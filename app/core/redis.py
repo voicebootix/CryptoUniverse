@@ -7,8 +7,8 @@ for real-time features in the cryptocurrency trading platform.
 
 import json
 from typing import Any, Dict, List, Optional, Union
-import aioredis
-from aioredis import Redis
+import redis.asyncio as redis
+from redis.asyncio import Redis
 import structlog
 
 from app.core.config import get_settings
@@ -29,7 +29,7 @@ async def get_redis_client() -> Redis:
     """
     global redis_client
     if redis_client is None:
-        redis_client = await aioredis.from_url(
+        redis_client = redis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True,
@@ -43,7 +43,7 @@ async def close_redis_client():
     """Close Redis client connection."""
     global redis_client
     if redis_client:
-        await redis_client.close()
+        await redis_client.aclose()
         redis_client = None
 
 
