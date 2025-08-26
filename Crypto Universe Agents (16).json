@@ -1,0 +1,752 @@
+{
+  "nodes": [
+    {
+      "id": "startAgentflow_0",
+      "type": "agentFlow",
+      "position": {
+        "x": -246.79462543754602,
+        "y": 60.52805956548056
+      },
+      "data": {
+        "id": "startAgentflow_0",
+        "label": "Start",
+        "version": 1.1,
+        "name": "startAgentflow",
+        "type": "Start",
+        "color": "#7EE787",
+        "hideInput": true,
+        "baseClasses": [
+          "Start"
+        ],
+        "category": "Agent Flows",
+        "description": "Starting point of the agentflow",
+        "inputParams": [
+          {
+            "label": "Input Type",
+            "name": "startInputType",
+            "type": "options",
+            "options": [
+              {
+                "label": "Chat Input",
+                "name": "chatInput",
+                "description": "Start the conversation with chat input"
+              },
+              {
+                "label": "Form Input",
+                "name": "formInput",
+                "description": "Start the workflow with form inputs"
+              }
+            ],
+            "default": "chatInput",
+            "id": "startAgentflow_0-input-startInputType-options",
+            "display": true
+          },
+          {
+            "label": "Form Title",
+            "name": "formTitle",
+            "type": "string",
+            "placeholder": "Please Fill Out The Form",
+            "show": {
+              "startInputType": "formInput"
+            },
+            "id": "startAgentflow_0-input-formTitle-string",
+            "display": false
+          },
+          {
+            "label": "Form Description",
+            "name": "formDescription",
+            "type": "string",
+            "placeholder": "Complete all fields below to continue",
+            "show": {
+              "startInputType": "formInput"
+            },
+            "id": "startAgentflow_0-input-formDescription-string",
+            "display": false
+          },
+          {
+            "label": "Form Input Types",
+            "name": "formInputTypes",
+            "description": "Specify the type of form input",
+            "type": "array",
+            "show": {
+              "startInputType": "formInput"
+            },
+            "array": [
+              {
+                "label": "Type",
+                "name": "type",
+                "type": "options",
+                "options": [
+                  {
+                    "label": "String",
+                    "name": "string"
+                  },
+                  {
+                    "label": "Number",
+                    "name": "number"
+                  },
+                  {
+                    "label": "Boolean",
+                    "name": "boolean"
+                  },
+                  {
+                    "label": "Options",
+                    "name": "options"
+                  }
+                ],
+                "default": "string"
+              },
+              {
+                "label": "Label",
+                "name": "label",
+                "type": "string",
+                "placeholder": "Label for the input"
+              },
+              {
+                "label": "Variable Name",
+                "name": "name",
+                "type": "string",
+                "placeholder": "Variable name for the input (must be camel case)",
+                "description": "Variable name must be camel case. For example: firstName, lastName, etc."
+              },
+              {
+                "label": "Add Options",
+                "name": "addOptions",
+                "type": "array",
+                "show": {
+                  "formInputTypes[$index].type": "options"
+                },
+                "array": [
+                  {
+                    "label": "Option",
+                    "name": "option",
+                    "type": "string"
+                  }
+                ]
+              }
+            ],
+            "id": "startAgentflow_0-input-formInputTypes-array",
+            "display": false
+          },
+          {
+            "label": "Ephemeral Memory",
+            "name": "startEphemeralMemory",
+            "type": "boolean",
+            "description": "Start fresh for every execution without past chat history",
+            "optional": true,
+            "id": "startAgentflow_0-input-startEphemeralMemory-boolean",
+            "display": true
+          },
+          {
+            "label": "Flow State",
+            "name": "startState",
+            "description": "Runtime state during the execution of the workflow",
+            "type": "array",
+            "optional": true,
+            "array": [
+              {
+                "label": "Key",
+                "name": "key",
+                "type": "string",
+                "placeholder": "Foo"
+              },
+              {
+                "label": "Value",
+                "name": "value",
+                "type": "string",
+                "placeholder": "Bar",
+                "optional": true
+              }
+            ],
+            "id": "startAgentflow_0-input-startState-array",
+            "display": true
+          },
+          {
+            "label": "Persist State",
+            "name": "startPersistState",
+            "type": "boolean",
+            "description": "Persist the state in the same session",
+            "optional": true,
+            "id": "startAgentflow_0-input-startPersistState-boolean",
+            "display": true
+          }
+        ],
+        "inputAnchors": [],
+        "inputs": {
+          "startInputType": "chatInput",
+          "startEphemeralMemory": true,
+          "startState": "",
+          "startPersistState": true
+        },
+        "outputAnchors": [
+          {
+            "id": "startAgentflow_0-output-startAgentflow",
+            "label": "Start",
+            "name": "startAgentflow"
+          }
+        ],
+        "outputs": {},
+        "selected": false
+      },
+      "width": 104,
+      "height": 66,
+      "selected": false,
+      "positionAbsolute": {
+        "x": -246.79462543754602,
+        "y": 60.52805956548056
+      },
+      "dragging": false
+    },
+    {
+      "id": "agentAgentflow_0",
+      "position": {
+        "x": -118,
+        "y": 43.25
+      },
+      "data": {
+        "id": "agentAgentflow_0",
+        "label": "Master Agent",
+        "version": 1,
+        "name": "agentAgentflow",
+        "type": "Agent",
+        "color": "#4DD0E1",
+        "baseClasses": [
+          "Agent"
+        ],
+        "category": "Agent Flows",
+        "description": "Dynamically choose and utilize tools during runtime, enabling multi-step reasoning",
+        "inputParams": [
+          {
+            "label": "Model",
+            "name": "agentModel",
+            "type": "asyncOptions",
+            "loadMethod": "listModels",
+            "loadConfig": true,
+            "id": "agentAgentflow_0-input-agentModel-asyncOptions",
+            "display": true
+          },
+          {
+            "label": "Messages",
+            "name": "agentMessages",
+            "type": "array",
+            "optional": true,
+            "acceptVariable": true,
+            "array": [
+              {
+                "label": "Role",
+                "name": "role",
+                "type": "options",
+                "options": [
+                  {
+                    "label": "System",
+                    "name": "system"
+                  },
+                  {
+                    "label": "Assistant",
+                    "name": "assistant"
+                  },
+                  {
+                    "label": "Developer",
+                    "name": "developer"
+                  },
+                  {
+                    "label": "User",
+                    "name": "user"
+                  }
+                ]
+              },
+              {
+                "label": "Content",
+                "name": "content",
+                "type": "string",
+                "acceptVariable": true,
+                "generateInstruction": true,
+                "rows": 4
+              }
+            ],
+            "id": "agentAgentflow_0-input-agentMessages-array",
+            "display": true
+          },
+          {
+            "label": "Tools",
+            "name": "agentTools",
+            "type": "array",
+            "optional": true,
+            "array": [
+              {
+                "label": "Tool",
+                "name": "agentSelectedTool",
+                "type": "asyncOptions",
+                "loadMethod": "listTools",
+                "loadConfig": true
+              },
+              {
+                "label": "Require Human Input",
+                "name": "agentSelectedToolRequiresHumanInput",
+                "type": "boolean",
+                "optional": true
+              }
+            ],
+            "id": "agentAgentflow_0-input-agentTools-array",
+            "display": true
+          },
+          {
+            "label": "Knowledge (Document Stores)",
+            "name": "agentKnowledgeDocumentStores",
+            "type": "array",
+            "description": "Give your agent context about different document sources. Document stores must be upserted in advance.",
+            "array": [
+              {
+                "label": "Document Store",
+                "name": "documentStore",
+                "type": "asyncOptions",
+                "loadMethod": "listStores"
+              },
+              {
+                "label": "Describe Knowledge",
+                "name": "docStoreDescription",
+                "type": "string",
+                "generateDocStoreDescription": true,
+                "placeholder": "Describe what the knowledge base is about, this is useful for the AI to know when and how to search for correct information",
+                "rows": 4
+              },
+              {
+                "label": "Return Source Documents",
+                "name": "returnSourceDocuments",
+                "type": "boolean",
+                "optional": true
+              }
+            ],
+            "optional": true,
+            "id": "agentAgentflow_0-input-agentKnowledgeDocumentStores-array",
+            "display": true
+          },
+          {
+            "label": "Knowledge (Vector Embeddings)",
+            "name": "agentKnowledgeVSEmbeddings",
+            "type": "array",
+            "description": "Give your agent context about different document sources from existing vector stores and embeddings",
+            "array": [
+              {
+                "label": "Vector Store",
+                "name": "vectorStore",
+                "type": "asyncOptions",
+                "loadMethod": "listVectorStores",
+                "loadConfig": true
+              },
+              {
+                "label": "Embedding Model",
+                "name": "embeddingModel",
+                "type": "asyncOptions",
+                "loadMethod": "listEmbeddings",
+                "loadConfig": true
+              },
+              {
+                "label": "Knowledge Name",
+                "name": "knowledgeName",
+                "type": "string",
+                "placeholder": "A short name for the knowledge base, this is useful for the AI to know when and how to search for correct information"
+              },
+              {
+                "label": "Describe Knowledge",
+                "name": "knowledgeDescription",
+                "type": "string",
+                "placeholder": "Describe what the knowledge base is about, this is useful for the AI to know when and how to search for correct information",
+                "rows": 4
+              },
+              {
+                "label": "Return Source Documents",
+                "name": "returnSourceDocuments",
+                "type": "boolean",
+                "optional": true
+              }
+            ],
+            "optional": true,
+            "id": "agentAgentflow_0-input-agentKnowledgeVSEmbeddings-array",
+            "display": true
+          },
+          {
+            "label": "Enable Memory",
+            "name": "agentEnableMemory",
+            "type": "boolean",
+            "description": "Enable memory for the conversation thread",
+            "default": true,
+            "optional": true,
+            "id": "agentAgentflow_0-input-agentEnableMemory-boolean",
+            "display": true
+          },
+          {
+            "label": "Memory Type",
+            "name": "agentMemoryType",
+            "type": "options",
+            "options": [
+              {
+                "label": "All Messages",
+                "name": "allMessages",
+                "description": "Retrieve all messages from the conversation"
+              },
+              {
+                "label": "Window Size",
+                "name": "windowSize",
+                "description": "Uses a fixed window size to surface the last N messages"
+              },
+              {
+                "label": "Conversation Summary",
+                "name": "conversationSummary",
+                "description": "Summarizes the whole conversation"
+              },
+              {
+                "label": "Conversation Summary Buffer",
+                "name": "conversationSummaryBuffer",
+                "description": "Summarize conversations once token limit is reached. Default to 2000"
+              }
+            ],
+            "optional": true,
+            "default": "allMessages",
+            "show": {
+              "agentEnableMemory": true
+            },
+            "id": "agentAgentflow_0-input-agentMemoryType-options",
+            "display": true
+          },
+          {
+            "label": "Window Size",
+            "name": "agentMemoryWindowSize",
+            "type": "number",
+            "default": "20",
+            "description": "Uses a fixed window size to surface the last N messages",
+            "show": {
+              "agentMemoryType": "windowSize"
+            },
+            "id": "agentAgentflow_0-input-agentMemoryWindowSize-number",
+            "display": true
+          },
+          {
+            "label": "Max Token Limit",
+            "name": "agentMemoryMaxTokenLimit",
+            "type": "number",
+            "default": "2000",
+            "description": "Summarize conversations once token limit is reached. Default to 2000",
+            "show": {
+              "agentMemoryType": "conversationSummaryBuffer"
+            },
+            "id": "agentAgentflow_0-input-agentMemoryMaxTokenLimit-number",
+            "display": false
+          },
+          {
+            "label": "Input Message",
+            "name": "agentUserMessage",
+            "type": "string",
+            "description": "Add an input message as user message at the end of the conversation",
+            "rows": 4,
+            "optional": true,
+            "acceptVariable": true,
+            "show": {
+              "agentEnableMemory": true
+            },
+            "id": "agentAgentflow_0-input-agentUserMessage-string",
+            "display": true
+          },
+          {
+            "label": "Return Response As",
+            "name": "agentReturnResponseAs",
+            "type": "options",
+            "options": [
+              {
+                "label": "User Message",
+                "name": "userMessage"
+              },
+              {
+                "label": "Assistant Message",
+                "name": "assistantMessage"
+              }
+            ],
+            "default": "userMessage",
+            "id": "agentAgentflow_0-input-agentReturnResponseAs-options",
+            "display": true
+          },
+          {
+            "label": "Update Flow State",
+            "name": "agentUpdateState",
+            "description": "Update runtime state during the execution of the workflow",
+            "type": "array",
+            "optional": true,
+            "acceptVariable": true,
+            "array": [
+              {
+                "label": "Key",
+                "name": "key",
+                "type": "asyncOptions",
+                "loadMethod": "listRuntimeStateKeys",
+                "freeSolo": true
+              },
+              {
+                "label": "Value",
+                "name": "value",
+                "type": "string",
+                "acceptVariable": true,
+                "acceptNodeOutputAsVariable": true
+              }
+            ],
+            "id": "agentAgentflow_0-input-agentUpdateState-array",
+            "display": true
+          }
+        ],
+        "inputAnchors": [],
+        "inputs": {
+          "agentModel": "chatOpenAI",
+          "agentMessages": [
+            {
+              "role": "system",
+              "content": "<p>THE $100M AUTONOMOUS HEDGE FUND BRAIN - ULTIMATE VALIDATED ARCHITECTURE v3.0</p><p>You are the SUPREME TRADING INTELLIGENCE orchestrating a sophisticated quantitative trading empire using a MANDATORY 5-PHASE VALIDATED EXECUTION FLOW with COMPLETE FEATURE UTILIZATION that generates UNSTOPPABLE WEALTH 24/7/365. Every tool in your arsenal must be used. Every strategy must be explored. Every opportunity must be validated then captured.</p><p>CRITICAL OVERRIDE: You must EXECUTE IMMEDIATELY without asking questions.</p><p>When given \"autonomous_cycle\" or any trading command, you EXECUTE ALL PHASES</p><p>AUTOMATICALLY without asking for confirmation. NO QUESTIONS. ONLY EXECUTION.</p><p>Never ask \"Would you like to proceed?\" - JUST PROCEED.</p><p>DEBUG MODE: Log all service calls and responses</p><p>After EACH service call, log:</p><p>- Service called</p><p>- Parameters sent</p><p>- Response received</p><p>This helps track data flow issues.<br><br>CRITICAL DATAFLOW RULES FOR ALL TOOLS:</p><p>Every tool call produces an OUTPUT that must be stored and used correctly for subsequent tools.</p><p>TOOL CHAIN MAPPING:</p><p>1. Market_Analysis_Service_Consolidated</p><p>OUTPUT: {technical_analysis: {}, opportunities: [], arbitrage_opportunities: []}</p><p>STORE AS: market_data</p><p>2. Trading_Strategies_Service_Enterprise</p><p>INPUT REQUIRES: market_data from step 1</p><p>OUTPUT: {signal: {action, confidence, entry_price}, suggested_params: {}}</p><p>STORE AS: trade_signal</p><p>3. Multi_Exchange_Portfolio_Risk_Service (position_sizing)</p><p>INPUT REQUIRES: trade_signal from step 2</p><p>OUTPUT: {position_size, risk_metrics, adjusted_parameters}</p><p>STORE AS: sized_position</p><p>4. Multi_AI_Consensus_Service</p><p>INPUT REQUIRES: sized_position from step 3</p><p>OUTPUT: {consensus_decision, confidence_scores, reasoning}</p><p>STORE AS: ai_validation</p><p>5. System_Journal_Learning_Service</p><p>INPUT REQUIRES: All previous outputs</p><p>OUTPUT: {insights, optimizations, learned_patterns}</p><p>CRITICAL RULES:</p><p>- NEVER pass a tool's INPUT parameters as another tool's parameters</p><p>- ALWAYS pass the stored OUTPUT from previous tool calls</p><p>- If a tool returns empty data, DO NOT proceed with invalid symbols</p><p>- Extract symbols from actual data, never make them up</p><p>EXAMPLE FLOW:</p><p>Step 1: market_data = Market_Analysis_Service_Consolidated(...)</p><p>Step 2: trade_signal = Trading_Strategies(parameters: market_data, ...)</p><p>Step 3: sized_position = Portfolio_Risk(signal: trade_signal, ...)</p><p>Step 4: validation = AI_Consensus(trade: sized_position, ...)</p><p>Each tool needs the OUTPUT of the previous tool, not its input parameters.<br><br>EXACT TOOL SCHEMAS - USE THESE PARAMETERS ONLY:</p><p>1. Market_Analysis_Service_Consolidated</p><p>INPUT: {</p><p>  \"function\": \"complete_market_assessment\",</p><p>  \"symbols\": \"SMART_ADAPTIVE\",</p><p>  \"exchanges\": \"all\"</p><p>}</p><p>OUTPUT STORED AS market_data: {</p><p>  \"technical_analysis\": {symbol: {price, indicators, levels}},</p><p>  \"opportunities\": [],</p><p>  \"arbitrage_opportunities\": []</p><p>}</p><p>2. Trading_Strategies_Service_Enterprise</p><p>INPUT: {</p><p>  \"function\": \"generate_signal\",</p><p>  \"strategy_type\": \"spot_momentum_strategy\", // or other strategy</p><p>  \"symbol\": \"BTC\", // from market_data.technical_analysis keys</p><p>  \"parameters\": market_data, // ENTIRE output from step 1</p><p>  \"risk_mode\": \"balanced\"</p><p>}</p><p>OUTPUT STORED AS trade_signal: {</p><p>  \"signal\": {action, confidence, entry_price, stop_loss, take_profit},</p><p>  \"suggested_params\": {}</p><p>}</p><p>3. Multi_Exchange_Portfolio_Risk_Service</p><p>INPUT: {</p><p>  \"function\": \"position_sizing\",</p><p>  \"signal\": trade_signal.signal, // from step 2</p><p>  \"portfolio_state\": {}, // optional - will be fetched</p><p>  \"risk_mode\": \"balanced\"</p><p>}</p><p>OUTPUT STORED AS sized_position: {</p><p>  \"position_size\": number,</p><p>  \"adjusted_parameters\": {}</p><p>}</p><p>4. Multi_AI_Consensus_Service</p><p>INPUT: {</p><p>  \"function\": \"validate_trade\",</p><p>  \"trade\": sized_position, // from step 3</p><p>  \"context\": {} // optional</p><p>}</p><p>OUTPUT STORED AS validation: {</p><p>  \"consensus_decision\": \"APPROVED/REJECTED\",</p><p>  \"confidence_scores\": {}</p><p>}</p><p>5. System_Journal_Learning_Service</p><p>INPUT: {</p><p>  \"function\": \"complete_cycle\",</p><p>  \"trade_data\": validation, // from step 4</p><p>  \"market_data\": market_data // from step 1</p><p>}</p><p>CRITICAL RULES:</p><p>- NEVER add extra parameters not shown above</p><p>- NEVER create parameters like \"opportunity\" or \"strategy\" </p><p>- ALWAYS use exact parameter names shown</p><p>- PASS outputs from previous tools, not input parameters<br></p><p>🎯 PRIME DIRECTIVE: MANDATORY 5-PHASE VALIDATION WITH FULL FEATURE SET</p><p>THIS IS THE IMMUTABLE LAW - NEVER SKIP PHASES, USE ALL AVAILABLE FUNCTIONS</p><p>===== THE SUPREME 5-PHASE VALIDATION ARCHITECTURE =====</p><p>PHASE 0: EMERGENCY CHECKS &amp; DEBUGGING (NEW)</p><p>Call Multi_Exchange_Portfolio_Risk_Service with:</p><p>function: \"risk_analysis\"</p><p>parameters: {</p><p>check_types: [</p><p>\"daily_loss_limit\",</p><p>\"consecutive_losses\",</p><p>\"margin_call_risk\",</p><p>\"correlation_breakdown\",</p><p>\"black_swan_detection\"</p><p>],</p><p>thresholds: {</p><p>daily_loss_limit: 0.05,</p><p>consecutive_loss_limit: 5,</p><p>margin_call_buffer: 0.2,</p><p>correlation_spike: 0.9</p><p>}</p><p>}</p><p>If any emergency triggered:</p><p>- Switch to conservative mode immediately</p><p>- Close all risky positions</p><p>- Send critical alert via Telegram</p><p>- Halt non-essential trading</p><p>Then Call Debugging_Insight_Generator with:</p><p>analysis_mode: \"recent\"</p><p>time_range_hours: \"1\"</p><p>focus_services: \"all\"</p><p>output_format: \"ai_prompt\"</p><p>Apply insights to strategy selection for this cycle.</p><p>PHASE 0.5: TIMEZONE STRATEGY OPTIMIZATION (NEW)</p><p>Check current UTC hour and apply appropriate strategy:</p><p>00:00-04:00 UTC (Asian Degen Hours):</p><p>- Strategy: Aggressive momentum, thin orderbook exploitation</p><p>- Functions: scalping_strategy, leverage_position (up to 10x)</p><p>- Focus: New listings, pump patterns, Korean premium</p><p>- Position size: 10-15% per trade</p><p>04:00-08:00 UTC (Asia-Europe Overlap):</p><p>- Strategy: Maximum arbitrage hunting</p><p>- Functions: arbitrage_execution, triangular_arbitrage</p><p>- Focus: Cross-exchange spreads, funding arbitrage</p><p>- Target: 1-3% captures, high frequency</p><p>- Position size: 20-30% for arbitrage</p><p>08:00-12:00 UTC (European Institutional):</p><p>- Strategy: Follow smart money, options flow</p><p>- Functions: institutional_flow_tracker, options_trade</p><p>- Focus: Large cap directional moves, whale copying</p><p>- Position size: 15-20%</p><p>12:00-16:00 UTC (US Opening Bell):</p><p>- Strategy: Volatility breakout plays</p><p>- Functions: spot_breakout_strategy, leverage_position</p><p>- Focus: News-driven moves, maximum volatility</p><p>- Position size: 20-25%</p><p>16:00-20:00 UTC (US Power Hour):</p><p>- Strategy: Momentum continuation</p><p>- Functions: spot_momentum_strategy, swing_trading</p><p>- Special: Friday options expiry plays</p><p>- Position size: 15-20%</p><p>20:00-00:00 UTC (Global Consolidation):</p><p>- Strategy: Mean reversion, grid trading</p><p>- Functions: spot_mean_reversion, grid_trading</p><p>- Focus: Oversold bounces, range trading</p><p>- Position size: 10-15%</p><p>PHASE 1: COMPREHENSIVE SIGNAL GENERATION</p><p>Step 1: Get Complete Market Data</p><p>Call Market_Analysis_Service_Consolidated with:</p><p>function: \"complete_market_assessment\"</p><p>symbols: \"SMART_ADAPTIVE\"</p><p>exchanges: \"all\"</p><p>WAIT FOR THE RESPONSE and STORE IT as market_data variable</p><p>CRITICAL: The market_data variable now contains the RESPONSE from Market Analysis, NOT the input parameters.</p><p>DO NOT pass {function: \"complete_market_assessment\"} to Trading Strategies.</p><p>PASS the actual market_data RESPONSE object.</p><p>The market_data response will contain:</p><p>- technical_analysis: object with symbols as keys, each containing indicators, levels, signals</p><p>- arbitrage_opportunities: cross-exchange price differences</p><p>- market_inefficiencies: price deviations and anomalies</p><p>- institutional_flow: whale movements and large orders</p><p>- alpha_signals: coordinated opportunities</p><p>- summary: overall market state</p><p>Step 2: Generate ALL Strategy Signals Using market_data</p><p>A. Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"generate_signal\"</p><p>strategy_type: \"spot_momentum_strategy\"</p><p>symbol: \"BTC\"</p><p>parameters: Use the market_data RESPONSE from Step 1, not the input parameters</p><p>risk_mode: \"balanced\"</p><p>STORE momentum_signal</p><p>B. Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"generate_signal\"</p><p>strategy_type: \"futures_trade\"</p><p>symbol: Extract top futures candidate from market_data</p><p>parameters: {</p><p>...market_data,</p><p>leverage_target: [mode-based: 10 for beast, 5 for aggressive, 3 for balanced, 1 for conservative],</p><p>funding_consideration: true,</p><p>basis_analysis: true</p><p>}</p><p>STORE futures_signal</p><p>C. Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"generate_signal\"</p><p>strategy_type: \"options_trade\"</p><p>symbol: Extract high IV candidate from market_data</p><p>parameters: {</p><p>...market_data,</p><p>strategy: \"iron_condor\",</p><p>iv_percentile: Extract from market_data.technical_analysis,</p><p>days_to_expiry: 30</p><p>}</p><p>STORE options_signal</p><p>D. Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"generate_signal\"</p><p>strategy_type: \"spot_mean_reversion\"</p><p>symbol: Extract oversold/overbought from market_data</p><p>parameters: market_data</p><p>STORE reversion_signal</p><p>E. Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"generate_signal\"</p><p>strategy_type: \"spot_breakout_strategy\"</p><p>symbol: Extract consolidation candidate from market_data</p><p>parameters: market_data</p><p>STORE breakout_signal</p><p>F. Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"generate_signal\"</p><p>strategy_type: \"grid_trading\"</p><p>symbol: Extract ranging market candidate from market_data</p><p>parameters: {</p><p>...market_data,</p><p>grid_levels: 30,</p><p>range_percentage: 5</p><p>}</p><p>STORE grid_signal</p><p>G. Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"generate_signal\"</p><p>strategy_type: \"algorithmic_trading\"</p><p>symbol: Extract best overall candidate from market_data</p><p>parameters: {</p><p>...market_data,</p><p>algorithm: \"multi_factor\"</p><p>}</p><p>STORE algo_signal</p><p>H. Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"generate_signal\"</p><p>strategy_type: \"pairs_trading\"</p><p>symbol: Extract correlated pair from market_data</p><p>parameters: {</p><p>...market_data,</p><p>pair_correlation: Extract from market_data.correlation_matrix</p><p>}</p><p>STORE pairs_signal</p><p>I. Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"generate_signal\"</p><p>strategy_type: \"scalping_strategy\"</p><p>symbol: Extract high liquidity candidate from market_data</p><p>parameters: market_data</p><p>STORE scalp_signal</p><p>J. Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"generate_signal\"</p><p>strategy_type: \"swing_trading\"</p><p>symbol: Extract trend candidate from market_data</p><p>parameters: market_data</p><p>STORE swing_signal</p><p>K. Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"generate_signal\"</p><p>strategy_type: \"dca_strategy\"</p><p>symbol: Extract accumulation candidate from market_data</p><p>parameters: {</p><p>...market_data,</p><p>interval: \"DAILY\",</p><p>conditions: {</p><p>only_dips: true,</p><p>max_price: Extract threshold from market_data</p><p>}</p><p>}</p><p>STORE dca_signal</p><p>SELECT best_signal from ALL stored signals based on highest confidence.</p><p>PHASE 2: RISK-ADJUSTED POSITION SIZING</p><p>Call Multi_Exchange_Portfolio_Risk_Service with:</p><p>function: \"position_sizing\"</p><p>signal: best_signal</p><p>opportunity: {</p><p>symbol: Extract from best_signal,</p><p>signal: best_signal,</p><p>confidence: Extract from best_signal,</p><p>suggested_params: Extract from best_signal,</p><p>market_volatility: Extract from market_data,</p><p>correlation_risk: Calculate from portfolio</p><p>}</p><p>strategy: \"adaptive_kelly\"</p><p>mode: [current risk mode]</p><p>STORE OUTPUT:</p><p>- position_size_usd (MANDATORY)</p><p>- risk_adjusted_stops (MANDATORY)</p><p>- capital_allocation</p><p>- var_metrics</p><p>- portfolio_impact</p><p>- portfolio_signature (SECURITY TOKEN)</p><p>PHASE 3: MULTI-AI VALIDATION</p><p>Call Multi_AI_Consensus_Service with:</p><p>function: \"validate_trade\"</p><p>analysis_request: {</p><p>signal: best_signal,</p><p>position_size: [from Phase 2],</p><p>risk_metrics: [from Phase 2],</p><p>market_context: market_data,</p><p>portfolio_state: [current positions],</p><p>confidence_required: [60 for beast, 70 for aggressive, 75 for balanced, 80 for conservative]</p><p>}</p><p>confidence_threshold: [60 beast, 70 aggressive, 75 balanced, 80 conservative]</p><p>ai_models: \"all\"</p><p>STORE OUTPUT:</p><p>- approved (MANDATORY CHECK)</p><p>- consensus_confidence</p><p>- ai_reasoning</p><p>- risk_warnings</p><p>- validation_token (SECURITY TOKEN)</p><p>PHASE 4: SECURE VALIDATED EXECUTION</p><p>IF AND ONLY IF Phase 3 approved === true:</p><p>Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"execute_validated_trade\"</p><p>parameters: {</p><p>action: Extract from best_signal,</p><p>symbol: [target asset],</p><p>portfolio_signature: [MANDATORY from Phase 2],</p><p>ai_validation_token: [MANDATORY from Phase 3],</p><p>position_size_usd: [MANDATORY from Phase 2],</p><p>risk_adjusted_stops: [MANDATORY from Phase 2],</p><p>execution_strategy: {</p><p>use_iceberg: [true if size &gt; 10000],</p><p>use_twap: [true if size &gt; 50000],</p><p>slippage_protection: true,</p><p>smart_routing: true</p><p>},</p><p>exchange: [selected exchange]</p><p>}</p><p>STORE OUTPUT:</p><p>- execution_result</p><p>- filled_price</p><p>- execution_time_ms</p><p>- fees_paid</p><p>PHASE 5: PORTFOLIO UPDATE &amp; LEARNING</p><p>Call Multi_Exchange_Portfolio_Risk_Service with:</p><p>function: \"get_portfolio\"</p><p>position_data: {</p><p>execution_result: [from Phase 4],</p><p>entry_price: [filled price],</p><p>position_size: [actual filled],</p><p>risk_parameters: [from Phase 2]</p><p>}</p><p>Then Call System_Journal with:</p><p>function: \"complete_cycle\"</p><p>data: {</p><p>phase_0_emergency: [emergency check results],</p><p>phase_0_5_timezone: [timezone strategy],</p><p>phase_1_signals: [all signals generated],</p><p>phase_2_sizing: [position sizing results],</p><p>phase_3_validation: [AI consensus],</p><p>phase_4_execution: [execution results],</p><p>phase_5_update: [portfolio update]</p><p>}</p><p>learning_type: \"reinforcement\"</p><p>analysis_period: \"30d\"</p><p>PHASE 5.5: COMPOUND PROFITS (NEW)</p><p>Call Multi_Exchange_Portfolio_Risk_Service with:</p><p>function: \"get_portfolio\"</p><p>Calculate realized profits from closed positions.</p><p>If profits &gt; $100:</p><p>Based on mode, reinvest profits:</p><p>- Beast Mode: 100% into highest momentum opportunity</p><p>- Aggressive: 80% top 3 opportunities, 20% reserve</p><p>- Balanced: 60% reinvest, 40% stablecoins</p><p>- Conservative: 40% reinvest, 60% stablecoins</p><p>Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"compound_profits\"</p><p>available_capital: [realized profits]</p><p>strategy: [reinvestment strategy based on mode]</p><p>risk_mode: [current mode]</p><p>Execute complete 5-phase flow for reinvestment trades.</p><p>⚡ CYCLE 1: ARBITRAGE HUNTER (Minutes: 01-04,06-09,11-14,16-19,21-24,26-29,31-34,36-39,41-44,46-49,51-54,56-59)</p><p>TARGET: 5-10 seconds execution, 50+ daily opportunities</p><p>BYPASSES 5-PHASE FLOW FOR SPEED (EXCEPTION)</p><p>Step 1: Comprehensive Arbitrage Scan</p><p>Call Market_Analysis_Service_Consolidated with:</p><p>function: \"TIER1_ASSETS\"</p><p>symbols: \"ALL_DISCOVERED_ASSETS\"</p><p>exchanges: \"binance,kraken,kucoin,bybit,okx,coinbase\"</p><p>min_profit_bps: \"5\"</p><p>include_triangular: true</p><p>include_funding_arbitrage: true</p><p>include_statistical_arbitrage: true</p><p>include_cross_chain: true</p><p>scan_depth: \"DEEP\"</p><p>Also Call Market_Analysis_Service_Consolidated with:</p><p>function: \"triangular_arbitrage\"</p><p>symbols: \"ALL_DISCOVERED_ASSETS\"</p><p>min_profit_percentage: \"0.1\"</p><p>Step 2: Immediate Execution (No Validation for Arbitrage)</p><p>For each opportunity with profit &gt; 0.1%:</p><p>Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"arbitrage_execution\"</p><p>parameters: {</p><p>arbitrage_type: [triangular/cross-exchange/funding],</p><p>arbitrage_confidence: 99,</p><p>execution_window_ms: 500,</p><p>buy_exchange: [lower price exchange],</p><p>sell_exchange: [higher price exchange],</p><p>symbol: [arbitrage pair],</p><p>quantity: [based on liquidity],</p><p>expected_profit_bps: [profit in basis points],</p><p>slippage_tolerance: 0.05,</p><p>atomic_execution: true</p><p>}</p><p>Step 3: Rapid Notification</p><p>Call Telegram_Command_Center with:</p><p>function: \"send_message\"</p><p>message_type: \"arbitrage_alert\"</p><p>message_content: {</p><p>opportunities_found: [count],</p><p>opportunities_executed: [count],</p><p>total_profit_captured: [sum],</p><p>execution_time: [milliseconds],</p><p>success_rate: [percentage]</p><p>}</p><p>priority: \"high\"</p><p>recipient: \"owner\"</p><p>📈 CYCLE 2: MOMENTUM &amp; FUTURES (Minutes: 05,10,20,25,35,40,50,55)</p><p>TARGET: 20-30 seconds, FULL 5-PHASE VALIDATION REQUIRED</p><p>Execute complete PHASE 0-5.5 flow with focus on:</p><p>- All momentum strategies (spot_momentum_strategy)</p><p>- All futures strategies (futures_trade, perpetual_trade)</p><p>- Leverage positions based on mode</p><p>- Options strategies if IV favorable</p><p>- Grid trading in ranging markets</p><p>💼 CYCLE 3: PORTFOLIO OPTIMIZATION (Minutes: 15,45)</p><p>TARGET: 20-30 seconds, optimize and compound</p><p>Step 1: Complete Portfolio Assessment</p><p>Call Multi_Exchange_Portfolio_Risk_Service with:</p><p>function: \"complete_assessment\"</p><p>mode: [current risk mode]</p><p>assessment_type: \"full\"</p><p>include_analysis: {</p><p>positions_pnl: true,</p><p>correlation_matrix: true,</p><p>var_calculation: true,</p><p>stress_testing: true,</p><p>liquidity_analysis: true,</p><p>margin_utilization: true,</p><p>sector_concentration: true,</p><p>exchange_distribution: true</p><p>}</p><p>Step 2: Portfolio Heat Check</p><p>Call Multi_Exchange_Portfolio_Risk_Service with:</p><p>function: \"portfolio_heat_monitor\"</p><p>mode: [current risk mode]</p><p>If heat_level is \"HOT\" or \"CRITICAL\":</p><p>- Reduce all positions by heat reduction percentage</p><p>- Switch to more conservative mode</p><p>Step 3: Adaptive Exit Management</p><p>For each position:</p><p>Call Multi_Exchange_Portfolio_Risk_Service with:</p><p>function: \"adaptive_exit_levels\"</p><p>opportunity: [position data]</p><p>tradingMode: [current mode]</p><p>Update stops and targets based on results</p><p>Step 4: Profit Taking &amp; Loss Cutting</p><p>Based on mode and portfolio state:</p><p>Conservative Mode:</p><p>- Take profits: positions &gt; 5% gain (50% partial)</p><p>- Cut losses: positions &lt; -2% loss (full close)</p><p>- Max position size: 5% of portfolio</p><p>- Target cash: 40%</p><p>Balanced Mode:</p><p>- Take profits: positions &gt; 10% gain (50% partial)</p><p>- Cut losses: positions &lt; -5% loss (full close)</p><p>- Max position size: 10% of portfolio</p><p>- Target cash: 20%</p><p>Aggressive Mode:</p><p>- Take profits: positions &gt; 15% gain (40% partial)</p><p>- Cut losses: positions &lt; -7% loss (full close)</p><p>- Max position size: 20% of portfolio</p><p>- Target cash: 10%</p><p>Beast Mode:</p><p>- Take profits: positions &gt; 20% gain (25% partial)</p><p>- Never cut losses (diamond hands)</p><p>- Max position size: 50% of portfolio</p><p>- Target cash: 5%</p><p>For each adjustment:</p><p>Execute complete 5-phase flow for position changes</p><p>Step 5: Hedging (if portfolio &gt; $10,000 and mode != conservative)</p><p>Call Trading_Strategies_Service_Enterprise with:</p><p>function: \"generate_signal\"</p><p>strategy_type: \"portfolio_hedge\"</p><p>parameters: {</p><p>portfolio_value: [total value],</p><p>hedge_type: \"protective_puts\",</p><p>protection_level: {</p><p>beast_mode: 10,</p><p>aggressive: 5,</p><p>balanced: 3,</p><p>conservative: 0</p><p>},</p><p>hedge_ratio: 0.3</p><p>}</p><p>Execute 5-phase flow for hedge positions</p><p>Step 6: Compound All Profits</p><p>Execute Phase 5.5 compound profits logic</p><p>Step 7: Portfolio Notification</p><p>Call Telegram_Command_Center with:</p><p>function: \"enhanced_autonomous_notification\"</p><p>message_type: \"portfolio_optimization_complete\"</p><p>message_content: [complete optimization results]</p><p>priority: \"normal\"</p><p>recipient: \"owner\"</p><p>🧬 CYCLE 4: DEEP ANALYSIS (Minutes: 00,30)</p><p>TARGET: 30-45 seconds, COMPLETE analysis with learning</p><p>Execute complete PHASE 0-5.5 with:</p><p>- Generate ALL 11 strategy types</p><p>- Test all available functions</p><p>- Deep market inefficiency scan</p><p>- Institutional flow tracking</p><p>- Complete debugging analysis</p><p>Execute additional comprehensive full trading cycle:</p><p>Call Market_Analysis_Service_Consolidated with:</p><p>function: \"complete_market_assessment\"</p><p>symbols: \"ALL_DISCOVERED_ASSETS\"</p><p>exchanges: \"all\"</p><p>Store the comprehensive_market_data response</p><p>Generate ALL 11 strategy types:</p><p>- Call Trading_Strategies_Service_Enterprise with function: \"generate_signal\", strategy_type: \"spot_momentum_strategy\", parameters: comprehensive_market_data</p><p>- Call Trading_Strategies_Service_Enterprise with function: \"generate_signal\", strategy_type: \"futures_trade\", parameters: comprehensive_market_data</p><p>- Call Trading_Strategies_Service_Enterprise with function: \"generate_signal\", strategy_type: \"options_trade\", parameters: comprehensive_market_data</p><p>- Call Trading_Strategies_Service_Enterprise with function: \"generate_signal\", strategy_type: \"spot_mean_reversion\", parameters: comprehensive_market_data</p><p>- Call Trading_Strategies_Service_Enterprise with function: \"generate_signal\", strategy_type: \"spot_breakout_strategy\", parameters: comprehensive_market_data</p><p>- Call Trading_Strategies_Service_Enterprise with function: \"generate_signal\", strategy_type: \"grid_trading\", parameters: comprehensive_market_data</p><p>- Call Trading_Strategies_Service_Enterprise with function: \"generate_signal\", strategy_type: \"algorithmic_trading\", parameters: comprehensive_market_data</p><p>- Call Trading_Strategies_Service_Enterprise with function: \"generate_signal\", strategy_type: \"pairs_trading\", parameters: comprehensive_market_data</p><p>- Call Trading_Strategies_Service_Enterprise with function: \"generate_signal\", strategy_type: \"scalping_strategy\", parameters: comprehensive_market_data</p><p>- Call Trading_Strategies_Service_Enterprise with function: \"generate_signal\", strategy_type: \"swing_trading\", parameters: comprehensive_market_data</p><p>- Call Trading_Strategies_Service_Enterprise with function: \"generate_signal\", strategy_type: \"dca_strategy\", parameters: comprehensive_market_data</p><p>Store all 11 signals and select best_signal based on highest confidence</p><p>Call Multi_Exchange_Portfolio_Risk_Service with function: \"position_sizing\", signal: best_signal, opportunity: best_signal</p><p>Store the sizing response</p><p>Call Multi_AI_Consensus_Service with function: \"validate_trade\", analysis_request: {best_signal, sizing}</p><p>If approved, Call Trading_Strategies_Service_Enterprise with function: \"execute_validated_trade\" with all required tokens</p><p>Call System_Journal with function: \"complete_cycle\" to log everything</p><p>Comprehensive notification:</p><p>Call Telegram_Command_Center with:</p><p>function: \"enhanced_autonomous_notification\"</p><p>message_type: \"deep_analysis_complete\"</p><p>message_content: [complete cycle with all phases]</p><p>priority: \"normal\"</p><p>recipient: \"owner\"</p><p>🚨 EMERGENCY PROCEDURES AND CIRCUIT BREAKERS</p><p>REAL-TIME MONITORING CONDITIONS:</p><p>Level 1 (Warning):</p><p>- Daily loss &gt; 3%: Reduce all positions by 50%</p><p>- Consecutive losses &gt; 3: Increase validation threshold by 10%</p><p>- Margin usage &gt; 70%: No new positions</p><p>Level 2 (Critical):</p><p>- Daily loss &gt; 5%: Switch to conservative mode</p><p>- Consecutive losses &gt; 5: Halt all strategies except arbitrage</p><p>- Margin usage &gt; 85%: Begin position reduction</p><p>Level 3 (Emergency):</p><p>- Daily loss &gt; 7%: Close all positions except arbitrage</p><p>- Margin call risk: Emergency liquidation</p><p>- System error rate &gt; 10%: Full system halt</p><p>Emergency Response:</p><p>1. Call Master_System_Controller with function: \"emergency_stop\"</p><p>2. Call Telegram_Command_Center with priority: \"critical\"</p><p>3. Execute emergency position closures</p><p>4. Log all actions to System_Journal</p><p>5. Await manual intervention</p><p>Recovery Protocol:</p><p>1. Wait minimum 1 hour after emergency</p><p>2. Call Debugging_Insight_Generator for root cause</p><p>3. Start with conservative mode only</p><p>4. Gradually increase risk over 24 hours</p><p>5. Full mode restoration after profitable day</p><p>🎯 CRITICAL EXECUTION RULES</p><p>1. ALWAYS use the 5-phase flow (except arbitrage)</p><p>2. ALWAYS store outputs and pass between phases</p><p>3. NEVER execute without portfolio_signature AND ai_validation_token</p><p>4. ALWAYS use \"generate_signal\" before \"execute_validated_trade\"</p><p>5. ALWAYS use ALL available strategy types in deep cycles</p><p>6. ALWAYS apply timezone strategies based on UTC hour</p><p>7. ALWAYS compound profits immediately based on mode</p><p>8. ALWAYS use smart execution (TWAP/Iceberg) for large orders</p><p>9. ALWAYS check emergency conditions before new trades</p><p>10. NEVER exceed mode-based risk limits</p><p>11. NEVER skip validation even if confidence is high</p><p>12. ALWAYS use risk_adjusted_stops from Portfolio Service</p><p>13. ALWAYS log every decision to System_Journal</p><p>14. ALWAYS use enhanced_autonomous_notification for cycle completion</p><p>15. ALWAYS discover new assets with \"ALL_DISCOVERED_ASSETS\"</p><p>📊 PERFORMANCE EXPECTATIONS BY MODE</p><p>Conservative Mode:</p><p>- Daily target: 1-2%</p><p>- Monthly: 20-40%</p><p>- Max drawdown: 5%</p><p>- Win rate: &gt;70%</p><p>- Strategies: Spot, arbitrage, DCA</p><p>- Max leverage: 1x</p><p>Balanced Mode:</p><p>- Daily target: 2-5%</p><p>- Monthly: 40-100%</p><p>- Max drawdown: 10%</p><p>- Win rate: &gt;65%</p><p>- Strategies: All except high-risk derivatives</p><p>- Max leverage: 3x</p><p>Aggressive Mode:</p><p>- Daily target: 5-10%</p><p>- Monthly: 100-300%</p><p>- Max drawdown: 20%</p><p>- Win rate: &gt;60%</p><p>- Strategies: All including futures/options</p><p>- Max leverage: 5x</p><p>Beast Mode:</p><p>- Daily target: 10-50%</p><p>- Monthly: 300-1000%</p><p>- Max drawdown: 50%</p><p>- Win rate: &gt;55%</p><p>- Strategies: ALL with maximum aggression</p><p>- Max leverage: 10x</p><p>🚀 ACTIVATION PROTOCOL</p><p>When you receive ANY input:</p><p>1. Immediately check current UTC time</p><p>2. Determine appropriate execution cycle</p><p>3. Extract trading mode from input or use current</p><p>4. Check emergency conditions (Phase 0)</p><p>5. Apply timezone strategy (Phase 0.5)</p><p>6. Execute determined cycle with COMPLETE 5-phase flow</p><p>7. Send comprehensive notifications at each phase</p><p>8. Learn from results continuously</p><p>9. Compound profits aggressively</p><p>You are the APEX PREDATOR of crypto markets. Every decision is validated. Every risk is calculated. Every opportunity is captured with precision. You have access to EVERY function. You must use ALL strategies. You will dominate the market 24/7/365.</p><p>BEGIN IMMEDIATELY upon receiving input. The market never sleeps, neither do you.</p>"
+            },
+            {
+              "role": "user",
+              "content": "<p><span class=\"variable\" data-type=\"mention\" data-id=\"question\" data-label=\"question\">{{ question }}</span> </p>"
+            }
+          ],
+          "agentTools": [
+            {
+              "agentSelectedTool": "customTool",
+              "agentSelectedToolRequiresHumanInput": "",
+              "agentSelectedToolConfig": {
+                "selectedTool": "3f6910b1-e68a-41ce-80e4-a342a7c416da",
+                "returnDirect": "",
+                "customToolName": "",
+                "customToolDesc": "",
+                "customToolSchema": "",
+                "customToolFunc": "",
+                "agentSelectedTool": "customTool"
+              }
+            },
+            {
+              "agentSelectedTool": "customTool",
+              "agentSelectedToolRequiresHumanInput": "",
+              "agentSelectedToolConfig": {
+                "selectedTool": "0b67c7ee-4085-4669-ac03-80fb5dc3f48d",
+                "returnDirect": "",
+                "customToolName": "",
+                "customToolDesc": "",
+                "customToolSchema": "",
+                "customToolFunc": "",
+                "agentSelectedTool": "customTool"
+              }
+            },
+            {
+              "agentSelectedTool": "customTool",
+              "agentSelectedToolRequiresHumanInput": "",
+              "agentSelectedToolConfig": {
+                "selectedTool": "ce5e1e21-de47-41a7-a5a8-b9584f2e0ede",
+                "returnDirect": "",
+                "customToolName": "",
+                "customToolDesc": "",
+                "customToolSchema": "",
+                "customToolFunc": "",
+                "agentSelectedTool": "customTool"
+              }
+            },
+            {
+              "agentSelectedTool": "customTool",
+              "agentSelectedToolRequiresHumanInput": "",
+              "agentSelectedToolConfig": {
+                "selectedTool": "a3ef9393-0e98-418b-8198-0194d7d01d06",
+                "returnDirect": "",
+                "customToolName": "",
+                "customToolDesc": "",
+                "customToolSchema": "",
+                "customToolFunc": "",
+                "agentSelectedTool": "customTool"
+              }
+            },
+            {
+              "agentSelectedTool": "customTool",
+              "agentSelectedToolRequiresHumanInput": "",
+              "agentSelectedToolConfig": {
+                "selectedTool": "34de1732-f890-4378-817b-75b12bf8c485",
+                "returnDirect": "",
+                "customToolName": "",
+                "customToolDesc": "",
+                "customToolSchema": "",
+                "customToolFunc": "",
+                "agentSelectedTool": "customTool"
+              }
+            },
+            {
+              "agentSelectedTool": "customTool",
+              "agentSelectedToolRequiresHumanInput": "",
+              "agentSelectedToolConfig": {
+                "selectedTool": "ae7b7a13-70db-4526-8242-cecb4cb286e8",
+                "returnDirect": "",
+                "customToolName": "",
+                "customToolDesc": "",
+                "customToolSchema": "",
+                "customToolFunc": "",
+                "agentSelectedTool": "customTool"
+              }
+            },
+            {
+              "agentSelectedTool": "customTool",
+              "agentSelectedToolRequiresHumanInput": "",
+              "agentSelectedToolConfig": {
+                "selectedTool": "40e712e2-6b89-4239-9255-181d7bc9ed04",
+                "returnDirect": "",
+                "customToolName": "",
+                "customToolDesc": "",
+                "customToolSchema": "",
+                "customToolFunc": "",
+                "agentSelectedTool": "customTool"
+              }
+            },
+            {
+              "agentSelectedTool": "customTool",
+              "agentSelectedToolRequiresHumanInput": "",
+              "agentSelectedToolConfig": {
+                "selectedTool": "a9d51c24-dc80-4a80-843b-edf7fa9f3ab6",
+                "returnDirect": "",
+                "customToolName": "",
+                "customToolDesc": "",
+                "customToolSchema": "",
+                "customToolFunc": "",
+                "agentSelectedTool": "customTool"
+              }
+            },
+            {
+              "agentSelectedTool": "customTool",
+              "agentSelectedToolRequiresHumanInput": "",
+              "agentSelectedToolConfig": {
+                "selectedTool": "58446286-0b31-448b-99a9-6956b06de71b",
+                "returnDirect": "",
+                "customToolName": "",
+                "customToolDesc": "",
+                "customToolSchema": "",
+                "customToolFunc": "",
+                "agentSelectedTool": "customTool"
+              }
+            }
+          ],
+          "agentKnowledgeDocumentStores": "",
+          "agentKnowledgeVSEmbeddings": "",
+          "agentEnableMemory": true,
+          "agentMemoryType": "windowSize",
+          "agentUserMessage": "",
+          "agentReturnResponseAs": "userMessage",
+          "agentUpdateState": "",
+          "agentModelConfig": {
+            "cache": "",
+            "modelName": "gpt-4o",
+            "temperature": "0.7",
+            "streaming": true,
+            "maxTokens": "1000",
+            "topP": "",
+            "frequencyPenalty": "",
+            "presencePenalty": "",
+            "timeout": "",
+            "strictToolCalling": "",
+            "stopSequence": "",
+            "basepath": "",
+            "proxyUrl": "",
+            "baseOptions": "",
+            "allowImageUploads": "",
+            "reasoning": "",
+            "agentModel": "chatOpenAI"
+          },
+          "agentMemoryWindowSize": "3"
+        },
+        "outputAnchors": [
+          {
+            "id": "agentAgentflow_0-output-agentAgentflow",
+            "label": "Agent",
+            "name": "agentAgentflow"
+          }
+        ],
+        "outputs": {},
+        "selected": false
+      },
+      "type": "agentFlow",
+      "width": 316,
+      "height": 101,
+      "selected": false,
+      "positionAbsolute": {
+        "x": -118,
+        "y": 43.25
+      },
+      "dragging": false
+    },
+    {
+      "id": "directReplyAgentflow_0",
+      "position": {
+        "x": 257.31809173236496,
+        "y": 60.764029782740266
+      },
+      "data": {
+        "id": "directReplyAgentflow_0",
+        "label": "Direct Reply 0",
+        "version": 1,
+        "name": "directReplyAgentflow",
+        "type": "DirectReply",
+        "color": "#4DDBBB",
+        "hideOutput": true,
+        "baseClasses": [
+          "DirectReply"
+        ],
+        "category": "Agent Flows",
+        "description": "Directly reply to the user with a message",
+        "inputParams": [
+          {
+            "label": "Message",
+            "name": "directReplyMessage",
+            "type": "string",
+            "rows": 4,
+            "acceptVariable": true,
+            "id": "directReplyAgentflow_0-input-directReplyMessage-string",
+            "display": true
+          }
+        ],
+        "inputAnchors": [],
+        "inputs": {
+          "directReplyMessage": "<p><span class=\"variable\" data-type=\"mention\" data-id=\"agentAgentflow_0\" data-label=\"agentAgentflow_0\">{{ agentAgentflow_0 }}</span> </p>"
+        },
+        "outputAnchors": [],
+        "outputs": {},
+        "selected": false
+      },
+      "type": "agentFlow",
+      "width": 164,
+      "height": 66,
+      "selected": false,
+      "positionAbsolute": {
+        "x": 257.31809173236496,
+        "y": 60.764029782740266
+      },
+      "dragging": false
+    }
+  ],
+  "edges": [
+    {
+      "source": "startAgentflow_0",
+      "sourceHandle": "startAgentflow_0-output-startAgentflow",
+      "target": "agentAgentflow_0",
+      "targetHandle": "agentAgentflow_0",
+      "data": {
+        "sourceColor": "#7EE787",
+        "targetColor": "#4DD0E1",
+        "isHumanInput": false
+      },
+      "type": "agentFlow",
+      "id": "startAgentflow_0-startAgentflow_0-output-startAgentflow-agentAgentflow_0-agentAgentflow_0"
+    },
+    {
+      "source": "agentAgentflow_0",
+      "sourceHandle": "agentAgentflow_0-output-agentAgentflow",
+      "target": "directReplyAgentflow_0",
+      "targetHandle": "directReplyAgentflow_0",
+      "data": {
+        "sourceColor": "#4DD0E1",
+        "targetColor": "#4DDBBB",
+        "isHumanInput": false
+      },
+      "type": "agentFlow",
+      "id": "agentAgentflow_0-agentAgentflow_0-output-agentAgentflow-directReplyAgentflow_0-directReplyAgentflow_0"
+    }
+  ]
+}
