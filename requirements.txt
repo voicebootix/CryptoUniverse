@@ -52,9 +52,9 @@ setproctitle==1.3.3  # Process naming for monitoring
 # Time and scheduling (celery beat is built into celery package)
 pytz==2023.3
 
-# Financial calculations
-numpy==1.25.2
-pandas==2.1.4
+# Financial calculations (Python 3.11 compatible versions)
+numpy==1.24.3
+pandas==2.0.3
 
 # WebSockets for real-time features
 websockets==12.0
@@ -62,7 +62,7 @@ websockets==12.0
 # Additional enterprise dependencies for APIs  
 bcrypt==4.1.2
 PyJWT==2.8.0
-cryptography==42.0.8
+cryptography==41.0.8
 email-validator==2.1.0
 
 # Crypto trading and exchange APIs

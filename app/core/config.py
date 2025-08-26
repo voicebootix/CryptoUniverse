@@ -125,7 +125,8 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = Field(default="uploads", description="File upload directory")
     MAX_FILE_SIZE_MB: int = Field(default=10, description="Maximum file size in MB")
 
-    @validator("ENVIRONMENT")
+    @field_validator("ENVIRONMENT")
+    @classmethod
     def validate_environment(cls, v):
         """Validate environment setting."""
         valid_environments = ["development", "staging", "production"]
@@ -133,29 +134,14 @@ class Settings(BaseSettings):
             raise ValueError(f"Environment must be one of {valid_environments}")
         return v
 
-    @validator("LOG_LEVEL")
+    @field_validator("LOG_LEVEL")
+    @classmethod
     def validate_log_level(cls, v):
         """Validate log level setting."""
         valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         if v.upper() not in valid_levels:
             raise ValueError(f"Log level must be one of {valid_levels}")
         return v.upper()
-
-    @validator("CORS_ORIGINS", pre=True)
-    def parse_cors_origins(cls, v):
-        """Parse CORS origins from string or list."""
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
-        return v
-
-    @validator("ALLOWED_HOSTS", pre=True)
-    def parse_allowed_hosts(cls, v):
-        """Parse allowed hosts from string or list."""
-        if v is None:
-            return None
-        if isinstance(v, str):
-            return [host.strip() for host in v.split(",")]
-        return v
 
     class Config:
         """Pydantic configuration."""

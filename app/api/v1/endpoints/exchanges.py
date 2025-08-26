@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 from cryptography.fernet import Fernet
 
@@ -46,14 +46,16 @@ class ExchangeApiKeyRequest(BaseModel):
     sandbox: bool = False
     nickname: Optional[str] = None
     
-    @validator('exchange')
+    @field_validator('exchange')
+    @classmethod
     def validate_exchange(cls, v):
         allowed_exchanges = ["binance", "kraken", "kucoin", "coinbase", "bybit"]
         if v.lower() not in allowed_exchanges:
             raise ValueError(f"Exchange must be one of: {allowed_exchanges}")
         return v.lower()
     
-    @validator('api_key', 'secret_key')
+    @field_validator('api_key', 'secret_key')
+    @classmethod
     def validate_keys(cls, v):
         if len(v.strip()) < 10:
             raise ValueError("API keys must be at least 10 characters")

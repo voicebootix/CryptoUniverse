@@ -13,7 +13,7 @@ from typing import Dict, Any, Optional
 import structlog
 from app.core.logging import LoggerMixin
 from app.core.config import get_settings
-from app.core.redis import redis_client
+from app.core.redis import get_redis_client
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)

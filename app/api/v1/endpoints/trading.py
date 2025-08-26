@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -53,14 +53,16 @@ class TradeRequest(BaseModel):
     leverage: Optional[int] = None
     strategy_type: Optional[str] = None
     
-    @validator('action')
+    @field_validator('action')
+    @classmethod
     def validate_action(cls, v):
         allowed_actions = ["buy", "sell", "long", "short"]
         if v.lower() not in allowed_actions:
             raise ValueError(f"Action must be one of: {allowed_actions}")
         return v.lower()
     
-    @validator('amount')
+    @field_validator('amount')
+    @classmethod
     def validate_amount(cls, v):
         if v <= 0:
             raise ValueError("Amount must be positive")
@@ -76,7 +78,8 @@ class AutonomousModeRequest(BaseModel):
     excluded_symbols: Optional[List[str]] = None
     trading_hours: Optional[Dict[str, Any]] = None
     
-    @validator('mode')
+    @field_validator('mode')
+    @classmethod
     def validate_mode(cls, v):
         allowed_modes = ["conservative", "balanced", "aggressive", "beast_mode"]
         if v.lower() not in allowed_modes:

@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any
 import aiohttp
 import structlog
 from app.core.config import get_settings
-from app.core.redis import redis_client
+from app.core.redis import get_redis_client
 from app.core.supabase import supabase_client
 
 settings = get_settings()

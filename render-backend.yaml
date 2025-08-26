@@ -1,0 +1,61 @@
+# Render Web Service configuration for CryptoUniverse Backend
+services:
+  - type: web
+    name: cryptouniverse-backend
+    runtime: python
+    plan: starter  # Start with starter, upgrade to pro when needed
+    region: oregon
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: python start.py
+    healthCheckPath: /api/v1/status
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cryptouniverse-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: cryptouniverse-redis
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: "https://cryptouniverse-frontend.onrender.com"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DEFAULT_SIMULATION_MODE
+        value: "true"
+      - key: DEFAULT_CREDIT_BALANCE
+        value: "100"
+      - key: MAX_DAILY_LOSS_PCT
+        value: "10.0"
+      - key: MAX_POSITION_SIZE_PCT
+        value: "20.0"
+
+  # Redis Cache Service
+  - type: redis
+    name: cryptouniverse-redis
+    plan: starter
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+
+databases:
+  # PostgreSQL Database
+  - name: cryptouniverse-db
+    plan: starter
+    region: oregon
+    databaseName: cryptouniverse
+    user: cryptouniverse

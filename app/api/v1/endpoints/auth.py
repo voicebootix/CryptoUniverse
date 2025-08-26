@@ -16,12 +16,12 @@ import jwt
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import get_database
-from app.core.redis import redis_client
+from app.core.redis import get_redis_client
 from app.models.user import User, UserRole, UserStatus
 from app.models.tenant import Tenant
 from app.models.session import UserSession
@@ -43,7 +43,8 @@ class LoginRequest(BaseModel):
     remember_me: bool = False
     mfa_code: Optional[str] = None
 
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def validate_password(cls, v):
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters')
@@ -57,7 +58,8 @@ class RegisterRequest(BaseModel):
     tenant_id: Optional[str] = None
     role: UserRole = UserRole.TRADER
     
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def validate_password(cls, v):
         if len(v) < 8:
             raise ValueError('Password must be at least 8 characters')
@@ -181,7 +183,8 @@ async def get_current_user(
         )
     
     # Check if token is blacklisted
-    blacklisted = await redis_client.get(f"blacklist:{token}")
+    redis = await get_redis_client()
+    blacklisted = await redis.get(f"blacklist:{token}")
     if blacklisted:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -439,7 +442,8 @@ async def logout(
     token = credentials.credentials
     
     # Blacklist the access token
-    await redis_client.setex(
+    redis = await get_redis_client()
+    await redis.setex(
         f"blacklist:{token}",
         int(auth_service.access_token_expire.total_seconds()),
         "revoked"

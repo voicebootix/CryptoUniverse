@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 import structlog
 from fastapi import HTTPException, status
 
-from app.core.redis import redis_client
+from app.core.redis import get_redis_client
 from app.core.config import get_settings
 
 settings = get_settings()

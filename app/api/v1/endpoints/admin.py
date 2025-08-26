@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 
@@ -53,7 +53,8 @@ class UserManagementRequest(BaseModel):
     reason: Optional[str] = None
     credit_amount: Optional[int] = None
     
-    @validator('action')
+    @field_validator('action')
+    @classmethod
     def validate_action(cls, v):
         allowed_actions = ["activate", "deactivate", "suspend", "reset_credits", "reset_password"]
         if v.lower() not in allowed_actions:
