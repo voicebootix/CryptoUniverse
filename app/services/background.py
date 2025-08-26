@@ -330,29 +330,20 @@ class BackgroundServiceManager(LoggerMixin):
             await asyncio.sleep(self.intervals["autonomous_cycles"])
     
     async def _market_data_sync_service(self):
-        """Sync market data for configured symbols."""
+        """Sync market data for configured symbols using real APIs."""
         self.logger.info("📈 Market data sync service started")
         
         while self.running:
             try:
                 symbols = self.service_configs["market_data_symbols"]
                 
-                for symbol in symbols:
-                    # This would fetch real market data
-                    # Store in Redis for quick access
-                    market_data = {
-                        "symbol": symbol,
-                        "price": 50000.0,  # Mock data
-                        "volume_24h": 1000000.0,
-                        "change_24h": 2.5,
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
-                    
-                    await redis_client.setex(
-                        f"market_data:{symbol}",
-                        120,  # 2 minutes TTL
-                        str(market_data)
-                    )
+                # Import market data feeds
+                from app.services.market_data_feeds import market_data_feeds
+                
+                # Sync market data using real APIs
+                await market_data_feeds.sync_market_data_batch(symbols)
+                
+                self.logger.debug(f"Market data sync completed for {len(symbols)} symbols")
                 
             except Exception as e:
                 self.logger.error("Market data sync error", error=str(e))
