@@ -65,7 +65,7 @@ class PerformanceMetric(Base):
     value = Column(Numeric(15, 8), nullable=False)
     period_start = Column(DateTime, nullable=False)
     period_end = Column(DateTime, nullable=False)
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=func.now(), nullable=False)
     
     __table_args__ = (
@@ -113,7 +113,7 @@ class TradingSession(Base):
     pnl = Column(Numeric(15, 2), default=0, nullable=False)
     started_at = Column(DateTime, default=func.now(), nullable=False)
     ended_at = Column(DateTime, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     
     __table_args__ = (
         Index("idx_session_user_status", "user_id", "status"),

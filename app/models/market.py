@@ -57,7 +57,7 @@ class Symbol(Base):
     symbol = Column(String(20), nullable=False, unique=True, index=True)
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=func.now(), nullable=False)
     
     def __repr__(self) -> str:
@@ -74,7 +74,7 @@ class TechnicalIndicator(Base):
     indicator_name = Column(String(50), nullable=False, index=True)
     timeframe = Column(String(10), nullable=False)
     value = Column(Numeric(25, 8), nullable=False)
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     timestamp = Column(DateTime, nullable=False, index=True)
     created_at = Column(DateTime, default=func.now(), nullable=False)
     

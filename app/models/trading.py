@@ -247,7 +247,7 @@ class Trade(Base):
     completed_at = Column(DateTime, nullable=True)
     
     # Metadata
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     notes = Column(Text, nullable=True)
     
     # Relationships
@@ -356,7 +356,7 @@ class Position(Base):
     last_updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     
     # Metadata
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     notes = Column(Text, nullable=True)
     
     # Relationships

@@ -122,7 +122,7 @@ class TelegramMessage:
     user_id: Optional[str] = None
     chat_id: Optional[str] = None
     message_id: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    meta_data: Optional[Dict[str, Any]] = None
 
 
 @dataclass

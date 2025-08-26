@@ -7,13 +7,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:production": "tsc && vite build --config vite.config.production.ts",
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --ext ts,tsx --fix",
     "type-check": "tsc --noEmit",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "start": "vite --host 0.0.0.0 --port 3000"
+    "start": "vite --host 0.0.0.0 --port 3000",
+    "deploy:render": "chmod +x build.sh && ./build.sh"
   },
   "dependencies": {
     "@headlessui/react": "^1.7.18",

@@ -213,7 +213,7 @@ class CreditTransaction(Base):
     billing_history_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     
     # Transaction metadata
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     source = Column(String(50), nullable=False)  # web, api, mobile, system
     ip_address = Column(String(45), nullable=True)
     

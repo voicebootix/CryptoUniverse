@@ -321,7 +321,7 @@ class BillingHistory(Base):
     period_end = Column(DateTime, nullable=True)
     
     # Metadata
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     failure_reason = Column(String(500), nullable=True)
     
     # Timestamps

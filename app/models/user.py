@@ -324,7 +324,7 @@ class UserActivity(Base):
     # Activity metadata
     success = Column(Boolean, default=True, nullable=False)
     error_message = Column(Text, nullable=True)
-    metadata = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)
     
     # Risk and security
     risk_score = Column(Integer, default=0, nullable=False)  # 0-100 risk score

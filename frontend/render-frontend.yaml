@@ -1,0 +1,45 @@
+# Render Static Site configuration for CryptoUniverse Frontend
+services:
+  - type: web
+    name: cryptouniverse-frontend
+    runtime: static
+    plan: pro  # Professional tier for enterprise
+    region: oregon
+    buildCommand: |
+      npm ci
+      npm run build
+    staticPublishPath: ./dist
+    pullRequestPreviewsEnabled: true
+    buildFilter:
+      paths:
+        - frontend/**
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: VITE_API_URL
+        value: https://cryptouniverse-backend.onrender.com/api/v1
+      - key: VITE_WS_URL
+        value: wss://cryptouniverse-backend.onrender.com/ws
+      - key: VITE_APP_NAME
+        value: CryptoUniverse Enterprise
+      - key: VITE_APP_VERSION
+        value: "2.0.0"
+      - key: VITE_ENVIRONMENT
+        value: production
+    headers:
+      - path: /*
+        headers:
+          X-Frame-Options: SAMEORIGIN
+          X-Content-Type-Options: nosniff
+          X-XSS-Protection: "1; mode=block"
+          Referrer-Policy: strict-origin-when-cross-origin
+          Strict-Transport-Security: max-age=31536000; includeSubDomains
+    redirects:
+      - source: /*
+        destination: /index.html
+        type: rewrite
+    customDomains:
+      - name: app.cryptouniverse.com  # Your custom domain
+        type: apex
+      - name: www.cryptouniverse.com
+        type: www
