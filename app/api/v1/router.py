@@ -1,26 +1,25 @@
 """
 Main API router for CryptoUniverse Enterprise v1.
 
-This router will include all API endpoints for the enterprise platform.
+This router includes all API endpoints for the enterprise platform.
 """
 
 from fastapi import APIRouter
 import structlog
+
+# Import endpoint routers
+from app.api.v1.endpoints import auth, trading, admin, exchanges
 
 logger = structlog.get_logger(__name__)
 
 # Create the main API router
 api_router = APIRouter()
 
-# TODO: Add endpoint routers
-# from app.api.v1.endpoints import auth, trading, portfolio, users, admin
-
 # Include endpoint routers
-# api_router.include_router(auth.router, prefix="/auth", tags=["authentication"])
-# api_router.include_router(trading.router, prefix="/trading", tags=["trading"])
-# api_router.include_router(portfolio.router, prefix="/portfolio", tags=["portfolio"])
-# api_router.include_router(users.router, prefix="/users", tags=["users"])
-# api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
+api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+api_router.include_router(trading.router, prefix="/trading", tags=["Trading"])
+api_router.include_router(exchanges.router, prefix="/exchanges", tags=["Exchange Management"])
+api_router.include_router(admin.router, prefix="/admin", tags=["Administration"])
 
 @api_router.get("/status")
 async def api_status():
@@ -28,5 +27,23 @@ async def api_status():
     return {
         "status": "operational",
         "version": "v1",
+<<<<<<< Current (Your changes)
         "message": "CryptoUniverse Enterprise API v1"
+=======
+        "message": "CryptoUniverse Enterprise API v1 - AI Money Manager",
+        "endpoints": {
+            "authentication": "/api/v1/auth",
+            "trading": "/api/v1/trading",
+            "exchanges": "/api/v1/exchanges", 
+            "administration": "/api/v1/admin"
+        },
+        "features": [
+            "JWT Authentication with MFA",
+            "Manual & Autonomous Trading",
+            "Simulation & Live Mode",
+            "Rate Limiting & Security",
+            "Multi-tenant Support",
+            "Enterprise Administration"
+        ]
+>>>>>>> Incoming (Background Agent changes)
     }

@@ -1,0 +1,140 @@
+# Render Blueprint Configuration for CryptoUniverse Enterprise
+services:
+  # Web Service - Main FastAPI Application
+  - type: web
+    name: cryptouniverse-enterprise
+    runtime: python3
+    plan: standard  # Adjust based on your needs (starter, standard, pro)
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --access-logfile - --error-logfile - --log-level info --timeout 120 --keep-alive 2 --max-requests 1000 --max-requests-jitter 50 --preload
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        fromService:
+          type: web
+          name: cryptouniverse-enterprise
+          property: port
+      - key: BASE_URL
+        fromService:
+          type: web
+          name: cryptouniverse-enterprise
+          property: host
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DEBUG
+        value: "false"
+      # Database connection
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cryptouniverse-db
+          property: connectionString
+      # Redis connection
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: cryptouniverse-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: cryptouniverse-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: cryptouniverse-redis
+          property: connectionString
+
+  # Background Worker Service (for Celery)
+  - type: worker
+    name: cryptouniverse-worker
+    runtime: python3
+    plan: starter  # Adjust based on your needs
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A app.services.background worker --loglevel=info --concurrency=2
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cryptouniverse-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: cryptouniverse-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: cryptouniverse-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: cryptouniverse-redis
+          property: connectionString
+
+  # Celery Beat Scheduler (for scheduled tasks)
+  - type: worker
+    name: cryptouniverse-scheduler
+    runtime: python3
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: celery -A app.services.background beat --loglevel=info
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PYTHONDONTWRITEBYTECODE
+        value: "1"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cryptouniverse-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: cryptouniverse-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: cryptouniverse-redis
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: cryptouniverse-redis
+          property: connectionString
+
+# Database Service
+databases:
+  - name: cryptouniverse-db
+    plan: starter  # Adjust based on your needs (starter, standard, pro)
+    databaseName: cryptouniverse_enterprise
+    user: cryptouniverse_user
+
+# Redis Service
+services:
+  - type: redis
+    name: cryptouniverse-redis
+    plan: starter  # Adjust based on your needs
+    maxmemoryPolicy: allkeys-lru
