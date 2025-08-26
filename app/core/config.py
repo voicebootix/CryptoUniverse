@@ -9,8 +9,9 @@ import os
 from functools import lru_cache
 from typing import List, Optional
 
-from pydantic import Field, validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
+import json
 
 
 class Settings(BaseSettings):
@@ -71,6 +72,21 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = Field(default=None, description="OpenAI API key")
     ANTHROPIC_API_KEY: Optional[str] = Field(default=None, description="Anthropic API key")
     GOOGLE_AI_API_KEY: Optional[str] = Field(default=None, description="Google AI API key")
+    
+    @field_validator('CORS_ORIGINS', 'ALLOWED_HOSTS', mode='before')
+    @classmethod
+    def parse_string_lists(cls, v):
+        """Parse string list fields from environment variables."""
+        if isinstance(v, str):
+            if not v.strip():  # Empty string
+                return []
+            try:
+                # Try to parse as JSON first
+                return json.loads(v)
+            except json.JSONDecodeError:
+                # If not JSON, split by comma
+                return [item.strip() for item in v.split(',') if item.strip()]
+        return v
 
     # Exchange API settings
     BINANCE_API_KEY: Optional[str] = Field(default=None, description="Binance API key")
