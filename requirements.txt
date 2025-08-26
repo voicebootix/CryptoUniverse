@@ -45,8 +45,7 @@ mypy==1.7.1
 gunicorn==21.2.0
 python-dotenv==1.0.0
 
-# Database migrations
-alembic==1.13.1
+# Database migrations (already listed above)
 
 # Additional production dependencies
 psutil==5.9.6  # System monitoring
@@ -62,13 +61,12 @@ pandas==2.1.4
 
 # WebSockets for real-time features
 websockets==12.0
-<<<<<<< Current (Your changes)
-=======
 
-# Additional enterprise dependencies for APIs
+# Additional enterprise dependencies for APIs  
 bcrypt==4.1.2
 PyJWT==2.8.0
 cryptography==41.0.8
-psutil==5.9.6
 email-validator==2.1.0
->>>>>>> Incoming (Background Agent changes)
+
+# Crypto trading and exchange APIs
+ccxt==4.2.25
