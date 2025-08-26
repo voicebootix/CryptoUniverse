@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 
 # Core imports
 from app.core.config import get_settings
-from app.core.database import database, engine
+from app.core.database import engine, db_manager
 from app.core.redis import redis_client
 from app.core.logging import configure_logging
 
@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     try:
         # Connect to database
-        await database.connect()
+        await db_manager.connect()
         logger.info("✅ Database connected")
 
         # Connect to Redis
@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("✅ Background services stopped")
 
         # Disconnect from database
-        await database.disconnect()
+        await db_manager.disconnect()
         logger.info("✅ Database disconnected")
 
         # Close Redis connection
@@ -209,7 +209,7 @@ async def health_check():
 
     try:
         # Check database
-        await database.execute("SELECT 1")
+        await db_manager.execute("SELECT 1")
         health_status["checks"]["database"] = "connected"
     except Exception as e:
         health_status["checks"]["database"] = f"error: {str(e)}"

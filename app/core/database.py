@@ -51,28 +51,30 @@ metadata = MetaData()
 Base = declarative_base(metadata=metadata)
 
 
-# Database connection events
-@event.listens_for(engine, "connect")
+# Database connection events for async engine
+@event.listens_for(engine.sync_engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record):
     """Set SQLite pragmas for development."""
-    if "sqlite" in settings.DATABASE_URL:
+    if "sqlite" in get_async_database_url():
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
 
-@event.listens_for(engine, "before_cursor_execute")
+@event.listens_for(engine.sync_engine, "before_cursor_execute")
 def receive_before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
     """Log slow queries in development."""
-    if settings.ENVIRONMENT == "development":
-        context._query_start_time = asyncio.get_event_loop().time()
+    if getattr(settings, 'ENVIRONMENT', 'production') == "development":
+        import time
+        context._query_start_time = time.time()
 
 
-@event.listens_for(engine, "after_cursor_execute")
+@event.listens_for(engine.sync_engine, "after_cursor_execute")
 def receive_after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
     """Log slow queries in development."""
-    if settings.ENVIRONMENT == "development":
-        total = asyncio.get_event_loop().time() - context._query_start_time
+    if getattr(settings, 'ENVIRONMENT', 'production') == "development":
+        import time
+        total = time.time() - getattr(context, '_query_start_time', time.time())
         if total > 0.5:  # Log queries taking longer than 500ms
             import structlog
             logger = structlog.get_logger()

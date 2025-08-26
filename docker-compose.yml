@@ -1,158 +1,170 @@
 version: '3.8'
 
 services:
-  # Main application
-  app:
-    build: 
-      context: .
-      target: production
-    ports:
-      - "8000:8000"
-    environment:
-      - ENVIRONMENT=production
-      - DATABASE_URL=postgresql://cryptouniverse:password@db:5432/cryptouniverse_enterprise
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - app_logs:/app/logs
-    restart: unless-stopped
-    networks:
-      - cryptouniverse_network
-
-  # PostgreSQL database
-  db:
+  # Database Services
+  postgres:
     image: postgres:15-alpine
+    container_name: cryptouniverse-postgres
     environment:
-      POSTGRES_DB: cryptouniverse_enterprise
+      POSTGRES_DB: cryptouniverse
       POSTGRES_USER: cryptouniverse
-      POSTGRES_PASSWORD: password
-      PGDATA: /var/lib/postgresql/data/pgdata
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crypto_secure_password}
     ports:
       - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cryptouniverse -d cryptouniverse_enterprise"]
+      test: ["CMD-SHELL", "pg_isready -U cryptouniverse"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
     networks:
-      - cryptouniverse_network
+      - cryptouniverse-network
+    restart: unless-stopped
 
-  # Redis for caching and sessions
   redis:
     image: redis:7-alpine
+    container_name: cryptouniverse-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 5s
+      timeout: 3s
       retries: 5
-    restart: unless-stopped
     networks:
-      - cryptouniverse_network
+      - cryptouniverse-network
+    restart: unless-stopped
 
-  # Celery worker for background tasks
-  celery_worker:
+  # Backend API Service
+  backend:
     build:
       context: .
-      target: production
-    command: celery -A app.celery.celery_app worker --loglevel=info --concurrency=4
+      dockerfile: Dockerfile.backend
+    container_name: cryptouniverse-backend
     environment:
       - ENVIRONMENT=production
-      - DATABASE_URL=postgresql://cryptouniverse:password@db:5432/cryptouniverse_enterprise
+      - DATABASE_URL=postgresql+asyncpg://cryptouniverse:${POSTGRES_PASSWORD:-crypto_secure_password}@postgres:5432/cryptouniverse
       - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - SECRET_KEY=${SECRET_KEY:-your-super-secret-key-change-in-production}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-your-encryption-key-32-chars-long}
+      - CORS_ORIGINS=http://localhost:3000,https://your-domain.com
+    ports:
+      - "8000:8000"
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
-      - app_logs:/app/logs
-    restart: unless-stopped
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
-      - cryptouniverse_network
+      - cryptouniverse-network
+    restart: unless-stopped
 
-  # Celery beat scheduler
-  celery_beat:
+  # Frontend Service
+  frontend:
     build:
-      context: .
-      target: production
-    command: celery -A app.celery.celery_app beat --loglevel=info
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=http://localhost:8000/api/v1
+        - VITE_WS_URL=ws://localhost:8000/ws
+    container_name: cryptouniverse-frontend
+    ports:
+      - "3000:3000"
     environment:
-      - ENVIRONMENT=production
-      - DATABASE_URL=postgresql://cryptouniverse:password@db:5432/cryptouniverse_enterprise
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - NODE_ENV=production
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - app_logs:/app/logs
-    restart: unless-stopped
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
-      - cryptouniverse_network
+      - cryptouniverse-network
+    restart: unless-stopped
 
-  # Nginx reverse proxy
+  # Nginx Reverse Proxy (Production)
   nginx:
     image: nginx:alpine
+    container_name: cryptouniverse-nginx
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - nginx_logs:/var/log/nginx
-      - certbot_certs:/etc/letsencrypt
+      - ./ssl:/etc/nginx/ssl:ro
     depends_on:
-      - app
+      - backend
+      - frontend
+    networks:
+      - cryptouniverse-network
     restart: unless-stopped
-    networks:
-      - cryptouniverse_network
-
-  # Database migration service (runs once)
-  migrate:
-    build:
-      context: .
-      target: production
-    command: alembic upgrade head
-    environment:
-      - DATABASE_URL=postgresql://cryptouniverse:password@db:5432/cryptouniverse_enterprise
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - cryptouniverse_network
     profiles:
-      - migration
+      - production
+
+  # Monitoring Services
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: cryptouniverse-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - cryptouniverse-network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: cryptouniverse-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning
+    networks:
+      - cryptouniverse-network
+    restart: unless-stopped
+    profiles:
+      - monitoring
 
 volumes:
   postgres_data:
     driver: local
   redis_data:
     driver: local
-  app_logs:
+  prometheus_data:
     driver: local
-  nginx_logs:
-    driver: local
-  certbot_certs:
+  grafana_data:
     driver: local
 
 networks:
-  cryptouniverse_network:
+  cryptouniverse-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
