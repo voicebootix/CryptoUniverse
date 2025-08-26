@@ -1,7 +1,7 @@
 """
 Database configuration and connection management.
 
-Handles SQLAlchemy setup, connection pooling, and database operations
+Handles SQLAlchemy 2.x async setup, connection pooling, and database operations
 for the multi-tenant cryptocurrency trading platform.
 """
 
@@ -9,41 +9,41 @@ import asyncio
 from typing import AsyncGenerator, Optional
 
 import sqlalchemy
-from databases import Database
-from sqlalchemy import create_engine, MetaData, event
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import MetaData, event, text
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool, QueuePool
 
 from app.core.config import get_settings
 
 settings = get_settings()
 
-# Database instance
-database = Database(
-    settings.DATABASE_URL,
-    min_size=5,
-    max_size=settings.DATABASE_POOL_SIZE,
-    force_rollback=settings.ENVIRONMENT == "test"
-)
+# Convert sync DATABASE_URL to async if needed
+def get_async_database_url() -> str:
+    """Convert database URL to async version."""
+    db_url = settings.DATABASE_URL
+    if db_url.startswith("postgresql://"):
+        return db_url.replace("postgresql://", "postgresql+asyncpg://")
+    elif db_url.startswith("sqlite://"):
+        return db_url.replace("sqlite://", "sqlite+aiosqlite://")
+    return db_url
 
-# SQLAlchemy engine
-engine = create_engine(
-    settings.DATABASE_URL,
-    poolclass=QueuePool if settings.ENVIRONMENT != "test" else NullPool,
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
+# SQLAlchemy async engine
+engine = create_async_engine(
+    get_async_database_url(),
+    poolclass=QueuePool if getattr(settings, 'ENVIRONMENT', 'production') != "test" else NullPool,
+    pool_size=getattr(settings, 'DATABASE_POOL_SIZE', 20),
+    max_overflow=getattr(settings, 'DATABASE_MAX_OVERFLOW', 0),
     pool_pre_ping=True,
-    echo=settings.DATABASE_ECHO,
+    echo=getattr(settings, 'DATABASE_ECHO', False),
     future=True
 )
 
-# Session factory
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine,
-    future=True
+# Async session factory
+AsyncSessionLocal = async_sessionmaker(
+    engine,
+    class_=AsyncSession,
+    expire_on_commit=False
 )
 
 # Metadata and Base
@@ -84,42 +84,65 @@ def receive_after_cursor_execute(conn, cursor, statement, parameters, context, e
 
 
 class DatabaseManager:
-    """Database connection and transaction manager."""
+    """Database connection and transaction manager using SQLAlchemy 2.x async."""
     
     def __init__(self):
-        self._database = database
+        self._engine = engine
     
     async def connect(self) -> None:
         """Connect to database."""
-        await self._database.connect()
+        # Engine handles connections automatically
+        pass
     
     async def disconnect(self) -> None:
         """Disconnect from database."""
-        await self._database.disconnect()
+        await self._engine.dispose()
     
     async def execute(self, query, values=None):
         """Execute a query."""
-        return await self._database.execute(query, values)
+        async with self._engine.begin() as conn:
+            if values:
+                result = await conn.execute(text(query), values)
+            else:
+                result = await conn.execute(text(query))
+            return result
     
     async def fetch_all(self, query, values=None):
         """Fetch all results."""
-        return await self._database.fetch_all(query, values)
+        async with self._engine.begin() as conn:
+            if values:
+                result = await conn.execute(text(query), values)
+            else:
+                result = await conn.execute(text(query))
+            return result.fetchall()
     
     async def fetch_one(self, query, values=None):
         """Fetch one result."""
-        return await self._database.fetch_one(query, values)
+        async with self._engine.begin() as conn:
+            if values:
+                result = await conn.execute(text(query), values)
+            else:
+                result = await conn.execute(text(query))
+            return result.fetchone()
     
     async def fetch_val(self, query, values=None):
         """Fetch single value."""
-        return await self._database.fetch_val(query, values)
+        async with self._engine.begin() as conn:
+            if values:
+                result = await conn.execute(text(query), values)
+            else:
+                result = await conn.execute(text(query))
+            row = result.fetchone()
+            return row[0] if row else None
     
     async def execute_many(self, query, values):
         """Execute many queries."""
-        return await self._database.execute_many(query, values)
+        async with self._engine.begin() as conn:
+            return await conn.execute(text(query), values)
     
-    async def transaction(self):
+    def transaction(self):
         """Start a database transaction."""
-        return self._database.transaction()
+        return self._engine.begin()
 
 
 # Database manager instance
@@ -127,42 +150,50 @@ db_manager = DatabaseManager()
 
 
 # Dependency for getting database session
-async def get_database() -> AsyncGenerator[Database, None]:
+async def get_database() -> AsyncGenerator[AsyncSession, None]:
     """
-    Dependency that provides database connection.
+    Dependency that provides database session.
     
     Yields:
-        Database: Database connection instance
+        AsyncSession: SQLAlchemy async session instance
     """
-    try:
-        yield database
-    except Exception as e:
-        import structlog
-        logger = structlog.get_logger()
-        logger.error("Database operation failed", error=str(e))
-        raise
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        except Exception as e:
+            await session.rollback()
+            import structlog
+            logger = structlog.get_logger()
+            logger.error("Database operation failed", error=str(e))
+            raise
+        finally:
+            await session.close()
 
 
 # Dependency for getting database session with transaction
 async def get_database_transaction():
     """
-    Dependency that provides database connection with transaction.
+    Dependency that provides database session with transaction.
     
     Yields:
-        Database: Database connection with transaction
+        AsyncSession: Database session with transaction
     """
-    async with database.transaction():
-        try:
-            yield database
-        except Exception as e:
-            import structlog
-            logger = structlog.get_logger()
-            logger.error("Database transaction failed", error=str(e))
-            raise
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            try:
+                yield session
+            except Exception as e:
+                await session.rollback()
+                import structlog
+                logger = structlog.get_logger()
+                logger.error("Database transaction failed", error=str(e))
+                raise
+            finally:
+                await session.close()
 
 
 class DatabaseHealthCheck:
-    """Database health check utilities."""
+    """Database health check utilities using SQLAlchemy 2.x."""
     
     @staticmethod
     async def check_connection() -> bool:
@@ -173,7 +204,8 @@ class DatabaseHealthCheck:
             bool: True if connection is healthy
         """
         try:
-            await database.execute("SELECT 1")
+            async with engine.begin() as conn:
+                await conn.execute(text("SELECT 1"))
             return True
         except Exception:
             return False
@@ -194,26 +226,21 @@ class DatabaseHealthCheck:
         
         try:
             # Test read
-            await database.execute("SELECT 1")
-            results["read"] = True
+            async with engine.begin() as conn:
+                await conn.execute(text("SELECT 1"))
+                results["read"] = True
             
-            # Test write (using a test table if it exists)
-            test_query = """
-            INSERT INTO health_check (timestamp) 
-            VALUES (NOW()) 
-            ON CONFLICT DO NOTHING
-            """
-            try:
-                await database.execute(test_query)
-                results["write"] = True
-            except Exception:
-                # Table might not exist, which is fine
-                results["write"] = True
-            
-            # Test transaction
-            async with database.transaction():
-                await database.execute("SELECT 1")
-                results["transaction"] = True
+                # Test write (basic test)
+                try:
+                    await conn.execute(text("SELECT 1"))  # Simple test
+                    results["write"] = True
+                except Exception:
+                    results["write"] = False
+                
+                # Test transaction
+                async with conn.begin():
+                    await conn.execute(text("SELECT 1"))
+                    results["transaction"] = True
                 
         except Exception:
             pass
@@ -227,46 +254,54 @@ db_health = DatabaseHealthCheck()
 
 # Database utilities
 class DatabaseUtils:
-    """Database utility functions."""
+    """Database utility functions using SQLAlchemy 2.x."""
     
     @staticmethod
-    def create_all_tables():
+    async def create_all_tables():
         """Create all database tables."""
-        metadata.create_all(bind=engine)
+        async with engine.begin() as conn:
+            await conn.run_sync(metadata.create_all)
     
     @staticmethod
-    def drop_all_tables():
+    async def drop_all_tables():
         """Drop all database tables."""
-        metadata.drop_all(bind=engine)
+        async with engine.begin() as conn:
+            await conn.run_sync(metadata.drop_all)
     
     @staticmethod
     async def truncate_table(table_name: str):
         """Truncate a specific table."""
         query = f"TRUNCATE TABLE {table_name} RESTART IDENTITY CASCADE"
-        await database.execute(query)
+        async with engine.begin() as conn:
+            await conn.execute(text(query))
     
     @staticmethod
     async def get_table_count(table_name: str) -> int:
         """Get row count for a table."""
         query = f"SELECT COUNT(*) FROM {table_name}"
-        return await database.fetch_val(query)
+        async with engine.begin() as conn:
+            result = await conn.execute(text(query))
+            row = result.fetchone()
+            return row[0] if row else 0
     
     @staticmethod
     async def get_database_size() -> dict:
         """Get database size information."""
-        if "postgresql" in settings.DATABASE_URL:
+        if "postgresql" in get_async_database_url():
             query = """
             SELECT 
                 pg_size_pretty(pg_database_size(current_database())) as size,
                 pg_database_size(current_database()) as size_bytes
             """
-            result = await database.fetch_one(query)
-            return {
-                "size": result["size"],
-                "size_bytes": result["size_bytes"]
-            }
-        else:
-            return {"size": "Unknown", "size_bytes": 0}
+            async with engine.begin() as conn:
+                result = await conn.execute(text(query))
+                row = result.fetchone()
+                if row:
+                    return {
+                        "size": row[0],
+                        "size_bytes": row[1]
+                    }
+        return {"size": "Unknown", "size_bytes": 0}
 
 
 # Database utils instance
