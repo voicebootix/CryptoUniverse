@@ -51,8 +51,7 @@ python-dotenv==1.0.0
 psutil==5.9.6  # System monitoring
 setproctitle==1.3.3  # Process naming for monitoring
 
-# Time and scheduling
-celery-beat==2.5.0
+# Time and scheduling (celery beat is built into celery package)
 pytz==2023.3
 
 # Financial calculations
@@ -70,3 +69,13 @@ email-validator==2.1.0
 
 # Crypto trading and exchange APIs
 ccxt==4.2.25
+
+# File operations for logging and debug services
+aiofiles==23.2.1
+
+# Additional dependencies for system services  
+typing-extensions==4.8.0
+
+# AI services for consensus and analysis
+openai==1.3.8
+anthropic==0.7.8
