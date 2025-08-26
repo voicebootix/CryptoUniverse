@@ -199,14 +199,6 @@ class BackgroundServiceManager(LoggerMixin):
         
         task = self.tasks[service]
         return {
-<<<<<<< Current (Your changes)
-            "services": self.services,
-            "uptime": "placeholder",
-            "cpu_usage": 25.5,
-            "memory_usage": 45.2,
-            "active_connections": 42
-        }
-=======
             "status": "running" if not task.done() else "stopped",
             "cancelled": task.cancelled(),
             "exception": str(task.exception()) if task.exception() else None,
@@ -437,4 +429,3 @@ class BackgroundServiceManager(LoggerMixin):
             pass
         except Exception as e:
             self.logger.error("Session cleanup failed", error=str(e))
->>>>>>> Incoming (Background Agent changes)

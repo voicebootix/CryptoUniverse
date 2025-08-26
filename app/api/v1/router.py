@@ -27,9 +27,6 @@ async def api_status():
     return {
         "status": "operational",
         "version": "v1",
-<<<<<<< Current (Your changes)
-        "message": "CryptoUniverse Enterprise API v1"
-=======
         "message": "CryptoUniverse Enterprise API v1 - AI Money Manager",
         "endpoints": {
             "authentication": "/api/v1/auth",
@@ -45,5 +42,4 @@ async def api_status():
             "Multi-tenant Support",
             "Enterprise Administration"
         ]
->>>>>>> Incoming (Background Agent changes)
     }
