@@ -20,7 +20,7 @@ ALL SOPHISTICATION PRESERVED - ADAPTED FOR PYTHON EXCELLENCE
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
@@ -29,6 +29,7 @@ import uuid
 import structlog
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
+from app.core.redis import redis_client
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -97,6 +98,7 @@ class MasterSystemController(LoggerMixin):
             "last_emergency_level": EmergencyLevel.NORMAL.value
         }
         self.start_time = datetime.utcnow()
+        self.redis = redis_client
         
         # Trading mode configurations
         self.mode_configs = {
@@ -980,10 +982,319 @@ class MasterSystemController(LoggerMixin):
                 "timestamp": datetime.utcnow().isoformat()
             }
     
-    async def emergency_stop(self) -> Dict[str, Any]:
-        """Execute emergency stop protocol."""
+    async def start_autonomous_mode(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Start autonomous trading mode for a user."""
+        user_id = config.get("user_id")
+        mode = config.get("mode", "balanced")
         
-        self.logger.warning("🚨 EMERGENCY STOP ACTIVATED")
+        self.logger.info(f"🤖 Starting autonomous mode for user {user_id}", mode=mode)
+        
+        try:
+            # Generate session ID
+            session_id = f"auto_{user_id}_{int(time.time())}"
+            
+            # Store user config
+            await self.redis.hset(
+                f"autonomous_config:{user_id}",
+                mapping={
+                    "session_id": session_id,
+                    "mode": mode,
+                    "started_at": datetime.utcnow().isoformat(),
+                    "max_daily_loss_pct": config.get("max_daily_loss_pct", 5.0),
+                    "max_position_size_pct": config.get("max_position_size_pct", 10.0),
+                    "allowed_symbols": json.dumps(config.get("allowed_symbols", ["BTC", "ETH", "SOL"])),
+                    "excluded_symbols": json.dumps(config.get("excluded_symbols", [])),
+                    "trading_hours": json.dumps(config.get("trading_hours", {"start": "00:00", "end": "23:59"}))
+                }
+            )
+            
+            # Mark as active
+            await self.redis.set(f"autonomous_active:{user_id}", "true", ex=86400)
+            
+            # Estimate trades based on mode
+            trade_estimates = {
+                "conservative": 5,
+                "balanced": 10,
+                "aggressive": 20,
+                "beast_mode": 50
+            }
+            
+            return {
+                "success": True,
+                "session_id": session_id,
+                "estimated_trades": trade_estimates.get(mode, 10),
+                "message": f"Autonomous trading started in {mode} mode"
+            }
+            
+        except Exception as e:
+            self.logger.error("Failed to start autonomous mode", error=str(e))
+            return {"success": False, "error": str(e)}
+    
+    async def stop_autonomous_mode(self, user_id: str) -> Dict[str, Any]:
+        """Stop autonomous trading mode for a user."""
+        self.logger.info(f"🛑 Stopping autonomous mode for user {user_id}")
+        
+        try:
+            # Get current config
+            config = await self.redis.hgetall(f"autonomous_config:{user_id}")
+            
+            if config:
+                session_duration = 0
+                if config.get("started_at"):
+                    start_time = datetime.fromisoformat(config["started_at"])
+                    session_duration = (datetime.utcnow() - start_time).total_seconds()
+                
+                # Remove autonomous state
+                await self.redis.delete(f"autonomous_config:{user_id}")
+                await self.redis.delete(f"autonomous_active:{user_id}")
+                
+                # Get trading stats (mock for now)
+                trades_executed = 0
+                total_pnl = 0.0
+                
+                return {
+                    "success": True,
+                    "session_duration": session_duration,
+                    "trades_executed": trades_executed,
+                    "total_pnl": total_pnl,
+                    "message": "Autonomous trading stopped successfully"
+                }
+            else:
+                return {
+                    "success": True,
+                    "message": "No active autonomous session found"
+                }
+                
+        except Exception as e:
+            self.logger.error("Failed to stop autonomous mode", error=str(e))
+            return {"success": False, "error": str(e)}
+    
+    async def get_system_status(self, user_id: str) -> Dict[str, Any]:
+        """Get system status for a specific user."""
+        try:
+            # Check if autonomous mode is active
+            autonomous_active = await self.redis.get(f"autonomous_active:{user_id}")
+            autonomous_config = await self.redis.hgetall(f"autonomous_config:{user_id}") if autonomous_active else {}
+            
+            # Get system health
+            system_health = await self.redis.get("system_health")
+            health_status = "normal"
+            if system_health:
+                try:
+                    health_data = eval(system_health)
+                    health_status = "warning" if health_data.get("alerts") else "normal"
+                except:
+                    pass
+            
+            # Mock performance data (would be real in production)
+            performance_today = {
+                "trades": 5,
+                "profit_loss": 125.50,
+                "win_rate": 80.0,
+                "best_trade": 45.30,
+                "worst_trade": -12.10
+            }
+            
+            # Get active strategies
+            active_strategies = ["spot_momentum_strategy", "arbitrage_hunter"]
+            if autonomous_config.get("mode") == "aggressive":
+                active_strategies.append("high_frequency_scalping")
+            
+            # Calculate next action ETA (mock)
+            next_action_eta = 300  # 5 minutes
+            
+            return {
+                "autonomous_mode": bool(autonomous_active),
+                "simulation_mode": True,  # Would check user setting
+                "trading_mode": autonomous_config.get("mode", "balanced"),
+                "health": health_status,
+                "active_strategies": active_strategies,
+                "performance_today": performance_today,
+                "risk_level": health_status,
+                "next_action_eta": next_action_eta,
+                "session_id": autonomous_config.get("session_id"),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error("Failed to get system status", error=str(e))
+            return {
+                "autonomous_mode": False,
+                "simulation_mode": True,
+                "trading_mode": "balanced",
+                "health": "error",
+                "active_strategies": [],
+                "performance_today": {},
+                "risk_level": "error",
+                "next_action_eta": None,
+                "error": str(e)
+            }
+    
+    async def get_global_system_status(self) -> Dict[str, Any]:
+        """Get global system status for admin."""
+        try:
+            # Count active autonomous sessions
+            autonomous_keys = await self.redis.keys("autonomous_active:*")
+            active_sessions = len(autonomous_keys)
+            
+            # Get system health
+            system_health = await self.redis.get("system_health")
+            health_status = "normal"
+            error_rate = 0.0
+            
+            if system_health:
+                try:
+                    health_data = eval(system_health)
+                    health_status = "warning" if health_data.get("alerts") else "normal"
+                except:
+                    pass
+            
+            # Mock system metrics (would be real)
+            return {
+                "health": health_status,
+                "active_autonomous_sessions": active_sessions,
+                "uptime_hours": 24.5,
+                "error_rate_percent": error_rate,
+                "avg_response_time_ms": 150,
+                "uptime_percentage": 99.9,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error("Failed to get global system status", error=str(e))
+            return {
+                "health": "error",
+                "active_autonomous_sessions": 0,
+                "error": str(e)
+            }
+    
+    async def emergency_stop(self, user_id: str) -> Dict[str, Any]:
+        """Execute emergency stop for specific user."""
+        self.logger.critical(f"🚨 EMERGENCY STOP for user {user_id}")
+        
+        try:
+            # Stop autonomous mode
+            await self.stop_autonomous_mode(user_id)
+            
+            # Mark emergency state
+            await self.redis.set(f"emergency_stop:{user_id}", "true", ex=3600)
+            
+            return {
+                "success": True,
+                "user_id": user_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "message": "Emergency stop executed successfully"
+            }
+            
+        except Exception as e:
+            self.logger.error("Emergency stop failed", error=str(e))
+            return {"success": False, "error": str(e)}
+    
+    async def emergency_stop_all_users(self) -> Dict[str, Any]:
+        """Execute emergency stop for all users."""
+        self.logger.critical("🚨 PLATFORM-WIDE EMERGENCY STOP")
+        
+        try:
+            # Get all active autonomous sessions
+            autonomous_keys = await self.redis.keys("autonomous_active:*")
+            affected_users = []
+            stopped_sessions = 0
+            
+            for key in autonomous_keys:
+                user_id = key.decode().split(":")[-1]
+                result = await self.emergency_stop(user_id)
+                if result.get("success"):
+                    affected_users.append(user_id)
+                    stopped_sessions += 1
+            
+            # Set global emergency state
+            await self.redis.set("global_emergency_stop", "true", ex=3600)
+            
+            return {
+                "success": True,
+                "affected_users": len(affected_users),
+                "stopped_sessions": stopped_sessions,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error("Global emergency stop failed", error=str(e))
+            return {"success": False, "error": str(e)}
+    
+    async def configure_service_interval(self, service: str, interval: int) -> bool:
+        """Configure service interval."""
+        try:
+            await self.redis.hset("service_intervals", service, interval)
+            self.logger.info(f"Service interval configured: {service} = {interval}s")
+            return True
+        except Exception as e:
+            self.logger.error("Failed to configure service interval", error=str(e))
+            return False
+    
+    async def set_maintenance_mode(self, enabled: bool) -> bool:
+        """Set maintenance mode."""
+        try:
+            if enabled:
+                await self.redis.set("maintenance_mode", "true")
+                self.logger.warning("🔧 Maintenance mode ENABLED")
+            else:
+                await self.redis.delete("maintenance_mode")
+                self.logger.info("✅ Maintenance mode DISABLED")
+            return True
+        except Exception as e:
+            self.logger.error("Failed to set maintenance mode", error=str(e))
+            return False
+    
+    async def run_global_autonomous_cycle(self):
+        """Run autonomous trading cycle for all active users."""
+        try:
+            # Get all active autonomous sessions
+            autonomous_keys = await self.redis.keys("autonomous_active:*")
+            
+            self.logger.info(f"🤖 Running autonomous cycle for {len(autonomous_keys)} users")
+            
+            for key in autonomous_keys:
+                user_id = key.decode().split(":")[-1]
+                
+                # Check if emergency stop is active
+                emergency = await self.redis.get(f"emergency_stop:{user_id}")
+                if emergency:
+                    continue
+                
+                # Get user config
+                config = await self.redis.hgetall(f"autonomous_config:{user_id}")
+                if not config:
+                    continue
+                
+                # Run trading cycle for this user
+                await self._run_user_autonomous_cycle(user_id, config)
+                
+        except Exception as e:
+            self.logger.error("Global autonomous cycle failed", error=str(e))
+    
+    async def _run_user_autonomous_cycle(self, user_id: str, config: Dict):
+        """Run autonomous cycle for specific user."""
+        try:
+            mode = config.get("mode", "balanced")
+            self.logger.debug(f"Running autonomous cycle for user {user_id}", mode=mode)
+            
+            # This would contain the actual trading logic
+            # For now, just log the cycle
+            
+            # Update last cycle time
+            await self.redis.hset(
+                f"autonomous_config:{user_id}",
+                "last_cycle",
+                datetime.utcnow().isoformat()
+            )
+            
+        except Exception as e:
+            self.logger.error(f"User autonomous cycle failed for {user_id}", error=str(e))
+
+    async def emergency_stop(self) -> Dict[str, Any]:
+        """Execute emergency stop protocol - LEGACY METHOD."""
+        
+        self.logger.warning("🚨 LEGACY EMERGENCY STOP ACTIVATED")
         
         # Stop autonomous operation
         self.is_active = False

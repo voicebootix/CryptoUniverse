@@ -1427,11 +1427,73 @@ class PortfolioRiskService(LoggerMixin):
             }
 
 
-# Global service instance
-portfolio_risk_service = PortfolioRiskService()
+# Additional methods for API integration
+class PortfolioRiskServiceExtended(PortfolioRiskService):
+    """Extended portfolio risk service with API integration methods."""
+    
+    async def get_portfolio_status(self, user_id: str) -> Dict[str, Any]:
+        """Get comprehensive portfolio status for a user."""
+        try:
+            self.logger.info(f"Getting portfolio status for user {user_id}")
+            
+            # Mock portfolio data (would be real in production)
+            portfolio_data = {
+                "portfolio": {
+                    "total_value_usd": 54250.75,
+                    "available_balance": 12500.00,
+                    "positions": [
+                        {
+                            "symbol": "BTC",
+                            "amount": 0.5,
+                            "value_usd": 25000.00,
+                            "unrealized_pnl": 1250.50,
+                            "side": "long"
+                        },
+                        {
+                            "symbol": "ETH", 
+                            "amount": 10.0,
+                            "value_usd": 24000.00,
+                            "unrealized_pnl": -200.25,
+                            "side": "long"
+                        },
+                        {
+                            "symbol": "SOL",
+                            "amount": 100.0,
+                            "value_usd": 5000.00,
+                            "unrealized_pnl": 125.00,
+                            "side": "long"
+                        }
+                    ],
+                    "daily_pnl": 475.25,
+                    "daily_pnl_pct": 0.88,
+                    "total_pnl": 1175.25,
+                    "total_pnl_pct": 2.21,
+                    "margin_used": 5000.00,
+                    "margin_available": 15000.00,
+                    "risk_score": 35.5,
+                    "active_orders": 3
+                }
+            }
+            
+            return {
+                "success": True,
+                **portfolio_data
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get portfolio status for user {user_id}", error=str(e))
+            return {
+                "success": False,
+                "error": str(e),
+                "portfolio": {}
+            }
+
+
+# Global service instance  
+portfolio_risk_service = PortfolioRiskServiceExtended()
 
 
 # FastAPI dependency
-async def get_portfolio_risk_service() -> PortfolioRiskService:
+async def get_portfolio_risk_service() -> PortfolioRiskServiceExtended:
     """Dependency injection for FastAPI."""
     return portfolio_risk_service

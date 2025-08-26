@@ -154,6 +154,15 @@ class User(Base):
             and self.status == UserStatus.ACTIVE
             and self.role in [UserRole.ADMIN, UserRole.TRADER]
         )
+    
+    # Relationships
+    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+    login_history = relationship("LoginHistory", back_populates="user", cascade="all, delete-orphan")
+    profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    activities = relationship("UserActivity", back_populates="user", cascade="all, delete-orphan")
+    
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, email={self.email}, role={self.role}, status={self.status})>"
 
 
 class UserProfile(Base):

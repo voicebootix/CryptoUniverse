@@ -55,3 +55,10 @@ pandas==2.1.4
 
 # WebSockets for real-time features
 websockets==12.0
+
+# Additional enterprise dependencies for APIs
+bcrypt==4.1.2
+PyJWT==2.8.0
+cryptography==41.0.8
+psutil==5.9.6
+email-validator==2.1.0

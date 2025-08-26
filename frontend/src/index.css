@@ -1,0 +1,295 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&family=JetBrains+Mono:wght@100;200;300;400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 84% 4.9%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 94.1%;
+    --radius: 0.5rem;
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    overflow-x: hidden;
+  }
+
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-muted/20;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/30 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/50;
+  }
+
+  /* Selection styles */
+  ::selection {
+    @apply bg-primary/20 text-primary-foreground;
+  }
+
+  /* Focus styles for accessibility */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer components {
+  /* Card component styles */
+  .card-gradient {
+    background: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--muted)) 100%);
+  }
+
+  .glass-effect {
+    backdrop-filter: blur(10px);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  /* Trading specific styles */
+  .profit-text {
+    @apply text-profit font-semibold;
+  }
+
+  .loss-text {
+    @apply text-loss font-semibold;
+  }
+
+  .neutral-text {
+    @apply text-muted-foreground;
+  }
+
+  .price-ticker {
+    @apply font-mono text-sm font-medium;
+  }
+
+  .trading-button {
+    @apply relative overflow-hidden transition-all duration-200 hover:scale-105 active:scale-95;
+  }
+
+  .trading-button::before {
+    content: '';
+    @apply absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-500;
+  }
+
+  .trading-button:hover::before {
+    @apply translate-x-full;
+  }
+
+  /* Market data styles */
+  .market-up {
+    @apply text-profit bg-profit/10 border-profit/30;
+  }
+
+  .market-down {
+    @apply text-loss bg-loss/10 border-loss/30;
+  }
+
+  .market-neutral {
+    @apply text-muted-foreground bg-muted/10 border-muted/30;
+  }
+
+  /* Animation utilities */
+  .animate-pulse-slow {
+    animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  .animate-bounce-slow {
+    animation: bounce 2s infinite;
+  }
+
+  /* Loading states */
+  .skeleton {
+    @apply animate-pulse bg-muted/50 rounded;
+  }
+
+  /* Charts and graphs */
+  .chart-container {
+    @apply relative h-full w-full overflow-hidden rounded-lg bg-card/50;
+  }
+
+  /* Status indicators */
+  .status-indicator {
+    @apply relative flex h-3 w-3 rounded-full;
+  }
+
+  .status-indicator::before {
+    content: '';
+    @apply absolute inline-flex h-full w-full animate-ping rounded-full opacity-75;
+  }
+
+  .status-online::before {
+    @apply bg-profit;
+  }
+
+  .status-offline::before {
+    @apply bg-loss;
+  }
+
+  .status-warning::before {
+    @apply bg-warning;
+  }
+
+  /* Typography enhancements */
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary to-chart-1 bg-clip-text text-transparent;
+  }
+
+  .number-display {
+    @apply font-mono tabular-nums;
+  }
+
+  /* Interactive elements */
+  .interactive-element {
+    @apply transition-all duration-200 hover:bg-accent/10 active:bg-accent/20 cursor-pointer;
+  }
+
+  /* Grid patterns */
+  .dot-pattern {
+    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  /* Glow effects */
+  .glow-on-hover:hover {
+    @apply shadow-glow;
+    transition: box-shadow 0.3s ease-in-out;
+  }
+
+  .profit-glow:hover {
+    @apply shadow-glow-green;
+  }
+
+  .loss-glow:hover {
+    @apply shadow-glow-red;
+  }
+}
+
+@layer utilities {
+  /* Hide scrollbar but keep functionality */
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Text utilities */
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Aspect ratio utilities */
+  .aspect-golden {
+    aspect-ratio: 1.618 / 1;
+  }
+
+  /* Grid utilities */
+  .grid-auto-fit {
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+
+  .grid-auto-fill {
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  }
+
+  /* Positioning utilities */
+  .center-absolute {
+    @apply absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2;
+  }
+
+  /* Animation delays */
+  .animation-delay-75 {
+    animation-delay: 75ms;
+  }
+
+  .animation-delay-150 {
+    animation-delay: 150ms;
+  }
+
+  .animation-delay-300 {
+    animation-delay: 300ms;
+  }
+
+  .animation-delay-500 {
+    animation-delay: 500ms;
+  }
+}
+
+/* Dark theme optimizations */
+@media (prefers-color-scheme: dark) {
+  .chart-grid {
+    stroke: rgba(255, 255, 255, 0.1);
+  }
+  
+  .chart-axis {
+    stroke: rgba(255, 255, 255, 0.2);
+  }
+}
+
+/* Print styles */
+@media print {
+  * {
+    @apply text-black bg-white;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+  .mobile-full {
+    @apply w-full min-w-full;
+  }
+  
+  .mobile-stack {
+    @apply flex-col space-y-2 space-x-0;
+  }
+}
