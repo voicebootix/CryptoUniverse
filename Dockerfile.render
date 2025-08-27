@@ -3,22 +3,27 @@ FROM python:3.11-slim
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PORT=10000
+ENV PYTHONPATH=/app
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# Install system dependencies including build tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    gcc \
+    g++ \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# CRITICAL: Install setuptools FIRST before any other packages
-RUN pip install --upgrade pip
-RUN pip install setuptools==68.0.0 wheel
+# Copy requirements first for better caching
+COPY requirements.txt .
 
-# Install minimal required packages for simplified backend
-RUN pip install --no-cache-dir bcrypt==4.0.1
-RUN pip install --no-cache-dir PyJWT==2.8.0
+# Install Python dependencies
+RUN pip install --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the simplified backend
-COPY backend_simple.py .
+# Copy the entire application
+COPY . .
 
 # Create a non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
@@ -31,5 +36,5 @@ EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:10000/api/v1/status || exit 1
 
-# Run the simplified backend
-CMD ["python", "backend_simple.py"]
+# Run startup script then the application
+CMD ["sh", "-c", "python startup.py && python -m uvicorn main:app --host 0.0.0.0 --port 10000"]

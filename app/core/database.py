@@ -31,10 +31,7 @@ def get_async_database_url() -> str:
 # SQLAlchemy async engine
 engine = create_async_engine(
     get_async_database_url(),
-    poolclass=QueuePool if getattr(settings, 'ENVIRONMENT', 'production') != "test" else NullPool,
-    pool_size=getattr(settings, 'DATABASE_POOL_SIZE', 20),
-    max_overflow=getattr(settings, 'DATABASE_MAX_OVERFLOW', 0),
-    pool_pre_ping=True,
+    poolclass=NullPool,  # Use NullPool for async engines
     echo=getattr(settings, 'DATABASE_ECHO', False),
     future=True
 )
