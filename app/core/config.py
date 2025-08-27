@@ -32,11 +32,11 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=30, description="Refresh token expiration")
     API_KEY_EXPIRE_DAYS: int = Field(default=365, description="API key expiration")
 
-    # CORS settings
-    CORS_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8080", "https://cryptouniverse-frontend.onrender.com"],
-        description="Allowed CORS origins"
-    )
+    # CORS settings - hardcoded to avoid environment variable issues
+    @property
+    def CORS_ORIGINS(self) -> List[str]:
+        """CORS origins - hardcoded to avoid environment variable parsing issues."""
+        return ["http://localhost:3000", "http://localhost:8080", "https://cryptouniverse-frontend.onrender.com"]
     ALLOWED_HOSTS: Optional[List[str]] = Field(default=None, description="Allowed hosts")
 
     # Database settings
@@ -148,29 +148,12 @@ class Settings(BaseSettings):
             raise ValueError(f"Log level must be one of {valid_levels}")
         return v.upper()
 
-    class Config:
-        """Pydantic configuration."""
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-        
-        @classmethod
-        def customise_sources(cls, init_settings, env_settings, file_secret_settings):
-            """Customise settings sources to exclude CORS_ORIGINS from environment variables."""
-            from pydantic_settings.sources import EnvSettingsSource
-            
-            class FilteredEnvSettingsSource(EnvSettingsSource):
-                def prepare_field_value(self, field_name: str, field, value, value_is_complex: bool):
-                    # Skip CORS_ORIGINS completely
-                    if field_name == 'CORS_ORIGINS':
-                        return None, field_name, False
-                    return super().prepare_field_value(field_name, field, value, value_is_complex)
-            
-            return (
-                init_settings,
-                FilteredEnvSettingsSource(cls),
-                file_secret_settings,
-            )
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "case_sensitive": True,
+        "env_ignore_empty": True
+    }
 
 
 @lru_cache()

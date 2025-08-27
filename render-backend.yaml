@@ -5,8 +5,8 @@ services:
     runtime: python
     plan: starter  # Start with starter, upgrade to pro when needed
     region: oregon
-    buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: python start.py
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install --no-deps --force-reinstall -r requirements-minimal.txt
+    startCommand: python start-minimal.py
     healthCheckPath: /api/v1/status
     autoDeploy: true
     envVars:

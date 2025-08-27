@@ -1,0 +1,38 @@
+# Minimal CryptoUniverse Enterprise Backend - WORKING VERSION
+# Only essential packages that don't cause setuptools.build_meta issues
+
+# Core web framework - these work reliably
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# Database - PostgreSQL async driver that works
+asyncpg==0.29.0
+sqlalchemy==2.0.23
+
+# Authentication - minimal auth setup
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# Data validation
+pydantic==2.5.1
+pydantic-settings==2.1.0
+
+# HTTP client
+httpx==0.25.2
+
+# Background tasks - Redis only
+redis==5.0.1
+
+# Production server
+gunicorn==21.2.0
+
+# Environment
+python-dotenv==1.0.0
+
+# Basic security
+bcrypt==4.1.2
+PyJWT==2.8.0
+
+# Essential utilities
+typing-extensions==4.8.0

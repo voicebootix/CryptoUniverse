@@ -6,8 +6,8 @@ services:
     runtime: python
     plan: pro  # Professional tier for production workload
     region: oregon  # Choose region closest to your users
-    buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: python start.py
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install --no-deps --force-reinstall -r requirements-minimal.txt
+    startCommand: python start-minimal.py
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -53,7 +53,7 @@ services:
     runtime: python
     plan: pro
     region: oregon
-    buildCommand: chmod +x build.sh && ./build.sh
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install --no-deps --force-reinstall -r requirements-minimal.txt
     startCommand: python -m app.services.background_worker
     envVars:
       - key: ENVIRONMENT
