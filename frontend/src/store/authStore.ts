@@ -242,9 +242,8 @@ const setupTokenRefresh = () => {
 
 // Setup token refresh when store is rehydrated
 useAuthStore.subscribe(
-  (state) => state.tokens,
-  (tokens) => {
-    if (tokens) {
+  (state) => {
+    if (state.tokens) {
       setupTokenRefresh();
     }
   }
