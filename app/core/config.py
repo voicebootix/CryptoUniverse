@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     API_KEY_EXPIRE_DAYS: int = Field(default=365, description="API key expiration")
 
     # CORS settings
-    CORS_ORIGINS: List[str] = Field(
+    CORS_ORIGINS: Optional[List[str]] = Field(
         default=["http://localhost:3000", "http://localhost:8080", "https://cryptouniverse-frontend.onrender.com"],
         description="Allowed CORS origins"
     )
@@ -73,20 +73,35 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = Field(default=None, description="Anthropic API key")
     GOOGLE_AI_API_KEY: Optional[str] = Field(default=None, description="Google AI API key")
     
-    @field_validator('CORS_ORIGINS', 'ALLOWED_HOSTS', mode='before')
+    @field_validator('CORS_ORIGINS', mode='before')
     @classmethod
-    def parse_string_lists(cls, v):
-        """Parse string list fields from environment variables."""
-        if v is None or v == "":
-            return []
+    def parse_cors_origins(cls, v):
+        """Parse CORS_ORIGINS from environment variables."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            # Return None to use default value
+            return None
         if isinstance(v, str):
             v = v.strip()
-            if not v:  # Empty string after stripping
-                return []
             try:
                 # Try to parse as JSON first
                 return json.loads(v)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, ValueError):
+                # If not JSON, split by comma
+                return [item.strip() for item in v.split(',') if item.strip()]
+        return v
+
+    @field_validator('ALLOWED_HOSTS', mode='before')
+    @classmethod
+    def parse_allowed_hosts(cls, v):
+        """Parse ALLOWED_HOSTS from environment variables."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            try:
+                # Try to parse as JSON first
+                return json.loads(v)
+            except (json.JSONDecodeError, ValueError):
                 # If not JSON, split by comma
                 return [item.strip() for item in v.split(',') if item.strip()]
         return v
@@ -151,6 +166,32 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+
+        @classmethod
+        def customise_sources(cls, init_settings, env_settings, file_secret_settings):
+            """Customise settings sources to handle empty environment variables."""
+            def custom_env_settings(settings_cls):
+                """Custom environment settings source that filters out empty values."""
+                import os
+                from pydantic_settings.sources import EnvSettingsSource
+
+                # Get environment variables
+                env_vars = {}
+                for field_name, field in settings_cls.model_fields.items():
+                    env_name = field.alias or field_name.upper()
+                    env_value = os.getenv(env_name)
+
+                    # Only include non-empty values
+                    if env_value is not None and env_value.strip():
+                        env_vars[field_name] = env_value
+
+                return env_vars
+
+            return (
+                init_settings,
+                custom_env_settings,
+                file_secret_settings,
+            )
 
 
 @lru_cache()
