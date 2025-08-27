@@ -2,6 +2,7 @@ import React from 'react'
 
 // Placeholder checkbox component - replace with actual implementation
 export interface CheckboxProps {
+  id?: string
   checked?: boolean
   onCheckedChange?: (checked: boolean) => void
   disabled?: boolean
@@ -10,11 +11,12 @@ export interface CheckboxProps {
 }
 
 export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
-  ({ checked, onCheckedChange, disabled, className, children, ...props }, ref) => {
+  ({ id, checked, onCheckedChange, disabled, className, children, ...props }, ref) => {
     return (
       <label className={`flex items-center space-x-2 ${className || ''}`}>
         <input
           ref={ref}
+          id={id}
           type="checkbox"
           checked={checked}
           onChange={(e) => onCheckedChange?.(e.target.checked)}

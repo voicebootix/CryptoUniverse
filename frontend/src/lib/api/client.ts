@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
-import { getValidToken } from '@/store/authStore';
+import { useAuthStore } from '@/store/authStore';
 
 // API configuration
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
@@ -30,7 +30,7 @@ apiClient.interceptors.request.use(
     );
 
     if (!shouldSkipAuth) {
-      const token = await getValidToken();
+      const token = useAuthStore.getState().tokens?.access_token;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -79,7 +79,7 @@ apiClient.interceptors.response.use(
               await useAuthStore.getState().refreshToken();
               
               // Retry original request with new token
-              const token = await getValidToken();
+              const token = useAuthStore.getState().tokens?.access_token;
               if (token) {
                 originalRequest.headers = {
                   ...originalRequest.headers,
@@ -131,8 +131,8 @@ apiClient.interceptors.response.use(
 
       // Enhance error with more context
       const enhancedError = new Error(
-        data?.message || 
-        data?.error || 
+        (data as any)?.message || 
+        (data as any)?.error || 
         `API Error: ${status}`
       );
       

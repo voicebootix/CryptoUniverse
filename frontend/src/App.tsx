@@ -169,9 +169,9 @@ const App: React.FC = () => {
       </Router>
 
       {/* React Query DevTools (only in development) */}
-      {import.meta.env.DEV && (
+      {/* {import.meta.env.DEV && (
         <ReactQueryDevtools initialIsOpen={false} position="bottom-right" />
-      )}
+      )} */}
     </QueryClientProvider>
   );
 };
