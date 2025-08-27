@@ -1,27 +1,31 @@
-import * as React from "react"
-import * as CheckboxPrimitive from "@radix-ui/react-checkbox"
-import { Check } from "lucide-react"
-import { cn } from "@/lib/utils"
+import React from 'react'
 
-const Checkbox = React.forwardRef<
-  React.ElementRef<typeof CheckboxPrimitive.Root>,
-  React.ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>
->(({ className, ...props }, ref) => (
-  <CheckboxPrimitive.Root
-    ref={ref}
-    className={cn(
-      "peer h-4 w-4 shrink-0 rounded-sm border border-primary ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
-      className
-    )}
-    {...props}
-  >
-    <CheckboxPrimitive.Indicator
-      className={cn("flex items-center justify-center text-current")}
-    >
-      <Check className="h-4 w-4" />
-    </CheckboxPrimitive.Indicator>
-  </CheckboxPrimitive.Root>
-))
-Checkbox.displayName = CheckboxPrimitive.Root.displayName
+// Placeholder checkbox component - replace with actual implementation
+export interface CheckboxProps {
+  checked?: boolean
+  onCheckedChange?: (checked: boolean) => void
+  disabled?: boolean
+  className?: string
+  children?: React.ReactNode
+}
 
-export { Checkbox }
+export const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
+  ({ checked, onCheckedChange, disabled, className, children, ...props }, ref) => {
+    return (
+      <label className={`flex items-center space-x-2 ${className || ''}`}>
+        <input
+          ref={ref}
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onCheckedChange?.(e.target.checked)}
+          disabled={disabled}
+          className="rounded border border-gray-300"
+          {...props}
+        />
+        {children && <span>{children}</span>}
+      </label>
+    )
+  }
+)
+
+Checkbox.displayName = 'Checkbox'

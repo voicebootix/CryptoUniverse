@@ -101,3 +101,25 @@ export interface SecurityEvent {
   created_at: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
 }
+
+export interface ResetPasswordRequest {
+  email: string;
+}
+
+export interface ConfirmResetRequest {
+  token: string;
+  password: string;
+}
+
+export interface ChangePasswordRequest {
+  current_password: string;
+  new_password: string;
+}
+
+export interface EnableMFARequest {
+  password: string;
+}
+
+export interface VerifyMFARequest {
+  code: string;
+}
