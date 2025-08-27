@@ -21,7 +21,6 @@ import {
   CheckCircle,
   Activity,
   BarChart3,
-  Zap,
   RefreshCw,
   Eye,
   Sliders,

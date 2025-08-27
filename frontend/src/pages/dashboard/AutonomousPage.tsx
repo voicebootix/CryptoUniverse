@@ -21,7 +21,6 @@ import {
   Brain,
   Cpu,
   Flame,
-  Zap,
   Rocket,
   Crown,
   Swords,
