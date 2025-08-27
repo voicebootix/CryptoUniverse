@@ -6,8 +6,8 @@ services:
     runtime: python
     plan: pro  # Professional tier for production workload
     region: oregon  # Choose region closest to your users
-    buildCommand: pip install --upgrade pip setuptools wheel && pip install --no-deps --force-reinstall -r requirements-minimal.txt
-    startCommand: python start-minimal.py
+    buildCommand: pip install fastapi==0.104.1 uvicorn==0.24.0 pydantic==2.5.1 python-dotenv==1.0.0
+    startCommand: python app-minimal.py
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -53,7 +53,7 @@ services:
     runtime: python
     plan: pro
     region: oregon
-    buildCommand: pip install --upgrade pip setuptools wheel && pip install --no-deps --force-reinstall -r requirements-minimal.txt
+    buildCommand: pip install fastapi==0.104.1 uvicorn==0.24.0 pydantic==2.5.1 python-dotenv==1.0.0
     startCommand: python -m app.services.background_worker
     envVars:
       - key: ENVIRONMENT

@@ -5,8 +5,8 @@ services:
     runtime: python
     plan: starter  # Start with starter, upgrade to pro when needed
     region: oregon
-    buildCommand: pip install --upgrade pip setuptools wheel && pip install --no-deps --force-reinstall -r requirements-minimal.txt
-    startCommand: python start-minimal.py
+    buildCommand: pip install fastapi==0.104.1 uvicorn==0.24.0 pydantic==2.5.1 python-dotenv==1.0.0
+    startCommand: python app-minimal.py
     healthCheckPath: /api/v1/status
     autoDeploy: true
     envVars:

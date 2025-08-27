@@ -1,0 +1,5 @@
+# Ultra-minimal requirements - ONLY 4 packages
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.1
+python-dotenv==1.0.0
