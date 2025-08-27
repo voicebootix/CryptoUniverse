@@ -233,7 +233,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 @app.get("/")
 async def root():
     """Root endpoint."""
-    return {"message": "CryptoUniverse API Running"}
+    return {"message": "CryptoUniverse API Running", "version": "2.0.1", "backend": "simplified"}
 
 @app.get("/health")
 async def health():
