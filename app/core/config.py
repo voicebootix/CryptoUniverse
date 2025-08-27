@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # CORS settings
     CORS_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8080"],
+        default=["http://localhost:3000", "http://localhost:8080", "https://cryptouniverse-frontend.onrender.com"],
         description="Allowed CORS origins"
     )
     ALLOWED_HOSTS: Optional[List[str]] = Field(default=None, description="Allowed hosts")
