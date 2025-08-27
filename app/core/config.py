@@ -75,14 +75,7 @@ class Settings(BaseSettings):
     
 
 
-    @model_validator(mode='before')
-    @classmethod
-    def force_cors_origins_default(cls, values):
-        """Force CORS_ORIGINS to always use default value, ignoring environment variables."""
-        if isinstance(values, dict):
-            # Always set CORS_ORIGINS to the default value, ignoring any environment variable
-            values['CORS_ORIGINS'] = ["http://localhost:3000", "http://localhost:8080", "https://cryptouniverse-frontend.onrender.com"]
-        return values
+
 
     @field_validator('ALLOWED_HOSTS', mode='before')
     @classmethod
@@ -160,6 +153,24 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+        
+        @classmethod
+        def customise_sources(cls, init_settings, env_settings, file_secret_settings):
+            """Customise settings sources to exclude CORS_ORIGINS from environment variables."""
+            from pydantic_settings.sources import EnvSettingsSource
+            
+            class FilteredEnvSettingsSource(EnvSettingsSource):
+                def prepare_field_value(self, field_name: str, field, value, value_is_complex: bool):
+                    # Skip CORS_ORIGINS completely
+                    if field_name == 'CORS_ORIGINS':
+                        return None, field_name, False
+                    return super().prepare_field_value(field_name, field, value, value_is_complex)
+            
+            return (
+                init_settings,
+                FilteredEnvSettingsSource(cls),
+                file_secret_settings,
+            )
 
 
 @lru_cache()
