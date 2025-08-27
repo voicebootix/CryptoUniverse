@@ -18,6 +18,7 @@ import RegisterPage from '@/pages/auth/RegisterPage';
 import TradingDashboard from '@/pages/dashboard/TradingDashboard';
 import AICommandCenter from '@/pages/dashboard/AICommandCenter';
 import BeastModeDashboard from '@/pages/dashboard/BeastModeDashboard';
+import StrategyMarketplace from '@/pages/dashboard/StrategyMarketplace';
 import TradingPage from '@/pages/dashboard/TradingPage';
 import PortfolioPage from '@/pages/dashboard/PortfolioPage';
 import AutonomousPage from '@/pages/dashboard/AutonomousPage';
@@ -142,6 +143,9 @@ const App: React.FC = () => {
               
               {/* Beast Mode Dashboard */}
               <Route path="beast-mode" element={<BeastModeDashboard />} />
+              
+              {/* Strategy Marketplace */}
+              <Route path="strategies" element={<StrategyMarketplace />} />
               
               {/* Trading */}
               <Route path="trading" element={<TradingPage />} />

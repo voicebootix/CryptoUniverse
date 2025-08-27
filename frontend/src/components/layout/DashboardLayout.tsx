@@ -49,6 +49,7 @@ const navigation: NavigationItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'AI Command', href: '/dashboard/ai-command', icon: Brain, badge: 'AI' },
   { name: 'Beast Mode', href: '/dashboard/beast-mode', icon: Flame, badge: 'PRO' },
+  { name: 'Strategies', href: '/dashboard/strategies', icon: Crown, badge: '25+' },
   { name: 'Trading', href: '/dashboard/trading', icon: TrendingUp },
   { name: 'Portfolio', href: '/dashboard/portfolio', icon: Wallet },
   { name: 'Autonomous', href: '/dashboard/autonomous', icon: Bot },
