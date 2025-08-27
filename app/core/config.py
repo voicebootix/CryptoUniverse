@@ -77,8 +77,11 @@ class Settings(BaseSettings):
     @classmethod
     def parse_string_lists(cls, v):
         """Parse string list fields from environment variables."""
+        if v is None or v == "":
+            return []
         if isinstance(v, str):
-            if not v.strip():  # Empty string
+            v = v.strip()
+            if not v:  # Empty string after stripping
                 return []
             try:
                 # Try to parse as JSON first
