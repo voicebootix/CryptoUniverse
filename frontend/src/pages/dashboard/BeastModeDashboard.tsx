@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Flame,
-  Lightning,
+  Zap,
   Rocket,
   Crown,
   Swords,
@@ -73,7 +73,7 @@ const tradingModes = [
   {
     id: 'aggressive',
     name: 'Aggressive',
-    icon: Lightning,
+    icon: Zap,
     color: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
     description: 'Higher risk, higher rewards',
     maxRisk: 10,
