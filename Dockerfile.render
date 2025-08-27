@@ -13,21 +13,11 @@ RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 RUN pip install --upgrade pip
 RUN pip install setuptools==68.0.0 wheel
 
-# Now install application packages
-RUN pip install --no-cache-dir fastapi==0.104.1
-RUN pip install --no-cache-dir uvicorn==0.24.0
-RUN pip install --no-cache-dir pydantic==2.5.1
-
-# Copy the full application
+# Copy the full application first
 COPY . .
 
-# Install additional dependencies for full app
-RUN pip install --no-cache-dir sqlalchemy==2.0.23
-RUN pip install --no-cache-dir alembic==1.12.1
-RUN pip install --no-cache-dir psycopg2-binary==2.9.7
-RUN pip install --no-cache-dir redis==5.0.1
-RUN pip install --no-cache-dir bcrypt==4.0.1
-RUN pip install --no-cache-dir python-jose[cryptography]==3.3.0
+# Install from requirements.txt to get all dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Create a non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
