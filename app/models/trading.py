@@ -239,7 +239,7 @@ class Trade(Base):
     # Credits and profit tracking
     credits_used = Column(Integer, default=0, nullable=False)
     profit_realized_usd = Column(Numeric(12, 2), default=0, nullable=False)
-    credit_transaction_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    credit_transaction_id = Column(UUID(as_uuid=True), ForeignKey("credit_transactions.id"), nullable=True, index=True)
     
     # Timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)

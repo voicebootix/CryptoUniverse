@@ -201,8 +201,8 @@ class CreditTransaction(Base):
     balance_after = Column(Integer, nullable=False)
     
     # Related entities
-    trade_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # If related to trade
-    credit_pack_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # If from pack purchase
+    trade_id = Column(UUID(as_uuid=True), ForeignKey("trades.id"), nullable=True, index=True)  # If related to trade
+    credit_pack_id = Column(UUID(as_uuid=True), ForeignKey("credit_packs.id"), nullable=True, index=True)  # If from pack purchase
     
     # Financial information
     usd_value = Column(Numeric(12, 2), nullable=True)  # USD value of transaction
@@ -210,7 +210,7 @@ class CreditTransaction(Base):
     
     # External references
     stripe_payment_intent_id = Column(String(100), nullable=True, index=True)
-    billing_history_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    billing_history_id = Column(UUID(as_uuid=True), ForeignKey("billing_history.id"), nullable=True, index=True)
     
     # Transaction metadata
     meta_data = Column(JSON, nullable=True)

@@ -73,7 +73,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
     event_type = Column(String(100), nullable=False, index=True)
     event_data = Column(JSON, nullable=False)
     level = Column(Enum(AuditLogLevel), default=AuditLogLevel.INFO, nullable=False)

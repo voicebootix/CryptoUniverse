@@ -262,7 +262,7 @@ class UserActivity(Base):
     # Context information
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(Text, nullable=True)
-    session_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("user_sessions.id"), nullable=True, index=True)
     
     # Activity metadata
     success = Column(Boolean, default=True, nullable=False)
