@@ -6,7 +6,7 @@ services:
     runtime: python
     plan: pro  # Professional tier for production workload
     region: oregon  # Choose region closest to your users
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
     startCommand: python start.py
     envVars:
       - key: ENVIRONMENT
@@ -53,7 +53,7 @@ services:
     runtime: python
     plan: pro
     region: oregon
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
     startCommand: python -m app.services.background_worker
     envVars:
       - key: ENVIRONMENT
