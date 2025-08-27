@@ -126,6 +126,7 @@ class ExchangeAccount(Base):
     balances = relationship("ExchangeBalance", back_populates="account", cascade="all, delete-orphan")
     trades = relationship("Trade", back_populates="exchange_account")
     orders = relationship("Order", back_populates="exchange_account")
+    positions = relationship("Position", back_populates="exchange_account")
     
     # Constraints
     __table_args__ = (
