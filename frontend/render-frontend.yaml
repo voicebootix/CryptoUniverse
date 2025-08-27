@@ -17,9 +17,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: VITE_API_URL
-        value: https://cryptouniverse-backend.onrender.com/api/v1
+        value: https://cryptouniverse.onrender.com/api/v1
       - key: VITE_WS_URL
-        value: wss://cryptouniverse-backend.onrender.com/ws
+        value: wss://cryptouniverse.onrender.com/ws
       - key: VITE_APP_NAME
         value: CryptoUniverse Enterprise
       - key: VITE_APP_VERSION
