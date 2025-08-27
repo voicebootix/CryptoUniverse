@@ -65,3 +65,39 @@ export interface AuthState {
   error: string | null;
   mfaRequired: boolean;
 }
+
+export interface MFASetupResponse {
+  qr_code: string;
+  secret: string;
+  backup_codes: string[];
+}
+
+export interface Session {
+  id: string;
+  user_id: string;
+  ip_address: string;
+  user_agent: string;
+  created_at: string;
+  last_activity: string;
+  is_current: boolean;
+}
+
+export interface LoginHistory {
+  id: string;
+  user_id: string;
+  ip_address: string;
+  user_agent: string;
+  location?: string;
+  success: boolean;
+  created_at: string;
+}
+
+export interface SecurityEvent {
+  id: string;
+  user_id: string;
+  event_type: string;
+  description: string;
+  ip_address: string;
+  created_at: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+}
