@@ -1,4 +1,8 @@
 # CryptoUniverse Enterprise Backend
+# Build dependencies (must be installed first)
+setuptools>=65.0.0
+wheel>=0.40.0
+
 # High-performance async web framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
