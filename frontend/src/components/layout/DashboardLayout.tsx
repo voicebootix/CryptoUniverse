@@ -20,6 +20,9 @@ import {
   Zap,
   AlertTriangle,
   ChevronDown,
+  Brain,
+  Flame,
+  Crown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -44,9 +47,11 @@ interface NavigationItem {
 
 const navigation: NavigationItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'AI Command', href: '/dashboard/ai-command', icon: Brain, badge: 'AI' },
+  { name: 'Beast Mode', href: '/dashboard/beast-mode', icon: Flame, badge: 'PRO' },
   { name: 'Trading', href: '/dashboard/trading', icon: TrendingUp },
   { name: 'Portfolio', href: '/dashboard/portfolio', icon: Wallet },
-  { name: 'Autonomous', href: '/dashboard/autonomous', icon: Bot, badge: 'AI' },
+  { name: 'Autonomous', href: '/dashboard/autonomous', icon: Bot },
   { name: 'Exchanges', href: '/dashboard/exchanges', icon: BarChart3 },
   { name: 'Settings', href: '/dashboard/settings', icon: Settings },
   { name: 'Admin', href: '/dashboard/admin', icon: Users, adminOnly: true },
