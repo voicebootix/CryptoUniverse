@@ -8,7 +8,8 @@ cryptocurrency trading platform.
 from app.core.database import Base
 
 # Import all models to ensure they are registered with SQLAlchemy
-from app.models.user import User, UserProfile, UserSession, UserActivity
+from app.models.user import User, UserProfile, UserActivity
+from app.models.session import UserSession, LoginHistory
 from app.models.tenant import Tenant, TenantSettings
 from app.models.subscription import Subscription, SubscriptionPlan, BillingHistory
 from app.models.credit import CreditAccount, CreditTransaction, CreditPack
@@ -47,8 +48,10 @@ __all__ = [
     # User models
     "User",
     "UserProfile",
-    "UserSession",
     "UserActivity",
+    # Session models
+    "UserSession",
+    "LoginHistory",
     # Tenant models
     "Tenant",
     "TenantSettings",

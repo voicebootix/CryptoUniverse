@@ -239,63 +239,6 @@ class UserProfile(Base):
         return self.user.email.split("@")[0] if hasattr(self, "user") else "User"
 
 
-class UserSession(Base):
-    """
-    User session tracking for security and analytics.
-    
-    Tracks user sessions, devices, and login patterns for security
-    monitoring and user experience optimization.
-    """
-    
-    __tablename__ = "user_sessions"
-    
-    # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
-    
-    # Session data
-    session_token = Column(String(255), unique=True, nullable=False, index=True)
-    refresh_token = Column(String(255), unique=True, nullable=True, index=True)
-    device_id = Column(String(255), nullable=True, index=True)
-    
-    # Connection information
-    ip_address = Column(String(45), nullable=False)
-    user_agent = Column(Text, nullable=True)
-    location = Column(JSON, nullable=True)  # GeoIP data
-    
-    # Session metadata
-    is_active = Column(Boolean, default=True, nullable=False)
-    login_method = Column(String(20), default="password", nullable=False)  # password, 2fa, api_key
-    
-    # Timestamps
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    last_activity = Column(DateTime, default=func.now(), nullable=False)
-    expires_at = Column(DateTime, nullable=False)
-    logged_out_at = Column(DateTime, nullable=True)
-    
-    # Relationships
-    user = relationship("User", back_populates="sessions")
-    
-    # Indexes
-    __table_args__ = (
-        Index("idx_session_user_active", "user_id", "is_active"),
-        Index("idx_session_token", "session_token"),
-        Index("idx_session_expires", "expires_at"),
-    )
-    
-    def __repr__(self) -> str:
-        return f"<UserSession(user_id={self.user_id}, ip={self.ip_address}, active={self.is_active})>"
-    
-    @property
-    def is_expired(self) -> bool:
-        """Check if session is expired."""
-        return datetime.utcnow() > self.expires_at
-    
-    @property
-    def is_valid(self) -> bool:
-        """Check if session is valid and active."""
-        return self.is_active and not self.is_expired
-
 
 class UserActivity(Base):
     """
