@@ -24,7 +24,7 @@ class RateLimitService:
     """Enterprise rate limiting service with Redis backend."""
     
     def __init__(self):
-        self.redis = redis_client
+        self.redis = get_redis_client()
         
         # Default rate limits for different endpoint types
         self.default_limits = {
