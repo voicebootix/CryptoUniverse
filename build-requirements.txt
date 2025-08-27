@@ -1,11 +1,26 @@
 # Build dependencies for CryptoUniverse Enterprise
 # These must be installed BEFORE main requirements to prevent setuptools.build_meta errors
 
-# Core build tools
-pip>=23.0.0
-setuptools>=65.0.0
-wheel>=0.40.0
+# Core build tools - specific versions for Python 3.13 compatibility
+pip>=23.3.0
+setuptools>=68.0.0
+wheel>=0.41.0
 
-# Additional build dependencies that may be needed
-packaging>=21.0
-pyparsing>=3.0.0
+# Additional build dependencies for scientific packages
+packaging>=21.3
+pyparsing>=3.0.9
+Cython>=0.29.0
+
+# Build system requirements
+build>=1.0.0
+installer>=0.7.0
+
+# Specific dependencies for packages that commonly cause setuptools.build_meta issues
+# These ensure proper build environments for complex packages
+setuptools_scm>=7.0.0
+hatchling>=1.18.0
+hatch-vcs>=0.3.0
+
+# For ccxt and crypto libraries
+cryptography>=41.0.0
+cffi>=1.15.0

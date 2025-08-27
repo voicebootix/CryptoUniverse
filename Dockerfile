@@ -18,11 +18,10 @@ RUN apt-get update && apt-get install -y \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy requirements and install Python dependencies
-COPY build-requirements.txt requirements.txt .
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r build-requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy requirements and build script
+COPY build.sh build-requirements.txt requirements.txt .
+RUN chmod +x build.sh
+RUN ./build.sh
 
 # Production stage
 FROM python:3.11-slim as production

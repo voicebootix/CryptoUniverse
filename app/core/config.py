@@ -9,7 +9,7 @@ import os
 from functools import lru_cache
 from typing import List, Optional
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 import json
 
@@ -33,10 +33,9 @@ class Settings(BaseSettings):
     API_KEY_EXPIRE_DAYS: int = Field(default=365, description="API key expiration")
 
     # CORS settings
-    CORS_ORIGINS: Optional[List[str]] = Field(
+    CORS_ORIGINS: List[str] = Field(
         default=["http://localhost:3000", "http://localhost:8080", "https://cryptouniverse-frontend.onrender.com"],
-        description="Allowed CORS origins",
-        env=None  # Disable environment variable reading for this field
+        description="Allowed CORS origins"
     )
     ALLOWED_HOSTS: Optional[List[str]] = Field(default=None, description="Allowed hosts")
 
@@ -75,6 +74,15 @@ class Settings(BaseSettings):
     GOOGLE_AI_API_KEY: Optional[str] = Field(default=None, description="Google AI API key")
     
 
+
+    @model_validator(mode='before')
+    @classmethod
+    def force_cors_origins_default(cls, values):
+        """Force CORS_ORIGINS to always use default value, ignoring environment variables."""
+        if isinstance(values, dict):
+            # Always set CORS_ORIGINS to the default value, ignoring any environment variable
+            values['CORS_ORIGINS'] = ["http://localhost:3000", "http://localhost:8080", "https://cryptouniverse-frontend.onrender.com"]
+        return values
 
     @field_validator('ALLOWED_HOSTS', mode='before')
     @classmethod

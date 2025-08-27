@@ -88,7 +88,7 @@ CryptoUniverse Enterprise is designed as a **microservices architecture** with s
    - Click "New" → "Web Service"
    - Connect same repository
    - Set **Root Directory**: `.` (root)
-   - Set **Build Command**: `pip install --upgrade pip && pip install -r build-requirements.txt && pip install -r requirements.txt`
+   - Set **Build Command**: `chmod +x build.sh && ./build.sh`
    - Set **Start Command**: `python start.py`
 
 2. **Add Database**

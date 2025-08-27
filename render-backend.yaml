@@ -5,7 +5,7 @@ services:
     runtime: python
     plan: starter  # Start with starter, upgrade to pro when needed
     region: oregon
-    buildCommand: pip install --upgrade pip && pip install -r build-requirements.txt && pip install -r requirements.txt
+    buildCommand: chmod +x build.sh && ./build.sh
     startCommand: python start.py
     healthCheckPath: /api/v1/status
     autoDeploy: true
