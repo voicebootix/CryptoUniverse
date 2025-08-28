@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.user import User, UserRole, UserStatus
-from app.models.oauth import UserOAuthConnection, OAuthState, OAuthProvider
+from app.models.oauth import UserOAuthConnection, OAuthState
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -116,14 +116,15 @@ class OAuthService:
             
             # Use await for authorize_redirect which is an async method
             redirect_uri = f"{settings.API_V1_PREFIX}/auth/oauth/callback/google"
+            
+            # authlib expects a Starlette Request, not a FastAPI Request, so we pass the original scope
             response = await client.authorize_redirect(
-                request=client_request,  # Pass the request object
+                client_request.scope,  # Pass the raw scope
                 redirect_uri=redirect_uri,
                 state=state_token,
                 access_type='offline',
                 prompt='consent'
             )
-            # The URL is in the response headers
             return response.headers['location']
         
         raise HTTPException(
