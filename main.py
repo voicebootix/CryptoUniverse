@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 # Core imports
 from app.core.config import get_settings
@@ -108,17 +109,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_application() -> FastAPI:
     """Create and configure FastAPI application."""
     app = FastAPI(
-        title="CryptoUniverse Enterprise API",
-        description=(
-            "Multi-tenant cryptocurrency trading platform with AI-powered strategies, "
-            "copy trading marketplace, and enterprise features."
-        ),
-        version="2.0.0",
-        docs_url="/api/docs" if settings.ENVIRONMENT == "development" else None,
-        redoc_url="/api/redoc" if settings.ENVIRONMENT == "development" else None,
-        openapi_url="/api/openapi.json" if settings.ENVIRONMENT == "development" else None,
-        lifespan=lifespan,
+        title=settings.PROJECT_NAME,
+        version=settings.PROJECT_VERSION,
+        openapi_url=f"{settings.API_V1_STR}/openapi.json",
+        lifespan=lifespan
     )
+
+    # Add SessionMiddleware for OAuth
+    app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
+
+    # Set all CORS enabled origins
+    if settings.BACKEND_CORS_ORIGINS:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     # Security middleware
     if settings.ALLOWED_HOSTS:
