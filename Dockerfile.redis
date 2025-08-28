@@ -1,0 +1,12 @@
+FROM redis:7-alpine
+
+# Set default port and password (overridable via Render env vars)
+ENV REDIS_PORT=6379
+# REPLACE THIS WITH A REAL STRONG PASSWORD BEFORE DEPLOYING (set via Render env vars)
+ENV REDIS_PASSWORD=yourstrongpassword
+
+# Expose the port
+EXPOSE $REDIS_PORT
+
+# Start Redis with password and port
+CMD ["redis-server", "--port", "$REDIS_PORT", "--requirepass", "$REDIS_PASSWORD"]

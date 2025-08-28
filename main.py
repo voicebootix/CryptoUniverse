@@ -60,9 +60,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("✅ Database connected")
 
         # Connect to Redis
-        redis = await get_redis_client()
-        await redis.ping()
-        logger.info("✅ Redis connected")
+        try:
+            redis = await get_redis_client()
+            await redis.ping()
+            logger.info("✅ Redis connected")
+        except Exception as e:
+            logger.warning("⚠️ Redis connection failed - running in degraded mode", error=str(e))
 
         # Start background services
         await background_manager.start_all()
