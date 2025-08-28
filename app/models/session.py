@@ -37,7 +37,6 @@ class UserSession(Base):
     user_agent = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     expires_at = Column(DateTime(timezone=True), nullable=False)
-    last_used = Column(DateTime(timezone=True), server_default=func.now())
     is_active = Column(Boolean, default=True, nullable=False)
     
     # Relationships
