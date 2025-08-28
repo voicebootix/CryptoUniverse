@@ -265,7 +265,7 @@ const MultiExchangeHub: React.FC = () => {
                     </div>
                   </div>
                 </div>
-                <Badge variant={exchange.apiStatus === 'active' ? 'success' : exchange.apiStatus === 'syncing' ? 'warning' : 'secondary'}>
+                <Badge variant={exchange.apiStatus === 'active' ? 'default' : exchange.apiStatus === 'syncing' ? 'warning' : 'secondary'}>
                   {exchange.latency}
                 </Badge>
               </div>
@@ -358,7 +358,7 @@ const MultiExchangeHub: React.FC = () => {
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
                         <span className="font-semibold text-lg">{opp.pair}</span>
-                        <Badge variant={opp.risk === 'low' ? 'success' : opp.risk === 'medium' ? 'warning' : 'danger'}>
+                        <Badge variant={opp.risk === 'low' ? 'default' : opp.risk === 'medium' ? 'warning' : 'destructive'}>
                           {opp.risk} risk
                         </Badge>
                       </div>

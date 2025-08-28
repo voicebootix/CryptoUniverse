@@ -454,9 +454,9 @@ const CopyTradingNetwork: React.FC = () => {
                         {provider.recentSignals.slice(0, 2).map((signal, idx) => (
                           <div key={idx} className="flex items-center justify-between text-sm">
                             <div className="flex items-center gap-2">
-                              <Badge variant={signal.type === 'LONG' ? 'success' : 'danger'} size="sm">
-                                {signal.type}
-                              </Badge>
+                                                      <Badge variant={signal.type === 'LONG' ? 'default' : 'destructive'} size="sm">
+                          {signal.type}
+                        </Badge>
                               <span>{signal.pair}</span>
                             </div>
                             <span className={`font-medium ${signal.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -542,7 +542,7 @@ const CopyTradingNetwork: React.FC = () => {
                       <td className="py-3">{trade.provider}</td>
                       <td className="py-3 font-medium">{trade.pair}</td>
                       <td className="py-3">
-                        <Badge variant={trade.type === 'LONG' ? 'success' : 'danger'}>
+                        <Badge variant={trade.type === 'LONG' ? 'default' : 'destructive'}>
                           {trade.type}
                         </Badge>
                       </td>
@@ -555,7 +555,7 @@ const CopyTradingNetwork: React.FC = () => {
                         </div>
                       </td>
                       <td className="py-3">
-                        <Badge variant="success">Active</Badge>
+                        <Badge variant="default">Active</Badge>
                       </td>
                       <td className="py-3 text-sm text-gray-500">{trade.copiedAt}</td>
                       <td className="py-3">

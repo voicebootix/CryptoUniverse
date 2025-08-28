@@ -449,7 +449,7 @@ const TelegramCenter: React.FC = () => {
                       <p className="text-xs text-gray-500">{channel.members} members</p>
                     </div>
                   </div>
-                  <Badge variant={channel.status === 'active' ? 'success' : 'secondary'}>
+                  <Badge variant={channel.status === 'active' ? 'default' : 'secondary'}>
                     {channel.status}
                   </Badge>
                 </div>
