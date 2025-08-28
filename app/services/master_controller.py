@@ -98,7 +98,7 @@ class MasterSystemController(LoggerMixin):
             "last_emergency_level": EmergencyLevel.NORMAL.value
         }
         self.start_time = datetime.utcnow()
-        self.redis = redis_client
+        self.redis = None
         
         # Trading mode configurations
         self.mode_configs = {
@@ -1392,10 +1392,14 @@ class MasterSystemController(LoggerMixin):
 
 
 # Global service instance
-master_controller = MasterSystemController()
+master_controller = None
 
 
 # FastAPI dependency
 async def get_master_controller() -> MasterSystemController:
     """Dependency injection for FastAPI."""
+    global master_controller
+    if master_controller is None:
+        master_controller = MasterSystemController()
+        master_controller.redis = await get_redis_client()
     return master_controller
