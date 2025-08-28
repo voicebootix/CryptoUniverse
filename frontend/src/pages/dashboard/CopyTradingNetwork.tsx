@@ -333,27 +333,27 @@ const CopyTradingNetwork: React.FC = () => {
                   />
                 </div>
               </div>
-              <Select value={filterTier} onChange={setFilterTier}>
+              <Select value={filterTier} onValueChange={setFilterTier}>
                 <option value="all">All Tiers</option>
                 <option value="platinum">Platinum</option>
                 <option value="gold">Gold</option>
                 <option value="silver">Silver</option>
               </Select>
-              <Select value={filterSpecialty} onChange={setFilterSpecialty}>
+              <Select value={filterSpecialty} onValueChange={setFilterSpecialty}>
                 <option value="all">All Specialties</option>
                 <option value="btc">BTC Trading</option>
                 <option value="defi">DeFi</option>
                 <option value="scalping">Scalping</option>
                 <option value="swing">Swing Trading</option>
               </Select>
-              <Select value={sortBy} onChange={setSortBy}>
+              <Select value={sortBy} onValueChange={setSortBy}>
                 <option value="returns">Highest Returns</option>
                 <option value="winrate">Best Win Rate</option>
                 <option value="followers">Most Followers</option>
                 <option value="signals">Most Signals</option>
               </Select>
               <div className="flex items-center gap-2">
-                <Switch checked={showOnlyVerified} onChange={setShowOnlyVerified} />
+                <Switch checked={showOnlyVerified} onCheckedChange={setShowOnlyVerified} />
                 <span className="text-sm">Verified Only</span>
               </div>
             </div>
@@ -436,7 +436,7 @@ const CopyTradingNetwork: React.FC = () => {
                   <div className="flex items-center justify-between pt-4 border-t">
                     <div className="flex gap-2">
                       {provider.specialties.slice(0, 3).map((specialty) => (
-                        <Badge key={specialty} variant="secondary" size="sm">
+                        <Badge key={specialty} variant="secondary">
                           {specialty}
                         </Badge>
                       ))}
@@ -454,7 +454,7 @@ const CopyTradingNetwork: React.FC = () => {
                         {provider.recentSignals.slice(0, 2).map((signal, idx) => (
                           <div key={idx} className="flex items-center justify-between text-sm">
                             <div className="flex items-center gap-2">
-                                                      <Badge variant={signal.type === 'LONG' ? 'default' : 'destructive'} size="sm">
+                                                      <Badge variant={signal.type === 'LONG' ? 'default' : 'destructive'}>
                           {signal.type}
                         </Badge>
                               <span>{signal.pair}</span>

@@ -336,7 +336,7 @@ const MultiExchangeHub: React.FC = () => {
               <h3 className="text-lg font-semibold">Cross-Exchange Arbitrage Opportunities</h3>
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
-                  <Switch checked={autoArbitrage} onChange={setAutoArbitrage} />
+                  <Switch checked={autoArbitrage} onCheckedChange={setAutoArbitrage} />
                   <span className="text-sm">Auto-Execute</span>
                 </div>
                 <Badge variant="default">
