@@ -23,12 +23,7 @@ class BackgroundServiceManager(LoggerMixin):
     """Enterprise background service manager with real functionality."""
     
     def __init__(self):
-        self.services = {}
-        self.running = False
-        self.tasks = {}
-        self.start_time = None
-        self.redis = None # Initialize redis to None
-        
+        self.redis = None
         # Configurable service intervals (seconds)
         self.intervals = {
             "health_monitor": 60,        # 1 minute
@@ -51,6 +46,9 @@ class BackgroundServiceManager(LoggerMixin):
             }
         }
     
+    async def async_init(self):
+        self.redis = await get_redis_client()
+    
     async def start_all(self):
         """Start all background services with real functionality."""
         self.logger.info("🚀 Starting enterprise background services...")
@@ -58,7 +56,7 @@ class BackgroundServiceManager(LoggerMixin):
         self.start_time = datetime.utcnow()
         
         # Initialize redis client
-        self.redis = await get_redis_client()
+        await self.async_init()
         
         # Start individual services
         self.tasks["health_monitor"] = asyncio.create_task(self._health_monitor_service())

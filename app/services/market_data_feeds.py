@@ -24,7 +24,7 @@ class MarketDataFeeds:
     """Real market data feeds using free APIs."""
     
     def __init__(self):
-        self.redis = await get_redis_client()
+        self.redis = None
         
         # Free API endpoints
         self.apis = {
@@ -90,6 +90,9 @@ class MarketDataFeeds:
             "detailed": 300,  # 5 minutes for detailed data
             "markets": 600    # 10 minutes for market data
         }
+    
+    async def async_init(self):
+        self.redis = await get_redis_client()
     
     async def get_real_time_price(self, symbol: str) -> Dict[str, Any]:
         """Get real-time price data for a symbol."""

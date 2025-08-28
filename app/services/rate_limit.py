@@ -24,7 +24,7 @@ class RateLimitService:
     """Enterprise rate limiting service with Redis backend."""
     
     def __init__(self):
-        self.redis = await get_redis_client()
+        self.redis = None
         
         # Default rate limits for different endpoint types
         self.default_limits = {
@@ -53,6 +53,9 @@ class RateLimitService:
                 "api_key": {"limit": 100, "window": 60}
             }
         }
+    
+    async def async_init(self):
+        self.redis = await get_redis_client()
     
     async def check_rate_limit(
         self,
