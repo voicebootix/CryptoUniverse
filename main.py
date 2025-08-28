@@ -132,15 +132,6 @@ def create_application() -> FastAPI:
     if settings.ALLOWED_HOSTS:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
 
-    # CORS middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allow_headers=["*"],
-    )
-
     # Custom middleware (order matters!)
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RateLimitMiddleware)

@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = Field(default="redis://localhost:6379", env="REDIS_URL", description="Redis connection URL")
     
     # CORS settings
-    BACKEND_CORS_ORIGINS: List[str] = Field(default=["*"], env="BACKEND_CORS_ORIGINS", description="Allowed CORS origins (comma-separated)")
+    BACKEND_CORS_ORIGINS: List[str] = Field(default=["*"], env="BACKEND_CORS_ORIGINS", description="Allowed CORS origins")
     
     # Supabase settings
     SUPABASE_URL: Optional[str] = Field(default=None, env="SUPABASE_URL", description="Supabase project URL")
@@ -70,12 +70,6 @@ class Settings(BaseSettings):
         case_sensitive = True
         env_file = ".env"
         env_file_encoding = 'utf-8'
-
-    @validator("BACKEND_CORS_ORIGINS", pre=True)
-    def parse_cors_origins(cls, v: Optional[str]) -> List[str]:
-        if isinstance(v, str) and v:
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
-        return ["*"]
 
 
 @lru_cache()
