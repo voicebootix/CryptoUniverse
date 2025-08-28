@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     # OAuth settings
     GOOGLE_CLIENT_ID: Optional[str] = Field(default=None, description="Google OAuth client ID")
     GOOGLE_CLIENT_SECRET: Optional[str] = Field(default=None, description="Google OAuth client secret")
-    OAUTH_REDIRECT_URL: str = Field(default="http://localhost:3000/auth/callback", description="OAuth redirect URL")
+    OAUTH_REDIRECT_URL: str = Field(default="https://cryptouniverse.onrender.com/auth/callback", description="OAuth redirect URL")
     API_V1_PREFIX: str = Field(default="https://cryptouniverse.onrender.com/api/v1", description="API v1 prefix URL")
     
 
