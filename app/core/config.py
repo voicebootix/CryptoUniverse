@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=False, description="Debug mode")
     
     # Security settings
-    git : str = Field(..., env="SECRET_KEY", description="Secret key for JWT")
+    SECRET_KEY: str = Field(..., env="SECRET_KEY", description="Secret key for JWT")
     
     # Database settings
     DATABASE_URL: str = Field(..., env="DATABASE_URL", description="Database connection URL")
