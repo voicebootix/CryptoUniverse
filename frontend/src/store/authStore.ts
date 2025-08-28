@@ -40,7 +40,7 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null, mfaRequired: false });
 
         try {
-          const response = await apiClient.post<AuthResponse>('/auth/login', credentials);
+          const response = await apiClient.post('/auth/login', credentials);
           
           if (response.data.mfa_required) {
             set({ 
@@ -51,10 +51,27 @@ export const useAuthStore = create<AuthStore>()(
             return;
           }
 
-          if (response.data.success && response.data.user && response.data.tokens) {
+          // Handle the actual backend response format
+          if (response.data.access_token) {
+            // Create user object from response
+            const user = {
+              id: response.data.user_id,
+              email: credentials.email,
+              role: response.data.role,
+              tenant_id: response.data.tenant_id,
+              permissions: response.data.permissions || []
+            };
+
+            // Create tokens object
+            const tokens = {
+              access_token: response.data.access_token,
+              refresh_token: response.data.refresh_token,
+              expires_in: response.data.expires_in
+            };
+
             set({
-              user: response.data.user,
-              tokens: response.data.tokens,
+              user: user as any,
+              tokens: tokens,
               isAuthenticated: true,
               isLoading: false,
               error: null,
@@ -63,7 +80,7 @@ export const useAuthStore = create<AuthStore>()(
 
             // Set authorization header for future requests
             apiClient.defaults.headers.common['Authorization'] = 
-              `Bearer ${response.data.tokens.access_token}`;
+              `Bearer ${response.data.access_token}`;
           } else {
             throw new Error(response.data.message || 'Login failed');
           }
