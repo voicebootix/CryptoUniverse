@@ -267,7 +267,7 @@ async def login(
         )
     
     # Handle MFA if enabled
-    if user.mfa_enabled and not request.mfa_code:
+    if user.two_factor_enabled and not request.mfa_code:
         raise HTTPException(
             status_code=status.HTTP_202_ACCEPTED,
             detail="MFA code required",
@@ -275,7 +275,7 @@ async def login(
         )
     
     # Verify MFA code if provided
-    if user.mfa_enabled and request.mfa_code:
+    if user.two_factor_enabled and request.mfa_code:
         # TODO: Implement TOTP verification
         pass
     
@@ -381,7 +381,7 @@ async def register(
         tenant_id=str(user.tenant_id) if user.tenant_id else "",
         created_at=user.created_at,
         last_login=user.last_login,
-        mfa_enabled=user.mfa_enabled
+        mfa_enabled=user.two_factor_enabled
     )
 
 
@@ -488,7 +488,7 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         tenant_id=str(current_user.tenant_id) if current_user.tenant_id else "",
         created_at=current_user.created_at,
         last_login=current_user.last_login,
-        mfa_enabled=current_user.mfa_enabled
+        mfa_enabled=current_user.two_factor_enabled
     )
 
 
