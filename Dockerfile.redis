@@ -9,4 +9,4 @@ ENV REDIS_PASSWORD=yourstrongpassword
 EXPOSE $REDIS_PORT
 
 # Start Redis with password and port
-CMD ["redis-server", "--port", "$REDIS_PORT", "--requirepass", "$REDIS_PASSWORD"]
+CMD ["sh", "-c", "redis-server --port ${REDIS_PORT} --requirepass ${REDIS_PASSWORD}"]
