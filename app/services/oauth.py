@@ -112,16 +112,16 @@ class OAuthService:
         # Generate OAuth URL
         if provider == 'google':
             client = self.oauth.google
-            redirect_uri = f"{settings.API_V1_PREFIX}/auth/oauth/callback/google"
             
-            authorization_url = client.authorize_redirect_url(
+            # Use await for authorize_redirect which is an async method
+            redirect_uri = f"{settings.API_V1_PREFIX}/auth/oauth/callback/google"
+            response = await client.authorize_redirect(
                 redirect_uri=redirect_uri,
                 state=state_token,
                 access_type='offline',
                 prompt='consent'
             )
-            
-            return authorization_url
+            return response.url
         
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
