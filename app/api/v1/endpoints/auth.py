@@ -113,7 +113,7 @@ class AuthService:
             "sub": str(user.id),
             "email": user.email,
             "role": user.role.value,
-            "tenant_id": str(user.tenant_id),
+            "tenant_id": str(user.tenant_id) if user.tenant_id else "",
             "exp": expire,
             "iat": datetime.utcnow(),
             "type": "access"
@@ -305,7 +305,7 @@ async def login(
         expires_in=int(auth_service.access_token_expire.total_seconds()),
         user_id=str(user.id),
         role=user.role.value,
-        tenant_id=str(user.tenant_id),
+        tenant_id=str(user.tenant_id) if user.tenant_id else "",
         permissions=get_user_permissions(user.role)
     )
 
@@ -442,7 +442,7 @@ async def refresh_token(
         expires_in=int(auth_service.access_token_expire.total_seconds()),
         user_id=str(user.id),
         role=user.role.value,
-        tenant_id=str(user.tenant_id),
+        tenant_id=str(user.tenant_id) if user.tenant_id else "",
         permissions=get_user_permissions(user.role)
     )
 
