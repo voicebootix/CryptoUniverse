@@ -192,7 +192,8 @@ async def get_current_user(
             detail="Token has been revoked"
         )
     
-    user = db.query(User).filter(User.id == user_id).first()
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -294,7 +295,7 @@ async def login(
     
     # Update last login
     user.last_login = datetime.utcnow()
-    db.commit()
+    await db.commit()
     
     logger.info("Login successful", user_id=str(user.id), email=user.email)
     
@@ -338,7 +339,8 @@ async def register(
     
     # Validate tenant
     if request.tenant_id:
-        tenant = db.query(Tenant).filter(Tenant.id == request.tenant_id).first()
+        result = await db.execute(select(Tenant).filter(Tenant.id == request.tenant_id))
+        tenant = result.scalar_one_or_none()
         if not tenant or not tenant.is_active:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -356,8 +358,8 @@ async def register(
     )
     
     db.add(user)
-    db.commit()
-    db.refresh(user)
+    await db.commit()
+    await db.refresh(user)
     
     logger.info("User registered", user_id=str(user.id), email=user.email)
     
@@ -394,11 +396,12 @@ async def refresh_token(
     jti = payload.get("jti")
     
     # Verify session exists
-    session = db.query(UserSession).filter(
+    result = await db.execute(select(UserSession).filter(
         UserSession.user_id == user_id,
         UserSession.refresh_token == refresh_token,
         UserSession.expires_at > datetime.utcnow()
-    ).first()
+    ))
+    session = result.scalar_one_or_none()
     
     if not session:
         raise HTTPException(
@@ -407,7 +410,8 @@ async def refresh_token(
         )
     
     # Get user
-    user = db.query(User).filter(User.id == user_id).first()
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
     if not user or user.status != UserStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -421,7 +425,7 @@ async def refresh_token(
     # Update session
     session.refresh_token = new_refresh_token
     session.expires_at = datetime.utcnow() + auth_service.refresh_token_expire
-    db.commit()
+    await db.commit()
     
     return TokenResponse(
         access_token=new_access_token,
@@ -453,10 +457,11 @@ async def logout(
     )
     
     # Remove all user sessions
-    db.query(UserSession).filter(
+    from sqlalchemy import delete
+    await db.execute(delete(UserSession).filter(
         UserSession.user_id == current_user.id
-    ).delete()
-    db.commit()
+    ))
+    await db.commit()
     
     logger.info("User logged out", user_id=str(current_user.id))
     
