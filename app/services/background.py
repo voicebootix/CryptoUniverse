@@ -352,6 +352,10 @@ class BackgroundServiceManager(LoggerMixin):
                 # Import market data feeds
                 from app.services.market_data_feeds import market_data_feeds
                 
+                # Ensure market data feeds is initialized
+                if market_data_feeds.redis is None:
+                    await market_data_feeds.async_init()
+                
                 # Sync market data using real APIs
                 await market_data_feeds.sync_market_data_batch(symbols)
                 
@@ -401,8 +405,12 @@ class BackgroundServiceManager(LoggerMixin):
             try:
                 # Import rate limiter
                 from app.services.rate_limit import rate_limiter
-                if self.redis:
-                    cleaned = await rate_limiter.cleanup_expired_entries()
+                
+                # Ensure rate limiter is initialized
+                if rate_limiter.redis is None:
+                    await rate_limiter.async_init()
+                
+                cleaned = await rate_limiter.cleanup_expired_entries()
                 
                 if cleaned > 0:
                     self.logger.info(f"Cleaned {cleaned} expired rate limit entries")

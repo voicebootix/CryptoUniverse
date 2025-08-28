@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -240,7 +241,8 @@ async def login(
     logger.info("Login attempt", email=request.email, ip=client_ip)
     
     # Find user
-    user = db.query(User).filter(User.email == request.email).first()
+    result = await db.execute(select(User).filter(User.email == request.email))
+    user = result.scalar_one_or_none()
     if not user:
         await asyncio.sleep(1)  # Prevent timing attacks
         raise HTTPException(
@@ -326,7 +328,8 @@ async def register(
     logger.info("Registration attempt", email=request.email)
     
     # Check if user exists
-    existing_user = db.query(User).filter(User.email == request.email).first()
+    result = await db.execute(select(User).filter(User.email == request.email))
+    existing_user = result.scalar_one_or_none()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
