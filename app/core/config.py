@@ -9,7 +9,7 @@ import os
 from functools import lru_cache
 from typing import List, Optional
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator, computed_field
 from pydantic_settings import BaseSettings
 import json
 
@@ -38,18 +38,27 @@ class Settings(BaseSettings):
     
     # CORS settings
     BACKEND_CORS_ORIGINS: str = Field(default="*", env="BACKEND_CORS_ORIGINS", description="Allowed CORS origins (comma-separated or JSON list)")
-
-    @field_validator('BACKEND_CORS_ORIGINS', mode='before')
-    @classmethod
-    def parse_cors_origins(cls, v: str) -> List[str]:
-        if not v:
+    
+    @computed_field
+    @property
+    def cors_origins(self) -> List[str]:
+        """Parse CORS origins from string to list."""
+        v = self.BACKEND_CORS_ORIGINS
+        if not v or v == "":
             return ["*"]
+        # Handle JSON array format
         if v.startswith('['):
             try:
-                return json.loads(v)
-            except json.JSONDecodeError:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
                 pass
-        return [origin.strip() for origin in v.split(',') if origin.strip()]
+        # Handle comma-separated format
+        if ',' in v:
+            return [origin.strip() for origin in v.split(',') if origin.strip()]
+        # Single value
+        return [v.strip()] if v.strip() else ["*"]
     
     # Supabase settings
     SUPABASE_URL: Optional[str] = Field(default=None, env="SUPABASE_URL", description="Supabase project URL")
@@ -82,6 +91,7 @@ class Settings(BaseSettings):
         case_sensitive = True
         env_file = ".env"
         env_file_encoding = 'utf-8'
+        extra = 'ignore'  # Ignore extra environment variables
 
 
 @lru_cache()

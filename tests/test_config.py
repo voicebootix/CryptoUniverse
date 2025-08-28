@@ -1,16 +1,70 @@
+"""
+Test configuration settings parsing and validation.
+"""
+import os
 import pytest
 from app.core.config import Settings
 
-@pytest.mark.parametrize(
-    "input_value, expected",
-    [
-        ("", ["*"]),
-        ("*", ["*"]),
-        ("https://url1,https://url2", ["https://url1", "https://url2"]),
-        ('["https://url1", "https://url2"]', ["https://url1", "https://url2"]),
-        ("invalid json", ["invalid json"]),  # Fallback to split, but could enhance
-    ]
-)
-def test_cors_origins_parsing(input_value, expected):
-    settings = Settings(BACKEND_CORS_ORIGINS=input_value)
-    assert settings.BACKEND_CORS_ORIGINS.split(',') == expected  # Adjust if using computed field
+
+class TestCORSParsing:
+    """Test CORS origins parsing from various formats."""
+    
+    def test_empty_cors(self):
+        """Test empty CORS defaults to ['*']."""
+        settings = Settings(
+            SECRET_KEY="test-key",
+            DATABASE_URL="postgresql://test",
+            BACKEND_CORS_ORIGINS=""
+        )
+        assert settings.cors_origins == ["*"]
+    
+    def test_single_origin(self):
+        """Test single origin parsing."""
+        settings = Settings(
+            SECRET_KEY="test-key",
+            DATABASE_URL="postgresql://test",
+            BACKEND_CORS_ORIGINS="https://example.com"
+        )
+        assert settings.cors_origins == ["https://example.com"]
+    
+    def test_comma_separated_origins(self):
+        """Test comma-separated origins parsing."""
+        settings = Settings(
+            SECRET_KEY="test-key",
+            DATABASE_URL="postgresql://test",
+            BACKEND_CORS_ORIGINS="https://url1.com,https://url2.com"
+        )
+        assert settings.cors_origins == ["https://url1.com", "https://url2.com"]
+    
+    def test_json_array_origins(self):
+        """Test JSON array origins parsing."""
+        settings = Settings(
+            SECRET_KEY="test-key",
+            DATABASE_URL="postgresql://test",
+            BACKEND_CORS_ORIGINS='["https://url1.com", "https://url2.com"]'
+        )
+        assert settings.cors_origins == ["https://url1.com", "https://url2.com"]
+    
+    def test_wildcard_origin(self):
+        """Test wildcard origin."""
+        settings = Settings(
+            SECRET_KEY="test-key",
+            DATABASE_URL="postgresql://test",
+            BACKEND_CORS_ORIGINS="*"
+        )
+        assert settings.cors_origins == ["*"]
+    
+    def test_extra_env_vars_ignored(self):
+        """Test that extra environment variables are ignored."""
+        # This should not raise an error even with extra fields
+        settings = Settings(
+            SECRET_KEY="test-key",
+            DATABASE_URL="postgresql://test",
+            BACKEND_CORS_ORIGINS="*",
+            CORS_ORIGINS="ignored",  # Extra field
+            RANDOM_VAR="also_ignored"  # Another extra field
+        )
+        assert settings.cors_origins == ["*"]
+        # Verify the extra fields don't become attributes
+        assert not hasattr(settings, 'CORS_ORIGINS')
+        assert not hasattr(settings, 'RANDOM_VAR')
