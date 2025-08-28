@@ -23,6 +23,10 @@ class BackgroundServiceManager(LoggerMixin):
     """Enterprise background service manager with real functionality."""
     
     def __init__(self):
+        self.services = {}
+        self.running = False
+        self.tasks = {}
+        self.start_time = None
         self.redis = None
         # Configurable service intervals (seconds)
         self.intervals = {
