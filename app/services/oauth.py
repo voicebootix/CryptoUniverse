@@ -45,7 +45,7 @@ class OAuthService:
                 name='google',
                 client_id=settings.GOOGLE_CLIENT_ID,
                 client_secret=settings.GOOGLE_CLIENT_SECRET,
-                server_metadata_url='https://accounts.google.com/.well-known/openid_configuration',
+                server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
                 client_kwargs={
                     'scope': 'openid email profile'
                 }
@@ -76,6 +76,13 @@ class OAuthService:
             "jti": secrets.token_hex(16)  # Unique token ID
         }
         return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
+    
+    async def get_google_auth_url(self, request: Request, redirect_uri: str) -> str:
+        return await self.oauth.google.authorize_redirect(request, redirect_uri)
+    
+    async def get_google_user(self, request: Request) -> dict:
+        token = await self.oauth.google.authorize_access_token(request)
+        return token['userinfo']
     
     async def generate_oauth_url(
         self,
@@ -112,20 +119,9 @@ class OAuthService:
         
         # Generate OAuth URL
         if provider == 'google':
-            client = self.oauth.google
-            
-            # Use await for authorize_redirect which is an async method
             redirect_uri = f"{settings.API_V1_PREFIX}/auth/oauth/callback/google"
-            
-            # authlib expects a Starlette Request, not a FastAPI Request, so we pass the original scope
-            response = await client.authorize_redirect(
-                client_request.scope,  # Pass the raw scope
-                redirect_uri=redirect_uri,
-                state=state_token,
-                access_type='offline',
-                prompt='consent'
-            )
-            return response.headers['location']
+            authorization_url = await self.get_google_auth_url(client_request, redirect_uri)
+            return authorization_url
         
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -212,43 +208,21 @@ class OAuthService:
         finally:
             await db.commit()
     
-    async def _handle_google_callback(self, code: str, db: AsyncSession) -> Dict[str, Any]:
+    async def _handle_google_callback(self, request: Request, db: AsyncSession) -> Dict[str, Any]:
         """Handle Google OAuth callback."""
         
-        # Exchange code for tokens
-        token_url = "https://oauth2.googleapis.com/token"
-        token_data = {
-            "client_id": settings.GOOGLE_CLIENT_ID,
-            "client_secret": settings.GOOGLE_CLIENT_SECRET,
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": f"{settings.API_V1_PREFIX}/auth/oauth/callback/google"
-        }
-        
-        async with httpx.AsyncClient() as client:
-            token_response = await client.post(token_url, data=token_data)
-            token_response.raise_for_status()
-            tokens = token_response.json()
-        
-        # Get user info from Google
-        user_info_url = "https://www.googleapis.com/oauth2/v2/userinfo"
-        headers = {"Authorization": f"Bearer {tokens['access_token']}"}
-        
-        async with httpx.AsyncClient() as client:
-            user_response = await client.get(user_info_url, headers=headers)
-            user_response.raise_for_status()
-            user_data = user_response.json()
+        user_data = await self.get_google_user(request)
         
         return {
             "provider": "google",
-            "provider_user_id": user_data["id"],
+            "provider_user_id": user_data["sub"],
             "email": user_data["email"],
             "name": user_data.get("name", ""),
             "avatar_url": user_data.get("picture"),
             "profile_data": user_data,
-            "access_token": tokens["access_token"],
-            "refresh_token": tokens.get("refresh_token"),
-            "token_expires_at": datetime.utcnow() + timedelta(seconds=tokens.get("expires_in", 3600))
+            "access_token": user_data["access_token"],
+            "refresh_token": user_data.get("refresh_token"),
+            "token_expires_at": datetime.utcnow() + timedelta(seconds=user_data.get("expires_in", 3600))
         }
     
     async def _find_or_create_user(
