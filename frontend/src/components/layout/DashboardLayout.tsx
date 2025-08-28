@@ -23,6 +23,9 @@ import {
   Brain,
   Flame,
   Crown,
+  Globe,
+  CreditCard,
+  MessageSquare,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -50,8 +53,12 @@ const navigation: NavigationItem[] = [
   { name: 'AI Command', href: '/dashboard/ai-command', icon: Brain, badge: 'AI' },
   { name: 'Beast Mode', href: '/dashboard/beast-mode', icon: Flame, badge: 'PRO' },
   { name: 'Strategies', href: '/dashboard/strategies', icon: Crown, badge: '25+' },
+  { name: 'Exchange Hub', href: '/dashboard/exchanges-hub', icon: Globe, badge: '8' },
+  { name: 'Copy Trading', href: '/dashboard/copy-trading', icon: Users, badge: 'HOT' },
+  { name: 'Telegram', href: '/dashboard/telegram', icon: MessageSquare },
   { name: 'Trading', href: '/dashboard/trading', icon: TrendingUp },
   { name: 'Portfolio', href: '/dashboard/portfolio', icon: Wallet },
+  { name: 'Billing', href: '/dashboard/billing', icon: CreditCard },
   { name: 'Autonomous', href: '/dashboard/autonomous', icon: Bot },
   { name: 'Exchanges', href: '/dashboard/exchanges', icon: BarChart3 },
   { name: 'Settings', href: '/dashboard/settings', icon: Settings },

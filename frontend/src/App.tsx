@@ -20,6 +20,10 @@ import TradingDashboard from '@/pages/dashboard/TradingDashboard';
 import AICommandCenter from '@/pages/dashboard/AICommandCenter';
 import BeastModeDashboard from '@/pages/dashboard/BeastModeDashboard';
 import StrategyMarketplace from '@/pages/dashboard/StrategyMarketplace';
+import MultiExchangeHub from '@/pages/dashboard/MultiExchangeHub';
+import CreditBillingCenter from '@/pages/dashboard/CreditBillingCenter';
+import CopyTradingNetwork from '@/pages/dashboard/CopyTradingNetwork';
+import TelegramCenter from '@/pages/dashboard/TelegramCenter';
 import TradingPage from '@/pages/dashboard/TradingPage';
 import PortfolioPage from '@/pages/dashboard/PortfolioPage';
 import AutonomousPage from '@/pages/dashboard/AutonomousPage';
@@ -146,11 +150,23 @@ const App: React.FC = () => {
               {/* Beast Mode Dashboard */}
               <Route path="beast-mode" element={<BeastModeDashboard />} />
               
-              {/* Strategy Marketplace */}
-              <Route path="strategies" element={<StrategyMarketplace />} />
-              
-              {/* Trading */}
-              <Route path="trading" element={<TradingPage />} />
+                          {/* Strategy Marketplace */}
+            <Route path="strategies" element={<StrategyMarketplace />} />
+            
+            {/* Multi-Exchange Hub */}
+            <Route path="exchanges-hub" element={<MultiExchangeHub />} />
+            
+            {/* Credit & Billing */}
+            <Route path="billing" element={<CreditBillingCenter />} />
+            
+            {/* Copy Trading Network */}
+            <Route path="copy-trading" element={<CopyTradingNetwork />} />
+            
+            {/* Telegram Center */}
+            <Route path="telegram" element={<TelegramCenter />} />
+            
+            {/* Trading */}
+            <Route path="trading" element={<TradingPage />} />
               
               {/* Portfolio */}
               <Route path="portfolio" element={<PortfolioPage />} />
