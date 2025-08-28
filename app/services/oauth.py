@@ -45,7 +45,10 @@ class OAuthService:
                 name='google',
                 client_id=settings.GOOGLE_CLIENT_ID,
                 client_secret=settings.GOOGLE_CLIENT_SECRET,
-                server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+                # Manually provide endpoints to avoid network issue on Render
+                authorize_url='https://accounts.google.com/o/oauth2/auth',
+                access_token_url='https://accounts.google.com/o/oauth2/token',
+                userinfo_endpoint='https://www.googleapis.com/oauth2/v3/userinfo',
                 client_kwargs={
                     'scope': 'openid email profile'
                 }
@@ -77,17 +80,10 @@ class OAuthService:
         }
         return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
     
-    async def get_google_auth_url(self, request: Request, redirect_uri: str) -> str:
-        return await self.oauth.google.authorize_redirect(request, redirect_uri)
-    
-    async def get_google_user(self, request: Request) -> dict:
-        token = await self.oauth.google.authorize_access_token(request)
-        return token['userinfo']
-    
     async def generate_oauth_url(
         self,
         provider: str,
-        client_request: Request,  # Add request object
+        client_request: Request,
         redirect_url: Optional[str] = None,
         db: AsyncSession = None,
         ip_address: Optional[str] = None,
@@ -95,38 +91,18 @@ class OAuthService:
     ) -> str:
         """Generate OAuth authorization URL with state protection."""
         
-        if provider not in ['google']:
+        if provider != 'google':
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unsupported OAuth provider: {provider}"
             )
         
-        # Generate secure state token
-        state_token = secrets.token_urlsafe(32)
-        
-        # Store state in database for CSRF protection
-        if db:
-            oauth_state = OAuthState(
-                state_token=state_token,
-                provider=provider,
-                redirect_url=redirect_url or settings.OAUTH_REDIRECT_URL,
-                ip_address=ip_address,
-                user_agent=user_agent,
-                expires_at=datetime.utcnow() + timedelta(minutes=10)  # 10 minute expiry
-            )
-            db.add(oauth_state)
-            await db.commit()
-        
-        # Generate OAuth URL
-        if provider == 'google':
-            redirect_uri = f"{settings.API_V1_PREFIX}/auth/oauth/callback/google"
-            authorization_url = await self.get_google_auth_url(client_request, redirect_uri)
-            return authorization_url
-        
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="OAuth provider not configured"
-        )
+        # Use the correct redirect URI for the OAuth provider
+        redirect_uri = f"{settings.API_V1_PREFIX}/auth/oauth/callback/google"
+
+        # Let authlib handle the URL generation
+        response = await self.oauth.google.authorize_redirect(client_request, redirect_uri)
+        return response.headers['location']
     
     async def handle_oauth_callback(
         self,
@@ -211,7 +187,8 @@ class OAuthService:
     async def _handle_google_callback(self, request: Request, db: AsyncSession) -> Dict[str, Any]:
         """Handle Google OAuth callback."""
         
-        user_data = await self.get_google_user(request)
+        token = await self.oauth.google.authorize_access_token(request)
+        user_data = await self.oauth.google.userinfo(token=token)
         
         return {
             "provider": "google",

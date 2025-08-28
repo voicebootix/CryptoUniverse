@@ -565,11 +565,9 @@ async def get_oauth_url(
     
     authorization_url = await oauth_service.generate_oauth_url(
         provider=request.provider,
-        client_request=client_request,  # Pass the request object
+        client_request=client_request,
         redirect_url=request.redirect_url,
-        db=db,
-        ip_address=client_ip,
-        user_agent=user_agent
+        db=db
     )
     
     # Extract state from URL (simple approach)
