@@ -15,7 +15,7 @@ import httpx
 import structlog
 import jwt
 from authlib.integrations.starlette_client import OAuth
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,6 +80,7 @@ class OAuthService:
     async def generate_oauth_url(
         self,
         provider: str,
+        client_request: Request,  # Add request object
         redirect_url: Optional[str] = None,
         db: AsyncSession = None,
         ip_address: Optional[str] = None,
@@ -116,12 +117,14 @@ class OAuthService:
             # Use await for authorize_redirect which is an async method
             redirect_uri = f"{settings.API_V1_PREFIX}/auth/oauth/callback/google"
             response = await client.authorize_redirect(
+                request=client_request,  # Pass the request object
                 redirect_uri=redirect_uri,
                 state=state_token,
                 access_type='offline',
                 prompt='consent'
             )
-            return response.url
+            # The URL is in the response headers
+            return response.headers['location']
         
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

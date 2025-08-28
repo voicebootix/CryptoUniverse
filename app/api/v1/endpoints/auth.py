@@ -565,6 +565,7 @@ async def get_oauth_url(
     
     authorization_url = await oauth_service.generate_oauth_url(
         provider=request.provider,
+        client_request=client_request,  # Pass the request object
         redirect_url=request.redirect_url,
         db=db,
         ip_address=client_ip,
