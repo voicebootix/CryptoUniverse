@@ -240,7 +240,7 @@ const TelegramCenter: React.FC = () => {
               <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />
               <span className="font-medium">Bot Status</span>
             </div>
-            <Badge variant="success">Online</Badge>
+            <Badge variant="default">Online</Badge>
           </div>
           <p className="text-xs text-gray-500 mt-2">Uptime: {botStatus.uptime}</p>
         </Card>

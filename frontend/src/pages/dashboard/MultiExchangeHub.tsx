@@ -51,7 +51,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Tabs } from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
@@ -304,16 +304,16 @@ const MultiExchangeHub: React.FC = () => {
       </Card>
 
       {/* Tabs for different views */}
-      <Tabs value={activeTab} onChange={setActiveTab}>
-        <Tabs.List>
-          <Tabs.Tab value="overview">Overview</Tabs.Tab>
-          <Tabs.Tab value="arbitrage">Arbitrage Scanner</Tabs.Tab>
-          <Tabs.Tab value="orderbook">Unified Order Book</Tabs.Tab>
-          <Tabs.Tab value="performance">Performance Analysis</Tabs.Tab>
-          <Tabs.Tab value="positions">Cross-Exchange Positions</Tabs.Tab>
-        </Tabs.List>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="arbitrage">Arbitrage Scanner</TabsTrigger>
+          <TabsTrigger value="orderbook">Unified Order Book</TabsTrigger>
+          <TabsTrigger value="performance">Performance Analysis</TabsTrigger>
+          <TabsTrigger value="positions">Cross-Exchange Positions</TabsTrigger>
+        </TabsList>
 
-        <Tabs.Content value="overview">
+        <TabsContent value="overview">
           {/* Exchange Performance Chart */}
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Exchange Performance Comparison</h3>
@@ -328,9 +328,9 @@ const MultiExchangeHub: React.FC = () => {
               </RadarChart>
             </ResponsiveContainer>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="arbitrage">
+        <TabsContent value="arbitrage">
           <Card className="p-6">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-lg font-semibold">Cross-Exchange Arbitrage Opportunities</h3>
@@ -339,7 +339,7 @@ const MultiExchangeHub: React.FC = () => {
                   <Switch checked={autoArbitrage} onChange={setAutoArbitrage} />
                   <span className="text-sm">Auto-Execute</span>
                 </div>
-                <Badge variant="success">
+                <Badge variant="default">
                   <Zap className="w-3 h-3 mr-1" />
                   4 Active Opportunities
                 </Badge>
@@ -385,18 +385,18 @@ const MultiExchangeHub: React.FC = () => {
               ))}
             </div>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="orderbook">
+        <TabsContent value="orderbook">
           <Card className="p-6">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-lg font-semibold">Unified Order Book - BTC/USDT</h3>
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
-                  <Switch checked={unifiedTrading} onChange={setUnifiedTrading} />
+                  <Switch checked={unifiedTrading} onCheckedChange={setUnifiedTrading} />
                   <span className="text-sm">Unified Trading</span>
                 </div>
-                <Select value={filterExchange} onChange={setFilterExchange}>
+                <Select value={filterExchange} onValueChange={setFilterExchange}>
                   <option value="all">All Exchanges</option>
                   {exchanges.map(e => (
                     <option key={e.id} value={e.id}>{e.name}</option>
@@ -432,9 +432,9 @@ const MultiExchangeHub: React.FC = () => {
               </div>
             </div>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="performance">
+        <TabsContent value="performance">
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Performance by Exchange</h3>
             <ResponsiveContainer width="100%" height={400}>
@@ -449,14 +449,14 @@ const MultiExchangeHub: React.FC = () => {
               </BarChart>
             </ResponsiveContainer>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="positions">
+        <TabsContent value="positions">
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Cross-Exchange Positions</h3>
             <p className="text-gray-500">Position management across all connected exchanges coming soon...</p>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
       </Tabs>
     </div>
   );

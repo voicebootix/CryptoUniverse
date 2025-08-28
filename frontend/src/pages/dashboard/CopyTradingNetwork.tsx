@@ -61,7 +61,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Tabs } from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Avatar } from '@/components/ui/avatar';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
@@ -308,17 +308,17 @@ const CopyTradingNetwork: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onChange={setActiveTab}>
-        <Tabs.List>
-          <Tabs.Tab value="discover">Discover Providers</Tabs.Tab>
-          <Tabs.Tab value="following">Following</Tabs.Tab>
-          <Tabs.Tab value="copied">Copied Trades</Tabs.Tab>
-          <Tabs.Tab value="leaderboard">Leaderboard</Tabs.Tab>
-          <Tabs.Tab value="signals">Signal Feed</Tabs.Tab>
-          <Tabs.Tab value="performance">My Performance</Tabs.Tab>
-        </Tabs.List>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="discover">Discover Providers</TabsTrigger>
+          <TabsTrigger value="following">Following</TabsTrigger>
+          <TabsTrigger value="copied">Copied Trades</TabsTrigger>
+          <TabsTrigger value="leaderboard">Leaderboard</TabsTrigger>
+          <TabsTrigger value="signals">Signal Feed</TabsTrigger>
+          <TabsTrigger value="performance">My Performance</TabsTrigger>
+        </TabsList>
 
-        <Tabs.Content value="discover">
+        <TabsContent value="discover">
           {/* Filters */}
           <Card className="p-4 mb-6">
             <div className="flex flex-wrap gap-4 items-center">
@@ -471,9 +471,9 @@ const CopyTradingNetwork: React.FC = () => {
               </motion.div>
             ))}
           </div>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="following">
+        <TabsContent value="following">
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Providers You're Following</h3>
             <div className="space-y-4">
@@ -504,18 +504,18 @@ const CopyTradingNetwork: React.FC = () => {
               ))}
             </div>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="copied">
+        <TabsContent value="copied">
           <Card className="p-6">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-lg font-semibold">Active Copied Trades</h3>
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
-                  <Switch checked={autoCopy} onChange={setAutoCopy} />
+                  <Switch checked={autoCopy} onCheckedChange={setAutoCopy} />
                   <span className="text-sm">Auto-copy enabled</span>
                 </div>
-                <Badge variant="success">
+                <Badge variant="default">
                   {activeCopiedTrades.length} Active
                 </Badge>
               </div>
@@ -569,9 +569,9 @@ const CopyTradingNetwork: React.FC = () => {
               </table>
             </div>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="leaderboard">
+        <TabsContent value="leaderboard">
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-6">Top Signal Providers</h3>
             <div className="overflow-x-auto">
@@ -619,21 +619,21 @@ const CopyTradingNetwork: React.FC = () => {
               </table>
             </div>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="signals">
+        <TabsContent value="signals">
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Live Signal Feed</h3>
             <p className="text-gray-500">Real-time signals from providers you follow...</p>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="performance">
+        <TabsContent value="performance">
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Your Copy Trading Performance</h3>
             <p className="text-gray-500">Detailed performance analytics coming soon...</p>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
       </Tabs>
     </div>
   );

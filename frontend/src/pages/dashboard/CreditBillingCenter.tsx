@@ -52,7 +52,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
-import { Tabs } from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell } from 'recharts';
 
@@ -226,7 +226,7 @@ const CreditBillingCenter: React.FC = () => {
             <div>
               <h2 className="text-xl font-semibold flex items-center gap-2">
                 {currentSubscription.plan} Plan
-                <Badge variant="success">Active</Badge>
+                <Badge variant="default">Active</Badge>
               </h2>
               <p className="text-gray-600 mt-1">Renews on {currentSubscription.renewalDate}</p>
             </div>
@@ -258,7 +258,7 @@ const CreditBillingCenter: React.FC = () => {
               <div>
                 <p className="text-sm text-gray-600">Auto-Renewal</p>
                 <div className="flex items-center gap-2 mt-1">
-                  <Badge variant={currentSubscription.autoRenew ? 'success' : 'secondary'}>
+                  <Badge variant={currentSubscription.autoRenew ? 'default' : 'secondary'}>
                     {currentSubscription.autoRenew ? 'Enabled' : 'Disabled'}
                   </Badge>
                 </div>
@@ -291,17 +291,17 @@ const CreditBillingCenter: React.FC = () => {
       </div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onChange={setActiveTab}>
-        <Tabs.List>
-          <Tabs.Tab value="overview">Overview</Tabs.Tab>
-          <Tabs.Tab value="plans">Subscription Plans</Tabs.Tab>
-          <Tabs.Tab value="credits">Credit Packs</Tabs.Tab>
-          <Tabs.Tab value="usage">Usage Analytics</Tabs.Tab>
-          <Tabs.Tab value="billing">Billing History</Tabs.Tab>
-          <Tabs.Tab value="rewards">Rewards</Tabs.Tab>
-        </Tabs.List>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="plans">Subscription Plans</TabsTrigger>
+          <TabsTrigger value="credits">Credit Packs</TabsTrigger>
+          <TabsTrigger value="usage">Usage Analytics</TabsTrigger>
+          <TabsTrigger value="billing">Billing History</TabsTrigger>
+          <TabsTrigger value="rewards">Rewards</TabsTrigger>
+        </TabsList>
 
-        <Tabs.Content value="overview">
+        <TabsContent value="overview">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Credit Usage Chart */}
             <Card className="p-6">
@@ -349,9 +349,9 @@ const CreditBillingCenter: React.FC = () => {
               </div>
             </Card>
           </div>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="plans">
+        <TabsContent value="plans">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {subscriptionPlans.map((plan) => (
               <motion.div
@@ -400,9 +400,9 @@ const CreditBillingCenter: React.FC = () => {
               </motion.div>
             ))}
           </div>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="credits">
+        <TabsContent value="credits">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {creditPacks.map((pack) => (
               <Card key={pack.id} className="p-6 hover:shadow-lg transition-all">
@@ -412,7 +412,7 @@ const CreditBillingCenter: React.FC = () => {
                     <p className="text-gray-500">Credits</p>
                   </div>
                   {pack.bonus > 0 && (
-                    <Badge variant="success">
+                    <Badge variant="default">
                       +{formatNumber(pack.bonus)} Bonus
                     </Badge>
                   )}
@@ -430,16 +430,16 @@ const CreditBillingCenter: React.FC = () => {
               </Card>
             ))}
           </div>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="usage">
+        <TabsContent value="usage">
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Detailed Usage Analytics</h3>
             <p className="text-gray-500">Advanced usage analytics coming soon...</p>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="billing">
+        <TabsContent value="billing">
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Billing History</h3>
             <div className="overflow-x-auto">
@@ -460,7 +460,7 @@ const CreditBillingCenter: React.FC = () => {
                       <td className="py-3">{item.description}</td>
                       <td className="py-3">{formatCurrency(item.amount)}</td>
                       <td className="py-3">
-                        <Badge variant="success">{item.status}</Badge>
+                        <Badge variant="default">{item.status}</Badge>
                       </td>
                       <td className="py-3">
                         <Button variant="outline" size="sm">
@@ -474,9 +474,9 @@ const CreditBillingCenter: React.FC = () => {
               </table>
             </div>
           </Card>
-        </Tabs.Content>
+        </TabsContent>
 
-        <Tabs.Content value="rewards">
+        <TabsContent value="rewards">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {rewards.map((reward) => (
               <Card key={reward.id} className="p-6">
@@ -490,7 +490,7 @@ const CreditBillingCenter: React.FC = () => {
                       <p className="text-sm text-gray-500">{reward.description}</p>
                     </div>
                   </div>
-                  <Badge variant={reward.claimed ? 'success' : 'secondary'}>
+                  <Badge variant={reward.claimed ? 'default' : 'secondary'}>
                     {reward.claimed ? 'Claimed' : `${reward.progress}%`}
                   </Badge>
                 </div>
@@ -513,7 +513,7 @@ const CreditBillingCenter: React.FC = () => {
               </Card>
             ))}
           </div>
-        </Tabs.Content>
+        </TabsContent>
       </Tabs>
     </div>
   );
