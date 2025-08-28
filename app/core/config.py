@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     # Environment settings
     ENVIRONMENT: str = Field(default="development", description="Application environment")
     DEBUG: bool = Field(default=False, description="Debug mode")
+    LOG_LEVEL: str = Field(default="INFO", description="Logging level")
+    
+    # Server settings
+    HOST: str = Field(default="0.0.0.0", description="Server host")
+    PORT: int = Field(default=8000, description="Server port")
+    BASE_URL: str = Field(default="http://localhost:8000", description="Base URL for the application")
+    ALLOWED_HOSTS: List[str] = Field(default=[], description="Allowed hosts for the application")
     
     # Security settings
     SECRET_KEY: str = Field(..., env="SECRET_KEY", description="Secret key for JWT")
