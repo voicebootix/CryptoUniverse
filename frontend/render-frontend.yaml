@@ -6,8 +6,10 @@ services:
     plan: pro  # Professional tier for enterprise
     region: oregon
     buildCommand: |
+      echo "Starting frontend build v2.0.1..."
       npm ci
       npm run build
+      echo "Frontend build complete!"
     staticPublishPath: ./dist
     pullRequestPreviewsEnabled: true
     buildFilter:

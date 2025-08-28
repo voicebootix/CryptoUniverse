@@ -145,7 +145,7 @@ const LoginPage: React.FC = () => {
                   </div>
                   <div>
                     <h1 className="text-4xl font-bold text-white">CryptoUniverse</h1>
-                    <p className="text-blue-200 text-lg">Enterprise AI Trading Platform</p>
+                    <p className="text-blue-200 text-lg">Enterprise AI Trading Platform v2.0.1</p>
                   </div>
                 </div>
                 <p className="text-xl text-gray-300 leading-relaxed">
