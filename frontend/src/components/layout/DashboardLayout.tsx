@@ -56,6 +56,7 @@ const navigation: NavigationItem[] = [
   { name: 'Exchange Hub', href: '/dashboard/exchanges-hub', icon: Globe, badge: '8' },
   { name: 'Copy Trading', href: '/dashboard/copy-trading', icon: Users, badge: 'HOT' },
   { name: 'Telegram', href: '/dashboard/telegram', icon: MessageSquare },
+  { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3, badge: 'PRO' },
   { name: 'Trading', href: '/dashboard/trading', icon: TrendingUp },
   { name: 'Portfolio', href: '/dashboard/portfolio', icon: Wallet },
   { name: 'Billing', href: '/dashboard/billing', icon: CreditCard },

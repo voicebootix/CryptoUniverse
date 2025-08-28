@@ -24,6 +24,7 @@ import MultiExchangeHub from '@/pages/dashboard/MultiExchangeHub';
 import CreditBillingCenter from '@/pages/dashboard/CreditBillingCenter';
 import CopyTradingNetwork from '@/pages/dashboard/CopyTradingNetwork';
 import TelegramCenter from '@/pages/dashboard/TelegramCenter';
+import AdvancedAnalytics from '@/pages/dashboard/AdvancedAnalytics';
 import TradingPage from '@/pages/dashboard/TradingPage';
 import PortfolioPage from '@/pages/dashboard/PortfolioPage';
 import AutonomousPage from '@/pages/dashboard/AutonomousPage';
@@ -164,6 +165,9 @@ const App: React.FC = () => {
             
             {/* Telegram Center */}
             <Route path="telegram" element={<TelegramCenter />} />
+            
+            {/* Advanced Analytics */}
+            <Route path="analytics" element={<AdvancedAnalytics />} />
             
             {/* Trading */}
             <Route path="trading" element={<TradingPage />} />
