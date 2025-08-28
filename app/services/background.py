@@ -27,6 +27,7 @@ class BackgroundServiceManager(LoggerMixin):
         self.running = False
         self.tasks = {}
         self.start_time = None
+        self.redis = None # Initialize redis to None
         
         # Configurable service intervals (seconds)
         self.intervals = {
@@ -55,6 +56,9 @@ class BackgroundServiceManager(LoggerMixin):
         self.logger.info("🚀 Starting enterprise background services...")
         self.running = True
         self.start_time = datetime.utcnow()
+        
+        # Initialize redis client
+        self.redis = await get_redis_client()
         
         # Start individual services
         self.tasks["health_monitor"] = asyncio.create_task(self._health_monitor_service())
@@ -133,11 +137,12 @@ class BackgroundServiceManager(LoggerMixin):
             
             # Redis connection count (if available)
             active_connections = 0
-            try:
-                redis_info = await redis_client.info()
-                active_connections = redis_info.get("connected_clients", 0)
-            except:
-                pass
+            if self.redis:
+                try:
+                    redis_info = await self.redis.info()
+                    active_connections = redis_info.get("connected_clients", 0)
+                except:
+                    pass
             
             return {
                 "services": self.services,
@@ -178,11 +183,12 @@ class BackgroundServiceManager(LoggerMixin):
             self.intervals[service] = interval
             
             # Store in Redis for persistence
-            await redis_client.hset(
-                "service_intervals",
-                service,
-                interval
-            )
+            if self.redis:
+                await self.redis.hset(
+                    "service_intervals",
+                    service,
+                    interval
+                )
             
             self.logger.info(
                 f"Service interval updated: {service}",
@@ -228,10 +234,11 @@ class BackgroundServiceManager(LoggerMixin):
                     alerts.append(f"High disk usage: {disk_percent}%")
                 
                 # Check Redis connection
-                try:
-                    await redis_client.ping()
-                except Exception as e:
-                    alerts.append(f"Redis connection failed: {e}")
+                if self.redis:
+                    try:
+                        await self.redis.ping()
+                    except Exception as e:
+                        alerts.append(f"Redis connection failed: {e}")
                 
                 # Log alerts
                 if alerts:
@@ -246,11 +253,12 @@ class BackgroundServiceManager(LoggerMixin):
                     "timestamp": datetime.utcnow().isoformat()
                 }
                 
-                await redis_client.setex(
-                    "system_health",
-                    300,  # 5 minutes TTL
-                    str(health_data)
-                )
+                if self.redis:
+                    await self.redis.setex(
+                        "system_health",
+                        300,  # 5 minutes TTL
+                        str(health_data)
+                    )
                 
             except Exception as e:
                 self.logger.error("Health monitor error", error=str(e))
@@ -267,18 +275,20 @@ class BackgroundServiceManager(LoggerMixin):
                 
                 # Store metrics with timestamp
                 timestamp = int(time.time())
-                await redis_client.zadd(
-                    "system_metrics_history",
-                    {str(metrics): timestamp}
-                )
+                if self.redis:
+                    await self.redis.zadd(
+                        "system_metrics_history",
+                        {str(metrics): timestamp}
+                    )
                 
                 # Keep only last 24 hours of metrics
                 cutoff = timestamp - 86400  # 24 hours
-                await redis_client.zremrangebyscore(
-                    "system_metrics_history",
-                    0,
-                    cutoff
-                )
+                if self.redis:
+                    await self.redis.zremrangebyscore(
+                        "system_metrics_history",
+                        0,
+                        cutoff
+                    )
                 
             except Exception as e:
                 self.logger.error("Metrics collector error", error=str(e))
@@ -389,7 +399,8 @@ class BackgroundServiceManager(LoggerMixin):
             try:
                 # Import rate limiter
                 from app.services.rate_limit import rate_limiter
-                cleaned = await rate_limiter.cleanup_expired_entries()
+                if self.redis:
+                    cleaned = await rate_limiter.cleanup_expired_entries()
                 
                 if cleaned > 0:
                     self.logger.info(f"Cleaned {cleaned} expired rate limit entries")
@@ -402,22 +413,23 @@ class BackgroundServiceManager(LoggerMixin):
     async def _cleanup_redis_keys(self):
         """Clean up old Redis keys."""
         try:
-            # Clean keys older than 24 hours
-            patterns_to_clean = [
-                "rate_limit:*",
-                "market_data:*",
-                "system_health",
-                "user_session:*"
-            ]
-            
-            for pattern in patterns_to_clean:
-                keys = await redis_client.keys(pattern)
-                if keys:
-                    # Check TTL and clean if needed
-                    for key in keys:
-                        ttl = await redis_client.ttl(key)
-                        if ttl == -1:  # No expiration set
-                            await redis_client.expire(key, 86400)  # Set 24h expiration
+            if self.redis:
+                # Clean keys older than 24 hours
+                patterns_to_clean = [
+                    "rate_limit:*",
+                    "market_data:*",
+                    "system_health",
+                    "user_session:*"
+                ]
+                
+                for pattern in patterns_to_clean:
+                    keys = await self.redis.keys(pattern)
+                    if keys:
+                        # Check TTL and clean if needed
+                        for key in keys:
+                            ttl = await self.redis.ttl(key)
+                            if ttl == -1:  # No expiration set
+                                await self.redis.expire(key, 86400)  # Set 24h expiration
             
         except Exception as e:
             self.logger.error("Redis cleanup failed", error=str(e))

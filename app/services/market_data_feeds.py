@@ -24,7 +24,7 @@ class MarketDataFeeds:
     """Real market data feeds using free APIs."""
     
     def __init__(self):
-        self.redis = redis_client
+        self.redis = await get_redis_client()
         
         # Free API endpoints
         self.apis = {
