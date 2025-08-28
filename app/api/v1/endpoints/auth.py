@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -252,7 +252,7 @@ async def login(
         )
     
     # Verify password
-    if not auth_service.verify_password(request.password, user.password_hash):
+    if not auth_service.verify_password(request.password, user.hashed_password):
         await asyncio.sleep(1)  # Prevent timing attacks
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -350,7 +350,7 @@ async def register(
     # Create user
     user = User(
         email=request.email,
-        password_hash=auth_service.hash_password(request.password),
+        hashed_password=auth_service.hash_password(request.password),
         full_name=request.full_name,
         role=request.role,
         tenant_id=request.tenant_id,
@@ -457,7 +457,6 @@ async def logout(
     )
     
     # Remove all user sessions
-    from sqlalchemy import delete
     await db.execute(delete(UserSession).filter(
         UserSession.user_id == current_user.id
     ))
