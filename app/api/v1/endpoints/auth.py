@@ -27,11 +27,13 @@ from app.models.user import User, UserRole, UserStatus
 from app.models.tenant import Tenant
 from app.models.session import UserSession
 from app.services.rate_limit import RateLimitService
+from app.services.oauth import OAuthService
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
 security = HTTPBearer()
 rate_limiter = RateLimitService()
+oauth_service = OAuthService()
 
 router = APIRouter()
 
@@ -514,3 +516,136 @@ def get_user_permissions(role: UserRole) -> list:
         ]
     }
     return permissions_map.get(role, [])
+
+
+# OAuth Request/Response Models
+class OAuthUrlRequest(BaseModel):
+    provider: str
+    redirect_url: Optional[str] = None
+
+    @field_validator('provider')
+    @classmethod
+    def validate_provider(cls, v):
+        if v not in ['google']:
+            raise ValueError('Unsupported OAuth provider')
+        return v
+
+
+class OAuthUrlResponse(BaseModel):
+    authorization_url: str
+    state: str
+
+
+class OAuthCallbackRequest(BaseModel):
+    code: str
+    state: str
+
+
+class OAuthTokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str
+    user: UserResponse
+    redirect_url: Optional[str] = None
+
+
+# OAuth Endpoints
+@router.post("/oauth/url", response_model=OAuthUrlResponse)
+async def get_oauth_url(
+    request: OAuthUrlRequest,
+    client_request: Request,
+    db: Session = Depends(get_database)
+):
+    """Get OAuth authorization URL for social login."""
+    
+    client_ip = client_request.client.host
+    user_agent = client_request.headers.get("user-agent", "")
+    
+    logger.info("OAuth URL request", provider=request.provider, ip=client_ip)
+    
+    authorization_url = await oauth_service.generate_oauth_url(
+        provider=request.provider,
+        redirect_url=request.redirect_url,
+        db=db,
+        ip_address=client_ip,
+        user_agent=user_agent
+    )
+    
+    # Extract state from URL (simple approach)
+    from urllib.parse import urlparse, parse_qs
+    parsed_url = urlparse(authorization_url)
+    state = parse_qs(parsed_url.query).get('state', [''])[0]
+    
+    return OAuthUrlResponse(
+        authorization_url=authorization_url,
+        state=state
+    )
+
+
+@router.post("/oauth/callback/{provider}", response_model=OAuthTokenResponse)
+async def oauth_callback(
+    provider: str,
+    request: OAuthCallbackRequest,
+    client_request: Request,
+    db: Session = Depends(get_database)
+):
+    """Handle OAuth callback and authenticate user."""
+    
+    client_ip = client_request.client.host
+    
+    logger.info("OAuth callback", provider=provider, ip=client_ip)
+    
+    # Rate limiting
+    await rate_limiter.check_rate_limit(
+        key=f"oauth_callback:{client_ip}",
+        limit=10,
+        window=300  # 10 attempts per 5 minutes
+    )
+    
+    result = await oauth_service.handle_oauth_callback(
+        provider=provider,
+        code=request.code,
+        state=request.state,
+        db=db,
+        ip_address=client_ip
+    )
+    
+    return OAuthTokenResponse(**result)
+
+
+@router.post("/oauth/link/{provider}")
+async def link_oauth_account(
+    provider: str,
+    request: OAuthCallbackRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database)
+):
+    """Link OAuth account to existing user."""
+    
+    logger.info("OAuth account linking", provider=provider, user_id=str(current_user.id))
+    
+    # This would need additional implementation to handle the OAuth flow
+    # for linking to existing accounts
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="OAuth account linking not yet implemented"
+    )
+
+
+@router.delete("/oauth/unlink/{provider}")
+async def unlink_oauth_account(
+    provider: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database)
+):
+    """Unlink OAuth account from user."""
+    
+    logger.info("OAuth account unlinking", provider=provider, user_id=str(current_user.id))
+    
+    success = await oauth_service.unlink_oauth_account(
+        user_id=current_user.id,
+        provider=provider,
+        db=db
+    )
+    
+    return {"message": f"{provider.title()} account unlinked successfully"}

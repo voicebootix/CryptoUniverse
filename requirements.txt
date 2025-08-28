@@ -16,6 +16,8 @@ asyncpg==0.29.0  # PostgreSQL async driver (supports SQLAlchemy 2.x natively)
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.6
+authlib==1.2.1
+httpx==0.25.2
 
 # Data validation and serialization
 pydantic==2.5.1

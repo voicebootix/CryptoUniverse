@@ -10,6 +10,7 @@ from app.core.database import Base
 # Import all models to ensure they are registered with SQLAlchemy
 from app.models.user import User, UserProfile, UserActivity
 from app.models.session import UserSession, LoginHistory
+from app.models.oauth import UserOAuthConnection, OAuthState, OAuthProvider
 from app.models.tenant import Tenant, TenantSettings
 from app.models.subscription import Subscription, SubscriptionPlan, BillingHistory
 from app.models.credit import CreditAccount, CreditTransaction, CreditPack
@@ -52,6 +53,10 @@ __all__ = [
     # Session models
     "UserSession",
     "LoginHistory",
+    # OAuth models
+    "UserOAuthConnection",
+    "OAuthState",
+    "OAuthProvider",
     # Tenant models
     "Tenant",
     "TenantSettings",

@@ -107,6 +107,7 @@ class User(Base):
     profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
     login_history = relationship("LoginHistory", back_populates="user", cascade="all, delete-orphan")
+    oauth_connections = relationship("UserOAuthConnection", back_populates="user", cascade="all, delete-orphan")
     activities = relationship("UserActivity", back_populates="user", cascade="all, delete-orphan")
     tenant = relationship("Tenant", back_populates="users")
     subscription = relationship("Subscription", back_populates="user", uselist=False, cascade="all, delete-orphan")
