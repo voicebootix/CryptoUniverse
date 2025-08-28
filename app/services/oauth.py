@@ -13,6 +13,7 @@ from urllib.parse import urlencode
 
 import httpx
 import structlog
+import jwt
 from authlib.integrations.starlette_client import OAuth
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -21,7 +22,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.user import User, UserRole, UserStatus
 from app.models.oauth import UserOAuthConnection, OAuthState, OAuthProvider
-# We'll use the auth_service from auth endpoints directly to avoid circular imports
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -31,9 +31,12 @@ class OAuthService:
     """OAuth authentication service for social logins."""
     
     def __init__(self):
-        # Import here to avoid circular imports
-        from app.api.v1.endpoints.auth import auth_service
-        self.auth_service = auth_service
+        # JWT configuration (same as AuthService)
+        self.secret_key = settings.SECRET_KEY
+        self.algorithm = "HS256"
+        self.access_token_expire = timedelta(hours=1)
+        self.refresh_token_expire = timedelta(days=30)
+        
         self.oauth = OAuth()
         
         # Configure Google OAuth
@@ -47,6 +50,32 @@ class OAuthService:
                     'scope': 'openid email profile'
                 }
             )
+    
+    def create_access_token(self, user: User) -> str:
+        """Create JWT access token."""
+        expire = datetime.utcnow() + self.access_token_expire
+        to_encode = {
+            "sub": str(user.id),
+            "email": user.email,
+            "role": user.role.value,
+            "tenant_id": str(user.tenant_id) if user.tenant_id else "",
+            "exp": expire,
+            "iat": datetime.utcnow(),
+            "type": "access"
+        }
+        return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
+    
+    def create_refresh_token(self, user: User) -> str:
+        """Create JWT refresh token."""
+        expire = datetime.utcnow() + self.refresh_token_expire
+        to_encode = {
+            "sub": str(user.id),
+            "exp": expire,
+            "iat": datetime.utcnow(),
+            "type": "refresh",
+            "jti": secrets.token_hex(16)  # Unique token ID
+        }
+        return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
     
     async def generate_oauth_url(
         self,
@@ -144,8 +173,8 @@ class OAuthService:
             user = await self._find_or_create_user(user_info, provider, db)
             
             # Create authentication tokens
-            access_token = self.auth_service.create_access_token(user)
-            refresh_token = self.auth_service.create_refresh_token(user)
+            access_token = self.create_access_token(user)
+            refresh_token = self.create_refresh_token(user)
             
             # Log successful OAuth login
             logger.info(
