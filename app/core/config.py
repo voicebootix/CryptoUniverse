@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=False, description="Debug mode")
     
     # Security settings
-    SECRET_KEY: str = Field(..., env="SECRET_KEY", description="Secret key for JWT")
+    git : str = Field(..., env="SECRET_KEY", description="Secret key for JWT")
     
     # Database settings
     DATABASE_URL: str = Field(..., env="DATABASE_URL", description="Database connection URL")
@@ -37,7 +37,19 @@ class Settings(BaseSettings):
     REDIS_URL: str = Field(default="redis://localhost:6379", env="REDIS_URL", description="Redis connection URL")
     
     # CORS settings
-    BACKEND_CORS_ORIGINS: List[str] = Field(default=["*"], env="BACKEND_CORS_ORIGINS", description="Allowed CORS origins")
+    BACKEND_CORS_ORIGINS: str = Field(default="*", env="BACKEND_CORS_ORIGINS", description="Allowed CORS origins (comma-separated or JSON list)")
+
+    @field_validator('BACKEND_CORS_ORIGINS', mode='before')
+    @classmethod
+    def parse_cors_origins(cls, v: str) -> List[str]:
+        if not v:
+            return ["*"]
+        if v.startswith('['):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                pass
+        return [origin.strip() for origin in v.split(',') if origin.strip()]
     
     # Supabase settings
     SUPABASE_URL: Optional[str] = Field(default=None, env="SUPABASE_URL", description="Supabase project URL")
