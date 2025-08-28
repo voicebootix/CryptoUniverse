@@ -351,7 +351,6 @@ async def register(
     user = User(
         email=request.email,
         hashed_password=auth_service.hash_password(request.password),
-        full_name=request.full_name,
         role=request.role,
         tenant_id=request.tenant_id,
         status=UserStatus.PENDING_VERIFICATION
@@ -361,12 +360,22 @@ async def register(
     await db.commit()
     await db.refresh(user)
     
+    # Create user profile with full_name
+    from app.models.user import UserProfile
+    profile = UserProfile(
+        user_id=user.id,
+        first_name=request.full_name.split(' ')[0] if request.full_name else "",
+        last_name=' '.join(request.full_name.split(' ')[1:]) if ' ' in request.full_name else ""
+    )
+    db.add(profile)
+    await db.commit()
+    
     logger.info("User registered", user_id=str(user.id), email=user.email)
     
     return UserResponse(
         id=str(user.id),
         email=user.email,
-        full_name=user.full_name,
+        full_name=request.full_name,  # Use the request full_name directly
         role=user.role.value,
         status=user.status.value,
         tenant_id=str(user.tenant_id) if user.tenant_id else "",
