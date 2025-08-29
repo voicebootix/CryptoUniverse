@@ -37,6 +37,7 @@ export default defineConfig({
   },
   define: {
     'process.env.NODE_ENV': JSON.stringify('production'),
+    'import.meta.env.VITE_API_URL': JSON.stringify(process.env.VITE_API_URL),
     __DEV__: false,
   },
   // Production server config (for preview)

@@ -583,10 +583,11 @@ async def get_oauth_url(
     )
 
 
-@router.post("/oauth/callback/{provider}", response_model=OAuthTokenResponse)
+@router.get("/oauth/callback/{provider}", response_model=OAuthTokenResponse)
 async def oauth_callback(
     provider: str,
-    request: OAuthCallbackRequest,
+    code: str,
+    state: str,
     client_request: Request,
     db: Session = Depends(get_database)
 ):
@@ -605,8 +606,8 @@ async def oauth_callback(
     
     result = await oauth_service.handle_oauth_callback(
         provider=provider,
-        code=request.code,
-        state=request.state,
+        code=code,
+        state=state,
         db=db,
         ip_address=client_ip
     )
