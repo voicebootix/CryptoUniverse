@@ -144,18 +144,17 @@ async def connect_exchange(
     )
     
     try:
-        # Check if exchange already connected
+        # Check if exchange already connected through account relationship
         from sqlalchemy import select
         result = await db.execute(
-            select(ExchangeApiKey).filter(
-                ExchangeApiKey.user_id == current_user.id,
-                ExchangeApiKey.exchange == request.exchange,
-                ExchangeApiKey.sandbox == request.sandbox
+            select(ExchangeAccount).filter(
+                ExchangeAccount.user_id == current_user.id,
+                ExchangeAccount.exchange_name == request.exchange
             )
         )
-        existing = result.scalar_one_or_none()
+        existing_account = result.scalar_one_or_none()
         
-        if existing:
+        if existing_account:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Exchange {request.exchange} already connected"
@@ -186,26 +185,22 @@ async def connect_exchange(
         # Create exchange account
         exchange_account = ExchangeAccount(
             user_id=current_user.id,
-            exchange=request.exchange,
-            account_name=request.nickname or f"{request.exchange}_main",
-            is_active=True,
-            sandbox=request.sandbox
+            exchange_name=request.exchange,  # Use exchange_name field as defined in model
+            account_name=request.nickname or f"{request.exchange}_main"
         )
         db.add(exchange_account)
         await db.flush()  # Get the ID
         
-        # Create API key record
+        # Create API key record with minimal fields
         api_key_record = ExchangeApiKey(
-            user_id=current_user.id,
-            account_id=exchange_account.id,  # Fixed field name: account_id not exchange_account_id
+            account_id=exchange_account.id,
             key_name=request.nickname or f"{request.exchange}_main",
-            encrypted_api_key=encrypted_api_key,  # Fixed field name 
-            encrypted_secret_key=encrypted_secret_key,  # Fixed field name
-            encrypted_passphrase=encrypted_passphrase,  # Fixed field name
+            encrypted_api_key=encrypted_api_key,
+            encrypted_secret_key=encrypted_secret_key,
+            encrypted_passphrase=encrypted_passphrase,
             permissions=test_result.get("permissions", []),
             status=ApiKeyStatus.ACTIVE,
-            is_validated=True,
-            validated_at=datetime.utcnow()
+            is_validated=True
         )
         db.add(api_key_record)
         await db.commit()
@@ -224,11 +219,11 @@ async def connect_exchange(
         return ExchangeApiKeyResponse(
             id=str(api_key_record.id),
             exchange=request.exchange,
-            nickname=request.nickname,
+            nickname=request.nickname or api_key_record.key_name,
             api_key_masked=mask_api_key(request.api_key),
             is_active=True,
             trading_enabled=True,
-            sandbox=request.sandbox,
+            sandbox=request.sandbox or False,
             created_at=api_key_record.created_at,
             last_used=None,
             permissions=test_result.get("permissions", []),
@@ -263,9 +258,11 @@ async def list_exchange_connections(
     
     try:
         from sqlalchemy import select
-        # Query api keys directly by user_id
+        # Query api keys through exchange accounts relationship
         result = await db.execute(
-            select(ExchangeApiKey).filter(ExchangeApiKey.user_id == current_user.id)
+            select(ExchangeApiKey)
+            .join(ExchangeAccount, ExchangeApiKey.account_id == ExchangeAccount.id)
+            .filter(ExchangeAccount.user_id == current_user.id)
         )
         api_keys = result.scalars().all()
         
@@ -275,29 +272,38 @@ async def list_exchange_connections(
                 # Decrypt for display (masked)  
                 decrypted_api_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
                 
+                # Get exchange account info
+                account_result = await db.execute(
+                    select(ExchangeAccount).filter(ExchangeAccount.id == api_key.account_id)
+                )
+                account = account_result.scalar_one_or_none()
+                
+                if not account:
+                    continue  # Skip if account not found
+                
                 # Get daily volume usage
-                daily_volume = await get_daily_volume_usage(current_user.id, api_key.exchange)
+                daily_volume = await get_daily_volume_usage(current_user.id, account.exchange_name)
                 
                 connection = ExchangeApiKeyResponse(
                     id=str(api_key.id),
-                    exchange=api_key.exchange,
-                    nickname=api_key.nickname,
+                    exchange=account.exchange_name,
+                    nickname=api_key.key_name,  # Use key_name as nickname
                     api_key_masked=mask_api_key(decrypted_api_key),
-                    is_active=api_key.is_active,
-                    trading_enabled=api_key.trading_enabled,
-                    sandbox=api_key.sandbox,
+                    is_active=account.status == ExchangeStatus.ACTIVE,
+                    trading_enabled=account.trading_enabled,
+                    sandbox=account.is_simulation,  # Use is_simulation as sandbox
                     created_at=api_key.created_at,
-                    last_used=api_key.last_used,
+                    last_used=api_key.last_used_at,
                     permissions=api_key.permissions or [],
-                    connection_status="connected" if api_key.is_active else "inactive",
-                    daily_volume_limit=api_key.daily_volume_limit,
+                    connection_status="connected" if api_key.status == ApiKeyStatus.ACTIVE else "inactive",
+                    daily_volume_limit=None,  # Set to None for now
                     daily_volume_used=daily_volume
                 )
                 connections.append(connection)
                 
             except Exception as e:
                 logger.error(
-                    f"Failed to decrypt API key for exchange {api_key.exchange}",
+                    f"Failed to decrypt API key for exchange",
                     error=str(e),
                     api_key_id=str(api_key.id),
                     user_id=str(current_user.id)
@@ -305,17 +311,17 @@ async def list_exchange_connections(
                 # Still include connection but mark as error
                 connection = ExchangeApiKeyResponse(
                     id=str(api_key.id),
-                    exchange=api_key.exchange,
-                    nickname=api_key.nickname or f"{api_key.exchange}_corrupted",
+                    exchange="unknown",
+                    nickname=f"corrupted_key_{api_key.id}",
                     api_key_masked="••••••••[ERROR]",
                     is_active=False,
                     trading_enabled=False,
-                    sandbox=api_key.sandbox,
+                    sandbox=False,
                     created_at=api_key.created_at,
-                    last_used=api_key.last_used,
+                    last_used=api_key.last_used_at,
                     permissions=[],
                     connection_status="error",
-                    daily_volume_limit=api_key.daily_volume_limit,
+                    daily_volume_limit=None,
                     daily_volume_used=0.0
                 )
                 connections.append(connection)
@@ -355,9 +361,11 @@ async def update_exchange_connection(
         # Get API key record
         from sqlalchemy import select
         result = await db.execute(
-            select(ExchangeApiKey).filter(
+            select(ExchangeApiKey)
+            .join(ExchangeAccount, ExchangeApiKey.account_id == ExchangeAccount.id)
+            .filter(
                 ExchangeApiKey.id == api_key_id,
-                ExchangeApiKey.user_id == current_user.id
+                ExchangeAccount.user_id == current_user.id
             )
         )
         api_key = result.scalar_one_or_none()
@@ -368,20 +376,11 @@ async def update_exchange_connection(
                 detail="Exchange connection not found"
             )
         
-        # Update fields
+        # Update fields (only use fields that exist in model)
         if request.nickname is not None:
-            api_key.nickname = request.nickname
+            api_key.key_name = request.nickname or api_key.key_name
         
-        if request.is_active is not None:
-            api_key.is_active = request.is_active
-            
-        if request.trading_enabled is not None:
-            api_key.trading_enabled = request.trading_enabled
-            
-        if request.max_daily_volume is not None:
-            api_key.daily_volume_limit = request.max_daily_volume
-        
-        api_key.updated_at = datetime.utcnow()
+        # For now, just update the key name - other fields need to be added to model properly
         await db.commit()
         
         logger.info(
@@ -435,6 +434,18 @@ async def test_exchange_connection_endpoint(
                 detail="Exchange connection not found"
             )
         
+        # Get exchange account info
+        account_result = await db.execute(
+            select(ExchangeAccount).filter(ExchangeAccount.id == api_key.account_id)
+        )
+        account = account_result.scalar_one_or_none()
+        
+        if not account:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Exchange account not found"
+            )
+        
         # Decrypt API keys
         decrypted_api_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
         decrypted_secret_key = cipher_suite.decrypt(api_key.encrypted_secret_key.encode()).decode()
@@ -445,24 +456,23 @@ async def test_exchange_connection_endpoint(
         # Test connection
         start_time = datetime.utcnow()
         test_result = await test_exchange_connection(
-            api_key.exchange,
+            account.exchange_name,
             decrypted_api_key,
             decrypted_secret_key,
             decrypted_passphrase,
-            api_key.sandbox
+            account.is_simulation
         )
         end_time = datetime.utcnow()
         
         latency_ms = (end_time - start_time).total_seconds() * 1000
         
-        # Update last test time
-        api_key.last_test_at = datetime.utcnow()
+        # Update last test time and permissions
         if test_result["success"]:
             api_key.permissions = test_result.get("permissions", [])
         await db.commit()
         
         return ExchangeTestResponse(
-            exchange=api_key.exchange,
+            exchange=account.exchange_name,
             connection_status="connected" if test_result["success"] else "failed",
             permissions=test_result.get("permissions", []),
             account_info=test_result.get("account_info", {}),
@@ -502,13 +512,15 @@ async def get_exchange_balances(
             endpoint_type="private"
         )
         
-        # Get API key for exchange
+        # Get API key for exchange through account relationship
         from sqlalchemy import select
         result = await db.execute(
-            select(ExchangeApiKey).filter(
-                ExchangeApiKey.user_id == current_user.id,
-                ExchangeApiKey.exchange == exchange,
-                ExchangeApiKey.is_active == True
+            select(ExchangeApiKey)
+            .join(ExchangeAccount, ExchangeApiKey.account_id == ExchangeAccount.id)
+            .filter(
+                ExchangeAccount.user_id == current_user.id,
+                ExchangeAccount.exchange_name == exchange,
+                ExchangeAccount.status == ExchangeStatus.ACTIVE
             )
         )
         api_key = result.scalar_one_or_none()
@@ -579,33 +591,27 @@ async def disconnect_exchange(
                 detail="Exchange connection not found"
             )
         
-        exchange_name = api_key.exchange
+        # Get exchange account info for cleanup
+        account_result = await db.execute(
+            select(ExchangeAccount).filter(ExchangeAccount.id == api_key.account_id)
+        )
+        exchange_account = account_result.scalar_one_or_none()
+        exchange_name = exchange_account.exchange_name if exchange_account else "unknown"
         
-        # Check for active trading
-        # This would check if there are open positions or active orders
-        
-        # Remove API key and related records
+        # Remove API key record
         db.delete(api_key)
         
         # Remove exchange account if no other API keys
-        from sqlalchemy import select, func
-        count_result = await db.execute(
-            select(func.count(ExchangeApiKey.id)).filter(
-                ExchangeApiKey.user_id == current_user.id,
-                ExchangeApiKey.exchange == exchange_name
-            )
-        )
-        remaining_keys = count_result.scalar()
-        
-        if remaining_keys == 0:
-            account_result = await db.execute(
-                select(ExchangeAccount).filter(
-                    ExchangeAccount.user_id == current_user.id,
-                    ExchangeAccount.exchange == exchange_name
+        if exchange_account:
+            # Check if this was the only API key for this account
+            count_result = await db.execute(
+                select(func.count(ExchangeApiKey.id)).filter(
+                    ExchangeApiKey.account_id == exchange_account.id
                 )
             )
-            exchange_account = account_result.scalar_one_or_none()
-            if exchange_account:
+            remaining_keys = count_result.scalar()
+            
+            if remaining_keys <= 1:  # <= 1 because we haven't committed the delete yet
                 db.delete(exchange_account)
         
         await db.commit()
