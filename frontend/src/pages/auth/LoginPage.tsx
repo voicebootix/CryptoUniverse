@@ -30,6 +30,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { apiClient } from '@/lib/api/client';
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -69,22 +70,16 @@ const LoginPage: React.FC = () => {
 
   const handleGoogleLogin = async () => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/auth/oauth/url`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          provider: 'google',
-          redirect_url: window.location.origin + '/auth/callback'
-        }),
+      const response = await apiClient.post('/auth/oauth/url', {
+        provider: 'google',
+        redirect_url: window.location.origin + '/auth/callback'
       });
 
-      if (!response.ok) {
+      if (response.status !== 200) {
         throw new Error('Failed to get OAuth URL');
       }
 
-      const data = await response.json();
+      const data = response.data;
       
       // Redirect to Google OAuth
       window.location.href = data.authorization_url;
