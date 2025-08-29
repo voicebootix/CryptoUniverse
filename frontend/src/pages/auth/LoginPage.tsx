@@ -117,10 +117,10 @@ const LoginPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-      <div className="container mx-auto px-4 py-8">
-        <div className="grid lg:grid-cols-2 gap-8 min-h-screen items-center">
+      <div className="flex min-h-screen">
+        <div className="grid lg:grid-cols-2 w-full max-w-7xl mx-auto lg:gap-8">
           {/* Left Side - Branding & Features */}
-          <div className="hidden lg:block relative">
+          <div className="hidden lg:flex lg:items-center relative overflow-hidden">
             {/* Background Effects */}
             <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-purple-600/10 to-pink-600/10 rounded-3xl" />
             <div className="absolute top-10 left-10 w-48 h-48 bg-blue-500/5 rounded-full blur-3xl" />
@@ -130,7 +130,7 @@ const LoginPage: React.FC = () => {
               initial={{ opacity: 0, x: -50 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.8 }}
-              className="relative z-10 p-12"
+              className="relative z-10 p-8 xl:p-12 w-full"
             >
               {/* Logo & Title */}
               <div className="mb-12">
@@ -262,16 +262,16 @@ const LoginPage: React.FC = () => {
           </div>
 
           {/* Right Side - Login Form */}
-          <div className="w-full flex items-center justify-center">
+          <div className="flex items-center justify-center min-h-screen lg:min-h-0 p-4 lg:p-8">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
-              className="w-full max-w-md mx-auto"
+              className="w-full max-w-md"
             >
               <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl p-8 border border-white/20">
                 {/* Mobile Header */}
-                <div className="text-center mb-8 lg:hidden">
+                <div className="text-center mb-8 lg:hidden block">
                   <div className="flex items-center justify-center mb-6">
                     <div className="w-12 h-12 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center mr-3">
                       <TrendingUp className="w-6 h-6 text-white" />
