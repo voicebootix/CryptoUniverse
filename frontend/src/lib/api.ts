@@ -19,13 +19,35 @@ export const apiClient: AxiosInstance = axios.create({
 
 // Request interceptor to add auth token
 apiClient.interceptors.request.use(
-  (config) => {
+  async (config) => {
     // Add timestamp to prevent caching
     if (config.method === 'get') {
       config.params = {
         ...config.params,
         _t: Date.now(),
       };
+    }
+
+    // Skip auth for certain endpoints
+    const skipAuthEndpoints = [
+      '/auth/login',
+      '/auth/register', 
+      '/auth/forgot-password',
+      '/auth/reset-password',
+      '/auth/verify-email'
+    ];
+
+    const shouldSkipAuth = skipAuthEndpoints.some(endpoint => 
+      config.url?.includes(endpoint)
+    );
+
+    if (!shouldSkipAuth) {
+      // Import auth store dynamically to avoid circular dependencies
+      const { useAuthStore } = await import('@/store/authStore');
+      const token = useAuthStore.getState().tokens?.access_token;
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
     }
 
     return config;
