@@ -12,7 +12,12 @@ const RegisterPage: React.FC = () => {
       clearError();
       
       // Get Google OAuth URL
-      const response = await fetch('/api/v1/auth/oauth/url', {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || (
+        import.meta.env.PROD 
+          ? 'https://cryptouniverse.onrender.com/api/v1'
+          : 'http://localhost:8000/api/v1'
+      );
+      const response = await fetch(`${API_BASE_URL}/auth/oauth/url`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

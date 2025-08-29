@@ -1,9 +1,16 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { AuthTokens } from '@/types/auth';
 
+// API configuration
+const API_BASE_URL = import.meta.env.VITE_API_URL || (
+  import.meta.env.PROD 
+    ? 'https://cryptouniverse.onrender.com/api/v1'  // Production backend URL
+    : 'http://localhost:8000/api/v1'  // Local development
+);
+
 // Create axios instance with default config
 export const apiClient: AxiosInstance = axios.create({
-  baseURL: '/api/v1',
+  baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -45,7 +52,7 @@ apiClient.interceptors.response.use(
         const refreshToken = localStorage.getItem('refresh_token');
         
         if (refreshToken) {
-          const response = await axios.post<{ tokens: AuthTokens }>('/api/v1/auth/refresh', {
+          const response = await axios.post<{ tokens: AuthTokens }>(`${API_BASE_URL}/auth/refresh`, {
             refresh_token: refreshToken,
           });
 

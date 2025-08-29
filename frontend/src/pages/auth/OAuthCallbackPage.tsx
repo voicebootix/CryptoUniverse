@@ -36,8 +36,13 @@ const OAuthCallbackPage: React.FC = () => {
       }
 
       try {
-        // Send callback data to backend
-        const response = await fetch(`/api/v1/auth/oauth/callback/${provider}`, {
+        // Send callback data to backend  
+        const API_BASE_URL = import.meta.env.VITE_API_URL || (
+          import.meta.env.PROD 
+            ? 'https://cryptouniverse.onrender.com/api/v1'
+            : 'http://localhost:8000/api/v1'
+        );
+        const response = await fetch(`${API_BASE_URL}/auth/oauth/callback/${provider}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

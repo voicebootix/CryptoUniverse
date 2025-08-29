@@ -2,7 +2,11 @@ import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, AxiosResponse } f
 import { useAuthStore } from '@/store/authStore';
 
 // API configuration
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_URL || (
+  import.meta.env.PROD 
+    ? 'https://cryptouniverse.onrender.com/api/v1'  // Production backend URL
+    : 'http://localhost:8000/api/v1'  // Local development
+);
 
 // Create axios instance
 export const apiClient: AxiosInstance = axios.create({
