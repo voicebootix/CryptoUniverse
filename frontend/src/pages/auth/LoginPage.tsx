@@ -128,44 +128,43 @@ const LoginPage: React.FC = () => {
           <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-gradient-to-r from-violet-400/20 to-purple-400/20 rounded-full blur-3xl" />
           
           {/* Content Container */}
-          <div className="relative z-10 px-8 xl:px-12 py-12">
-          
-          <motion.div
-            initial={{ opacity: 0, x: -50 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.8 }}
-            className="relative z-10 max-w-lg mx-auto"
-          >
+          <div className="relative z-10 h-full flex flex-col justify-center px-6 py-8">
+            <motion.div
+              initial={{ opacity: 0, x: -50 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.8 }}
+              className="w-full"
+            >
               {/* Logo & Title */}
-              <div className="mb-12">
-                <div className="flex items-center mb-6">
-                  <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mr-4">
-                    <TrendingUp className="w-8 h-8 text-white" />
+              <div className="mb-8">
+                <div className="flex items-center mb-4">
+                  <div className="w-14 h-14 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mr-4">
+                    <TrendingUp className="w-7 h-7 text-white" />
                   </div>
                   <div>
-                    <h1 className="text-4xl font-bold text-white">CryptoUniverse</h1>
-                    <p className="text-blue-200 text-lg">Enterprise AI Trading Platform v2.0.1</p>
+                    <h1 className="text-3xl font-bold text-white">CryptoUniverse</h1>
+                    <p className="text-blue-200 text-base">Enterprise AI Trading Platform v2.0.1</p>
                   </div>
                 </div>
-                <p className="text-xl text-gray-300 leading-relaxed">
+                <p className="text-lg text-gray-300 leading-relaxed">
                   Automated cryptocurrency trading powered by advanced AI algorithms
                 </p>
               </div>
 
               {/* Feature Highlights */}
-              <div className="space-y-6">
+              <div className="space-y-4">
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.3, duration: 0.6 }}
-                  className="flex items-center space-x-4 p-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
+                  className="flex items-center space-x-3 p-3 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20"
                 >
-                  <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg flex items-center justify-center">
-                    <Bot className="w-6 h-6 text-white" />
+                  <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg flex items-center justify-center">
+                    <Bot className="w-5 h-5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold">AI-Powered Trading</h3>
-                    <p className="text-gray-300 text-sm">Multi-model consensus with GPT-4, Claude, and Gemini</p>
+                    <h3 className="text-white font-semibold text-sm">AI-Powered Trading</h3>
+                    <p className="text-gray-300 text-xs">Multi-model consensus with GPT-4, Claude, and Gemini</p>
                   </div>
                 </motion.div>
 
@@ -173,14 +172,14 @@ const LoginPage: React.FC = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.5, duration: 0.6 }}
-                  className="flex items-center space-x-4 p-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
+                  className="flex items-center space-x-3 p-3 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20"
                 >
-                  <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-cyan-600 rounded-lg flex items-center justify-center">
-                    <Globe className="w-6 h-6 text-white" />
+                  <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-cyan-600 rounded-lg flex items-center justify-center">
+                    <Globe className="w-5 h-5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold">Multi-Exchange Support</h3>
-                    <p className="text-gray-300 text-sm">Trade across 8+ major exchanges with arbitrage scanning</p>
+                    <h3 className="text-white font-semibold text-sm">Multi-Exchange Support</h3>
+                    <p className="text-gray-300 text-xs">Trade across 8+ major exchanges with arbitrage scanning</p>
                   </div>
                 </motion.div>
 
@@ -188,14 +187,14 @@ const LoginPage: React.FC = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.7, duration: 0.6 }}
-                  className="flex items-center space-x-4 p-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
+                  className="flex items-center space-x-3 p-3 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20"
                 >
-                  <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-600 rounded-lg flex items-center justify-center">
-                    <BarChart3 className="w-6 h-6 text-white" />
+                  <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-pink-600 rounded-lg flex items-center justify-center">
+                    <BarChart3 className="w-5 h-5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold">Advanced Analytics</h3>
-                    <p className="text-gray-300 text-sm">Institutional-grade risk management and reporting</p>
+                    <h3 className="text-white font-semibold text-sm">Advanced Analytics</h3>
+                    <p className="text-gray-300 text-xs">Institutional-grade risk management and reporting</p>
                   </div>
                 </motion.div>
 
@@ -203,14 +202,14 @@ const LoginPage: React.FC = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.9, duration: 0.6 }}
-                  className="flex items-center space-x-4 p-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
+                  className="flex items-center space-x-3 p-3 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20"
                 >
-                  <div className="w-12 h-12 bg-gradient-to-r from-orange-500 to-red-600 rounded-lg flex items-center justify-center">
-                    <Crown className="w-6 h-6 text-white" />
+                  <div className="w-10 h-10 bg-gradient-to-r from-orange-500 to-red-600 rounded-lg flex items-center justify-center">
+                    <Crown className="w-5 h-5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold">25+ Trading Strategies</h3>
-                    <p className="text-gray-300 text-sm">Professional strategies from DeFi to arbitrage</p>
+                    <h3 className="text-white font-semibold text-sm">25+ Trading Strategies</h3>
+                    <p className="text-gray-300 text-xs">Professional strategies from DeFi to arbitrage</p>
                   </div>
                 </motion.div>
               </div>
@@ -220,7 +219,7 @@ const LoginPage: React.FC = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 1.1, duration: 0.6 }}
-                className="mt-12 grid grid-cols-3 gap-6"
+                className="mt-6 grid grid-cols-3 gap-4"
               >
                 <div className="text-center">
                   <div className="text-2xl font-bold text-white">$2.8M+</div>
@@ -241,7 +240,7 @@ const LoginPage: React.FC = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 1.3, duration: 0.6 }}
-                className="mt-12 p-6 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
+                className="mt-6 p-4 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20"
               >
                 <div className="flex items-center justify-between mb-4">
                   <h4 className="text-white font-semibold">Protected by enterprise-grade security</h4>
