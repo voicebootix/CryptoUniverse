@@ -145,11 +145,15 @@ async def connect_exchange(
     
     try:
         # Check if exchange already connected
-        existing = db.query(ExchangeApiKey).filter(
-            ExchangeApiKey.user_id == current_user.id,
-            ExchangeApiKey.exchange == request.exchange,
-            ExchangeApiKey.sandbox == request.sandbox
-        ).first()
+        from sqlalchemy import select
+        result = await db.execute(
+            select(ExchangeApiKey).filter(
+                ExchangeApiKey.user_id == current_user.id,
+                ExchangeApiKey.exchange == request.exchange,
+                ExchangeApiKey.sandbox == request.sandbox
+            )
+        )
+        existing = result.scalar_one_or_none()
         
         if existing:
             raise HTTPException(
@@ -188,7 +192,7 @@ async def connect_exchange(
             sandbox=request.sandbox
         )
         db.add(exchange_account)
-        db.flush()  # Get the ID
+        await db.flush()  # Get the ID
         
         # Create API key record
         api_key_record = ExchangeApiKey(
@@ -206,8 +210,8 @@ async def connect_exchange(
             last_test_at=datetime.utcnow()
         )
         db.add(api_key_record)
-        db.commit()
-        db.refresh(api_key_record)
+        await db.commit()
+        await db.refresh(api_key_record)
         
         # Sync initial balances
         await sync_exchange_balances(current_user.id, request.exchange, api_key_record.id)
@@ -260,9 +264,11 @@ async def list_exchange_connections(
     )
     
     try:
-        api_keys = db.query(ExchangeApiKey).filter(
-            ExchangeApiKey.user_id == current_user.id
-        ).all()
+        from sqlalchemy import select
+        result = await db.execute(
+            select(ExchangeApiKey).filter(ExchangeApiKey.user_id == current_user.id)
+        )
+        api_keys = result.scalars().all()
         
         connections = []
         for api_key in api_keys:
@@ -348,10 +354,14 @@ async def update_exchange_connection(
     
     try:
         # Get API key record
-        api_key = db.query(ExchangeApiKey).filter(
-            ExchangeApiKey.id == api_key_id,
-            ExchangeApiKey.user_id == current_user.id
-        ).first()
+        from sqlalchemy import select
+        result = await db.execute(
+            select(ExchangeApiKey).filter(
+                ExchangeApiKey.id == api_key_id,
+                ExchangeApiKey.user_id == current_user.id
+            )
+        )
+        api_key = result.scalar_one_or_none()
         
         if not api_key:
             raise HTTPException(
@@ -373,7 +383,7 @@ async def update_exchange_connection(
             api_key.daily_volume_limit = request.max_daily_volume
         
         api_key.updated_at = datetime.utcnow()
-        db.commit()
+        await db.commit()
         
         logger.info(
             "Exchange connection updated",
@@ -411,10 +421,14 @@ async def test_exchange_connection_endpoint(
     
     try:
         # Get API key record
-        api_key = db.query(ExchangeApiKey).filter(
-            ExchangeApiKey.id == api_key_id,
-            ExchangeApiKey.user_id == current_user.id
-        ).first()
+        from sqlalchemy import select
+        result = await db.execute(
+            select(ExchangeApiKey).filter(
+                ExchangeApiKey.id == api_key_id,
+                ExchangeApiKey.user_id == current_user.id
+            )
+        )
+        api_key = result.scalar_one_or_none()
         
         if not api_key:
             raise HTTPException(
@@ -446,7 +460,7 @@ async def test_exchange_connection_endpoint(
         api_key.last_test_at = datetime.utcnow()
         if test_result["success"]:
             api_key.permissions = test_result.get("permissions", [])
-        db.commit()
+        await db.commit()
         
         return ExchangeTestResponse(
             exchange=api_key.exchange,
@@ -490,11 +504,15 @@ async def get_exchange_balances(
         )
         
         # Get API key for exchange
-        api_key = db.query(ExchangeApiKey).filter(
-            ExchangeApiKey.user_id == current_user.id,
-            ExchangeApiKey.exchange == exchange,
-            ExchangeApiKey.is_active == True
-        ).first()
+        from sqlalchemy import select
+        result = await db.execute(
+            select(ExchangeApiKey).filter(
+                ExchangeApiKey.user_id == current_user.id,
+                ExchangeApiKey.exchange == exchange,
+                ExchangeApiKey.is_active == True
+            )
+        )
+        api_key = result.scalar_one_or_none()
         
         if not api_key:
             raise HTTPException(
@@ -547,10 +565,14 @@ async def disconnect_exchange(
     
     try:
         # Get API key record
-        api_key = db.query(ExchangeApiKey).filter(
-            ExchangeApiKey.id == api_key_id,
-            ExchangeApiKey.user_id == current_user.id
-        ).first()
+        from sqlalchemy import select
+        result = await db.execute(
+            select(ExchangeApiKey).filter(
+                ExchangeApiKey.id == api_key_id,
+                ExchangeApiKey.user_id == current_user.id
+            )
+        )
+        api_key = result.scalar_one_or_none()
         
         if not api_key:
             raise HTTPException(
@@ -567,20 +589,27 @@ async def disconnect_exchange(
         db.delete(api_key)
         
         # Remove exchange account if no other API keys
-        remaining_keys = db.query(ExchangeApiKey).filter(
-            ExchangeApiKey.user_id == current_user.id,
-            ExchangeApiKey.exchange == exchange_name
-        ).count()
+        from sqlalchemy import select, func
+        count_result = await db.execute(
+            select(func.count(ExchangeApiKey.id)).filter(
+                ExchangeApiKey.user_id == current_user.id,
+                ExchangeApiKey.exchange == exchange_name
+            )
+        )
+        remaining_keys = count_result.scalar()
         
         if remaining_keys == 0:
-            exchange_account = db.query(ExchangeAccount).filter(
-                ExchangeAccount.user_id == current_user.id,
-                ExchangeAccount.exchange == exchange_name
-            ).first()
+            account_result = await db.execute(
+                select(ExchangeAccount).filter(
+                    ExchangeAccount.user_id == current_user.id,
+                    ExchangeAccount.exchange == exchange_name
+                )
+            )
+            exchange_account = account_result.scalar_one_or_none()
             if exchange_account:
                 db.delete(exchange_account)
         
-        db.commit()
+        await db.commit()
         
         logger.info(
             "Exchange disconnected",
