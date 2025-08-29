@@ -108,93 +108,119 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex">
-      {/* Left Side - Branding & Features */}
-      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-8 lg:p-12 bg-gradient-to-br from-purple-900 via-indigo-900 to-black relative overflow-hidden">
-        {/* Background Effects */}
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-purple-600/10 to-pink-600/10" />
-        <div className="absolute top-20 left-20 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
-        <div className="absolute bottom-20 right-20 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl animate-pulse" />
-
-        <motion.div
-          initial={{ opacity: 0, x: -50 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.8 }}
-          className="relative z-10"
-        >
-          {/* Logo & Title */}
-          <div className="mb-6 md:mb-8 lg:mb-12">
-            <div className="flex items-center mb-4 md:mb-6 lg:mb-8">
-              <div className="w-12 h-12 md:w-14 md:h-14 lg:w-16 lg:h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mr-3 md:mr-3 lg:mr-4 shadow-lg">
-                <TrendingUp className="w-6 h-6 md:w-7 md:h-7 lg:w-8 lg:h-8 text-white" />
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+      {/* Background Effects */}
+      <div className="absolute inset-0 bg-gradient-to-br from-blue-600/5 via-purple-600/10 to-pink-600/5" />
+      <div className="absolute top-20 left-20 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
+      <div className="absolute bottom-20 right-20 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse" />
+      
+      <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
+        <div className="w-full max-w-7xl mx-auto">
+          <div className="grid lg:grid-cols-2 gap-8 lg:gap-16 items-center">
+            
+            {/* Left Side - Branding & Features */}
+            <motion.div
+              initial={{ opacity: 0, x: -50 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.8 }}
+              className="order-2 lg:order-1 text-center lg:text-left"
+            >
+              {/* Logo & Title */}
+              <div className="mb-8 lg:mb-12">
+                <div className="flex items-center justify-center lg:justify-start mb-6">
+                  <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mr-4 shadow-lg">
+                    <TrendingUp className="w-8 h-8 text-white" />
+                  </div>
+                  <div>
+                    <h1 className="text-3xl lg:text-5xl font-bold text-white tracking-wide">
+                      CryptoUniverse
+                    </h1>
+                    <p className="text-blue-200 text-lg">Enterprise AI Trading v2.0.1</p>
+                  </div>
+                </div>
+                <p className="text-xl text-gray-300 leading-relaxed max-w-md mx-auto lg:mx-0">
+                  Automated cryptocurrency trading powered by advanced AI algorithms.
+                </p>
               </div>
-              <div className="min-w-0 flex-1">
-                <h1 className="text-xl md:text-2xl lg:text-4xl font-bold text-white tracking-wide lg:tracking-wider">CryptoUniverse</h1>
-                <p className="text-blue-200 text-sm md:text-base lg:text-lg">Enterprise AI Trading v2.0.1</p>
-              </div>
-            </div>
-            <p className="text-base md:text-lg lg:text-xl text-gray-300 leading-relaxed">
-              Automated cryptocurrency trading powered by advanced AI algorithms.
-            </p>
-          </div>
-          {/* Feature Highlights */}
-          <div className="space-y-3 md:space-y-4 lg:space-y-6">
-            <FeatureCard
-              icon={<Bot className="w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 text-white" />}
-              bgColor="from-green-500 to-emerald-600"
-              title="AI-Powered Trading"
-              description="Multi-model consensus with GPT-4, Claude, and Gemini"
-              delay={0.3}
-            />
-            <FeatureCard
-              icon={<Globe className="w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 text-white" />}
-              bgColor="from-blue-500 to-cyan-600"
-              title="Multi-Exchange Support"
-              description="Trade across 8+ major exchanges with arbitrage scanning"
-              delay={0.5}
-            />
-            <FeatureCard
-              icon={<BarChart3 className="w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 text-white" />}
-              bgColor="from-purple-500 to-pink-600"
-              title="Advanced Analytics"
-              description="Institutional-grade risk management and reporting"
-              delay={0.7}
-            />
-          </div>
-        </motion.div>
-        {/* Trust Indicators */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1.0, duration: 0.6 }}
-          className="relative z-10 mt-6 md:mt-8 lg:mt-12 p-3 md:p-4 lg:p-6 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
-        >
-          <div className="flex items-center justify-between mb-4">
-            <h4 className="text-white font-semibold">Protected by enterprise-grade security</h4>
-            <Shield className="w-6 h-6 text-green-400" />
-          </div>
-          <div className="flex items-center space-x-4 text-sm text-gray-300">
-            <div className="flex items-center space-x-1">
-              <Lock className="w-4 h-4" />
-              <span>256-bit SSL</span>
-            </div>
-            <div className="flex items-center space-x-1">
-              <CheckCircle className="w-4 h-4" />
-              <span>SOC 2 Compliant</span>
-            </div>
-          </div>
-        </motion.div>
-      </div>
 
-      {/* Right Side - Login Form */}
-      <div className="flex flex-col justify-center w-full lg:w-1/2 p-8 lg:p-10 bg-gray-800">
-        <div className="w-full max-w-sm md:max-w-md lg:max-w-lg xl:max-w-xl mx-auto">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-          >
-            <div className="bg-gray-900 shadow-xl rounded-2xl p-6 lg:p-8 border border-gray-700">
+              {/* Feature Highlights */}
+              <div className="space-y-4 mb-8 lg:mb-12">
+                <FeatureCard
+                  icon={<Bot className="w-6 h-6 text-white" />}
+                  bgColor="from-green-500 to-emerald-600"
+                  title="AI-Powered Trading"
+                  description="Multi-model consensus with GPT-4, Claude, and Gemini"
+                  delay={0.3}
+                />
+                <FeatureCard
+                  icon={<Globe className="w-6 h-6 text-white" />}
+                  bgColor="from-blue-500 to-cyan-600"
+                  title="Multi-Exchange Support"
+                  description="Trade across 8+ major exchanges with arbitrage scanning"
+                  delay={0.5}
+                />
+                <FeatureCard
+                  icon={<BarChart3 className="w-6 h-6 text-white" />}
+                  bgColor="from-purple-500 to-pink-600"
+                  title="Advanced Analytics"
+                  description="Institutional-grade risk management and reporting"
+                  delay={0.7}
+                />
+              </div>
+
+              {/* Performance Stats */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.9, duration: 0.6 }}
+                className="grid grid-cols-3 gap-4 mb-6 max-w-md mx-auto lg:mx-0"
+              >
+                <div className="text-center lg:text-left">
+                  <div className="text-2xl font-bold text-green-400">99.9%</div>
+                  <div className="text-sm text-gray-400">Uptime</div>
+                </div>
+                <div className="text-center lg:text-left">
+                  <div className="text-2xl font-bold text-blue-400">$100M+</div>
+                  <div className="text-sm text-gray-400">Assets Under Management</div>
+                </div>
+                <div className="text-center lg:text-left">
+                  <div className="text-2xl font-bold text-purple-400">24/7</div>
+                  <div className="text-sm text-gray-400">Trading</div>
+                </div>
+              </motion.div>
+
+              {/* Trust Indicators */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 1.0, duration: 0.6 }}
+                className="p-6 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 max-w-md mx-auto lg:mx-0"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-white font-semibold">Protected by enterprise-grade security</h4>
+                  <Shield className="w-6 h-6 text-green-400" />
+                </div>
+                <div className="flex items-center justify-center lg:justify-start space-x-6 text-sm text-gray-300">
+                  <div className="flex items-center space-x-2">
+                    <Lock className="w-4 h-4" />
+                    <span>256-bit SSL</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle className="w-4 h-4" />
+                    <span>SOC 2 Compliant</span>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+
+            {/* Right Side - Login Form */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.2 }}
+              className="order-1 lg:order-2"
+            >
+              <div className="bg-gray-900/50 backdrop-blur-sm shadow-2xl rounded-2xl p-8 border border-gray-700/50 max-w-md mx-auto">
               {/* Header */}
               <div className="text-center mb-8">
                 <h2 className="text-3xl font-bold text-white mb-2">Welcome Back</h2>
@@ -377,8 +403,9 @@ const LoginPage: React.FC = () => {
                   </Link>
                 </p>
               </div>
-            </div>
-          </motion.div>
+              </div>
+            </motion.div>
+          </div>
         </div>
       </div>
     </div>
@@ -398,14 +425,14 @@ const FeatureCard: React.FC<FeatureCardProps> = ({ icon, bgColor, title, descrip
     initial={{ opacity: 0, y: 20 }}
     animate={{ opacity: 1, y: 0 }}
     transition={{ delay, duration: 0.6 }}
-    className="flex items-center space-x-2 md:space-x-3 lg:space-x-4 p-2 md:p-3 lg:p-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
+    className="flex items-center space-x-4 p-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 max-w-md mx-auto lg:mx-0"
   >
-    <div className={`w-8 h-8 md:w-10 md:h-10 lg:w-12 lg:h-12 bg-gradient-to-r ${bgColor} rounded-lg flex items-center justify-center shadow-md flex-shrink-0`}>
+    <div className={`w-12 h-12 bg-gradient-to-r ${bgColor} rounded-lg flex items-center justify-center shadow-md flex-shrink-0`}>
       {icon}
     </div>
-    <div className="min-w-0 flex-1">
-      <h3 className="text-white font-semibold text-xs md:text-sm lg:text-base">{title}</h3>
-      <p className="text-gray-300 text-xs md:text-xs lg:text-sm leading-tight">{description}</p>
+    <div className="flex-1">
+      <h3 className="text-white font-semibold text-base">{title}</h3>
+      <p className="text-gray-300 text-sm leading-tight">{description}</p>
     </div>
   </motion.div>
 );
