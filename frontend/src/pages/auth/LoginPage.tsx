@@ -116,11 +116,11 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
-      <div className="w-full max-w-6xl h-auto md:h-auto md:max-h-[90vh] grid md:grid-cols-2 rounded-2xl shadow-2xl overflow-hidden bg-gray-800 border border-gray-700">
+    <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-4">
+      <div className="w-full max-w-7xl min-h-[600px] lg:min-h-[700px] grid lg:grid-cols-2 rounded-2xl shadow-2xl overflow-hidden bg-gray-800 border border-gray-700">
         
         {/* Left Side - Branding & Features */}
-        <div className="hidden md:flex flex-col justify-between p-10 bg-gradient-to-br from-purple-900 via-indigo-900 to-black relative overflow-hidden">
+        <div className="hidden lg:flex flex-col justify-between p-8 lg:p-12 bg-gradient-to-br from-purple-900 via-indigo-900 to-black relative overflow-hidden">
           {/* Background Effects */}
           <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-purple-600/10 to-pink-600/10" />
           <div className="absolute top-20 left-20 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
@@ -133,39 +133,39 @@ const LoginPage: React.FC = () => {
             className="relative z-10"
           >
               {/* Logo & Title */}
-              <div className="mb-12">
-                <div className="flex items-center mb-6">
-                  <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mr-4 shadow-lg">
-                    <TrendingUp className="w-8 h-8 text-white" />
+              <div className="mb-8 lg:mb-12">
+                <div className="flex items-center mb-6 lg:mb-8">
+                  <div className="w-14 h-14 lg:w-16 lg:h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mr-3 lg:mr-4 shadow-lg">
+                    <TrendingUp className="w-7 h-7 lg:w-8 lg:h-8 text-white" />
                   </div>
-                  <div>
-                    <h1 className="text-4xl font-bold text-white tracking-wider">CryptoUniverse</h1>
-                    <p className="text-blue-200 text-lg">Enterprise AI Trading v2.0.1</p>
+                  <div className="min-w-0 flex-1">
+                    <h1 className="text-2xl lg:text-4xl font-bold text-white tracking-wide lg:tracking-wider">CryptoUniverse</h1>
+                    <p className="text-blue-200 text-base lg:text-lg">Enterprise AI Trading v2.0.1</p>
                   </div>
                 </div>
-                <p className="text-xl text-gray-300 leading-relaxed">
+                <p className="text-lg lg:text-xl text-gray-300 leading-relaxed">
                   Automated cryptocurrency trading powered by advanced AI algorithms.
                 </p>
               </div>
 
               {/* Feature Highlights */}
-              <div className="space-y-6">
+              <div className="space-y-4 lg:space-y-6">
                 <FeatureCard
-                  icon={<Bot className="w-6 h-6 text-white" />}
+                  icon={<Bot className="w-5 h-5 lg:w-6 lg:h-6 text-white" />}
                   bgColor="from-green-500 to-emerald-600"
                   title="AI-Powered Trading"
                   description="Multi-model consensus with GPT-4, Claude, and Gemini"
                   delay={0.3}
                 />
                 <FeatureCard
-                  icon={<Globe className="w-6 h-6 text-white" />}
+                  icon={<Globe className="w-5 h-5 lg:w-6 lg:h-6 text-white" />}
                   bgColor="from-blue-500 to-cyan-600"
                   title="Multi-Exchange Support"
                   description="Trade across 8+ major exchanges with arbitrage scanning"
                   delay={0.5}
                 />
                 <FeatureCard
-                  icon={<BarChart3 className="w-6 h-6 text-white" />}
+                  icon={<BarChart3 className="w-5 h-5 lg:w-6 lg:h-6 text-white" />}
                   bgColor="from-purple-500 to-pink-600"
                   title="Advanced Analytics"
                   description="Institutional-grade risk management and reporting"
@@ -179,7 +179,7 @@ const LoginPage: React.FC = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 1.0, duration: 0.6 }}
-            className="relative z-10 mt-12 p-6 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
+            className="relative z-10 mt-8 lg:mt-12 p-4 lg:p-6 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
           >
             <div className="flex items-center justify-between mb-4">
               <h4 className="text-white font-semibold">Protected by enterprise-grade security</h4>
@@ -199,7 +199,7 @@ const LoginPage: React.FC = () => {
         </div>
 
         {/* Right Side - Login Form */}
-        <div className="flex flex-col justify-center p-8 sm:p-10 bg-gray-800 overflow-y-auto">
+        <div className="flex flex-col justify-center p-6 lg:p-8 xl:p-10 bg-gray-800 overflow-y-auto">
           <div className="w-full max-w-md mx-auto">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -421,14 +421,14 @@ const FeatureCard: React.FC<FeatureCardProps> = ({ icon, bgColor, title, descrip
     initial={{ opacity: 0, y: 20 }}
     animate={{ opacity: 1, y: 0 }}
     transition={{ delay, duration: 0.6 }}
-    className="flex items-center space-x-4 p-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
+    className="flex items-center space-x-3 lg:space-x-4 p-3 lg:p-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
   >
-    <div className={`w-12 h-12 bg-gradient-to-r ${bgColor} rounded-lg flex items-center justify-center shadow-md`}>
+    <div className={`w-10 h-10 lg:w-12 lg:h-12 bg-gradient-to-r ${bgColor} rounded-lg flex items-center justify-center shadow-md flex-shrink-0`}>
       {icon}
     </div>
-    <div>
-      <h3 className="text-white font-semibold">{title}</h3>
-      <p className="text-gray-300 text-sm">{description}</p>
+    <div className="min-w-0 flex-1">
+      <h3 className="text-white font-semibold text-sm lg:text-base">{title}</h3>
+      <p className="text-gray-300 text-xs lg:text-sm leading-tight">{description}</p>
     </div>
   </motion.div>
 );
