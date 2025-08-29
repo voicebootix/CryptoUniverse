@@ -116,181 +116,101 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-      <div className="min-h-screen flex">
+    <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
+      <div className="w-full max-w-6xl h-auto md:h-auto md:max-h-[90vh] grid md:grid-cols-2 rounded-2xl shadow-2xl overflow-hidden bg-gray-800 border border-gray-700">
+        
         {/* Left Side - Branding & Features */}
-        <div className="hidden lg:flex lg:flex-col lg:justify-center flex-1 relative overflow-hidden">
+        <div className="hidden md:flex flex-col justify-between p-10 bg-gradient-to-br from-purple-900 via-indigo-900 to-black relative overflow-hidden">
           {/* Background Effects */}
-          <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-purple-600 to-violet-700" />
-          <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/30 via-purple-500/20 to-pink-500/30" />
-          <div className="absolute top-10 left-10 w-72 h-72 bg-gradient-to-r from-blue-400/40 to-cyan-400/40 rounded-full blur-3xl animate-pulse" />
-          <div className="absolute bottom-10 right-10 w-80 h-80 bg-gradient-to-l from-purple-400/40 to-pink-400/40 rounded-full blur-3xl" />
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-gradient-to-r from-violet-400/20 to-purple-400/20 rounded-full blur-3xl" />
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-purple-600/10 to-pink-600/10" />
+          <div className="absolute top-20 left-20 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
+          <div className="absolute bottom-20 right-20 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl animate-pulse" />
           
-          {/* Content Container */}
-          <div className="relative z-10 h-full flex flex-col justify-center px-6 py-8">
-            <motion.div
-              initial={{ opacity: 0, x: -50 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.8 }}
-              className="w-full"
-            >
+          <motion.div
+            initial={{ opacity: 0, x: -50 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.8 }}
+            className="relative z-10"
+          >
               {/* Logo & Title */}
-              <div className="mb-8">
-                <div className="flex items-center mb-4">
-                  <div className="w-14 h-14 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mr-4">
-                    <TrendingUp className="w-7 h-7 text-white" />
+              <div className="mb-12">
+                <div className="flex items-center mb-6">
+                  <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mr-4 shadow-lg">
+                    <TrendingUp className="w-8 h-8 text-white" />
                   </div>
                   <div>
-                    <h1 className="text-3xl font-bold text-white">CryptoUniverse</h1>
-                    <p className="text-blue-200 text-base">Enterprise AI Trading Platform v2.0.1</p>
+                    <h1 className="text-4xl font-bold text-white tracking-wider">CryptoUniverse</h1>
+                    <p className="text-blue-200 text-lg">Enterprise AI Trading v2.0.1</p>
                   </div>
                 </div>
-                <p className="text-lg text-gray-300 leading-relaxed">
-                  Automated cryptocurrency trading powered by advanced AI algorithms
+                <p className="text-xl text-gray-300 leading-relaxed">
+                  Automated cryptocurrency trading powered by advanced AI algorithms.
                 </p>
               </div>
 
               {/* Feature Highlights */}
-              <div className="space-y-4">
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.3, duration: 0.6 }}
-                  className="flex items-center space-x-3 p-3 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20"
-                >
-                  <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg flex items-center justify-center">
-                    <Bot className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="text-white font-semibold text-sm">AI-Powered Trading</h3>
-                    <p className="text-gray-300 text-xs">Multi-model consensus with GPT-4, Claude, and Gemini</p>
-                  </div>
-                </motion.div>
-
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.5, duration: 0.6 }}
-                  className="flex items-center space-x-3 p-3 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20"
-                >
-                  <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-cyan-600 rounded-lg flex items-center justify-center">
-                    <Globe className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="text-white font-semibold text-sm">Multi-Exchange Support</h3>
-                    <p className="text-gray-300 text-xs">Trade across 8+ major exchanges with arbitrage scanning</p>
-                  </div>
-                </motion.div>
-
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.7, duration: 0.6 }}
-                  className="flex items-center space-x-3 p-3 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20"
-                >
-                  <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-pink-600 rounded-lg flex items-center justify-center">
-                    <BarChart3 className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="text-white font-semibold text-sm">Advanced Analytics</h3>
-                    <p className="text-gray-300 text-xs">Institutional-grade risk management and reporting</p>
-                  </div>
-                </motion.div>
-
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.9, duration: 0.6 }}
-                  className="flex items-center space-x-3 p-3 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20"
-                >
-                  <div className="w-10 h-10 bg-gradient-to-r from-orange-500 to-red-600 rounded-lg flex items-center justify-center">
-                    <Crown className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="text-white font-semibold text-sm">25+ Trading Strategies</h3>
-                    <p className="text-gray-300 text-xs">Professional strategies from DeFi to arbitrage</p>
-                  </div>
-                </motion.div>
+              <div className="space-y-6">
+                <FeatureCard
+                  icon={<Bot className="w-6 h-6 text-white" />}
+                  bgColor="from-green-500 to-emerald-600"
+                  title="AI-Powered Trading"
+                  description="Multi-model consensus with GPT-4, Claude, and Gemini"
+                  delay={0.3}
+                />
+                <FeatureCard
+                  icon={<Globe className="w-6 h-6 text-white" />}
+                  bgColor="from-blue-500 to-cyan-600"
+                  title="Multi-Exchange Support"
+                  description="Trade across 8+ major exchanges with arbitrage scanning"
+                  delay={0.5}
+                />
+                <FeatureCard
+                  icon={<BarChart3 className="w-6 h-6 text-white" />}
+                  bgColor="from-purple-500 to-pink-600"
+                  title="Advanced Analytics"
+                  description="Institutional-grade risk management and reporting"
+                  delay={0.7}
+                />
               </div>
+          </motion.div>
 
-              {/* Stats */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 1.1, duration: 0.6 }}
-                className="mt-6 grid grid-cols-3 gap-4"
-              >
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-white">$2.8M+</div>
-                  <div className="text-sm text-gray-400">Assets Under Management</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-white">73.2%</div>
-                  <div className="text-sm text-gray-400">Win Rate</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-white">2.87</div>
-                  <div className="text-sm text-gray-400">Sharpe Ratio</div>
-                </div>
-              </motion.div>
-
-              {/* Trust Indicators */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 1.3, duration: 0.6 }}
-                className="mt-6 p-4 bg-white/10 backdrop-blur-sm rounded-lg border border-white/20"
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-white font-semibold">Protected by enterprise-grade security</h4>
-                  <Shield className="w-6 h-6 text-green-400" />
-                </div>
-                <div className="flex items-center space-x-4 text-sm text-gray-300">
-                  <div className="flex items-center space-x-1">
-                    <Lock className="w-4 h-4" />
-                    <span>256-bit SSL</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <CheckCircle className="w-4 h-4" />
-                    <span>SOC 2 Compliant</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <Shield className="w-4 h-4" />
-                    <span>Bank-level Security</span>
-                  </div>
-                </div>
-              </motion.div>
-            </motion.div>
-          </div>
+          {/* Trust Indicators */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 1.0, duration: 0.6 }}
+            className="relative z-10 mt-12 p-6 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-white font-semibold">Protected by enterprise-grade security</h4>
+              <Shield className="w-6 h-6 text-green-400" />
+            </div>
+            <div className="flex items-center space-x-4 text-sm text-gray-300">
+              <div className="flex items-center space-x-1">
+                <Lock className="w-4 h-4" />
+                <span>256-bit SSL</span>
+              </div>
+              <div className="flex items-center space-x-1">
+                <CheckCircle className="w-4 h-4" />
+                <span>SOC 2 Compliant</span>
+              </div>
+            </div>
+          </motion.div>
         </div>
 
         {/* Right Side - Login Form */}
-        <div className="flex flex-col justify-center flex-1 px-4 py-12 sm:px-6 lg:px-8 xl:px-12">
-          <div className="w-full max-w-sm mx-auto lg:w-96">
+        <div className="flex flex-col justify-center p-8 sm:p-10 bg-gray-800 overflow-y-auto">
+          <div className="w-full max-w-md mx-auto">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
             >
-              <div className="bg-white shadow-xl rounded-2xl p-8">
-                {/* Mobile Header */}
-                <div className="text-center mb-8 lg:hidden">
-                  <div className="flex items-center justify-center mb-6">
-                    <div className="w-12 h-12 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center mr-3">
-                      <TrendingUp className="w-6 h-6 text-white" />
-                    </div>
-                    <div>
-                      <h1 className="text-2xl font-bold text-gray-900">CryptoUniverse</h1>
-                      <p className="text-sm text-gray-600">Enterprise AI Trading</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Desktop Header */}
-                <div className="hidden lg:block text-center mb-8">
-                  <h2 className="text-3xl font-bold text-gray-900 mb-2">Welcome back</h2>
-                  <p className="text-gray-600">Sign in to your AI trading dashboard</p>
+              <div className="bg-gray-900 shadow-xl rounded-2xl p-8 border border-gray-700">
+                {/* Header */}
+                <div className="text-center mb-8">
+                  <h2 className="text-3xl font-bold text-white mb-2">Welcome Back</h2>
+                  <p className="text-gray-400">Sign in to your AI trading dashboard</p>
                 </div>
 
                 {/* Error Alert */}
@@ -300,9 +220,9 @@ const LoginPage: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     className="mb-6"
                   >
-                    <Alert className="border-red-200 bg-red-50">
-                      <AlertCircle className="h-4 w-4 text-red-600" />
-                      <AlertDescription className="text-red-700">
+                    <Alert className="border-red-500/50 bg-red-500/10 text-red-300">
+                      <AlertCircle className="h-4 w-4 text-red-400" />
+                      <AlertDescription>
                         {error}
                       </AlertDescription>
                     </Alert>
@@ -316,10 +236,10 @@ const LoginPage: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     className="mb-6"
                   >
-                    <Alert className="border-blue-200 bg-blue-50">
-                      <Shield className="h-4 w-4 text-blue-600" />
-                      <AlertDescription className="text-blue-700">
-                        Please enter your MFA code to complete login
+                    <Alert className="border-blue-500/50 bg-blue-500/10 text-blue-300">
+                      <Shield className="h-4 w-4 text-blue-400" />
+                      <AlertDescription>
+                        Please enter your MFA code to complete login.
                       </AlertDescription>
                     </Alert>
                   </motion.div>
@@ -329,24 +249,24 @@ const LoginPage: React.FC = () => {
                 <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
                   {/* Email Field */}
                   <div className="space-y-2">
-                    <Label htmlFor="email" className="text-sm font-medium text-gray-700">
+                    <Label htmlFor="email" className="text-sm font-medium text-gray-300">
                       Email address
                     </Label>
                     <Input
                       id="email"
                       type="email"
                       placeholder="Enter your email"
-                      className="h-11 bg-white border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                      className="h-11 bg-gray-700 border-gray-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-white"
                       {...register('email')}
                     />
                     {errors.email && (
-                      <p className="text-sm text-red-600">{errors.email.message}</p>
+                      <p className="text-sm text-red-400">{errors.email.message}</p>
                     )}
                   </div>
 
                   {/* Password Field */}
                   <div className="space-y-2">
-                    <Label htmlFor="password" className="text-sm font-medium text-gray-700">
+                    <Label htmlFor="password" className="text-sm font-medium text-gray-300">
                       Password
                     </Label>
                     <div className="relative">
@@ -354,19 +274,19 @@ const LoginPage: React.FC = () => {
                         id="password"
                         type={showPassword ? 'text' : 'password'}
                         placeholder="Enter your password"
-                        className="h-11 bg-white border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 pr-12 transition-all"
+                        className="h-11 bg-gray-700 border-gray-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 pr-12 transition-all text-white"
                         {...register('password')}
                       />
                       <button
                         type="button"
                         onClick={() => setShowPassword(!showPassword)}
-                        className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600"
+                        className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-white"
                       >
                         {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                       </button>
                     </div>
                     {errors.password && (
-                      <p className="text-sm text-red-600">{errors.password.message}</p>
+                      <p className="text-sm text-red-400">{errors.password.message}</p>
                     )}
                   </div>
 
@@ -377,18 +297,18 @@ const LoginPage: React.FC = () => {
                       animate={{ opacity: 1, height: 'auto' }}
                       className="space-y-2"
                     >
-                      <Label htmlFor="mfa_code" className="text-sm font-medium text-gray-700">
+                      <Label htmlFor="mfa_code" className="text-sm font-medium text-gray-300">
                         MFA Code
                       </Label>
                       <Input
                         id="mfa_code"
                         type="text"
                         placeholder="Enter your MFA code"
-                        className="h-12 bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                        className="h-12 bg-gray-700 border-gray-600 focus:border-blue-500 focus:ring-blue-500 text-white"
                         {...register('mfa_code')}
                       />
                       {errors.mfa_code && (
-                        <p className="text-sm text-red-600">{errors.mfa_code.message}</p>
+                        <p className="text-sm text-red-400">{errors.mfa_code.message}</p>
                       )}
                     </motion.div>
                   )}
@@ -400,14 +320,15 @@ const LoginPage: React.FC = () => {
                         id="remember_me"
                         checked={watch('remember_me')}
                         onCheckedChange={(checked) => setValue('remember_me', checked as boolean)}
+                        className="border-gray-500"
                       />
-                      <Label htmlFor="remember_me" className="text-sm text-gray-600">
+                      <Label htmlFor="remember_me" className="text-sm text-gray-400">
                         Remember me
                       </Label>
                     </div>
                     <Link
                       to="/auth/forgot-password"
-                      className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                      className="text-sm text-blue-400 hover:text-blue-300 font-medium"
                     >
                       Forgot password?
                     </Link>
@@ -417,15 +338,15 @@ const LoginPage: React.FC = () => {
                   <Button
                     type="submit"
                     disabled={isLoading}
-                    className="w-full h-11 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium transition-all duration-200 shadow-lg hover:shadow-xl"
+                    className="w-full h-11 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
                   >
                     {isLoading ? (
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center justify-center space-x-2">
                         <Loader2 className="w-5 h-5 animate-spin" />
                         <span>Signing in...</span>
                       </div>
                     ) : (
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center justify-center space-x-2">
                         <span>Sign in</span>
                         <ArrowRight className="w-5 h-5" />
                       </div>
@@ -433,12 +354,12 @@ const LoginPage: React.FC = () => {
                   </Button>
 
                   {/* Divider */}
-                  <div className="relative">
+                  <div className="relative my-6">
                     <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t border-gray-300" />
+                      <div className="w-full border-t border-gray-600" />
                     </div>
                     <div className="relative flex justify-center text-sm">
-                      <span className="px-2 bg-white text-gray-500">Or continue with</span>
+                      <span className="px-2 bg-gray-900 text-gray-400">Or continue with</span>
                     </div>
                   </div>
 
@@ -447,12 +368,20 @@ const LoginPage: React.FC = () => {
                     type="button"
                     onClick={handleGoogleLogin}
                     variant="outline"
-                    className="w-full h-11 border-gray-200 hover:bg-gray-50 text-gray-700 font-medium transition-all duration-200 hover:border-gray-300"
+                    className="w-full h-11 bg-gray-800 border-gray-600 hover:bg-gray-700 text-gray-300 font-medium transition-all duration-200 hover:border-gray-500"
                   >
-                    <div className="flex items-center space-x-3">
-                      <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
-                        <span className="text-lg font-bold text-blue-600">G</span>
-                      </div>
+                    <div className="flex items-center justify-center space-x-3">
+                      <svg className="w-5 h-5" viewBox="0 0 48 48">
+                        <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12
+	c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24
+	c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"></path>
+                        <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657
+	C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"></path>
+                        <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36
+	c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"></path>
+                        <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571
+	c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"></path>
+                      </svg>
                       <span>Continue with Google</span>
                     </div>
                   </Button>
@@ -460,27 +389,15 @@ const LoginPage: React.FC = () => {
 
                 {/* Sign Up Link */}
                 <div className="mt-8 text-center">
-                  <p className="text-gray-600">
+                  <p className="text-gray-400">
                     Don't have an account?{' '}
                     <Link
                       to="/auth/register"
-                      className="text-blue-600 hover:text-blue-800 font-semibold"
+                      className="text-blue-400 hover:text-blue-300 font-semibold"
                     >
                       Sign up for free
                     </Link>
                   </p>
-                </div>
-
-                {/* Footer */}
-                <div className="mt-8 pt-6 border-t border-gray-200 text-center">
-                  <p className="text-xs text-gray-500">
-                    © 2024 CryptoUniverse Enterprise. All rights reserved.
-                  </p>
-                  <div className="mt-2 text-xs text-gray-400">
-                    <span className="mr-4">🔒 256-bit SSL</span>
-                    <span className="mr-4">✓ SOC 2 Compliant</span>
-                    <span>🛡️ Bank-level Security</span>
-                  </div>
                 </div>
               </div>
             </motion.div>
@@ -490,5 +407,30 @@ const LoginPage: React.FC = () => {
     </div>
   );
 };
+
+interface FeatureCardProps {
+  icon: React.ReactNode;
+  bgColor: string;
+  title: string;
+  description: string;
+  delay: number;
+}
+
+const FeatureCard: React.FC<FeatureCardProps> = ({ icon, bgColor, title, description, delay }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ delay, duration: 0.6 }}
+    className="flex items-center space-x-4 p-4 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10"
+  >
+    <div className={`w-12 h-12 bg-gradient-to-r ${bgColor} rounded-lg flex items-center justify-center shadow-md`}>
+      {icon}
+    </div>
+    <div>
+      <h3 className="text-white font-semibold">{title}</h3>
+      <p className="text-gray-300 text-sm">{description}</p>
+    </div>
+  </motion.div>
+);
 
 export default LoginPage;
