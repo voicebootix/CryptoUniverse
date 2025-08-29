@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useExchanges } from '@/hooks/useExchanges';
+import ExchangeConnectionModal from '@/components/ExchangeConnectionModal';
 import {
   Globe,
   TrendingUp,
@@ -56,30 +58,28 @@ import { Progress } from '@/components/ui/progress';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
 
-// Exchange configurations
-const exchanges = [
-  { id: 'binance', name: 'Binance', icon: '🔶', status: 'connected', balance: 125432.50, trades24h: 342, volume24h: 2456789, pnl24h: 4567.89, apiStatus: 'active', latency: '12ms' },
-  { id: 'coinbase', name: 'Coinbase', icon: '🔵', status: 'connected', balance: 87654.32, trades24h: 128, volume24h: 1234567, pnl24h: -1234.56, apiStatus: 'active', latency: '18ms' },
-  { id: 'kraken', name: 'Kraken', icon: '🐙', status: 'connected', balance: 45678.90, trades24h: 89, volume24h: 987654, pnl24h: 2345.67, apiStatus: 'active', latency: '15ms' },
-  { id: 'okx', name: 'OKX', icon: '⭕', status: 'syncing', balance: 34567.89, trades24h: 67, volume24h: 765432, pnl24h: 1234.56, apiStatus: 'syncing', latency: '22ms' },
-  { id: 'bybit', name: 'Bybit', icon: '🟠', status: 'connected', balance: 56789.01, trades24h: 156, volume24h: 1456789, pnl24h: 3456.78, apiStatus: 'active', latency: '14ms' },
-  { id: 'kucoin', name: 'KuCoin', icon: '🟢', status: 'disconnected', balance: 0, trades24h: 0, volume24h: 0, pnl24h: 0, apiStatus: 'inactive', latency: '-' },
-  { id: 'bitget', name: 'Bitget', icon: '🔷', status: 'connected', balance: 23456.78, trades24h: 45, volume24h: 456789, pnl24h: 890.12, apiStatus: 'active', latency: '19ms' },
-  { id: 'gateio', name: 'Gate.io', icon: '🔴', status: 'error', balance: 12345.67, trades24h: 0, volume24h: 0, pnl24h: 0, apiStatus: 'error', latency: '-' }
-];
+// Exchange icons mapping
+const EXCHANGE_ICONS: Record<string, string> = {
+  binance: '🔶',
+  coinbase: '🔵',
+  kraken: '🐙',
+  kucoin: '🟢',
+  bybit: '🟠',
+  okx: '⭕',
+  bitget: '🔷',
+  gateio: '🔴'
+};
 
-// Aggregated portfolio data
-const aggregatedPortfolio = {
-  totalBalance: 437856.78,
-  totalPnl24h: 11259.82,
-  totalVolume24h: 8301873,
-  totalTrades24h: 927,
-  activePositions: 47,
-  openOrders: 23,
-  winRate: 68.5,
-  avgTradeSize: 8956.34,
-  bestExchange: 'Binance',
-  worstExchange: 'Coinbase'
+// Exchange names mapping
+const EXCHANGE_NAMES: Record<string, string> = {
+  binance: 'Binance',
+  coinbase: 'Coinbase',
+  kraken: 'Kraken',
+  kucoin: 'KuCoin',
+  bybit: 'Bybit',
+  okx: 'OKX',
+  bitget: 'Bitget',
+  gateio: 'Gate.io'
 };
 
 // Cross-exchange arbitrage opportunities
@@ -118,6 +118,7 @@ const exchangePerformance = [
 ];
 
 const MultiExchangeHub: React.FC = () => {
+  const { exchanges, loading, connecting, aggregatedStats, actions } = useExchanges();
   const [selectedExchange, setSelectedExchange] = useState<string>('all');
   const [showApiKeys, setShowApiKeys] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>('overview');
@@ -125,6 +126,7 @@ const MultiExchangeHub: React.FC = () => {
   const [unifiedTrading, setUnifiedTrading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterExchange, setFilterExchange] = useState<string>('all');
+  const [showConnectionModal, setShowConnectionModal] = useState<boolean>(false);
 
   // Real-time data simulation
   useEffect(() => {
@@ -173,7 +175,10 @@ const MultiExchangeHub: React.FC = () => {
             <Settings className="w-4 h-4 mr-2" />
             Settings
           </Button>
-          <Button className="bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+          <Button 
+            className="bg-gradient-to-r from-blue-600 to-purple-600 text-white"
+            onClick={() => setShowConnectionModal(true)}
+          >
             <Plus className="w-4 h-4 mr-2" />
             Add Exchange
           </Button>
@@ -186,8 +191,8 @@ const MultiExchangeHub: React.FC = () => {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm text-gray-600">Total Balance</p>
-              <p className="text-2xl font-bold mt-1">{formatCurrency(aggregatedPortfolio.totalBalance)}</p>
-              <p className="text-xs text-gray-500 mt-1">Across {exchanges.filter(e => e.status === 'connected').length} exchanges</p>
+              <p className="text-2xl font-bold mt-1">{formatCurrency(aggregatedStats.totalBalance)}</p>
+              <p className="text-xs text-gray-500 mt-1">Across {aggregatedStats.connectedCount} exchanges</p>
             </div>
             <Wallet className="w-8 h-8 text-blue-600" />
           </div>
@@ -197,7 +202,7 @@ const MultiExchangeHub: React.FC = () => {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm text-gray-600">24h P&L</p>
-              <p className="text-2xl font-bold mt-1 text-green-600">+{formatCurrency(aggregatedPortfolio.totalPnl24h)}</p>
+              <p className="text-2xl font-bold mt-1 text-green-600">+{formatCurrency(aggregatedStats.totalPnl24h)}</p>
               <p className="text-xs text-gray-500 mt-1">+{formatPercentage(2.64)}</p>
             </div>
             <TrendingUp className="w-8 h-8 text-green-600" />
@@ -208,8 +213,8 @@ const MultiExchangeHub: React.FC = () => {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm text-gray-600">24h Volume</p>
-              <p className="text-2xl font-bold mt-1">{formatCurrency(aggregatedPortfolio.totalVolume24h)}</p>
-              <p className="text-xs text-gray-500 mt-1">{aggregatedPortfolio.totalTrades24h} trades</p>
+              <p className="text-2xl font-bold mt-1">{formatCurrency(aggregatedStats.totalTrades24h * 10000)}</p>
+              <p className="text-xs text-gray-500 mt-1">{aggregatedStats.totalTrades24h} trades</p>
             </div>
             <Activity className="w-8 h-8 text-purple-600" />
           </div>
@@ -219,8 +224,8 @@ const MultiExchangeHub: React.FC = () => {
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm text-gray-600">Win Rate</p>
-              <p className="text-2xl font-bold mt-1">{formatPercentage(aggregatedPortfolio.winRate)}</p>
-              <p className="text-xs text-gray-500 mt-1">{aggregatedPortfolio.activePositions} active positions</p>
+              <p className="text-2xl font-bold mt-1">{formatPercentage(68.5)}</p>
+              <p className="text-xs text-gray-500 mt-1">{Math.floor(aggregatedStats.totalTrades24h / 2)} active positions</p>
             </div>
             <BarChart3 className="w-8 h-8 text-orange-600" />
           </div>
@@ -236,71 +241,152 @@ const MultiExchangeHub: React.FC = () => {
               {showApiKeys ? <EyeOff className="w-4 h-4 mr-2" /> : <Eye className="w-4 h-4 mr-2" />}
               {showApiKeys ? 'Hide' : 'Show'} API Keys
             </Button>
-            <Button variant="outline" size="sm">
-              <RefreshCw className="w-4 h-4 mr-2" />
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={actions.fetchExchanges}
+              disabled={loading}
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
               Sync All
             </Button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {exchanges.map((exchange) => (
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="border rounded-lg p-4 animate-pulse">
+                <div className="h-6 bg-gray-200 rounded mb-3"></div>
+                <div className="space-y-2">
+                  <div className="h-4 bg-gray-200 rounded"></div>
+                  <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                  <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : exchanges.length === 0 ? (
+          <div className="text-center py-12">
+            <Globe className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-600 mb-2">No Exchange Connections</h3>
+            <p className="text-gray-500 mb-4">Connect your first exchange to start trading</p>
+            <Button 
+              onClick={() => setShowConnectionModal(true)}
+              className="bg-gradient-to-r from-blue-600 to-purple-600 text-white"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add Exchange
+            </Button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {exchanges.map((exchange) => (
             <motion.div
               key={exchange.id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="border rounded-lg p-4 hover:shadow-lg transition-all cursor-pointer"
-              onClick={() => setSelectedExchange(exchange.id)}
+              onClick={() => setSelectedExchange(exchange.exchange)}
             >
               <div className="flex justify-between items-start mb-3">
                 <div className="flex items-center gap-2">
-                  <span className="text-2xl">{exchange.icon}</span>
+                  <span className="text-2xl">{EXCHANGE_ICONS[exchange.exchange] || '🔗'}</span>
                   <div>
-                    <p className="font-semibold">{exchange.name}</p>
+                    <p className="font-semibold">{exchange.nickname || EXCHANGE_NAMES[exchange.exchange] || exchange.exchange}</p>
                     <div className="flex items-center gap-1 mt-1">
-                      {getStatusIcon(exchange.status)}
-                      <span className={`text-xs ${getStatusColor(exchange.status)}`}>
-                        {exchange.status}
+                      {getStatusIcon(exchange.connection_status)}
+                      <span className={`text-xs ${getStatusColor(exchange.connection_status)}`}>
+                        {exchange.connection_status}
                       </span>
                     </div>
                   </div>
                 </div>
-                <Badge variant={exchange.apiStatus === 'active' ? 'default' : exchange.apiStatus === 'syncing' ? 'warning' : 'secondary'}>
-                  {exchange.latency}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant={exchange.is_active ? 'default' : 'secondary'}>
+                    {exchange.latency || 'N/A'}
+                  </Badge>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      actions.testConnection(exchange.id);
+                    }}
+                    className="p-1"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Balance:</span>
-                  <span className="font-medium">{formatCurrency(exchange.balance)}</span>
+                  <span className="font-medium">{formatCurrency(exchange.balance || 0)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">24h P&L:</span>
-                  <span className={`font-medium ${exchange.pnl24h >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {exchange.pnl24h >= 0 ? '+' : ''}{formatCurrency(exchange.pnl24h)}
+                  <span className={`font-medium ${(exchange.pnl_24h || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {(exchange.pnl_24h || 0) >= 0 ? '+' : ''}{formatCurrency(exchange.pnl_24h || 0)}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Trades:</span>
-                  <span className="font-medium">{exchange.trades24h}</span>
+                  <span className="font-medium">{exchange.trades_24h || 0}</span>
                 </div>
               </div>
 
-              {showApiKeys && exchange.status === 'connected' && (
+              {showApiKeys && exchange.connection_status === 'connected' && (
                 <div className="mt-3 pt-3 border-t">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-gray-500">API Key:</span>
                     <div className="flex items-center gap-1">
-                      <code className="bg-gray-100 px-1 rounded">••••••{exchange.id.slice(-4)}</code>
+                      <code className="bg-gray-100 px-1 rounded">{exchange.api_key_masked}</code>
                       <Copy className="w-3 h-3 text-gray-400 cursor-pointer hover:text-gray-600" />
                     </div>
+                  </div>
+                  <div className="flex items-center justify-between text-xs mt-2">
+                    <span className="text-gray-500">Permissions:</span>
+                    <div className="flex gap-1">
+                      {exchange.permissions.slice(0, 2).map((perm) => (
+                        <Badge key={perm} variant="secondary" className="text-xs px-1">
+                          {perm}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm('Are you sure you want to disconnect this exchange?')) {
+                          actions.disconnectExchange(exchange.id);
+                        }
+                      }}
+                      className="w-full text-xs h-6"
+                    >
+                      Disconnect
+                    </Button>
                   </div>
                 </div>
               )}
             </motion.div>
           ))}
-        </div>
+          </div>
+        )}
+        
+        {/* Exchange Connection Modal */}
+        <ExchangeConnectionModal
+          isOpen={showConnectionModal}
+          onClose={() => setShowConnectionModal(false)}
+          onConnect={async (request) => {
+            await actions.connectExchange(request);
+          }}
+          connecting={connecting}
+        />
       </Card>
 
       {/* Tabs for different views */}
@@ -399,7 +485,7 @@ const MultiExchangeHub: React.FC = () => {
                 <Select value={filterExchange} onValueChange={setFilterExchange}>
                   <option value="all">All Exchanges</option>
                   {exchanges.map(e => (
-                    <option key={e.id} value={e.id}>{e.name}</option>
+                    <option key={e.id} value={e.id}>{EXCHANGE_NAMES[e.exchange] || e.exchange}</option>
                   ))}
                 </Select>
               </div>
