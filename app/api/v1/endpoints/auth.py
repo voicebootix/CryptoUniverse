@@ -304,6 +304,7 @@ async def login(
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
+        token_type="bearer",
         expires_in=int(auth_service.access_token_expire.total_seconds()),
         user_id=str(user.id),
         role=user.role.value,
@@ -441,6 +442,7 @@ async def refresh_token(
     return TokenResponse(
         access_token=new_access_token,
         refresh_token=new_refresh_token,
+        token_type="bearer",
         expires_in=int(auth_service.access_token_expire.total_seconds()),
         user_id=str(user.id),
         role=user.role.value,

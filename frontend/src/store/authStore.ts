@@ -66,7 +66,8 @@ export const useAuthStore = create<AuthStore>()(
             const tokens = {
               access_token: response.data.access_token,
               refresh_token: response.data.refresh_token,
-              expires_in: response.data.expires_in
+              expires_in: response.data.expires_in,
+              token_type: response.data.token_type
             };
 
             set({
