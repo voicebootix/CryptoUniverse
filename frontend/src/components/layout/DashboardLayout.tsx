@@ -188,7 +188,7 @@ const DashboardLayout: React.FC = () => {
                   <Avatar className="h-8 w-8">
                     <AvatarImage src={user?.avatar_url} alt={user?.full_name} />
                     <AvatarFallback>
-                      {user ? getInitials(user.full_name) : 'U'}
+                      {user && user.full_name ? getInitials(user.full_name) : (user?.email ? getInitials(user.email) : 'U')}
                     </AvatarFallback>
                   </Avatar>
                 </Button>

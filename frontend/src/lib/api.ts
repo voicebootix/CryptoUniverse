@@ -315,8 +315,13 @@ export class WebSocketManager {
 }
 
 // Create WebSocket manager instance
-export const wsManager = new WebSocketManager(
-  `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
-);
+const getWebSocketUrl = () => {
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+  const baseUrl = apiUrl.replace('/api/v1', '').replace('http://', '').replace('https://', '');
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${baseUrl}/ws`;
+};
+
+export const wsManager = new WebSocketManager(getWebSocketUrl());
 
 export default apiClient;
