@@ -189,10 +189,14 @@ class ExchangeApiKey(Base):
     
     # Primary key
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)  # Direct user reference
     account_id = Column(UUID(as_uuid=True), ForeignKey("exchange_accounts.id"), nullable=False, index=True)
     
     # Key identification
     key_name = Column(String(100), nullable=False)  # User-defined name
+    nickname = Column(String(100), nullable=True)  # Display name for UI
+    exchange = Column(String(50), nullable=False)  # binance, kraken, etc.
+    sandbox = Column(Boolean, default=False, nullable=False)  # Testnet mode
     key_type = Column(String(20), default="trading", nullable=False)  # trading, read_only, futures
     
     # Encrypted key data (AES-256 encrypted)
@@ -210,8 +214,13 @@ class ExchangeApiKey(Base):
     is_validated = Column(Boolean, default=False, nullable=False)
     validation_error = Column(Text, nullable=True)
     
+    # Trading settings
+    trading_enabled = Column(Boolean, default=True, nullable=False)
+    daily_volume_limit = Column(Numeric(15, 2), nullable=True)
+    
     # Usage tracking
-    last_used_at = Column(DateTime, nullable=True)
+    last_used = Column(DateTime, nullable=True)  # Backend expects last_used not last_used_at
+    last_used_at = Column(DateTime, nullable=True)  # Keep for compatibility
     total_requests = Column(Integer, default=0, nullable=False)
     failed_requests = Column(Integer, default=0, nullable=False)
     

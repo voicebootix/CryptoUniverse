@@ -197,17 +197,15 @@ async def connect_exchange(
         # Create API key record
         api_key_record = ExchangeApiKey(
             user_id=current_user.id,
-            exchange_account_id=exchange_account.id,
-            exchange=request.exchange,
-            api_key_encrypted=encrypted_api_key,
-            secret_key_encrypted=encrypted_secret_key,
-            passphrase_encrypted=encrypted_passphrase,
-            nickname=request.nickname,
-            sandbox=request.sandbox,
-            is_active=True,
-            trading_enabled=True,
+            account_id=exchange_account.id,  # Fixed field name: account_id not exchange_account_id
+            key_name=request.nickname or f"{request.exchange}_main",
+            encrypted_api_key=encrypted_api_key,  # Fixed field name 
+            encrypted_secret_key=encrypted_secret_key,  # Fixed field name
+            encrypted_passphrase=encrypted_passphrase,  # Fixed field name
             permissions=test_result.get("permissions", []),
-            last_test_at=datetime.utcnow()
+            status=ApiKeyStatus.ACTIVE,
+            is_validated=True,
+            validated_at=datetime.utcnow()
         )
         db.add(api_key_record)
         await db.commit()
@@ -265,6 +263,7 @@ async def list_exchange_connections(
     
     try:
         from sqlalchemy import select
+        # Query api keys directly by user_id
         result = await db.execute(
             select(ExchangeApiKey).filter(ExchangeApiKey.user_id == current_user.id)
         )
@@ -273,8 +272,8 @@ async def list_exchange_connections(
         connections = []
         for api_key in api_keys:
             try:
-                # Decrypt for display (masked)
-                decrypted_api_key = cipher_suite.decrypt(api_key.api_key_encrypted.encode()).decode()
+                # Decrypt for display (masked)  
+                decrypted_api_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
                 
                 # Get daily volume usage
                 daily_volume = await get_daily_volume_usage(current_user.id, api_key.exchange)
@@ -437,11 +436,11 @@ async def test_exchange_connection_endpoint(
             )
         
         # Decrypt API keys
-        decrypted_api_key = cipher_suite.decrypt(api_key.api_key_encrypted.encode()).decode()
-        decrypted_secret_key = cipher_suite.decrypt(api_key.secret_key_encrypted.encode()).decode()
+        decrypted_api_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
+        decrypted_secret_key = cipher_suite.decrypt(api_key.encrypted_secret_key.encode()).decode()
         decrypted_passphrase = None
-        if api_key.passphrase_encrypted:
-            decrypted_passphrase = cipher_suite.decrypt(api_key.passphrase_encrypted.encode()).decode()
+        if api_key.encrypted_passphrase:
+            decrypted_passphrase = cipher_suite.decrypt(api_key.encrypted_passphrase.encode()).decode()
         
         # Test connection
         start_time = datetime.utcnow()
