@@ -97,12 +97,38 @@ class OAuthService:
                 detail=f"Unsupported OAuth provider: {provider}"
             )
         
+        # Generate secure state token
+        state_token = secrets.token_urlsafe(32)
+        
+        # Store state in database for validation
+        if db:
+            oauth_state = OAuthState(
+                state_token=state_token,
+                provider=provider,
+                redirect_url=redirect_url,
+                ip_address=ip_address or client_request.client.host,
+                user_agent=user_agent or client_request.headers.get("user-agent", ""),
+                expires_at=datetime.utcnow() + timedelta(minutes=10)  # 10 minute expiry
+            )
+            db.add(oauth_state)
+            await db.commit()
+        
         # Use the correct redirect URI for the OAuth provider
-        redirect_uri = f"{settings.API_V1_PREFIX}/auth/oauth/callback/google"
-
-        # Let authlib handle the URL generation
-        response = await self.oauth.google.authorize_redirect(client_request, redirect_uri)
-        return response.headers['location']
+        redirect_uri = f"{settings.BASE_URL}/api/v1/auth/oauth/callback/google"
+        
+        # Build OAuth URL manually with our state
+        params = {
+            'client_id': settings.GOOGLE_CLIENT_ID,
+            'redirect_uri': redirect_uri,
+            'scope': 'openid email profile',
+            'response_type': 'code',
+            'state': state_token,
+            'access_type': 'offline',
+            'prompt': 'consent'
+        }
+        
+        oauth_url = f"https://accounts.google.com/o/oauth2/auth?{urlencode(params)}"
+        return oauth_url
     
     async def handle_oauth_callback(
         self,
