@@ -269,7 +269,9 @@ const ExchangesPage: React.FC = () => {
       <ExchangeConnectionModal
         isOpen={showConnectionModal}
         onClose={() => setShowConnectionModal(false)}
-        onConnect={actions.connectExchange}
+        onConnect={async (request) => {
+          await actions.connectExchange(request);
+        }}
         connecting={connecting}
       />
     </motion.div>

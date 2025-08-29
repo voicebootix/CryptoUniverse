@@ -83,7 +83,7 @@ export const useExchanges = () => {
         setExchanges(mappedExchanges);
         
         // Fetch balances for connected exchanges
-        for (const exchange of mappedExchanges.filter(e => e.is_active)) {
+        for (const exchange of mappedExchanges.filter((e: any) => e.is_active)) {
           await fetchExchangeBalances(exchange.exchange);
         }
       }
