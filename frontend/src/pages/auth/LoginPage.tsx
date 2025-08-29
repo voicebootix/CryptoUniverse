@@ -119,21 +119,18 @@ const LoginPage: React.FC = () => {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
       <div className="min-h-screen flex">
         {/* Left Side - Branding & Features */}
-        <div className="hidden lg:flex lg:flex-col lg:justify-center flex-1 relative overflow-hidden">
+        <div className="hidden lg:flex lg:flex-col lg:justify-center flex-1 relative overflow-hidden px-8 py-12">
           {/* Background Effects */}
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-600/20 via-purple-600/25 to-indigo-600/20" />
-          <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/10 via-transparent to-blue-500/10" />
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-gradient-to-r from-blue-500/15 to-purple-500/15 rounded-full blur-3xl animate-pulse" />
-          <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-gradient-to-l from-purple-600/15 to-pink-500/15 rounded-full blur-3xl" />
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-purple-600/10 to-pink-600/10" />
+          <div className="absolute top-20 left-20 w-48 h-48 bg-blue-500/5 rounded-full blur-3xl" />
+          <div className="absolute bottom-20 right-20 w-64 h-64 bg-purple-500/5 rounded-full blur-3xl" />
           
-          {/* Content Container */}
-          <div className="relative z-10 px-8 xl:px-16 py-12">
-            <motion.div
-              initial={{ opacity: 0, x: -50 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.8 }}
-              className="max-w-lg mx-auto"
-            >
+          <motion.div
+            initial={{ opacity: 0, x: -50 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.8 }}
+            className="relative z-10 max-w-lg mx-auto"
+          >
               {/* Logo & Title */}
               <div className="mb-12">
                 <div className="flex items-center mb-6">
@@ -262,7 +259,6 @@ const LoginPage: React.FC = () => {
               </motion.div>
             </motion.div>
           </div>
-        </div>
 
         {/* Right Side - Login Form */}
         <div className="flex flex-col justify-center flex-1 px-4 py-12 sm:px-6 lg:px-8 xl:px-12">
