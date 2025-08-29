@@ -91,13 +91,6 @@ const DashboardLayout: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Emergency logout button for debugging */}
-      <div className="fixed top-2 right-2 z-50">
-        <Button onClick={handleLogout} variant="destructive" size="sm">
-          Emergency Logout
-        </Button>
-      </div>
-      
       {/* Mobile sidebar overlay */}
       <AnimatePresence>
         {sidebarOpen && (
@@ -176,6 +169,17 @@ const DashboardLayout: React.FC = () => {
                 System Online
               </span>
             </div>
+
+            {/* Emergency logout button */}
+            <Button 
+              onClick={handleLogout} 
+              variant="outline" 
+              size="sm"
+              className="hidden sm:flex items-center gap-2 text-xs h-8 px-3 border-destructive/20 text-destructive hover:bg-destructive hover:text-destructive-foreground"
+            >
+              <LogOut className="h-3 w-3" />
+              <span className="hidden md:inline">Emergency Logout</span>
+            </Button>
 
             {/* Notifications */}
             <Button variant="ghost" size="icon" className="relative">
