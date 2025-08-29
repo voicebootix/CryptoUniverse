@@ -119,11 +119,16 @@ const LoginPage: React.FC = () => {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
       <div className="min-h-screen flex">
         {/* Left Side - Branding & Features */}
-        <div className="hidden lg:flex lg:flex-col lg:justify-center flex-1 relative overflow-hidden px-8 py-12">
+        <div className="hidden lg:flex lg:flex-col lg:justify-center flex-1 relative overflow-hidden">
           {/* Background Effects */}
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-purple-600/10 to-pink-600/10" />
-          <div className="absolute top-20 left-20 w-48 h-48 bg-blue-500/5 rounded-full blur-3xl" />
-          <div className="absolute bottom-20 right-20 w-64 h-64 bg-purple-500/5 rounded-full blur-3xl" />
+          <div className="absolute inset-0 bg-gradient-to-br from-indigo-600 via-purple-600 to-violet-700" />
+          <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/30 via-purple-500/20 to-pink-500/30" />
+          <div className="absolute top-10 left-10 w-72 h-72 bg-gradient-to-r from-blue-400/40 to-cyan-400/40 rounded-full blur-3xl animate-pulse" />
+          <div className="absolute bottom-10 right-10 w-80 h-80 bg-gradient-to-l from-purple-400/40 to-pink-400/40 rounded-full blur-3xl" />
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-gradient-to-r from-violet-400/20 to-purple-400/20 rounded-full blur-3xl" />
+          
+          {/* Content Container */}
+          <div className="relative z-10 px-8 xl:px-12 py-12">
           
           <motion.div
             initial={{ opacity: 0, x: -50 }}
@@ -259,6 +264,7 @@ const LoginPage: React.FC = () => {
               </motion.div>
             </motion.div>
           </div>
+        </div>
 
         {/* Right Side - Login Form */}
         <div className="flex flex-col justify-center flex-1 px-4 py-12 sm:px-6 lg:px-8 xl:px-12">
