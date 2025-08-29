@@ -163,7 +163,7 @@ export const marketAPI = {
 
 export const exchangesAPI = {
   getConnected: () =>
-    apiClient.get('/exchanges'),
+    apiClient.get('/exchanges/list'),
   
   connect: (exchange: string, credentials: any) =>
     apiClient.post('/exchanges/connect', { exchange, ...credentials }),
@@ -174,8 +174,8 @@ export const exchangesAPI = {
   testConnection: (exchangeId: string) =>
     apiClient.post(`/exchanges/${exchangeId}/test`),
   
-  getBalances: (exchangeId?: string) =>
-    apiClient.get('/exchanges/balances', { params: { exchange_id: exchangeId } }),
+  getBalances: (exchange: string) =>
+    apiClient.get(`/exchanges/${exchange}/balances`),
 };
 
 export const adminAPI = {

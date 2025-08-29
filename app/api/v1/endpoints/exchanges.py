@@ -33,7 +33,26 @@ router = APIRouter()
 trade_executor = TradeExecutionService()
 
 # Encryption for API keys
-encryption_key = settings.ENCRYPTION_KEY.encode() if hasattr(settings, 'ENCRYPTION_KEY') else Fernet.generate_key()
+def get_encryption_key():
+    """Get or generate a consistent encryption key."""
+    if hasattr(settings, 'ENCRYPTION_KEY') and settings.ENCRYPTION_KEY:
+        return settings.ENCRYPTION_KEY.encode()
+    else:
+        # Use SECRET_KEY as base for encryption key to ensure consistency
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+        import base64
+        
+        # Generate consistent key from SECRET_KEY
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=b'cryptouniverse_salt',  # Fixed salt for consistency
+            iterations=100000,
+        )
+        return base64.urlsafe_b64encode(kdf.derive(settings.SECRET_KEY.encode()))
+
+encryption_key = get_encryption_key()
 cipher_suite = Fernet(encryption_key)
 
 
@@ -247,28 +266,54 @@ async def list_exchange_connections(
         
         connections = []
         for api_key in api_keys:
-            # Decrypt for display (masked)
-            decrypted_api_key = cipher_suite.decrypt(api_key.api_key_encrypted.encode()).decode()
-            
-            # Get daily volume usage
-            daily_volume = await get_daily_volume_usage(current_user.id, api_key.exchange)
-            
-            connection = ExchangeApiKeyResponse(
-                id=str(api_key.id),
-                exchange=api_key.exchange,
-                nickname=api_key.nickname,
-                api_key_masked=mask_api_key(decrypted_api_key),
-                is_active=api_key.is_active,
-                trading_enabled=api_key.trading_enabled,
-                sandbox=api_key.sandbox,
-                created_at=api_key.created_at,
-                last_used=api_key.last_used,
-                permissions=api_key.permissions or [],
-                connection_status="connected" if api_key.is_active else "inactive",
-                daily_volume_limit=api_key.daily_volume_limit,
-                daily_volume_used=daily_volume
-            )
-            connections.append(connection)
+            try:
+                # Decrypt for display (masked)
+                decrypted_api_key = cipher_suite.decrypt(api_key.api_key_encrypted.encode()).decode()
+                
+                # Get daily volume usage
+                daily_volume = await get_daily_volume_usage(current_user.id, api_key.exchange)
+                
+                connection = ExchangeApiKeyResponse(
+                    id=str(api_key.id),
+                    exchange=api_key.exchange,
+                    nickname=api_key.nickname,
+                    api_key_masked=mask_api_key(decrypted_api_key),
+                    is_active=api_key.is_active,
+                    trading_enabled=api_key.trading_enabled,
+                    sandbox=api_key.sandbox,
+                    created_at=api_key.created_at,
+                    last_used=api_key.last_used,
+                    permissions=api_key.permissions or [],
+                    connection_status="connected" if api_key.is_active else "inactive",
+                    daily_volume_limit=api_key.daily_volume_limit,
+                    daily_volume_used=daily_volume
+                )
+                connections.append(connection)
+                
+            except Exception as e:
+                logger.error(
+                    f"Failed to decrypt API key for exchange {api_key.exchange}",
+                    error=str(e),
+                    api_key_id=str(api_key.id),
+                    user_id=str(current_user.id)
+                )
+                # Still include connection but mark as error
+                connection = ExchangeApiKeyResponse(
+                    id=str(api_key.id),
+                    exchange=api_key.exchange,
+                    nickname=api_key.nickname or f"{api_key.exchange}_corrupted",
+                    api_key_masked="••••••••[ERROR]",
+                    is_active=False,
+                    trading_enabled=False,
+                    sandbox=api_key.sandbox,
+                    created_at=api_key.created_at,
+                    last_used=api_key.last_used,
+                    permissions=[],
+                    connection_status="error",
+                    daily_volume_limit=api_key.daily_volume_limit,
+                    daily_volume_used=0.0
+                )
+                connections.append(connection)
         
         return {
             "connections": connections,
