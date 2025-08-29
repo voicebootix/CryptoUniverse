@@ -26,6 +26,8 @@ services:
           property: connectionString
       - key: CORS_ORIGINS
         value: https://cryptouniverse-frontend.onrender.com
+      - key: BASE_URL
+        value: https://cryptouniverse.onrender.com
       - key: HOST
         value: 0.0.0.0
       - key: PORT
