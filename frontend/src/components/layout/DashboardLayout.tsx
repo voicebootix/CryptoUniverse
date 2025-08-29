@@ -91,6 +91,13 @@ const DashboardLayout: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Emergency logout button for debugging */}
+      <div className="fixed top-2 right-2 z-50">
+        <Button onClick={handleLogout} variant="destructive" size="sm">
+          Emergency Logout
+        </Button>
+      </div>
+      
       {/* Mobile sidebar overlay */}
       <AnimatePresence>
         {sidebarOpen && (
@@ -288,7 +295,7 @@ const SidebarContent: React.FC<SidebarContentProps> = ({
           <Avatar className="h-10 w-10">
             <AvatarImage src={user?.avatar_url} alt={user?.full_name} />
             <AvatarFallback>
-              {user ? getInitials(user.full_name) : 'U'}
+              {user && user.full_name ? getInitials(user.full_name) : (user?.email ? getInitials(user.email) : 'U')}
             </AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
