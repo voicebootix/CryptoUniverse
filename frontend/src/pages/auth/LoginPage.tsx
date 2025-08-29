@@ -108,9 +108,9 @@ const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white flex flex-row">
+    <div className="min-h-screen bg-gray-900 text-white flex">
       {/* Left Side - Branding & Features */}
-      <div className="hidden md:flex md:w-1/2 md:flex-col md:justify-between md:flex-shrink-0 p-6 md:p-8 lg:p-12 bg-gradient-to-br from-purple-900 via-indigo-900 to-black relative overflow-hidden">
+      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-8 lg:p-12 bg-gradient-to-br from-purple-900 via-indigo-900 to-black relative overflow-hidden">
         {/* Background Effects */}
         <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-purple-600/10 to-pink-600/10" />
         <div className="absolute top-20 left-20 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl animate-pulse" />
@@ -187,14 +187,14 @@ const LoginPage: React.FC = () => {
       </div>
 
       {/* Right Side - Login Form */}
-      <div className="flex flex-col justify-center w-full md:w-1/2 md:flex-shrink-0 p-6 md:p-8 lg:p-10 bg-gray-800 overflow-y-auto">
-        <div className="w-full max-w-sm md:max-w-md mx-auto">
+      <div className="flex flex-col justify-center w-full lg:w-1/2 p-8 lg:p-10 bg-gray-800">
+        <div className="w-full max-w-sm md:max-w-md lg:max-w-lg xl:max-w-xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
           >
-            <div className="bg-gray-900 shadow-xl rounded-2xl p-8 border border-gray-700">
+            <div className="bg-gray-900 shadow-xl rounded-2xl p-6 lg:p-8 border border-gray-700">
               {/* Header */}
               <div className="text-center mb-8">
                 <h2 className="text-3xl font-bold text-white mb-2">Welcome Back</h2>
