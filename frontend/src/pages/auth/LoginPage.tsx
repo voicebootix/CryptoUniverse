@@ -117,21 +117,20 @@ const LoginPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
-      <div className="flex min-h-screen">
-        <div className="grid lg:grid-cols-2 w-full max-w-7xl mx-auto lg:gap-8">
-          {/* Left Side - Branding & Features */}
-          <div className="hidden lg:flex lg:items-center relative overflow-hidden">
-            {/* Background Effects */}
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-purple-600/10 to-pink-600/10 rounded-3xl" />
-            <div className="absolute top-10 left-10 w-48 h-48 bg-blue-500/5 rounded-full blur-3xl" />
-            <div className="absolute bottom-10 right-10 w-64 h-64 bg-purple-500/5 rounded-full blur-3xl" />
-            
-            <motion.div
-              initial={{ opacity: 0, x: -50 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.8 }}
-              className="relative z-10 p-8 xl:p-12 w-full"
-            >
+      <div className="min-h-screen flex">
+        {/* Left Side - Branding & Features */}
+        <div className="hidden lg:flex lg:flex-col lg:justify-center flex-1 relative overflow-hidden px-8 py-12">
+          {/* Background Effects */}
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-600/10 via-purple-600/10 to-pink-600/10" />
+          <div className="absolute top-20 left-20 w-48 h-48 bg-blue-500/5 rounded-full blur-3xl" />
+          <div className="absolute bottom-20 right-20 w-64 h-64 bg-purple-500/5 rounded-full blur-3xl" />
+          
+          <motion.div
+            initial={{ opacity: 0, x: -50 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.8 }}
+            className="relative z-10 max-w-lg mx-auto"
+          >
               {/* Logo & Title */}
               <div className="mb-12">
                 <div className="flex items-center mb-6">
@@ -261,17 +260,17 @@ const LoginPage: React.FC = () => {
             </motion.div>
           </div>
 
-          {/* Right Side - Login Form */}
-          <div className="flex items-center justify-center min-h-screen lg:min-h-0 p-4 lg:p-8">
+        {/* Right Side - Login Form */}
+        <div className="flex flex-col justify-center flex-1 px-4 py-12 sm:px-6 lg:px-8 xl:px-12">
+          <div className="w-full max-w-sm mx-auto lg:w-96">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
-              className="w-full max-w-md"
             >
-              <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl p-8 border border-white/20">
+              <div className="bg-white shadow-xl rounded-2xl p-8">
                 {/* Mobile Header */}
-                <div className="text-center mb-8 lg:hidden block">
+                <div className="text-center mb-8 lg:hidden">
                   <div className="flex items-center justify-center mb-6">
                     <div className="w-12 h-12 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center mr-3">
                       <TrendingUp className="w-6 h-6 text-white" />
@@ -322,7 +321,7 @@ const LoginPage: React.FC = () => {
                 )}
 
                 {/* Login Form */}
-                <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+                <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
                   {/* Email Field */}
                   <div className="space-y-2">
                     <Label htmlFor="email" className="text-sm font-medium text-gray-700">
@@ -332,7 +331,7 @@ const LoginPage: React.FC = () => {
                       id="email"
                       type="email"
                       placeholder="Enter your email"
-                      className="h-12 bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500"
+                      className="h-11 bg-white border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                       {...register('email')}
                     />
                     {errors.email && (
@@ -350,7 +349,7 @@ const LoginPage: React.FC = () => {
                         id="password"
                         type={showPassword ? 'text' : 'password'}
                         placeholder="Enter your password"
-                        className="h-12 bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 pr-12"
+                        className="h-11 bg-white border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 pr-12 transition-all"
                         {...register('password')}
                       />
                       <button
@@ -413,7 +412,7 @@ const LoginPage: React.FC = () => {
                   <Button
                     type="submit"
                     disabled={isLoading}
-                    className="w-full h-12 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold text-base"
+                    className="w-full h-11 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium transition-all duration-200 shadow-lg hover:shadow-xl"
                   >
                     {isLoading ? (
                       <div className="flex items-center space-x-2">
@@ -443,7 +442,7 @@ const LoginPage: React.FC = () => {
                     type="button"
                     onClick={handleGoogleLogin}
                     variant="outline"
-                    className="w-full h-12 border-gray-300 hover:bg-gray-50 text-gray-700 font-medium"
+                    className="w-full h-11 border-gray-200 hover:bg-gray-50 text-gray-700 font-medium transition-all duration-200 hover:border-gray-300"
                   >
                     <div className="flex items-center space-x-3">
                       <div className="w-5 h-5 bg-white rounded-full flex items-center justify-center">
