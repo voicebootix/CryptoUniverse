@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Any
 from decimal import Decimal
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
@@ -24,9 +24,10 @@ from app.models.exchange import ExchangeAccount
 from app.models.credit import CreditAccount, CreditTransaction
 from app.services.trade_execution import TradeExecutionService
 from app.services.master_controller import MasterSystemController
-from app.services.portfolio_risk import PortfolioRiskService
+from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
 from app.services.market_analysis_core import MarketAnalysisService
 from app.services.rate_limit import rate_limiter
+from app.services.websocket import manager
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -36,7 +37,7 @@ router = APIRouter()
 # Initialize services
 trade_executor = TradeExecutionService()
 master_controller = MasterSystemController()
-risk_service = PortfolioRiskService()
+risk_service = PortfolioRiskServiceExtended()
 market_analysis = MarketAnalysisService()
 
 
@@ -131,6 +132,27 @@ class SystemStatusResponse(BaseModel):
     risk_level: str
     next_action_eta: Optional[int]
 
+class MarketDataItem(BaseModel):
+    symbol: str
+    price: Decimal
+    change: float
+    volume: str
+
+class MarketOverviewResponse(BaseModel):
+    market_data: List[MarketDataItem]
+
+class RecentTrade(BaseModel):
+    id: int
+    symbol: str
+    side: str
+    amount: Decimal
+    price: Decimal
+    time: str
+    status: str
+    pnl: Decimal
+
+class RecentTradesResponse(BaseModel):
+    recent_trades: List[RecentTrade]
 
 # Trading Endpoints
 @router.post("/execute", response_model=TradeResponse)
@@ -496,6 +518,109 @@ async def get_trading_system_status(
             detail=f"Failed to get system status: {str(e)}"
         )
 
+
+@router.get("/market-overview", response_model=MarketOverviewResponse)
+async def get_market_overview(
+    current_user: User = Depends(get_current_user)
+):
+    """Get market overview data."""
+    await rate_limiter.check_rate_limit(
+        key="market:overview",
+        limit=100,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    try:
+        # In a real application, this data would come from the MarketAnalysisService
+        mock_market_data = [
+            {"symbol": "BTC", "price": Decimal("50000"), "change": 2.5, "volume": "2.1B"},
+            {"symbol": "ETH", "price": Decimal("2400"), "change": -1.2, "volume": "1.8B"},
+            {"symbol": "SOL", "price": Decimal("50"), "change": 5.8, "volume": "450M"},
+            {"symbol": "ADA", "price": Decimal("0.45"), "change": 3.2, "volume": "320M"},
+            {"symbol": "DOT", "price": Decimal("8.50"), "change": -0.8, "volume": "180M"},
+        ]
+        return MarketOverviewResponse(market_data=mock_market_data)
+    except Exception as e:
+        logger.error("Market overview retrieval failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get market overview: {str(e)}"
+        )
+
+@router.get("/recent-trades", response_model=RecentTradesResponse)
+async def get_recent_trades(
+    current_user: User = Depends(get_current_user)
+):
+    """Get recent trading activity."""
+    await rate_limiter.check_rate_limit(
+        key="trades:recent",
+        limit=100,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    try:
+        # In a real application, this data would come from the database
+        mock_recent_trades = [
+            {
+                "id": 1,
+                "symbol": "BTC",
+                "side": "buy",
+                "amount": Decimal("0.1"),
+                "price": Decimal("49800"),
+                "time": "2 min ago",
+                "status": "completed",
+                "pnl": Decimal("120.50"),
+            },
+            {
+                "id": 2,
+                "symbol": "ETH",
+                "side": "sell",
+                "amount": Decimal("2.0"),
+                "price": Decimal("2420"),
+                "time": "15 min ago",
+                "status": "completed",
+                "pnl": Decimal("-45.20"),
+            },
+            {
+                "id": 3,
+                "symbol": "SOL",
+                "side": "buy",
+                "amount": Decimal("50"),
+                "price": Decimal("48.50"),
+                "time": "1 hour ago",
+                "status": "pending",
+                "pnl": Decimal("0"),
+            },
+        ]
+        return RecentTradesResponse(recent_trades=mock_recent_trades)
+    except Exception as e:
+        logger.error("Recent trades retrieval failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get recent trades: {str(e)}"
+        )
+
+@router.websocket("/ws")
+async def websocket_endpoint(
+    websocket: WebSocket,
+    db: Session = Depends(get_database)
+):
+    # Accept connection first
+    await websocket.accept()
+    
+    # For now, connect without authentication
+    # TODO: Implement WebSocket token authentication via query params
+    user_id = "anonymous"  # Temporary
+    await manager.connect(websocket, user_id)
+    
+    try:
+        while True:
+            # Keep the connection alive
+            data = await websocket.receive_text()
+            # Echo back for testing
+            await websocket.send_text(f"Echo: {data}")
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, user_id)
 
 @router.post("/stop-all")
 async def emergency_stop_all_trading(

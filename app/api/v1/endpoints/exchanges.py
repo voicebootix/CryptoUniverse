@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from cryptography.fernet import Fernet
 
 from app.core.config import get_settings
@@ -125,7 +125,7 @@ class ExchangeTestResponse(BaseModel):
 async def connect_exchange(
     request: ExchangeApiKeyRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Connect a new exchange account with API keys."""
     
@@ -186,7 +186,9 @@ async def connect_exchange(
         exchange_account = ExchangeAccount(
             user_id=current_user.id,
             exchange_name=request.exchange,  # Use exchange_name field as defined in model
-            account_name=request.nickname or f"{request.exchange}_main"
+            account_name=request.nickname or f"{request.exchange}_main",
+            status=ExchangeStatus.ACTIVE,  # Set to ACTIVE so balance queries work
+            trading_enabled=True
         )
         db.add(exchange_account)
         await db.flush()  # Get the ID
@@ -252,7 +254,7 @@ async def connect_exchange(
 @router.get("/list")
 async def list_exchange_connections(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """List all connected exchange accounts."""
     
@@ -353,7 +355,7 @@ async def update_exchange_connection(
     api_key_id: str,
     request: ExchangeApiKeyUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Update exchange connection settings."""
     
@@ -413,7 +415,7 @@ async def update_exchange_connection(
 async def test_exchange_connection_endpoint(
     api_key_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Test exchange connection and permissions."""
     
@@ -425,12 +427,14 @@ async def test_exchange_connection_endpoint(
     )
     
     try:
-        # Get API key record
+        # Get API key record through account relationship
         from sqlalchemy import select
         result = await db.execute(
-            select(ExchangeApiKey).filter(
+            select(ExchangeApiKey)
+            .join(ExchangeAccount, ExchangeApiKey.account_id == ExchangeAccount.id)
+            .filter(
                 ExchangeApiKey.id == api_key_id,
-                ExchangeApiKey.user_id == current_user.id
+                ExchangeAccount.user_id == current_user.id
             )
         )
         api_key = result.scalar_one_or_none()
@@ -501,7 +505,7 @@ async def test_exchange_connection_endpoint(
 async def get_exchange_balances(
     exchange: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Get current balances from exchange."""
     
@@ -539,7 +543,7 @@ async def get_exchange_balances(
             )
         
         # Get fresh balances from exchange
-        balances = await fetch_exchange_balances(api_key)
+        balances = await fetch_exchange_balances(api_key, db)
         
         # Calculate total USD value
         total_value_usd = sum(
@@ -547,7 +551,7 @@ async def get_exchange_balances(
         )
         
         # Update balance records in database
-        await update_balance_records(current_user.id, exchange, balances)
+        await update_balance_records(current_user.id, exchange, balances, db)
         
         return ExchangeBalanceResponse(
             exchange=exchange,
@@ -570,7 +574,7 @@ async def get_exchange_balances(
 async def disconnect_exchange(
     api_key_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Disconnect and remove exchange connection."""
     
@@ -691,41 +695,167 @@ async def test_exchange_connection(
         }
 
 
-async def fetch_exchange_balances(api_key: ExchangeApiKey) -> List[Dict[str, Any]]:
+async def fetch_exchange_balances(api_key: ExchangeApiKey, db: AsyncSession) -> List[Dict[str, Any]]:
     """Fetch balances from exchange API."""
     try:
-        # This would use the actual exchange APIs
-        # For now, return mock data
+        # Get the exchange account to determine exchange type
+        from sqlalchemy import select
         
-        mock_balances = [
-            {
-                "asset": "BTC",
-                "free": 0.5,
-                "locked": 0.0,
-                "total": 0.5,
-                "value_usd": 25000.0
-            },
-            {
-                "asset": "ETH", 
-                "free": 10.0,
-                "locked": 2.0,
-                "total": 12.0,
-                "value_usd": 24000.0
-            },
-            {
-                "asset": "USDT",
-                "free": 5000.0,
-                "locked": 0.0,
-                "total": 5000.0,
-                "value_usd": 5000.0
-            }
-        ]
+        result = await db.execute(
+            select(ExchangeAccount).filter(ExchangeAccount.id == api_key.account_id)
+        )
+        account = result.scalar_one_or_none()
         
-        return mock_balances
+        if not account:
+            logger.error(f"No account found for API key {api_key.id}")
+            return []
+        
+        exchange_name = account.exchange_name.lower()
+        
+        # Decrypt API credentials
+        decrypted_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
+        decrypted_secret = cipher_suite.decrypt(api_key.encrypted_secret_key.encode()).decode()
+        
+        if exchange_name == "binance":
+            return await fetch_binance_balances(decrypted_key, decrypted_secret)
+        elif exchange_name == "coinbase":
+            return await fetch_coinbase_balances(decrypted_key, decrypted_secret)
+        else:
+            logger.warning(f"Exchange {exchange_name} not yet supported for live balance fetching")
+            # Return empty list for unsupported exchanges
+            return []
         
     except Exception as e:
-        logger.error(f"Failed to fetch balances for {api_key.exchange}", error=str(e))
+        logger.error(f"Failed to fetch balances for API key {api_key.id}", error=str(e))
         return []
+
+
+async def fetch_binance_balances(api_key: str, api_secret: str) -> List[Dict[str, Any]]:
+    """Fetch balances from Binance API."""
+    import aiohttp
+    import hmac
+    import hashlib
+    import time
+    from urllib.parse import urlencode
+    
+    try:
+        base_url = "https://api.binance.com"
+        endpoint = "/api/v3/account"
+        timestamp = int(time.time() * 1000)
+        
+        # Prepare query parameters
+        params = {
+            "timestamp": timestamp
+        }
+        
+        # Create signature
+        query_string = urlencode(params)
+        signature = hmac.new(
+            api_secret.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        params["signature"] = signature
+        
+        headers = {
+            "X-MBX-APIKEY": api_key
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{base_url}{endpoint}",
+                params=params,
+                headers=headers
+            ) as response:
+                if response.status != 200:
+                    logger.error(f"Binance API error: {response.status}")
+                    return []
+                
+                data = await response.json()
+                balances = []
+                
+                # Get current prices for USD conversion
+                prices = await get_binance_prices(list(set([b["asset"] for b in data.get("balances", []) if float(b.get("free", 0)) + float(b.get("locked", 0)) > 0])))
+                
+                # Process balances
+                for balance in data.get("balances", []):
+                    free = float(balance.get("free", 0))
+                    locked = float(balance.get("locked", 0))
+                    total = free + locked
+                    
+                    # Only include assets with non-zero balance
+                    if total > 0:
+                        asset = balance.get("asset")
+                        usd_price = prices.get(asset, 0.0)
+                        value_usd = total * usd_price
+                        
+                        balances.append({
+                            "asset": asset,
+                            "free": free,
+                            "locked": locked,
+                            "total": total,
+                            "value_usd": round(value_usd, 2)
+                        })
+                
+                return balances
+                
+    except Exception as e:
+        logger.error(f"Failed to fetch Binance balances: {str(e)}")
+        return []
+
+
+async def get_binance_prices(assets: List[str]) -> Dict[str, float]:
+    """Get current USD prices for assets from Binance."""
+    import aiohttp
+    
+    if not assets:
+        return {}
+    
+    try:
+        # Binance price ticker endpoint (public, no auth needed)
+        base_url = "https://api.binance.com"
+        endpoint = "/api/v3/ticker/price"
+        
+        prices = {}
+        
+        async with aiohttp.ClientSession() as session:
+            # Get all price tickers
+            async with session.get(f"{base_url}{endpoint}") as response:
+                if response.status != 200:
+                    logger.error(f"Binance price API error: {response.status}")
+                    return {}
+                
+                data = await response.json()
+                
+                # Create price mapping
+                for ticker in data:
+                    symbol = ticker.get("symbol", "")
+                    price = float(ticker.get("price", 0))
+                    
+                    # Match assets to USDT pairs (most common)
+                    for asset in assets:
+                        if symbol == f"{asset}USDT":
+                            prices[asset] = price
+                        elif asset == "USDT":
+                            prices["USDT"] = 1.0  # USDT is always $1
+                        elif asset == "BUSD":
+                            prices["BUSD"] = 1.0  # BUSD is always $1
+                        elif asset == "USDC":
+                            prices["USDC"] = 1.0  # USDC is always $1
+                
+                return prices
+                
+    except Exception as e:
+        logger.error(f"Failed to fetch Binance prices: {str(e)}")
+        return {}
+
+
+async def fetch_coinbase_balances(api_key: str, api_secret: str) -> List[Dict[str, Any]]:
+    """Fetch balances from Coinbase API."""
+    # TODO: Implement Coinbase API integration
+    logger.warning("Coinbase balance fetching not yet implemented")
+    return []
 
 
 async def sync_exchange_balances(user_id: str, exchange: str, api_key_id: str):
@@ -737,12 +867,49 @@ async def sync_exchange_balances(user_id: str, exchange: str, api_key_id: str):
         logger.error("Balance sync failed", error=str(e))
 
 
-async def update_balance_records(user_id: str, exchange: str, balances: List[Dict]):
+async def update_balance_records(user_id: str, exchange: str, balances: List[Dict], db: AsyncSession):
     """Update balance records in database."""
     try:
-        # This would update the ExchangeBalance table
-        logger.info(f"Updating balance records for user {user_id}, exchange {exchange}")
+        from sqlalchemy import select, delete
+        from decimal import Decimal
+        
+        # Get the exchange account
+        account_result = await db.execute(
+            select(ExchangeAccount).filter(
+                ExchangeAccount.user_id == user_id,
+                ExchangeAccount.exchange_name == exchange
+            )
+        )
+        account = account_result.scalar_one_or_none()
+        
+        if not account:
+            logger.error(f"No exchange account found for user {user_id}, exchange {exchange}")
+            return
+        
+        # Delete existing balance records for this account
+        await db.execute(
+            delete(ExchangeBalance).filter(ExchangeBalance.account_id == account.id)
+        )
+        
+        # Insert new balance records
+        for balance in balances:
+            if balance.get("total", 0) > 0:  # Only store non-zero balances
+                exchange_balance = ExchangeBalance(
+                    account_id=account.id,
+                    symbol=balance.get("asset", ""),
+                    total_balance=Decimal(str(balance.get("total", 0))),
+                    available_balance=Decimal(str(balance.get("free", 0))),
+                    locked_balance=Decimal(str(balance.get("locked", 0))),
+                    usd_value=Decimal(str(balance.get("value_usd", 0))),
+                    last_updated=datetime.utcnow()
+                )
+                db.add(exchange_balance)
+        
+        await db.commit()
+        logger.info(f"Updated {len(balances)} balance records for user {user_id}, exchange {exchange}")
+        
     except Exception as e:
+        await db.rollback()
         logger.error("Balance update failed", error=str(e))
 
 

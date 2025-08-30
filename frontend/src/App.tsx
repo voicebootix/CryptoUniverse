@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 // import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { Toaster } from '@/components/ui/toaster';
 import { useAuthStore, useIsAuthenticated } from '@/store/authStore';
-import { wsManager } from '@/lib/api';
 
 // Layout Components
 import AuthLayout from '@/components/layout/AuthLayout';
@@ -90,32 +89,8 @@ const App: React.FC = () => {
   const user = useAuthStore((state) => state.user);
   const tokens = useAuthStore((state) => state.tokens);
 
-  // Initialize WebSocket connection for authenticated users
-  useEffect(() => {
-    if (isAuthenticated && tokens?.access_token) {
-      wsManager.connect(tokens.access_token);
-      
-      // Subscribe to system-wide events
-      const unsubscribeStatus = wsManager.subscribe('system_status', (data) => {
-        console.log('System status update:', data);
-      });
-
-      const unsubscribePrice = wsManager.subscribe('price_update', (data) => {
-        console.log('Price update:', data);
-      });
-
-      const unsubscribeTrade = wsManager.subscribe('trade_update', (data) => {
-        console.log('Trade update:', data);
-      });
-
-      return () => {
-        unsubscribeStatus();
-        unsubscribePrice();
-        unsubscribeTrade();
-        wsManager.disconnect();
-      };
-    }
-  }, [isAuthenticated, tokens]);
+  // TODO: Initialize WebSocket connection for authenticated users
+  // This will be implemented once the basic API client is working
 
   return (
     <QueryClientProvider client={queryClient}>

@@ -28,49 +28,9 @@ import { Badge } from '@/components/ui/badge';
 import { useAuthStore, useUser } from '@/store/authStore';
 import { formatCurrency, formatPercentage, formatNumber, getColorForChange, getBackgroundColorForChange } from '@/lib/utils';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, BarChart, Bar } from 'recharts';
+import { usePortfolioStore } from '@/hooks/usePortfolio';
 
-// Mock data - in production this would come from real APIs
-const portfolioData = {
-  totalValue: 54250.75,
-  availableBalance: 12500.00,
-  totalPnL: 1175.25,
-  dailyPnL: 475.25,
-  dailyPnLPercent: 0.88,
-  totalPnLPercent: 2.21,
-  positions: [
-    {
-      symbol: 'BTC',
-      name: 'Bitcoin',
-      amount: 0.5,
-      value: 25000.00,
-      price: 50000.00,
-      change24h: 2.5,
-      unrealizedPnL: 1250.50,
-      side: 'long' as const,
-    },
-    {
-      symbol: 'ETH',
-      name: 'Ethereum',
-      amount: 10.0,
-      value: 24000.00,
-      price: 2400.00,
-      change24h: -1.2,
-      unrealizedPnL: -200.25,
-      side: 'long' as const,
-    },
-    {
-      symbol: 'SOL',
-      name: 'Solana',
-      amount: 100.0,
-      value: 5000.00,
-      price: 50.00,
-      change24h: 5.8,
-      unrealizedPnL: 125.00,
-      side: 'long' as const,
-    },
-  ],
-};
-
+// Mock data for charts and tables that are not yet connected
 const performanceData = [
   { time: '00:00', value: 52800 },
   { time: '04:00', value: 53100 },
@@ -125,26 +85,65 @@ const COLORS = ['#22c55e', '#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6'];
 
 const TradingDashboard: React.FC = () => {
   const user = useUser();
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const { 
+    totalValue,
+    availableBalance,
+    totalPnL,
+    dailyPnL,
+    dailyPnLPercent,
+    totalPnLPercent,
+    positions,
+    performanceHistory,
+    marketData,
+    recentTrades,
+    isLoading,
+    error,
+    fetchPortfolio,
+    fetchStatus,
+    fetchMarketData,
+    fetchRecentTrades,
+    connectWebSocket,
+  } = usePortfolioStore();
+  
   const [autonomousMode, setAutonomousMode] = useState(false);
-  const [systemStatus, setSystemStatus] = useState('online');
+
+  useEffect(() => {
+    fetchPortfolio();
+    fetchStatus();
+    fetchMarketData();
+    fetchRecentTrades();
+    connectWebSocket();
+  }, [fetchPortfolio, fetchStatus, fetchMarketData, fetchRecentTrades, connectWebSocket]);
 
   const handleRefresh = async () => {
-    setIsRefreshing(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    setIsRefreshing(false);
+    await Promise.all([fetchPortfolio(), fetchStatus(), fetchMarketData(), fetchRecentTrades()]);
   };
 
   const toggleAutonomousMode = () => {
     setAutonomousMode(!autonomousMode);
   };
 
-  const pieChartData = portfolioData.positions.map((position, index) => ({
+  const pieChartData = positions.map((position, index) => ({
     name: position.symbol,
     value: position.value,
     color: COLORS[index % COLORS.length],
   }));
+
+  if (isLoading && totalValue === 0) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <div className="text-2xl">Loading Portfolio...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <div className="text-2xl text-red-500">Error: {error}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -172,10 +171,10 @@ const TradingDashboard: React.FC = () => {
           <Button
             variant="outline"
             onClick={handleRefresh}
-            disabled={isRefreshing}
+            disabled={isLoading}
             className="gap-2"
           >
-            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
         </div>
@@ -214,16 +213,16 @@ const TradingDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {formatCurrency(portfolioData.totalValue)}
+                {formatCurrency(totalValue)}
               </div>
-              <div className={`flex items-center text-sm ${getColorForChange(portfolioData.dailyPnL)}`}>
-                {portfolioData.dailyPnL > 0 ? (
+              <div className={`flex items-center text-sm ${getColorForChange(dailyPnL)}`}>
+                {dailyPnL > 0 ? (
                   <ArrowUpRight className="h-4 w-4 mr-1" />
                 ) : (
                   <ArrowDownRight className="h-4 w-4 mr-1" />
                 )}
-                {formatCurrency(Math.abs(portfolioData.dailyPnL))} (
-                {formatPercentage(Math.abs(portfolioData.dailyPnLPercent))}) today
+                {formatCurrency(Math.abs(dailyPnL))} (
+                {formatPercentage(Math.abs(dailyPnLPercent))}) today
               </div>
             </CardContent>
           </Card>
@@ -241,7 +240,7 @@ const TradingDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {formatCurrency(portfolioData.availableBalance)}
+                {formatCurrency(availableBalance)}
               </div>
               <p className="text-xs text-muted-foreground">
                 Ready for new positions
@@ -261,17 +260,17 @@ const TradingDashboard: React.FC = () => {
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className={`text-2xl font-bold ${getColorForChange(portfolioData.totalPnL)}`}>
-                {portfolioData.totalPnL > 0 ? '+' : ''}
-                {formatCurrency(portfolioData.totalPnL)}
+              <div className={`text-2xl font-bold ${getColorForChange(totalPnL)}`}>
+                {totalPnL > 0 ? '+' : ''}
+                {formatCurrency(totalPnL)}
               </div>
-              <div className={`flex items-center text-sm ${getColorForChange(portfolioData.totalPnL)}`}>
-                {portfolioData.totalPnL > 0 ? (
+              <div className={`flex items-center text-sm ${getColorForChange(totalPnL)}`}>
+                {totalPnL > 0 ? (
                   <TrendingUp className="h-4 w-4 mr-1" />
                 ) : (
                   <TrendingDown className="h-4 w-4 mr-1" />
                 )}
-                {formatPercentage(Math.abs(portfolioData.totalPnLPercent))} return
+                {formatPercentage(Math.abs(totalPnLPercent))} return
               </div>
             </CardContent>
           </Card>
@@ -321,7 +320,7 @@ const TradingDashboard: React.FC = () => {
             <CardContent>
               <div className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={performanceData}>
+                  <LineChart data={performanceHistory}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                     <XAxis
                       dataKey="time"
@@ -438,7 +437,7 @@ const TradingDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {portfolioData.positions.map((position) => (
+                {positions.map((position) => (
                   <div
                     key={position.symbol}
                     className="flex items-center justify-between p-4 rounded-lg border bg-muted/30"
