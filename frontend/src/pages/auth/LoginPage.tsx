@@ -166,21 +166,21 @@ const LoginPage: React.FC = () => {
         </motion.div>
 
         {/* Main Content - Centered Layout */}
-        <div className="flex-1 flex items-center justify-center px-6 py-12">
-          <div className="w-full max-w-7xl mx-auto">
-            <div className="grid lg:grid-cols-2 gap-16 items-center min-h-[600px]">
+        <div className="flex-1 flex items-center justify-center px-4 py-8">
+          <div className="w-full max-w-6xl mx-auto">
+            <div className="grid lg:grid-cols-5 gap-12 items-center">
               
               {/* Left Side - Feature Summary */}
               <motion.div
                 initial={{ opacity: 0, x: -30 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.6, delay: 0.2 }}
-                className="space-y-10 lg:pr-8"
+                className="lg:col-span-2 space-y-8"
               >
                 {/* Hero Text */}
-                <div className="space-y-6">
+                <div className="space-y-4">
                   <motion.h2
-                    className="text-4xl lg:text-5xl font-bold leading-tight"
+                    className="text-3xl lg:text-4xl font-bold leading-tight"
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3, duration: 0.6 }}
@@ -192,7 +192,7 @@ const LoginPage: React.FC = () => {
                     </span>
                   </motion.h2>
                   <motion.p
-                    className="text-xl text-gray-300 leading-relaxed max-w-lg"
+                    className="text-lg text-gray-300 leading-relaxed"
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.4, duration: 0.6 }}
@@ -206,21 +206,18 @@ const LoginPage: React.FC = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.5, duration: 0.6 }}
-                  className="space-y-6"
+                  className="space-y-4"
                 >
                   {[
-                    { icon: Bot, title: "AI-Powered Trading", desc: "Multi-model consensus with GPT-4, Claude, and Gemini", color: "text-green-400" },
-                    { icon: Globe, title: "Multi-Exchange Support", desc: "Trade across 8+ major exchanges with arbitrage scanning", color: "text-blue-400" },
-                    { icon: Shield, title: "Enterprise Security", desc: "Bank-level encryption with multi-factor authentication", color: "text-purple-400" }
+                    { icon: Bot, title: "AI-Powered Trading", color: "text-green-400" },
+                    { icon: Globe, title: "Multi-Exchange Support", color: "text-blue-400" },
+                    { icon: Shield, title: "Enterprise Security", color: "text-purple-400" }
                   ].map((feature, index) => (
-                    <div key={index} className="flex items-start space-x-4">
-                      <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center flex-shrink-0 mt-1">
-                        <feature.icon className={`w-5 h-5 ${feature.color}`} />
+                    <div key={index} className="flex items-center space-x-3">
+                      <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center">
+                        <feature.icon className={`w-4 h-4 ${feature.color}`} />
                       </div>
-                      <div>
-                        <h3 className="text-white font-semibold text-lg mb-1">{feature.title}</h3>
-                        <p className="text-gray-400 text-sm leading-relaxed">{feature.desc}</p>
-                      </div>
+                      <span className="text-gray-300 font-medium">{feature.title}</span>
                     </div>
                   ))}
                 </motion.div>
@@ -230,52 +227,50 @@ const LoginPage: React.FC = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.6, duration: 0.6 }}
-                  className="grid grid-cols-3 gap-6 p-8 bg-white/5 backdrop-blur-sm rounded-3xl border border-white/10"
+                  className="grid grid-cols-3 gap-4 p-6 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10"
                 >
                   {[
                     { value: "99.9%", label: "Uptime", color: "text-green-400" },
-                    { value: "$100M+", label: "Assets Under Management", color: "text-blue-400" },
+                    { value: "$100M+", label: "AUM", color: "text-blue-400" },
                     { value: "24/7", label: "Trading", color: "text-purple-400" }
                   ].map((stat, index) => (
                     <div key={index} className="text-center">
-                      <div className={`text-2xl font-bold ${stat.color} mb-2`}>{stat.value}</div>
-                      <div className="text-sm text-gray-400 leading-tight">{stat.label}</div>
+                      <div className={`text-xl font-bold ${stat.color} mb-1`}>{stat.value}</div>
+                      <div className="text-xs text-gray-400">{stat.label}</div>
                     </div>
                   ))}
                 </motion.div>
               </motion.div>
 
-              {/* Right Side - Login Form */}
+              {/* Right Side - Login Form (Centered & Larger) */}
               <motion.div
                 initial={{ opacity: 0, x: 30 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.6, delay: 0.4 }}
-                className="flex justify-center lg:justify-end"
+                className="lg:col-span-3 flex justify-center"
               >
-                <div className="w-full max-w-lg">
+                <div className="w-full max-w-md">
                   {/* Glassmorphism Container */}
-                  <div className="relative bg-white/8 backdrop-blur-2xl border border-white/20 rounded-3xl p-10 shadow-2xl">
-                    {/* Background Glow */}
-                    <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 via-purple-500/10 to-pink-500/10 rounded-3xl blur-xl opacity-50" />
+                  <div className="relative bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl">
                     
                     {/* Form Header */}
                     <motion.div
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.6, duration: 0.6 }}
-                      className="relative text-center mb-10"
+                      className="text-center mb-8"
                     >
-                      <div className="flex items-center justify-center mb-6">
+                      <div className="flex items-center justify-center mb-4">
                         <motion.div
-                          className="w-20 h-20 bg-gradient-to-r from-blue-500 to-purple-600 rounded-3xl flex items-center justify-center shadow-2xl"
+                          className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg"
                           whileHover={{ rotate: 5, scale: 1.05 }}
                           transition={{ type: "spring", stiffness: 400, damping: 17 }}
                         >
-                          <KeyRound className="w-10 h-10 text-white" />
+                          <KeyRound className="w-8 h-8 text-white" />
                         </motion.div>
                       </div>
-                      <h2 className="text-4xl font-bold text-white mb-3">Welcome Back</h2>
-                      <p className="text-gray-300 text-lg">Sign in to your trading dashboard</p>
+                      <h2 className="text-3xl font-bold text-white mb-2">Welcome Back</h2>
+                      <p className="text-gray-300">Sign in to your trading dashboard</p>
                     </motion.div>
 
                     {/* Alerts */}
@@ -310,17 +305,17 @@ const LoginPage: React.FC = () => {
                     </AnimatePresence>
 
                     {/* Login Form */}
-                    <form onSubmit={handleSubmit(onSubmit)} className="relative space-y-8">
+                    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
                       
                       {/* Email Field */}
                       <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.7, duration: 0.5 }}
-                        className="space-y-3"
+                        className="space-y-2"
                       >
-                        <Label htmlFor="email" className="text-white font-semibold text-lg flex items-center space-x-3">
-                          <Mail className="w-5 h-5 text-blue-400" />
+                        <Label htmlFor="email" className="text-white font-medium flex items-center space-x-2">
+                          <Mail className="w-4 h-4 text-blue-400" />
                           <span>Email Address</span>
                         </Label>
                         <div className="relative group">
@@ -328,10 +323,9 @@ const LoginPage: React.FC = () => {
                             id="email"
                             type="email"
                             placeholder="Enter your email address"
-                            className="h-14 bg-white/10 border-white/20 focus:border-blue-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl transition-all duration-300 text-lg px-6"
+                            className="h-12 bg-white/10 border-white/20 focus:border-blue-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-xl transition-all duration-300"
                             {...register('email')}
                           />
-                          <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-blue-500/10 via-transparent to-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                         </div>
                         <AnimatePresence>
                           {errors.email && (
@@ -339,7 +333,7 @@ const LoginPage: React.FC = () => {
                               initial={{ opacity: 0, y: -10 }}
                               animate={{ opacity: 1, y: 0 }}
                               exit={{ opacity: 0, y: -10 }}
-                              className="text-sm text-red-400 flex items-center space-x-2 pl-2"
+                              className="text-sm text-red-400 flex items-center space-x-2"
                             >
                               <AlertCircle className="w-4 h-4" />
                               <span>{errors.email.message}</span>
@@ -353,30 +347,29 @@ const LoginPage: React.FC = () => {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.8, duration: 0.5 }}
-                        className="space-y-3"
+                        className="space-y-2"
                       >
-                        <Label htmlFor="password" className="text-white font-semibold text-lg flex items-center space-x-3">
-                          <KeyRound className="w-5 h-5 text-purple-400" />
+                        <Label htmlFor="password" className="text-white font-medium flex items-center space-x-2">
+                          <KeyRound className="w-4 h-4 text-purple-400" />
                           <span>Password</span>
                         </Label>
-                        <div className="relative group">
+                        <div className="relative">
                           <Input
                             id="password"
                             type={showPassword ? 'text' : 'password'}
                             placeholder="Enter your password"
-                            className="h-14 bg-white/10 border-white/20 focus:border-purple-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl pr-16 transition-all duration-300 text-lg px-6"
+                            className="h-12 bg-white/10 border-white/20 focus:border-purple-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-xl pr-12 transition-all duration-300"
                             {...register('password')}
                           />
                           <motion.button
                             type="button"
                             onClick={() => setShowPassword(!showPassword)}
-                            className="absolute inset-y-0 right-0 flex items-center pr-4 text-gray-400 hover:text-white transition-colors duration-200"
+                            className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-white transition-colors duration-200"
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.95 }}
                           >
-                            {showPassword ? <EyeOff className="w-6 h-6" /> : <Eye className="w-6 h-6" />}
+                            {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                           </motion.button>
-                          <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-purple-500/10 via-transparent to-pink-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                         </div>
                         <AnimatePresence>
                           {errors.password && (
@@ -384,7 +377,7 @@ const LoginPage: React.FC = () => {
                               initial={{ opacity: 0, y: -10 }}
                               animate={{ opacity: 1, y: 0 }}
                               exit={{ opacity: 0, y: -10 }}
-                              className="text-sm text-red-400 flex items-center space-x-2 pl-2"
+                              className="text-sm text-red-400 flex items-center space-x-2"
                             >
                               <AlertCircle className="w-4 h-4" />
                               <span>{errors.password.message}</span>
@@ -401,27 +394,24 @@ const LoginPage: React.FC = () => {
                             animate={{ opacity: 1, height: "auto" }}
                             exit={{ opacity: 0, height: 0 }}
                             transition={{ duration: 0.3 }}
-                            className="space-y-3"
+                            className="space-y-2"
                           >
-                            <Label htmlFor="mfa_code" className="text-white font-semibold text-lg flex items-center space-x-3">
-                              <Shield className="w-5 h-5 text-green-400" />
+                            <Label htmlFor="mfa_code" className="text-white font-medium flex items-center space-x-2">
+                              <Shield className="w-4 h-4 text-green-400" />
                               <span>MFA Code</span>
                             </Label>
-                            <div className="relative group">
-                              <Input
-                                id="mfa_code"
-                                type="text"
-                                placeholder="Enter your MFA code"
-                                className="h-14 bg-white/10 border-white/20 focus:border-green-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl transition-all duration-300 text-lg px-6"
-                                {...register('mfa_code')}
-                              />
-                              <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-green-500/10 via-transparent to-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-                            </div>
+                            <Input
+                              id="mfa_code"
+                              type="text"
+                              placeholder="Enter your MFA code"
+                              className="h-12 bg-white/10 border-white/20 focus:border-green-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-xl transition-all duration-300"
+                              {...register('mfa_code')}
+                            />
                             {errors.mfa_code && (
                               <motion.p
                                 initial={{ opacity: 0, y: -10 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                className="text-sm text-red-400 flex items-center space-x-2 pl-2"
+                                className="text-sm text-red-400 flex items-center space-x-2"
                               >
                                 <AlertCircle className="w-4 h-4" />
                                 <span>{errors.mfa_code.message}</span>
@@ -436,22 +426,22 @@ const LoginPage: React.FC = () => {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.9, duration: 0.5 }}
-                        className="flex items-center justify-between pt-2"
+                        className="flex items-center justify-between"
                       >
-                        <div className="flex items-center space-x-4">
+                        <div className="flex items-center space-x-3">
                           <Checkbox
                             id="remember_me"
                             checked={watch('remember_me')}
                             onCheckedChange={(checked) => setValue('remember_me', checked as boolean)}
-                            className="border-white/40 data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 w-5 h-5"
+                            className="border-white/30 data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500"
                           />
-                          <Label htmlFor="remember_me" className="text-gray-300 font-medium text-lg">
+                          <Label htmlFor="remember_me" className="text-gray-300 font-normal">
                             Remember me
                           </Label>
                         </div>
                         <Link
                           to="/auth/forgot-password"
-                          className="text-blue-400 hover:text-blue-300 font-semibold text-lg transition-colors duration-200"
+                          className="text-blue-400 hover:text-blue-300 font-medium transition-colors duration-200"
                         >
                           Forgot password?
                         </Link>
@@ -466,18 +456,17 @@ const LoginPage: React.FC = () => {
                         <Button
                           type="submit"
                           disabled={isLoading}
-                          className="w-full h-16 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white font-bold text-xl rounded-2xl shadow-2xl hover:shadow-3xl transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] relative overflow-hidden"
+                          className="w-full h-12 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98]"
                         >
-                          <div className="absolute inset-0 bg-gradient-to-r from-white/20 via-transparent to-white/20 transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
                           {isLoading ? (
-                            <div className="flex items-center justify-center space-x-3 relative z-10">
-                              <Loader2 className="w-6 h-6 animate-spin" />
+                            <div className="flex items-center justify-center space-x-2">
+                              <Loader2 className="w-5 h-5 animate-spin" />
                               <span>Signing in...</span>
                             </div>
                           ) : (
-                            <div className="flex items-center justify-center space-x-3 relative z-10">
+                            <div className="flex items-center justify-center space-x-2">
                               <span>Sign in</span>
-                              <ArrowRight className="w-6 h-6" />
+                              <ArrowRight className="w-5 h-5" />
                             </div>
                           )}
                         </Button>
@@ -489,13 +478,13 @@ const LoginPage: React.FC = () => {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: 1.1, duration: 0.5 }}
-                      className="relative my-8"
+                      className="relative my-6"
                     >
                       <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-white/30" />
+                        <div className="w-full border-t border-white/20" />
                       </div>
                       <div className="relative flex justify-center">
-                        <span className="px-4 bg-white/10 backdrop-blur-sm text-gray-300 text-lg font-medium rounded-full">
+                        <span className="px-3 bg-white/5 backdrop-blur-sm text-gray-400 text-sm">
                           Or continue with
                         </span>
                       </div>
@@ -506,39 +495,39 @@ const LoginPage: React.FC = () => {
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 1.2, duration: 0.5 }}
-                      className="relative space-y-6"
+                      className="space-y-4"
                     >
                       {/* Google Sign In */}
                       <Button
                         type="button"
                         onClick={handleGoogleLogin}
                         variant="outline"
-                        className="w-full h-14 bg-white/10 border-white/30 hover:bg-white/20 text-white rounded-2xl transition-all duration-300 hover:scale-[1.02] text-lg font-semibold"
+                        className="w-full h-12 bg-white/10 border-white/20 hover:bg-white/15 text-white rounded-xl transition-all duration-300"
                       >
-                        <div className="flex items-center justify-center space-x-4">
-                          <svg className="w-6 h-6" viewBox="0 0 48 48">
+                        <div className="flex items-center justify-center space-x-3">
+                          <svg className="w-5 h-5" viewBox="0 0 48 48">
                             <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"></path>
                             <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"></path>
                             <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"></path>
                             <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"></path>
                           </svg>
-                          <span>Continue with Google</span>
+                          <span className="font-medium">Continue with Google</span>
                         </div>
                       </Button>
 
                       {/* Sign Up Link */}
-                      <div className="text-center pt-4">
-                        <p className="text-gray-300 text-lg mb-4">
+                      <div className="text-center pt-2">
+                        <p className="text-gray-400 text-sm mb-3">
                           Don't have an account?
                         </p>
                         <Button
                           variant="outline"
-                          className="w-full h-14 border-white/30 hover:bg-white/15 text-white rounded-2xl transition-all duration-300 hover:scale-[1.02] text-lg font-semibold"
+                          className="w-full h-12 border-white/20 hover:bg-white/10 text-white rounded-xl transition-all duration-300"
                           onClick={() => navigate('/auth/register')}
                         >
-                          <div className="flex items-center justify-center space-x-3">
-                            <Star className="w-5 h-5" />
-                            <span>Create new account</span>
+                          <div className="flex items-center justify-center space-x-2">
+                            <Star className="w-4 h-4" />
+                            <span className="font-medium">Create new account</span>
                           </div>
                         </Button>
                       </div>
