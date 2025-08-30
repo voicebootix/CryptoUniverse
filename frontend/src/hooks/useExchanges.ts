@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { exchangesAPI } from '@/lib/api';
+import { exchangesAPI } from '@/lib/api/client';
 import { useToast } from '@/components/ui/use-toast';
 
 export interface ExchangeConnection {

@@ -281,6 +281,58 @@ export const healthCheck = async (): Promise<{
   }
 };
 
+// Create specialized API instances using the same auth system
+export const tradingAPI = axios.create({
+  baseURL: `${API_BASE_URL}/trading`,
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+export const exchangesAPI = axios.create({
+  baseURL: `${API_BASE_URL}/exchanges`,
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Apply the same interceptors to specialized instances
+[tradingAPI, exchangesAPI].forEach(instance => {
+  // Add auth interceptor
+  instance.interceptors.request.use(authInterceptor);
+  
+  // Add response interceptor
+  instance.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+      const originalRequest = error.config;
+      
+      if (error.response?.status === 401 && !originalRequest._retry) {
+        originalRequest._retry = true;
+        
+        try {
+          const authStore = useAuthStore.getState();
+          const newToken = await authStore.refreshToken();
+          
+          if (newToken) {
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            return instance(originalRequest);
+          }
+        } catch (refreshError) {
+          console.error('Token refresh failed:', refreshError);
+          const authStore = useAuthStore.getState();
+          authStore.logout();
+          window.location.href = '/login';
+        }
+      }
+      
+      return Promise.reject(error);
+    }
+  );
+});
+
 // Export types for use in other files
 export type APIError = {
   message: string;

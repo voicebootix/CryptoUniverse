@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { tradingAPI } from '@/lib/api'; // Assuming tradingAPI is set up for trading endpoints
+import { tradingAPI } from '@/lib/api/client';
 import { produce, Draft } from 'immer';
 
 interface Position {
