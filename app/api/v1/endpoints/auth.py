@@ -524,7 +524,8 @@ def get_user_permissions(role: UserRole) -> list:
 # OAuth Request/Response Models
 class OAuthUrlRequest(BaseModel):
     provider: str
-    redirect_url: Optional[str] = None
+    redirect_url: str  # Now required
+    is_signup: bool = False  # Flag to indicate registration flow
 
     @field_validator('provider')
     @classmethod
@@ -571,6 +572,7 @@ async def get_oauth_url(
         provider=request.provider,
         client_request=client_request,
         redirect_url=request.redirect_url,
+        is_signup=request.is_signup,
         db=db
     )
     
@@ -586,15 +588,16 @@ async def get_oauth_url(
 
 
 
-@router.get("/oauth/callback/{provider}")
+@router.get("/oauth/callback")
 async def oauth_callback(
-    provider: str,
     code: str,
     state: str,
     client_request: Request,
     db: AsyncSession = Depends(get_database)
 ):
-    """Handle OAuth callback and redirect to frontend with tokens."""
+    """Handle OAuth callback from Google and redirect to frontend with tokens."""
+    # Always use Google as provider since it's our only OAuth provider for now
+    provider = "google"
     
     client_ip = client_request.client.host
     

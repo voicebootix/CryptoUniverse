@@ -1,8 +1,9 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { useAuthStore } from '@/store/authStore';
+import React from "react";
+import { motion } from "framer-motion";
+import { Link } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { useAuthStore } from "@/store/authStore";
+import { apiClient } from "@/lib/api/client";
 
 const RegisterPage: React.FC = () => {
   const clearError = useAuthStore((state) => state.clearError);
@@ -10,29 +11,32 @@ const RegisterPage: React.FC = () => {
   const handleGoogleSignUp = async () => {
     try {
       clearError();
-      
-      // Get Google OAuth URL using the configured API client
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'https://cryptouniverse.onrender.com/api/v1'}/auth/oauth/url`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          provider: 'google',
-          redirect_url: null  // Let backend handle the redirect URL
-        }),
+
+      // Get current URL for the callback
+      const currentOrigin = window.location.origin;
+      const callbackUrl = `${currentOrigin}/auth/callback`;
+
+      // Use the API client which already handles the correct base URL
+      const response = await apiClient.post("/auth/oauth/url", {
+        provider: "google",
+        redirect_url: callbackUrl,
+        is_signup: true, // Add this flag to indicate registration flow
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to get OAuth URL');
+      if (response.status !== 200) {
+        throw new Error("Failed to get OAuth URL");
       }
 
-      const data = await response.json();
-      
+      const data = response.data;
+
+      // Store callback URL and registration intent in session storage
+      sessionStorage.setItem("oauth_callback_url", callbackUrl);
+      sessionStorage.setItem("oauth_intent", "signup");
+
       // Redirect to Google OAuth
       window.location.href = data.authorization_url;
     } catch (error) {
-      console.error('Google signup error:', error);
+      console.error("Google signup error:", error);
     }
   };
 
@@ -82,9 +86,7 @@ const RegisterPage: React.FC = () => {
           <span className="w-full border-t" />
         </div>
         <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-background px-2 text-muted-foreground">
-            Or
-          </span>
+          <span className="bg-background px-2 text-muted-foreground">Or</span>
         </div>
       </div>
 
@@ -93,7 +95,7 @@ const RegisterPage: React.FC = () => {
           Traditional registration is currently by invitation only.
         </p>
         <p className="text-sm text-muted-foreground">
-          Already have an account?{' '}
+          Already have an account?{" "}
           <Link to="/auth/login" className="text-primary hover:underline">
             Sign in here
           </Link>

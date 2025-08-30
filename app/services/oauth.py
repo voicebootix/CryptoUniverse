@@ -85,7 +85,8 @@ class OAuthService:
         self,
         provider: str,
         client_request: Request,
-        redirect_url: Optional[str] = None,
+        redirect_url: str,
+        is_signup: bool = False,
         db: AsyncSession = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None
