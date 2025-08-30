@@ -8,7 +8,7 @@ from fastapi import APIRouter
 import structlog
 
 # Import endpoint routers
-from app.api.v1.endpoints import auth, trading, admin, exchanges
+from app.api.v1.endpoints import auth, trading, admin, exchanges, chat
 
 logger = structlog.get_logger(__name__)
 
@@ -20,6 +20,7 @@ api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(trading.router, prefix="/trading", tags=["Trading"])
 api_router.include_router(exchanges.router, prefix="/exchanges", tags=["Exchange Management"])
 api_router.include_router(admin.router, prefix="/admin", tags=["Administration"])
+api_router.include_router(chat.router, prefix="/chat", tags=["AI Chat"])
 
 @api_router.get("/status")
 async def api_status():
@@ -32,7 +33,8 @@ async def api_status():
             "authentication": "/api/v1/auth",
             "trading": "/api/v1/trading",
             "exchanges": "/api/v1/exchanges", 
-            "administration": "/api/v1/admin"
+            "administration": "/api/v1/admin",
+            "ai_chat": "/api/v1/chat"
         },
         "features": [
             "JWT Authentication with MFA",
