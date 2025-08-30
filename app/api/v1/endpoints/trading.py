@@ -14,7 +14,8 @@ from decimal import Decimal
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, field_validator
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -143,7 +144,7 @@ class MarketOverviewResponse(BaseModel):
     market_data: List[MarketDataItem]
 
 class RecentTrade(BaseModel):
-    id: int
+    id: str  # UUID as string
     symbol: str
     side: str
     amount: Decimal
@@ -595,7 +596,7 @@ async def get_market_overview(
 @router.get("/recent-trades", response_model=RecentTradesResponse)
 async def get_recent_trades(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Get recent trading activity."""
     await rate_limiter.check_rate_limit(
@@ -605,12 +606,13 @@ async def get_recent_trades(
         user_id=str(current_user.id)
     )
     try:
-        # Get real trades from database
-        recent_trades_query = db.query(Trade).filter(
+        # Get real trades from database using async SQLAlchemy 2.0 pattern
+        stmt = select(Trade).where(
             Trade.user_id == current_user.id
         ).order_by(Trade.created_at.desc()).limit(10)
         
-        trades = recent_trades_query.all()
+        result = await db.execute(stmt)
+        trades = result.scalars().all()
         
         if trades:
             trade_list = []

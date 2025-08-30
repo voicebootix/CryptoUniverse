@@ -65,7 +65,8 @@ export const useArbitrageStore = create<ArbitrageState>((set, get) => ({
       
       if (result.success) {
         // Transform API data to match UI expectations
-        const opportunities = (result.data || []).map((opp: any, index: number) => ({
+        const opportunitiesData = result.data?.opportunities || [];
+        const opportunities = opportunitiesData.map((opp: any, index: number) => ({
           id: index + 1,
           pair: opp.symbol || `${symbols.split(',')[0]}/USDT`,
           buyExchange: opp.buy_exchange || 'Unknown',
