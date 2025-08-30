@@ -119,14 +119,15 @@ def create_application() -> FastAPI:
     app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
 
     # Set all CORS enabled origins
-    if settings.cors_origins:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=settings.cors_origins,
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["https://cryptouniverse-frontend.onrender.com"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["*"],
+        max_age=3600,
+    )
 
     # Security middleware
     if settings.ALLOWED_HOSTS:
