@@ -606,6 +606,13 @@ async def oauth_callback(
         window=300  # 10 attempts per 5 minutes
     )
     
+    # Import required modules at function level to avoid scope issues
+    import base64
+    import json
+    from urllib.parse import quote
+    from datetime import datetime
+    from fastapi.responses import RedirectResponse
+    
     try:
         result = await oauth_service.handle_oauth_callback(
             provider=provider,
@@ -614,12 +621,6 @@ async def oauth_callback(
             db=db,
             ip_address=client_ip
         )
-        
-        # Encode the auth data as URL-safe base64
-        import base64
-        import json
-        from urllib.parse import quote
-        from datetime import datetime
         
         # Custom JSON encoder for datetime objects
         def json_serializer(obj):
@@ -643,7 +644,6 @@ async def oauth_callback(
         frontend_url = settings.FRONTEND_URL or "https://cryptouniverse-frontend.onrender.com"
         redirect_url = f"{frontend_url}/auth/callback?success=true&data={auth_data_encoded}"
         
-        from fastapi.responses import RedirectResponse
         return RedirectResponse(url=redirect_url, status_code=302)
         
     except Exception as e:
@@ -654,7 +654,6 @@ async def oauth_callback(
         error_message = quote(str(e))
         redirect_url = f"{frontend_url}/auth/callback?error=true&message={error_message}"
         
-        from fastapi.responses import RedirectResponse
         return RedirectResponse(url=redirect_url, status_code=302)
 
 
