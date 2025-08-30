@@ -23,16 +23,16 @@ Created a unified price service to eliminate duplication between market analysis
 ### Integration Points
 
 #### Market Analysis Integration
-**File**: `app/api/v1/endpoints/trading.py:564-578`
+**File**: `app/api/v1/endpoints/trading.py:563-578`
 - Market overview endpoint now uses unified service as fallback
 - Maintains existing market analysis functionality
 - Adds exchange data as backup source
 
 #### Exchange Integration
-**File**: `app/api/v1/endpoints/exchanges.py:779-781`
-- Portfolio balance calculations use unified service
-- Optimized for portfolio valuation accuracy
-- Maintains existing exchange functionality
+**Note**: Exchange integration maintained separately to avoid conflicts
+- Portfolio balance calculations can optionally use unified service
+- Exchange-specific price fetching preserved for accuracy
+- Integration available for future enhancement
 
 #### Startup Integration
 **File**: `start.py:81-83`

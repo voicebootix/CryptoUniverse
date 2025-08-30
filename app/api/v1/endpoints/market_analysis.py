@@ -31,7 +31,7 @@ router = APIRouter()
 
 # Initialize services
 market_analysis = MarketAnalysisService()
-market_data_feeds = MarketDataFeeds()
+# Use shared singleton from market_data_feeds module
 
 
 # Request/Response Models
@@ -503,7 +503,8 @@ async def get_trending_coins(
     )
     
     try:
-        # Initialize market data feeds if needed
+        # Initialize shared market data feeds if needed
+        from app.services.market_data_feeds import market_data_feeds
         if not hasattr(market_data_feeds, 'redis') or market_data_feeds.redis is None:
             await market_data_feeds.async_init()
         
@@ -613,7 +614,8 @@ async def get_single_crypto_price(
     )
     
     try:
-        # Initialize market data feeds if needed
+        # Initialize shared market data feeds if needed
+        from app.services.market_data_feeds import market_data_feeds
         if not hasattr(market_data_feeds, 'redis') or market_data_feeds.redis is None:
             await market_data_feeds.async_init()
         
@@ -896,6 +898,13 @@ async def test_unified_price_service(
     )
     
     try:
+        # Security guard - only allow in debug mode or for admin users
+        if not settings.DEBUG and current_user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Endpoint not found"
+            )
+        
         from app.services.unified_price_service import unified_price_service
         
         # Initialize if needed

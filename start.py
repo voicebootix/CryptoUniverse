@@ -77,13 +77,13 @@ async def startup_checks():
             from app.services.market_data_feeds import market_data_feeds
             from app.services.health_monitor import health_monitor
             
-            # Initialize unified price service (eliminates duplication)
+            # Initialize health monitor (which will initialize market_data_feeds)
+            await health_monitor.initialize()
+            
+            # Initialize unified price service after health monitor
             from app.services.unified_price_service import unified_price_service
             await unified_price_service.async_init()
             logger.info("✅ Unified price service initialized")
-            
-            # Initialize health monitor
-            await health_monitor.initialize()
             
             # Test primary API
             btc_price = await market_data_feeds.get_real_time_price("BTC")

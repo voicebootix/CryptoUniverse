@@ -325,7 +325,7 @@ class UnifiedPriceService(LoggerMixin):
         try:
             ttl = self.cache_ttl.get(source.value, 60)
             
-            await self.redis.hset(cache_key, {
+            await self.redis.hset(cache_key, mapping={
                 "price": str(price),
                 "timestamp": str(datetime.utcnow().timestamp()),
                 "source": source.value

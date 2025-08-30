@@ -247,7 +247,7 @@ async def execute_manual_trade(
                     reference_id=result.get("trade_id")
                 )
                 db.add(credit_tx)
-                db.commit()
+                await db.commit()
         
         trade_result = result.get("trade_result", {}) or result.get("simulation_result", {})
         
@@ -642,7 +642,7 @@ async def get_recent_trades(
         # Fallback to demo data if no trades exist
         demo_trades = [
             {
-                "id": 0,
+                "id": "0",  # String to match RecentTrade.id type
                 "symbol": "BTC",
                 "side": "buy",
                 "amount": Decimal("0.001"),
