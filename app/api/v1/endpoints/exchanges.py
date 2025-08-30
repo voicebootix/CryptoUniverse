@@ -728,7 +728,7 @@ async def fetch_exchange_balances(api_key: ExchangeApiKey) -> List[Dict[str, Any
                 return []
         
     except Exception as e:
-        logger.error(f"Failed to fetch balances for {api_key.exchange}", error=str(e))
+        logger.error(f"Failed to fetch balances for API key {api_key.id}", error=str(e))
         return []
 
 
