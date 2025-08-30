@@ -14,7 +14,6 @@ import json
 from typing import Optional, Dict, Any
 from urllib.parse import quote
 from fastapi.responses import RedirectResponse
-
 import bcrypt
 import jwt
 import structlog
