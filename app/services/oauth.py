@@ -9,7 +9,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 
 import httpx
 import structlog
@@ -153,8 +153,6 @@ class OAuthService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to generate OAuth URL"
             )
-        return oauth_url
-    
     async def handle_oauth_callback(
         self,
         provider: str,
@@ -262,28 +260,34 @@ class OAuthService:
                         "Content-Type": "application/x-www-form-urlencoded"
                     }
                 )
-            
-            if token_response.status_code != 200:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Failed to exchange OAuth code for tokens"
+                
+                                if token_response.status_code != 200:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Failed to exchange OAuth code for tokens"
+                    )
+                
+                token_data = token_response.json()
+                
+                # Get user info
+                user_info_response = await client.get(
+                    "https://www.googleapis.com/oauth2/v3/userinfo",
+                    headers={"Authorization": f"Bearer {token_data['access_token']}"}
                 )
-            
-            token_data = token_response.json()
-            
-            # Get user info
-            user_info_response = await client.get(
-                "https://www.googleapis.com/oauth2/v3/userinfo",
-                headers={"Authorization": f"Bearer {token_data['access_token']}"}
-            )
-            
-            if user_info_response.status_code != 200:
+                
+                if user_info_response.status_code != 200:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Failed to get user info from Google"
+                    )
+                
+                user_data = user_info_response.json()
+            except Exception as e:
+                logger.error("Google OAuth callback failed", error=str(e))
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Failed to get user info from Google"
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to complete Google OAuth process"
                 )
-            
-            user_data = user_info_response.json()
         
         return {
             "provider": "google",
