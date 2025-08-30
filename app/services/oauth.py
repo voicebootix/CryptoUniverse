@@ -241,11 +241,12 @@ class OAuthService:
     async def _handle_google_callback(self, code: str, db: AsyncSession) -> Dict[str, Any]:
         """Handle Google OAuth callback."""
         
-        redirect_uri = f"{settings.BASE_URL}/api/v1/auth/oauth/callback/google"
+        # Use hardcoded Render URL for production
+        redirect_uri = "https://cryptouniverse.onrender.com/api/v1/auth/oauth/callback/google"
         
-        # Exchange code for tokens manually
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            try:
+        try:
+            # Exchange code for tokens manually
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 token_response = await client.post(
                     "https://oauth2.googleapis.com/token",
                     data={
@@ -261,7 +262,7 @@ class OAuthService:
                     }
                 )
                 
-                                if token_response.status_code != 200:
+                if token_response.status_code != 200:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Failed to exchange OAuth code for tokens"
@@ -282,24 +283,24 @@ class OAuthService:
                     )
                 
                 user_data = user_info_response.json()
-            except Exception as e:
-                logger.error("Google OAuth callback failed", error=str(e))
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to complete Google OAuth process"
-                )
-        
-        return {
-            "provider": "google",
-            "provider_user_id": user_data["sub"],
-            "email": user_data["email"],
-            "name": user_data.get("name", ""),
-            "avatar_url": user_data.get("picture"),
-            "profile_data": user_data,
-            "access_token": token_data["access_token"],
-            "refresh_token": token_data.get("refresh_token"),
-            "token_expires_at": datetime.utcnow() + timedelta(seconds=token_data.get("expires_in", 3600))
-        }
+                
+                return {
+                    "provider": "google",
+                    "provider_user_id": user_data["sub"],
+                    "email": user_data["email"],
+                    "name": user_data.get("name", ""),
+                    "avatar_url": user_data.get("picture"),
+                    "profile_data": user_data,
+                    "access_token": token_data["access_token"],
+                    "refresh_token": token_data.get("refresh_token"),
+                    "token_expires_at": datetime.utcnow() + timedelta(seconds=token_data.get("expires_in", 3600))
+                }
+        except Exception as e:
+            logger.error("Google OAuth callback failed", error=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to complete Google OAuth process"
+            )
     
     async def _find_or_create_user(
         self,
