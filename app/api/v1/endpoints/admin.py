@@ -12,8 +12,8 @@ from typing import Dict, List, Optional, Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, field_validator
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, or_, func, select
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -83,7 +83,8 @@ class UserListResponse(BaseModel):
 # Admin Endpoints
 @router.get("/system/status")
 async def get_system_overview(
-    current_user: User = Depends(require_role([UserRole.ADMIN]))
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_database)
 ):
     """Get comprehensive system status overview."""
     
@@ -100,24 +101,29 @@ async def get_system_overview(
         background_status = await background_manager.health_check()
         
         # Get database metrics
-        db: Session = next(get_database())
-        
         # Count active users
-        active_users = db.query(User).filter(
-            User.status == UserStatus.ACTIVE,
-            User.last_login >= datetime.utcnow() - timedelta(days=7)
-        ).count()
+        result = await db.execute(
+            select(func.count(User.id)).filter(
+                User.status == UserStatus.ACTIVE,
+                User.last_login >= datetime.utcnow() - timedelta(days=7)
+            )
+        )
+        active_users = result.scalar()
         
         # Count trades today
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        trades_today = db.query(Trade).filter(
-            Trade.created_at >= today_start
-        ).count()
+        result = await db.execute(
+            select(func.count(Trade.id)).filter(Trade.created_at >= today_start)
+        )
+        trades_today = result.scalar()
         
         # Calculate volume
-        volume_24h = db.query(func.sum(Trade.amount)).filter(
-            Trade.created_at >= datetime.utcnow() - timedelta(hours=24)
-        ).scalar() or 0
+        result = await db.execute(
+            select(func.sum(Trade.amount)).filter(
+                Trade.created_at >= datetime.utcnow() - timedelta(hours=24)
+            )
+        )
+        volume_24h = result.scalar() or 0
         
         return {
             "system_health": system_status.get("health", "unknown"),
@@ -234,7 +240,7 @@ async def list_users(
     role_filter: Optional[str] = None,
     search: Optional[str] = None,
     current_user: User = Depends(require_role([UserRole.ADMIN])),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """List and filter users."""
     
@@ -323,7 +329,7 @@ async def list_users(
 async def manage_user(
     request: UserManagementRequest,
     current_user: User = Depends(require_role([UserRole.ADMIN])),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Manage user accounts (activate, deactivate, etc.)."""
     
@@ -442,7 +448,7 @@ async def manage_user(
 @router.get("/metrics", response_model=SystemMetricsResponse)
 async def get_detailed_metrics(
     current_user: User = Depends(require_role([UserRole.ADMIN])),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Get detailed system metrics."""
     
@@ -517,7 +523,7 @@ async def get_audit_logs(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     current_user: User = Depends(require_role([UserRole.ADMIN])),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Get audit logs for security and compliance."""
     

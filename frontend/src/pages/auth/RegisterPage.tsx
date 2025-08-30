@@ -12,17 +12,10 @@ const RegisterPage: React.FC = () => {
     try {
       clearError();
 
-      // Use backend URL for callback
-      const backendUrl =
-        import.meta.env.VITE_API_URL ||
-        "https://cryptouniverse.onrender.com/api/v1";
-      const callbackUrl = `${backendUrl}/auth/oauth/callback/google`;
-
-      // Use the API client which already handles the correct base URL
+      // Let backend handle the callback URL
       const response = await apiClient.post("/auth/oauth/url", {
         provider: "google",
-        redirect_url: callbackUrl,
-        is_signup: true, // Add this flag to indicate registration flow
+        is_signup: true,
       });
 
       if (response.status !== 200) {
@@ -31,8 +24,7 @@ const RegisterPage: React.FC = () => {
 
       const data = response.data;
 
-      // Store callback URL and registration intent in session storage
-      sessionStorage.setItem("oauth_callback_url", callbackUrl);
+      // Store registration intent in session storage
       sessionStorage.setItem("oauth_intent", "signup");
 
       // Redirect to Google OAuth

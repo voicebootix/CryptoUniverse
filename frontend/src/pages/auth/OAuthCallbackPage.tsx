@@ -1,37 +1,43 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Loader2, AlertCircle, CheckCircle } from 'lucide-react';
-import { useAuthStore } from '@/store/authStore';
-import { Container } from '@/components/ui/container';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import React, { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { motion } from "framer-motion";
+import { Loader2, AlertCircle, CheckCircle } from "lucide-react";
+import { useAuthStore } from "@/store/authStore";
+import { Container } from "@/components/ui/container";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const OAuthCallbackPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
-  const [error, setError] = useState<string>('');
-  
+  const [status, setStatus] = useState<"loading" | "success" | "error">(
+    "loading"
+  );
+  const [error, setError] = useState<string>("");
+
   const setUser = useAuthStore((state) => state.setUser);
   const setTokens = useAuthStore((state) => state.setTokens);
 
   useEffect(() => {
     const handleOAuthCallback = async () => {
       try {
-        const success = searchParams.get('success');
-        const errorParam = searchParams.get('error');
-        const message = searchParams.get('message');
-        const data = searchParams.get('data');
+        const success = searchParams.get("success");
+        const errorParam = searchParams.get("error");
+        const message = searchParams.get("message");
+        const data = searchParams.get("data");
 
         // Handle OAuth errors from backend redirect
-        if (errorParam === 'true') {
-          setStatus('error');
-          setError(message ? decodeURIComponent(message) : 'OAuth authentication failed');
+        if (errorParam === "true") {
+          setStatus("error");
+          setError(
+            message
+              ? decodeURIComponent(message)
+              : "OAuth authentication failed"
+          );
           return;
         }
 
         // Handle success from backend redirect
-        if (success === 'true' && data) {
+        if (success === "true" && data) {
           try {
             // Decode the base64 encoded auth data
             const decodedData = atob(data);
@@ -45,56 +51,69 @@ const OAuthCallbackPage: React.FC = () => {
               authData.user.last_login = new Date(authData.user.last_login);
             }
 
-            // Store tokens and user data
+            // Store tokens and user data using the auth store
             setTokens({
               access_token: authData.access_token,
               refresh_token: authData.refresh_token,
-              token_type: authData.token_type || 'bearer',
-              expires_in: authData.expires_in || 3600
+              token_type: authData.token_type || "bearer",
+              expires_in: authData.expires_in || 3600,
             });
             setUser(authData.user);
 
-            setStatus('success');
+            setStatus("success");
+
+            // Check if this was a signup flow
+            const oauthIntent = sessionStorage.getItem("oauth_intent");
+            const isSignup = oauthIntent === "signup";
+
+            // Clear session storage
+            sessionStorage.removeItem("oauth_intent");
+
+            // Show success message
+            console.log(
+              isSignup ? "Registration successful!" : "Login successful!"
+            );
 
             // Redirect to dashboard after a brief success message
             setTimeout(() => {
-              navigate('/dashboard', { replace: true });
-            }, 2000);
+              navigate("/dashboard", { replace: true });
+            }, 1500);
 
             return;
           } catch (decodeError) {
-            console.error('Failed to decode auth data:', decodeError);
-            setStatus('error');
-            setError('Failed to process authentication data');
+            console.error("Failed to decode auth data:", decodeError);
+            setStatus("error");
+            setError("Failed to process authentication data");
             return;
           }
         }
 
         // Fallback: Handle legacy direct callback (shouldn't happen now)
-        const code = searchParams.get('code');
-        const state = searchParams.get('state');
-        const error = searchParams.get('error');
+        const code = searchParams.get("code");
+        const state = searchParams.get("state");
+        const error = searchParams.get("error");
 
         if (error) {
-          setStatus('error');
+          setStatus("error");
           setError(`OAuth error: ${error}`);
           return;
         }
 
         if (code && state) {
-          setStatus('error');
-          setError('Direct OAuth callback detected. Please try signing in again.');
+          setStatus("error");
+          setError(
+            "Direct OAuth callback detected. Please try signing in again."
+          );
           return;
         }
 
         // No valid parameters found
-        setStatus('error');
-        setError('Invalid OAuth callback parameters');
-
+        setStatus("error");
+        setError("Invalid OAuth callback parameters");
       } catch (err) {
-        console.error('OAuth callback error:', err);
-        setStatus('error');
-        setError(err instanceof Error ? err.message : 'Authentication failed');
+        console.error("OAuth callback error:", err);
+        setStatus("error");
+        setError(err instanceof Error ? err.message : "Authentication failed");
       }
     };
 
@@ -115,7 +134,7 @@ const OAuthCallbackPage: React.FC = () => {
           transition={{
             duration: 8,
             repeat: Infinity,
-            ease: "easeInOut"
+            ease: "easeInOut",
           }}
         />
         <motion.div
@@ -127,7 +146,7 @@ const OAuthCallbackPage: React.FC = () => {
           transition={{
             duration: 10,
             repeat: Infinity,
-            ease: "easeInOut"
+            ease: "easeInOut",
           }}
         />
       </div>
@@ -141,12 +160,16 @@ const OAuthCallbackPage: React.FC = () => {
               transition={{ duration: 0.6 }}
               className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-12 shadow-2xl text-center"
             >
-              {status === 'loading' && (
+              {status === "loading" && (
                 <>
                   <motion.div
                     className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6"
                     animate={{ rotate: 360 }}
-                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                    transition={{
+                      duration: 2,
+                      repeat: Infinity,
+                      ease: "linear",
+                    }}
                   >
                     <Loader2 className="w-8 h-8 text-white" />
                   </motion.div>
@@ -159,7 +182,7 @@ const OAuthCallbackPage: React.FC = () => {
                 </>
               )}
 
-              {status === 'success' && (
+              {status === "success" && (
                 <>
                   <motion.div
                     className="w-16 h-16 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6"
@@ -178,7 +201,7 @@ const OAuthCallbackPage: React.FC = () => {
                 </>
               )}
 
-              {status === 'error' && (
+              {status === "error" && (
                 <>
                   <motion.div
                     className="w-16 h-16 bg-gradient-to-r from-red-500 to-pink-600 rounded-full flex items-center justify-center mx-auto mb-6"
@@ -197,7 +220,7 @@ const OAuthCallbackPage: React.FC = () => {
                   </Alert>
                   <motion.button
                     className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-2xl transition-all duration-300"
-                    onClick={() => navigate('/auth/login')}
+                    onClick={() => navigate("/auth/login")}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                   >
