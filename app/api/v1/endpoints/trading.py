@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Any
 from decimal import Decimal
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,7 @@ from app.services.master_controller import MasterSystemController
 from app.services.portfolio_risk import PortfolioRiskService
 from app.services.market_analysis_core import MarketAnalysisService
 from app.services.rate_limit import rate_limiter
+from app.services.websocket import manager
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -598,6 +599,19 @@ async def get_recent_trades(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get recent trades: {str(e)}"
         )
+
+@router.websocket("/ws")
+async def websocket_endpoint(
+    websocket: WebSocket,
+    current_user: User = Depends(get_current_user)
+):
+    await manager.connect(websocket, str(current_user.id))
+    try:
+        while True:
+            # Keep the connection alive
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, str(current_user.id))
 
 @router.post("/stop-all")
 async def emergency_stop_all_trading(

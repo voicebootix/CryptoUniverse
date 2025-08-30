@@ -58,7 +58,7 @@ export const useExchanges = () => {
       setLoading(true);
       setError(null);
       
-      const response = await exchangesAPI.getConnected();
+      const response = await exchangesAPI.get('/list');
       const data = response.data;
       
       if (data.connections) {
@@ -105,14 +105,7 @@ export const useExchanges = () => {
       setConnecting(true);
       setError(null);
 
-      const response = await exchangesAPI.connect(request.exchange, {
-        api_key: request.api_key,
-        secret_key: request.secret_key,
-        passphrase: request.passphrase,
-        sandbox: request.sandbox || false,
-        nickname: request.nickname,
-      });
-
+      const response = await exchangesAPI.post('/connect', request);
       const newConnection = response.data;
       
       // Add to local state
@@ -167,7 +160,7 @@ export const useExchanges = () => {
   // Test exchange connection
   const testConnection = async (exchangeId: string) => {
     try {
-      const response = await exchangesAPI.testConnection(exchangeId);
+      const response = await exchangesAPI.post(`/${exchangeId}/test`);
       const testResult = response.data;
       
       // Update exchange status
@@ -212,7 +205,7 @@ export const useExchanges = () => {
   // Fetch balances for specific exchange
   const fetchExchangeBalances = async (exchange: string) => {
     try {
-      const response = await exchangesAPI.getBalances(exchange);
+      const response = await exchangesAPI.get(`/${exchange}/balances`);
       const balanceData = response.data;
       
       setBalances(prev => ({
@@ -242,7 +235,7 @@ export const useExchanges = () => {
   // Disconnect exchange
   const disconnectExchange = async (exchangeId: string) => {
     try {
-      await exchangesAPI.disconnect(exchangeId);
+      await exchangesAPI.delete(`/${exchangeId}`);
       
       setExchanges(prev => prev.filter(ex => ex.id !== exchangeId));
       

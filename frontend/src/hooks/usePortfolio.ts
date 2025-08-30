@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { tradingAPI } from '@/lib/api'; // Assuming tradingAPI is set up for trading endpoints
-import { produce } from 'immer';
+import { produce, Draft } from 'immer';
 
 interface Position {
   symbol: string;
@@ -53,7 +53,10 @@ interface PortfolioState {
   fetchStatus: () => Promise<void>;
   fetchMarketData: () => Promise<void>;
   fetchRecentTrades: () => Promise<void>;
+  connectWebSocket: () => void;
 }
+
+let socket: WebSocket | null = null;
 
 export const usePortfolioStore = create<PortfolioState>((set) => ({
   totalValue: 0,
@@ -73,7 +76,7 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
     try {
       const response = await tradingAPI.get('/portfolio'); // Endpoint from trading.py
       const data = response.data;
-      set(produce(draft => {
+      set(produce((draft: Draft<PortfolioState>) => {
         draft.totalValue = data.total_value;
         draft.availableBalance = data.available_balance;
         draft.totalPnL = data.total_pnl;
@@ -101,7 +104,7 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
     try {
       const response = await tradingAPI.get('/status');
       const data = response.data;
-      set(produce(draft => {
+      set(produce((draft: Draft<PortfolioState>) => {
         if (data.performance_today && Array.isArray(data.performance_today.history)) {
           draft.performanceHistory = data.performance_today.history.map((h: any) => ({
             time: new Date(h.timestamp).toLocaleTimeString(),
@@ -119,7 +122,7 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
     try {
       const response = await tradingAPI.get('/market-overview');
       const data = response.data;
-      set(produce(draft => {
+      set(produce((draft: Draft<PortfolioState>) => {
         draft.marketData = data.market_data.map((item: any) => ({
           ...item,
           price: parseFloat(item.price),
@@ -135,7 +138,7 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
     try {
       const response = await tradingAPI.get('/recent-trades');
       const data = response.data;
-      set(produce(draft => {
+      set(produce((draft: Draft<PortfolioState>) => {
         draft.recentTrades = data.recent_trades.map((trade: any) => ({
           ...trade,
           amount: parseFloat(trade.amount),
@@ -147,5 +150,36 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
     } catch (error: any) {
       set({ isLoading: false, error: error.message || 'Failed to fetch recent trades' });
     }
+  },
+  connectWebSocket: () => {
+    if (socket) {
+      return;
+    }
+
+    const wsUrl = `wss://${window.location.host}/api/v1/trading/ws`;
+    socket = new WebSocket(wsUrl);
+
+    socket.onopen = () => {
+      console.log('WebSocket connected');
+    };
+
+    socket.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      set(produce((draft: Draft<PortfolioState>) => {
+        if (data.performance_today) {
+          draft.dailyPnL = data.performance_today.profit_loss;
+        }
+        // Add more state updates as needed based on WebSocket messages
+      }));
+    };
+
+    socket.onclose = () => {
+      console.log('WebSocket disconnected');
+      socket = null;
+    };
+
+    socket.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
   },
 }));

@@ -41,9 +41,8 @@ const authInterceptor = (config: InternalAxiosRequestConfig) => {
   );
 
   if (!shouldSkipAuth) {
-    // Import auth store dynamically to avoid circular dependencies
-    const { useAuthStore } = await import('@/store/authStore');
-    const token = useAuthStore.getState().tokens?.access_token;
+    // Cannot use await here, so we'll get the token synchronously from localStorage
+    const token = localStorage.getItem('access_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -133,7 +132,6 @@ apiClient.interceptors.response.use(
 export const tradingAPI = axios.create({
   baseURL: `${API_BASE_URL}/trading`,
 });
-
 tradingAPI.interceptors.request.use(authInterceptor);
 
 tradingAPI.interceptors.response.use(
@@ -234,45 +232,52 @@ export const marketAPI = {
 export const exchangesAPI = axios.create({
   baseURL: `${API_BASE_URL}/exchanges`,
 });
-
 exchangesAPI.interceptors.request.use(authInterceptor);
-exchangesAPI.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
-      try {
-        const refreshToken = localStorage.getItem('refresh_token');
-        if (refreshToken) {
-          const response = await axios.post<{ tokens: AuthTokens }>(`${API_BASE_URL}/auth/refresh`, {
-            refresh_token: refreshToken,
-          });
-          const { tokens } = response.data;
-          localStorage.setItem('access_token', tokens.access_token);
-          localStorage.setItem('refresh_token', tokens.refresh_token);
-          
-          const { useAuthStore } = await import('@/store/authStore');
-          useAuthStore.getState().setTokens(tokens);
+const setupResponseInterceptor = (instance: AxiosInstance) => {
+  instance.interceptors.response.use(
+    (response: AxiosResponse) => response,
+    async (error: AxiosError) => {
+      const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
 
-          exchangesAPI.defaults.headers.common['Authorization'] = `Bearer ${tokens.access_token}`;
-          if (originalRequest.headers) {
-            originalRequest.headers['Authorization'] = `Bearer ${tokens.access_token}`;
+      if (error.response?.status === 401 && !originalRequest._retry) {
+        originalRequest._retry = true;
+        try {
+          const refreshToken = localStorage.getItem('refresh_token');
+          if (refreshToken) {
+            const response = await axios.post<{ tokens: AuthTokens }>(`${API_BASE_URL}/auth/refresh`, {
+              refresh_token: refreshToken,
+            });
+            const { tokens } = response.data;
+            localStorage.setItem('access_token', tokens.access_token);
+            localStorage.setItem('refresh_token', tokens.refresh_token);
+            
+            const { useAuthStore } = await import('@/store/authStore');
+            useAuthStore.getState().setTokens(tokens);
+
+            instance.defaults.headers.common['Authorization'] = `Bearer ${tokens.access_token}`;
+            if (originalRequest.headers) {
+              originalRequest.headers['Authorization'] = `Bearer ${tokens.access_token}`;
+            }
+            return instance(originalRequest);
           }
-          return exchangesAPI(originalRequest);
+        } catch (refreshError) {
+          // Handle failed refresh
         }
-      } catch (refreshError) {
-        // Handle failed refresh
       }
+      return Promise.reject(error);
     }
-    return Promise.reject(error);
-  }
-);
+  );
+};
+
+setupResponseInterceptor(apiClient);
+setupResponseInterceptor(tradingAPI);
+setupResponseInterceptor(exchangesAPI);
+
 
 export const adminAPI = {
-  getUsers: (params?: any) =>
-    apiClient.get('/admin/users', { params }),
+  getUsers: () =>
+    apiClient.get('/admin/users'),
   
   getSystemMetrics: () =>
     apiClient.get('/admin/system/metrics'),
