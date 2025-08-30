@@ -109,7 +109,7 @@ class ExchangeConfigurations:
     @classmethod
     def get_all_exchanges(cls) -> List[str]:
         """Get list of all supported exchanges."""
-        return ["binance", "kraken", "kucoin"]
+        return ["binance", "kraken", "kucoin", "coinbase", "bybit", "okx", "bitget", "gateio"]
     
     @classmethod
     def get_config(cls, exchange: str) -> Dict[str, Any]:
@@ -117,7 +117,12 @@ class ExchangeConfigurations:
         configs = {
             "binance": cls.BINANCE,
             "kraken": cls.KRAKEN, 
-            "kucoin": cls.KUCOIN
+            "kucoin": cls.KUCOIN,
+            "coinbase": {"base_url": "https://api.exchange.coinbase.com", "rate_limit": 600},
+            "bybit": {"base_url": "https://api.bybit.com", "rate_limit": 600},
+            "okx": {"base_url": "https://www.okx.com", "rate_limit": 600},
+            "bitget": {"base_url": "https://api.bitget.com", "rate_limit": 600},
+            "gateio": {"base_url": "https://api.gateio.ws", "rate_limit": 300}
         }
         return configs.get(exchange.lower(), {})
 

@@ -166,21 +166,55 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
 
     socket.onopen = () => {
       console.log('WebSocket connected');
+      
+      // Subscribe to market data for major cryptocurrencies
+      const subscribeMessage = {
+        type: 'subscribe_market',
+        symbols: ['BTC', 'ETH', 'SOL', 'ADA', 'DOT', 'MATIC', 'LINK', 'UNI']
+      };
+      socket?.send(JSON.stringify(subscribeMessage));
     };
 
     socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      set(produce((draft: Draft<PortfolioState>) => {
-        if (data.performance_today) {
-          draft.dailyPnL = data.performance_today.profit_loss;
-        }
-        // Add more state updates as needed based on WebSocket messages
-      }));
+      try {
+        const data = JSON.parse(event.data);
+        
+        set(produce((draft: Draft<PortfolioState>) => {
+          if (data.type === 'market_update') {
+            // Update market data in real-time
+            const existingIndex = draft.marketData.findIndex(item => item.symbol === data.symbol);
+            if (existingIndex >= 0) {
+              draft.marketData[existingIndex] = {
+                symbol: data.symbol,
+                price: data.data.price,
+                change: data.data.change_24h,
+                volume: data.data.volume_24h ? `${(data.data.volume_24h / 1e6).toFixed(0)}M` : 'N/A'
+              };
+            } else {
+              draft.marketData.push({
+                symbol: data.symbol,
+                price: data.data.price,
+                change: data.data.change_24h,
+                volume: data.data.volume_24h ? `${(data.data.volume_24h / 1e6).toFixed(0)}M` : 'N/A'
+              });
+            }
+          } else if (data.performance_today) {
+            draft.dailyPnL = data.performance_today.profit_loss;
+          }
+        }));
+      } catch (error) {
+        console.error('WebSocket message parsing error:', error);
+      }
     };
 
     socket.onclose = () => {
       console.log('WebSocket disconnected');
       socket = null;
+      
+      // Attempt to reconnect after 5 seconds
+      setTimeout(() => {
+        get().connectWebSocket();
+      }, 5000);
     };
 
     socket.onerror = (error) => {

@@ -6,6 +6,7 @@ portfolio management, and real-time trading data for the AI money manager.
 """
 
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
@@ -531,15 +532,63 @@ async def get_market_overview(
         user_id=str(current_user.id)
     )
     try:
-        # In a real application, this data would come from the MarketAnalysisService
-        mock_market_data = [
-            {"symbol": "BTC", "price": Decimal("50000"), "change": 2.5, "volume": "2.1B"},
-            {"symbol": "ETH", "price": Decimal("2400"), "change": -1.2, "volume": "1.8B"},
-            {"symbol": "SOL", "price": Decimal("50"), "change": 5.8, "volume": "450M"},
-            {"symbol": "ADA", "price": Decimal("0.45"), "change": 3.2, "volume": "320M"},
-            {"symbol": "DOT", "price": Decimal("8.50"), "change": -0.8, "volume": "180M"},
+        # Get real market data from MarketAnalysisService
+        market_result = await market_analysis.realtime_price_tracking(
+            symbols="BTC,ETH,SOL,ADA,DOT,MATIC,LINK,UNI",
+            exchanges="all",
+            user_id=str(current_user.id)
+        )
+        
+        if market_result.get("success"):
+            market_data_items = []
+            data = market_result.get("data", {})
+            
+            for symbol, symbol_data in data.items():
+                if symbol_data.get("aggregated"):
+                    agg = symbol_data["aggregated"]
+                    # Calculate volume in readable format
+                    volume = agg.get("total_volume", 0)
+                    volume_str = f"{volume/1e9:.1f}B" if volume > 1e9 else f"{volume/1e6:.0f}M"
+                    
+                    market_data_items.append({
+                        "symbol": symbol,
+                        "price": Decimal(str(agg.get("average_price", 0))),
+                        "change": float(symbol_data.get("exchanges", [{}])[0].get("change_24h", 0)) if symbol_data.get("exchanges") else 0.0,
+                        "volume": volume_str
+                    })
+            
+            if market_data_items:
+                return MarketOverviewResponse(market_data=market_data_items)
+        
+        # Fallback to market data feeds if market analysis fails
+        from app.services.market_data_feeds import get_market_overview
+        fallback_result = await get_market_overview()
+        
+        if fallback_result.get("success"):
+            market_data_items = []
+            data = fallback_result.get("data", {})
+            
+            for symbol, symbol_data in data.items():
+                volume = symbol_data.get("volume_24h", 0)
+                volume_str = f"{volume/1e9:.1f}B" if volume > 1e9 else f"{volume/1e6:.0f}M"
+                
+                market_data_items.append({
+                    "symbol": symbol,
+                    "price": Decimal(str(symbol_data.get("price", 0))),
+                    "change": float(symbol_data.get("change_24h", 0)),
+                    "volume": volume_str
+                })
+            
+            return MarketOverviewResponse(market_data=market_data_items)
+        
+        # Final fallback to prevent errors
+        logger.warning("All market data sources failed, using minimal fallback data")
+        fallback_data = [
+            {"symbol": "BTC", "price": Decimal("0"), "change": 0.0, "volume": "N/A"},
+            {"symbol": "ETH", "price": Decimal("0"), "change": 0.0, "volume": "N/A"},
         ]
-        return MarketOverviewResponse(market_data=mock_market_data)
+        return MarketOverviewResponse(market_data=fallback_data)
+        
     except Exception as e:
         logger.error("Market overview retrieval failed", error=str(e))
         raise HTTPException(
@@ -559,40 +608,52 @@ async def get_recent_trades(
         user_id=str(current_user.id)
     )
     try:
-        # In a real application, this data would come from the database
-        mock_recent_trades = [
+        # Get real trades from database
+        recent_trades_query = db.query(Trade).filter(
+            Trade.user_id == current_user.id
+        ).order_by(Trade.created_at.desc()).limit(10)
+        
+        trades = recent_trades_query.all()
+        
+        if trades:
+            trade_list = []
+            for trade in trades:
+                # Calculate time difference
+                time_diff = datetime.utcnow() - trade.created_at
+                if time_diff.total_seconds() < 3600:  # Less than 1 hour
+                    time_str = f"{int(time_diff.total_seconds() / 60)} min ago"
+                elif time_diff.total_seconds() < 86400:  # Less than 1 day
+                    time_str = f"{int(time_diff.total_seconds() / 3600)} hour ago"
+                else:
+                    time_str = trade.created_at.strftime("%Y-%m-%d")
+                
+                trade_list.append({
+                    "id": trade.id,
+                    "symbol": trade.symbol,
+                    "side": trade.side,
+                    "amount": trade.amount,
+                    "price": trade.price,
+                    "time": time_str,
+                    "status": trade.status,
+                    "pnl": trade.profit_loss or Decimal("0"),
+                })
+            
+            return RecentTradesResponse(recent_trades=trade_list)
+        
+        # Fallback to demo data if no trades exist
+        demo_trades = [
             {
-                "id": 1,
+                "id": 0,
                 "symbol": "BTC",
                 "side": "buy",
-                "amount": Decimal("0.1"),
-                "price": Decimal("49800"),
-                "time": "2 min ago",
-                "status": "completed",
-                "pnl": Decimal("120.50"),
-            },
-            {
-                "id": 2,
-                "symbol": "ETH",
-                "side": "sell",
-                "amount": Decimal("2.0"),
-                "price": Decimal("2420"),
-                "time": "15 min ago",
-                "status": "completed",
-                "pnl": Decimal("-45.20"),
-            },
-            {
-                "id": 3,
-                "symbol": "SOL",
-                "side": "buy",
-                "amount": Decimal("50"),
-                "price": Decimal("48.50"),
-                "time": "1 hour ago",
-                "status": "pending",
+                "amount": Decimal("0.001"),
+                "price": Decimal("0"),
+                "time": "No trades yet",
+                "status": "demo",
                 "pnl": Decimal("0"),
-            },
+            }
         ]
-        return RecentTradesResponse(recent_trades=mock_recent_trades)
+        return RecentTradesResponse(recent_trades=demo_trades)
     except Exception as e:
         logger.error("Recent trades retrieval failed", error=str(e))
         raise HTTPException(
@@ -615,10 +676,52 @@ async def websocket_endpoint(
     
     try:
         while True:
-            # Keep the connection alive
+            # Receive client messages
             data = await websocket.receive_text()
-            # Echo back for testing
-            await websocket.send_text(f"Echo: {data}")
+            
+            try:
+                message = json.loads(data)
+                message_type = message.get("type")
+                
+                if message_type == "subscribe_market":
+                    # Subscribe to market data updates
+                    symbols = message.get("symbols", [])
+                    await manager.subscribe_to_market_data(websocket, symbols)
+                    await websocket.send_json({
+                        "type": "subscription_confirmed",
+                        "symbols": symbols,
+                        "message": f"Subscribed to market data for {', '.join(symbols)}"
+                    })
+                
+                elif message_type == "unsubscribe_market":
+                    # Unsubscribe from market data
+                    symbols = message.get("symbols", [])
+                    await manager.unsubscribe_from_market_data(websocket, symbols)
+                    await websocket.send_json({
+                        "type": "unsubscription_confirmed",
+                        "symbols": symbols,
+                        "message": f"Unsubscribed from market data for {', '.join(symbols)}"
+                    })
+                
+                elif message_type == "ping":
+                    # Heartbeat
+                    await websocket.send_json({
+                        "type": "pong",
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+                
+                else:
+                    # Echo back for testing
+                    await websocket.send_json({
+                        "type": "echo",
+                        "data": message,
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+                    
+            except json.JSONDecodeError:
+                # Handle plain text messages
+                await websocket.send_text(f"Echo: {data}")
+                
     except WebSocketDisconnect:
         manager.disconnect(websocket, user_id)
 

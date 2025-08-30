@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useExchanges } from '@/hooks/useExchanges';
+import { useArbitrage } from '@/hooks/useArbitrage';
 import ExchangeConnectionModal from '@/components/ExchangeConnectionModal';
 import {
   Globe,
@@ -82,13 +83,7 @@ const EXCHANGE_NAMES: Record<string, string> = {
   gateio: 'Gate.io'
 };
 
-// Cross-exchange arbitrage opportunities
-const arbitrageOpportunities = [
-  { id: 1, pair: 'BTC/USDT', buyExchange: 'Kraken', sellExchange: 'Binance', buyPrice: 43250.50, sellPrice: 43312.80, spread: 62.30, spreadPct: 0.14, volume: 5.2, profit: 324.36, risk: 'low' },
-  { id: 2, pair: 'ETH/USDT', buyExchange: 'Coinbase', sellExchange: 'Bybit', buyPrice: 2245.30, sellPrice: 2251.45, spread: 6.15, spreadPct: 0.27, volume: 12.8, profit: 78.72, risk: 'medium' },
-  { id: 3, pair: 'SOL/USDT', buyExchange: 'OKX', sellExchange: 'Binance', buyPrice: 98.45, sellPrice: 98.92, spread: 0.47, spreadPct: 0.48, volume: 234, profit: 109.98, risk: 'low' },
-  { id: 4, pair: 'AVAX/USDT', buyExchange: 'Bitget', sellExchange: 'Kraken', buyPrice: 34.12, sellPrice: 34.45, spread: 0.33, spreadPct: 0.97, volume: 456, profit: 150.48, risk: 'high' }
-];
+// Arbitrage opportunities now loaded from API - no more hardcoded data
 
 // Unified order book
 const unifiedOrderBook = {

@@ -39,13 +39,16 @@ import structlog
 from app.core.logging import LoggerMixin
 # Avoid circular import - define configurations locally
 class ExchangeConfigurations:
-    """Exchange API configurations for market data."""
+    """Exchange API configurations for market data - All 7 exchanges supported."""
     
     BINANCE = {
         "base_url": "https://api.binance.com",
         "endpoints": {
             "ticker": "/api/v3/ticker/24hr",
-            "price": "/api/v3/ticker/price"
+            "price": "/api/v3/ticker/price",
+            "depth": "/api/v3/depth",
+            "klines": "/api/v3/klines",
+            "exchange_info": "/api/v3/exchangeInfo"
         },
         "rate_limit": 1200
     }
@@ -53,7 +56,11 @@ class ExchangeConfigurations:
     KRAKEN = {
         "base_url": "https://api.kraken.com", 
         "endpoints": {
-            "ticker": "/0/public/Ticker"
+            "ticker": "/0/public/Ticker",
+            "depth": "/0/public/Depth",
+            "trades": "/0/public/Trades",
+            "ohlc": "/0/public/OHLC",
+            "asset_pairs": "/0/public/AssetPairs"
         },
         "rate_limit": 60
     }
@@ -61,9 +68,68 @@ class ExchangeConfigurations:
     KUCOIN = {
         "base_url": "https://api.kucoin.com",
         "endpoints": {
-            "stats": "/api/v1/market/stats"
+            "ticker": "/api/v1/market/allTickers",
+            "stats": "/api/v1/market/stats",
+            "orderbook": "/api/v1/market/orderbook/level2_20",
+            "klines": "/api/v1/market/candles",
+            "symbols": "/api/v1/symbols"
         },
         "rate_limit": 1800
+    }
+    
+    COINBASE = {
+        "base_url": "https://api.exchange.coinbase.com",
+        "endpoints": {
+            "ticker": "/products/{symbol}/ticker",
+            "products": "/products",
+            "stats": "/products/{symbol}/stats",
+            "orderbook": "/products/{symbol}/book"
+        },
+        "rate_limit": 600
+    }
+    
+    BYBIT = {
+        "base_url": "https://api.bybit.com",
+        "endpoints": {
+            "ticker": "/v5/market/tickers",
+            "orderbook": "/v5/market/orderbook",
+            "kline": "/v5/market/kline",
+            "instruments": "/v5/market/instruments-info"
+        },
+        "rate_limit": 600
+    }
+    
+    OKX = {
+        "base_url": "https://www.okx.com",
+        "endpoints": {
+            "ticker": "/api/v5/market/ticker",
+            "tickers": "/api/v5/market/tickers",
+            "orderbook": "/api/v5/market/books",
+            "instruments": "/api/v5/public/instruments"
+        },
+        "rate_limit": 600
+    }
+    
+    BITGET = {
+        "base_url": "https://api.bitget.com",
+        "endpoints": {
+            "ticker": "/api/spot/v1/market/ticker",
+            "tickers": "/api/spot/v1/market/tickers",
+            "depth": "/api/spot/v1/market/depth",
+            "symbols": "/api/spot/v1/public/products"
+        },
+        "rate_limit": 600
+    }
+    
+    GATEIO = {
+        "base_url": "https://api.gateio.ws",
+        "endpoints": {
+            "ticker": "/api/v4/spot/tickers",
+            "orderbook": "/api/v4/spot/order_book",
+            "trades": "/api/v4/spot/trades",
+            "currency_pairs": "/api/v4/spot/currency_pairs"
+        },
+        "rate_limit": 300
     }
 
 logger = structlog.get_logger(__name__)
@@ -76,7 +142,12 @@ class DynamicExchangeManager(LoggerMixin):
         self.exchange_configs = {
             "binance": ExchangeConfigurations.BINANCE,
             "kraken": ExchangeConfigurations.KRAKEN,
-            "kucoin": ExchangeConfigurations.KUCOIN
+            "kucoin": ExchangeConfigurations.KUCOIN,
+            "coinbase": ExchangeConfigurations.COINBASE,
+            "bybit": ExchangeConfigurations.BYBIT,
+            "okx": ExchangeConfigurations.OKX,
+            "bitget": ExchangeConfigurations.BITGET,
+            "gateio": ExchangeConfigurations.GATEIO
         }
         self.rate_limiters = {}
         self.circuit_breakers = {}
@@ -543,8 +614,86 @@ class MarketAnalysisService(LoggerMixin):
                 return {
                     "price": float(data["data"]["last"]),
                     "volume": float(data["data"]["vol"]),
+                    "change_24h": float(data["data"]["changeRate"]) * 100,
                     "timestamp": datetime.utcnow().isoformat()
                 }
+            
+            elif exchange == "coinbase":
+                coinbase_symbol = symbol.replace("/", "-")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    f"/products/{coinbase_symbol}/ticker"
+                )
+                return {
+                    "price": float(data["price"]),
+                    "volume": float(data["volume"]),
+                    "change_24h": 0,  # Calculate from price and open
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            
+            elif exchange == "bybit":
+                bybit_symbol = symbol.replace("/", "")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    "/v5/market/tickers",
+                    {"category": "spot", "symbol": bybit_symbol}
+                )
+                if data.get("result", {}).get("list"):
+                    ticker = data["result"]["list"][0]
+                    return {
+                        "price": float(ticker["lastPrice"]),
+                        "volume": float(ticker["volume24h"]),
+                        "change_24h": float(ticker["price24hPcnt"]) * 100,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            
+            elif exchange == "okx":
+                okx_symbol = symbol.replace("/", "-")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    "/api/v5/market/ticker",
+                    {"instId": okx_symbol}
+                )
+                if data.get("data"):
+                    ticker = data["data"][0]
+                    return {
+                        "price": float(ticker["last"]),
+                        "volume": float(ticker["vol24h"]),
+                        "change_24h": float(ticker["chgPct"]) * 100,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            
+            elif exchange == "bitget":
+                bitget_symbol = symbol.replace("/", "")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    "/api/spot/v1/market/ticker",
+                    {"symbol": bitget_symbol}
+                )
+                if data.get("data"):
+                    ticker = data["data"]
+                    return {
+                        "price": float(ticker["close"]),
+                        "volume": float(ticker["baseVol"]),
+                        "change_24h": float(ticker["chgRate"]) * 100,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            
+            elif exchange == "gateio":
+                gateio_symbol = symbol.replace("/", "_")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    "/api/v4/spot/tickers",
+                    {"currency_pair": gateio_symbol}
+                )
+                if isinstance(data, list) and data:
+                    ticker = data[0]
+                    return {
+                        "price": float(ticker["last"]),
+                        "volume": float(ticker["base_volume"]),
+                        "change_24h": float(ticker["change_percentage"]),
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
         
         except Exception as e:
             self.logger.error(f"Error fetching price for {symbol} from {exchange}: {e}")

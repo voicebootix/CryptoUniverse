@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = Field(default=None, description="Anthropic API key")
     GOOGLE_AI_API_KEY: Optional[str] = Field(default=None, description="Google AI API key")
     
+    # Market data API keys
+    ALPHA_VANTAGE_API_KEY: Optional[str] = Field(default=None, env="ALPHA_VANTAGE_API_KEY", description="Alpha Vantage API key")
+    COINGECKO_API_KEY: Optional[str] = Field(default=None, env="COINGECKO_API_KEY", description="CoinGecko API key")
+    FINNHUB_API_KEY: Optional[str] = Field(default=None, env="FINNHUB_API_KEY", description="Finnhub API key")
+    
     # OAuth settings
     GOOGLE_CLIENT_ID: Optional[str] = Field(default=None, description="Google OAuth client ID")
     GOOGLE_CLIENT_SECRET: Optional[str] = Field(default=None, description="Google OAuth client secret")
