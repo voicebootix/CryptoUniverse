@@ -304,7 +304,7 @@ export const exchangesAPI = axios.create({
   instance.interceptors.request.use(
     (config) => {
       const authStore = useAuthStore.getState();
-      const token = authStore.accessToken;
+      const token = authStore.tokens?.access_token;
       
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
@@ -327,7 +327,7 @@ export const exchangesAPI = axios.create({
         try {
           const authStore = useAuthStore.getState();
           await authStore.refreshToken();
-          const newToken = authStore.accessToken;
+          const newToken = authStore.tokens?.access_token;
           
           if (newToken) {
             originalRequest.headers.Authorization = `Bearer ${newToken}`;
