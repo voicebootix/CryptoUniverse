@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { Link, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { Link, useNavigate } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Eye,
   EyeOff,
@@ -22,19 +22,24 @@ import {
   Sparkles,
   Star,
   Zap,
-} from 'lucide-react';
-import { useAuthStore, useMfaRequired, useAuthError, useAuthLoading } from '@/store/authStore';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { apiClient } from '@/lib/api/client';
-import { Container } from '@/components/ui/container';
+} from "lucide-react";
+import {
+  useAuthStore,
+  useMfaRequired,
+  useAuthError,
+  useAuthLoading,
+} from "@/store/authStore";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { apiClient } from "@/lib/api/client";
+import { Container } from "@/components/ui/container";
 
 const loginSchema = z.object({
-  email: z.string().email('Invalid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  email: z.string().email("Invalid email address"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
   mfa_code: z.string().optional(),
   remember_me: z.boolean().optional(),
 });
@@ -65,21 +70,28 @@ const LoginPage: React.FC = () => {
 
   const handleGoogleLogin = async () => {
     try {
-      // Use the API client which already handles the correct base URL for Render
-      
-      const response = await apiClient.post('/auth/oauth/url', {
-        provider: 'google',
-        redirect_url: null  // Let backend handle the redirect URL
+      // Get current URL for the callback
+      const currentOrigin = window.location.origin;
+      const callbackUrl = `${currentOrigin}/auth/callback`;
+
+      const response = await apiClient.post("/auth/oauth/url", {
+        provider: "google",
+        redirect_url: callbackUrl,
       });
-      
+
       if (response.status !== 200) {
-        throw new Error('Failed to get OAuth URL');
+        throw new Error("Failed to get OAuth URL");
       }
-      
+
       const data = response.data;
+
+      // Store callback URL in session storage for verification
+      sessionStorage.setItem("oauth_callback_url", callbackUrl);
+
+      // Redirect to Google OAuth
       window.location.href = data.authorization_url;
     } catch (error) {
-      console.error('Google login error:', error);
+      console.error("Google login error:", error);
     }
   };
 
@@ -102,7 +114,7 @@ const LoginPage: React.FC = () => {
     try {
       await login(data);
       if (!mfaRequired) {
-        navigate('/dashboard');
+        navigate("/dashboard");
       }
     } catch (err) {
       // Error is handled by the store
@@ -123,7 +135,7 @@ const LoginPage: React.FC = () => {
           transition={{
             duration: 8,
             repeat: Infinity,
-            ease: "easeInOut"
+            ease: "easeInOut",
           }}
         />
         <motion.div
@@ -135,7 +147,7 @@ const LoginPage: React.FC = () => {
           transition={{
             duration: 10,
             repeat: Infinity,
-            ease: "easeInOut"
+            ease: "easeInOut",
           }}
         />
       </div>
@@ -173,7 +185,6 @@ const LoginPage: React.FC = () => {
         <div className="flex-1 flex items-center justify-center px-4 py-8">
           <div className="w-full max-w-6xl mx-auto">
             <div className="grid lg:grid-cols-5 gap-12 items-center">
-              
               {/* Left Side - Feature Summary */}
               <motion.div
                 initial={{ opacity: 0, x: -30 }}
@@ -201,7 +212,8 @@ const LoginPage: React.FC = () => {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.4, duration: 0.6 }}
                   >
-                    Advanced cryptocurrency trading with multi-model AI consensus and institutional-grade security.
+                    Advanced cryptocurrency trading with multi-model AI
+                    consensus and institutional-grade security.
                   </motion.p>
                 </div>
 
@@ -213,15 +225,29 @@ const LoginPage: React.FC = () => {
                   className="space-y-4"
                 >
                   {[
-                    { icon: Bot, title: "AI-Powered Trading", color: "text-green-400" },
-                    { icon: Globe, title: "Multi-Exchange Support", color: "text-blue-400" },
-                    { icon: Shield, title: "Enterprise Security", color: "text-purple-400" }
+                    {
+                      icon: Bot,
+                      title: "AI-Powered Trading",
+                      color: "text-green-400",
+                    },
+                    {
+                      icon: Globe,
+                      title: "Multi-Exchange Support",
+                      color: "text-blue-400",
+                    },
+                    {
+                      icon: Shield,
+                      title: "Enterprise Security",
+                      color: "text-purple-400",
+                    },
                   ].map((feature, index) => (
                     <div key={index} className="flex items-center space-x-3">
                       <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center">
                         <feature.icon className={`w-4 h-4 ${feature.color}`} />
                       </div>
-                      <span className="text-gray-300 font-medium">{feature.title}</span>
+                      <span className="text-gray-300 font-medium">
+                        {feature.title}
+                      </span>
                     </div>
                   ))}
                 </motion.div>
@@ -234,12 +260,22 @@ const LoginPage: React.FC = () => {
                   className="grid grid-cols-3 gap-4 p-6 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10"
                 >
                   {[
-                    { value: "99.9%", label: "Uptime", color: "text-green-400" },
+                    {
+                      value: "99.9%",
+                      label: "Uptime",
+                      color: "text-green-400",
+                    },
                     { value: "$100M+", label: "AUM", color: "text-blue-400" },
-                    { value: "24/7", label: "Trading", color: "text-purple-400" }
+                    {
+                      value: "24/7",
+                      label: "Trading",
+                      color: "text-purple-400",
+                    },
                   ].map((stat, index) => (
                     <div key={index} className="text-center">
-                      <div className={`text-xl font-bold ${stat.color} mb-1`}>{stat.value}</div>
+                      <div className={`text-xl font-bold ${stat.color} mb-1`}>
+                        {stat.value}
+                      </div>
                       <div className="text-xs text-gray-400">{stat.label}</div>
                     </div>
                   ))}
@@ -256,7 +292,6 @@ const LoginPage: React.FC = () => {
                 <div className="w-full max-w-lg">
                   {/* Glassmorphism Container */}
                   <div className="relative bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-12 shadow-2xl">
-                    
                     {/* Form Header */}
                     <motion.div
                       initial={{ opacity: 0, y: 20 }}
@@ -268,13 +303,21 @@ const LoginPage: React.FC = () => {
                         <motion.div
                           className="w-24 h-24 bg-gradient-to-r from-blue-500 to-purple-600 rounded-3xl flex items-center justify-center shadow-2xl"
                           whileHover={{ rotate: 5, scale: 1.05 }}
-                          transition={{ type: "spring", stiffness: 400, damping: 17 }}
+                          transition={{
+                            type: "spring",
+                            stiffness: 400,
+                            damping: 17,
+                          }}
                         >
                           <KeyRound className="w-12 h-12 text-white" />
                         </motion.div>
                       </div>
-                      <h2 className="text-4xl font-bold text-white mb-4">Welcome Back</h2>
-                      <p className="text-gray-300 text-xl">Sign in to your AI trading dashboard</p>
+                      <h2 className="text-4xl font-bold text-white mb-4">
+                        Welcome Back
+                      </h2>
+                      <p className="text-gray-300 text-xl">
+                        Sign in to your AI trading dashboard
+                      </p>
                     </motion.div>
 
                     {/* Alerts */}
@@ -282,7 +325,11 @@ const LoginPage: React.FC = () => {
                       {error && (
                         <motion.div
                           initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                          animate={{ opacity: 1, height: "auto", marginBottom: 24 }}
+                          animate={{
+                            opacity: 1,
+                            height: "auto",
+                            marginBottom: 24,
+                          }}
                           exit={{ opacity: 0, height: 0, marginBottom: 0 }}
                           transition={{ duration: 0.3 }}
                         >
@@ -296,21 +343,29 @@ const LoginPage: React.FC = () => {
                       {mfaRequired && (
                         <motion.div
                           initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                          animate={{ opacity: 1, height: "auto", marginBottom: 24 }}
+                          animate={{
+                            opacity: 1,
+                            height: "auto",
+                            marginBottom: 24,
+                          }}
                           exit={{ opacity: 0, height: 0, marginBottom: 0 }}
                           transition={{ duration: 0.3 }}
                         >
                           <Alert className="border-blue-500/30 bg-blue-500/10 backdrop-blur-sm text-blue-300">
                             <Shield className="h-4 w-4 text-blue-400" />
-                            <AlertDescription>Please enter your MFA code to complete login.</AlertDescription>
+                            <AlertDescription>
+                              Please enter your MFA code to complete login.
+                            </AlertDescription>
                           </Alert>
                         </motion.div>
                       )}
                     </AnimatePresence>
 
                     {/* Login Form */}
-                    <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
-                      
+                    <form
+                      onSubmit={handleSubmit(onSubmit)}
+                      className="space-y-8"
+                    >
                       {/* Email Field */}
                       <motion.div
                         initial={{ opacity: 0, y: 20 }}
@@ -318,7 +373,10 @@ const LoginPage: React.FC = () => {
                         transition={{ delay: 0.7, duration: 0.5 }}
                         className="space-y-4"
                       >
-                        <Label htmlFor="email" className="text-white font-semibold text-lg flex items-center space-x-3">
+                        <Label
+                          htmlFor="email"
+                          className="text-white font-semibold text-lg flex items-center space-x-3"
+                        >
                           <Mail className="w-6 h-6 text-blue-400" />
                           <span>Email Address</span>
                         </Label>
@@ -328,7 +386,7 @@ const LoginPage: React.FC = () => {
                             type="email"
                             placeholder="Enter your email address"
                             className="h-16 bg-white/10 border-white/20 focus:border-blue-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl transition-all duration-300 text-lg px-6"
-                            {...register('email')}
+                            {...register("email")}
                           />
                           <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-blue-500/10 via-transparent to-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                         </div>
@@ -354,17 +412,20 @@ const LoginPage: React.FC = () => {
                         transition={{ delay: 0.8, duration: 0.5 }}
                         className="space-y-4"
                       >
-                        <Label htmlFor="password" className="text-white font-semibold text-lg flex items-center space-x-3">
+                        <Label
+                          htmlFor="password"
+                          className="text-white font-semibold text-lg flex items-center space-x-3"
+                        >
                           <KeyRound className="w-6 h-6 text-purple-400" />
                           <span>Password</span>
                         </Label>
                         <div className="relative group">
                           <Input
                             id="password"
-                            type={showPassword ? 'text' : 'password'}
+                            type={showPassword ? "text" : "password"}
                             placeholder="Enter your password"
                             className="h-16 bg-white/10 border-white/20 focus:border-purple-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl pr-16 transition-all duration-300 text-lg px-6"
-                            {...register('password')}
+                            {...register("password")}
                           />
                           <motion.button
                             type="button"
@@ -373,7 +434,11 @@ const LoginPage: React.FC = () => {
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.95 }}
                           >
-                            {showPassword ? <EyeOff className="w-6 h-6" /> : <Eye className="w-6 h-6" />}
+                            {showPassword ? (
+                              <EyeOff className="w-6 h-6" />
+                            ) : (
+                              <Eye className="w-6 h-6" />
+                            )}
                           </motion.button>
                           <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-purple-500/10 via-transparent to-pink-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                         </div>
@@ -402,7 +467,10 @@ const LoginPage: React.FC = () => {
                             transition={{ duration: 0.3 }}
                             className="space-y-4"
                           >
-                            <Label htmlFor="mfa_code" className="text-white font-semibold text-lg flex items-center space-x-3">
+                            <Label
+                              htmlFor="mfa_code"
+                              className="text-white font-semibold text-lg flex items-center space-x-3"
+                            >
                               <Shield className="w-6 h-6 text-green-400" />
                               <span>MFA Code</span>
                             </Label>
@@ -412,7 +480,7 @@ const LoginPage: React.FC = () => {
                                 type="text"
                                 placeholder="Enter your MFA code"
                                 className="h-16 bg-white/10 border-white/20 focus:border-green-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl transition-all duration-300 text-lg px-6"
-                                {...register('mfa_code')}
+                                {...register("mfa_code")}
                               />
                               <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-green-500/10 via-transparent to-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                             </div>
@@ -440,11 +508,16 @@ const LoginPage: React.FC = () => {
                         <div className="flex items-center space-x-4">
                           <Checkbox
                             id="remember_me"
-                            checked={watch('remember_me')}
-                            onCheckedChange={(checked) => setValue('remember_me', checked as boolean)}
+                            checked={watch("remember_me")}
+                            onCheckedChange={(checked) =>
+                              setValue("remember_me", checked as boolean)
+                            }
                             className="border-white/30 data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 w-5 h-5"
                           />
-                          <Label htmlFor="remember_me" className="text-gray-300 font-medium text-lg">
+                          <Label
+                            htmlFor="remember_me"
+                            className="text-gray-300 font-medium text-lg"
+                          >
                             Remember me
                           </Label>
                         </div>
@@ -515,12 +588,26 @@ const LoginPage: React.FC = () => {
                       >
                         <div className="flex items-center justify-center space-x-4">
                           <svg className="w-7 h-7" viewBox="0 0 48 48">
-                            <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"></path>
-                            <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"></path>
-                            <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"></path>
-                            <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"></path>
+                            <path
+                              fill="#FFC107"
+                              d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"
+                            ></path>
+                            <path
+                              fill="#FF3D00"
+                              d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"
+                            ></path>
+                            <path
+                              fill="#4CAF50"
+                              d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"
+                            ></path>
+                            <path
+                              fill="#1976D2"
+                              d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"
+                            ></path>
                           </svg>
-                          <span className="font-medium">Continue with Google</span>
+                          <span className="font-medium">
+                            Continue with Google
+                          </span>
                         </div>
                       </Button>
 
@@ -532,7 +619,7 @@ const LoginPage: React.FC = () => {
                         <Button
                           variant="outline"
                           className="w-full h-16 border-white/30 hover:bg-white/15 text-white rounded-2xl transition-all duration-300 hover:scale-[1.02] text-lg font-semibold"
-                          onClick={() => navigate('/auth/register')}
+                          onClick={() => navigate("/auth/register")}
                         >
                           <div className="flex items-center justify-center space-x-3">
                             <Star className="w-6 h-6" />
