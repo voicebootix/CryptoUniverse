@@ -12,9 +12,11 @@ const RegisterPage: React.FC = () => {
     try {
       clearError();
 
-      // Get current URL for the callback
-      const currentOrigin = window.location.origin;
-      const callbackUrl = `${currentOrigin}/auth/callback`;
+      // Use backend URL for callback
+      const backendUrl =
+        import.meta.env.VITE_API_URL ||
+        "https://cryptouniverse.onrender.com/api/v1";
+      const callbackUrl = `${backendUrl}/auth/oauth/callback/google`;
 
       // Use the API client which already handles the correct base URL
       const response = await apiClient.post("/auth/oauth/url", {
