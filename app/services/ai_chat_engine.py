@@ -30,8 +30,6 @@ from app.services.websocket import manager
 from app.services.ai_consensus_core import AIConsensusService
 from app.services.master_controller import MasterSystemController
 from app.services.trade_execution import TradeExecutionService
-from app.services.portfolio_risk_core import PortfolioRiskService
-from app.services.market_analysis_core import MarketAnalysisService
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -105,8 +103,7 @@ class AIChatEngine(LoggerMixin):
         self.ai_consensus = AIConsensusService()
         self.master_controller = MasterSystemController()
         self.trade_executor = TradeExecutionService()
-        self.portfolio_risk = PortfolioRiskService()
-        self.market_analysis = MarketAnalysisService()
+        self.unified_manager = None  # Will be set by unified manager
         
         # Intent classification patterns
         self.intent_patterns = {
@@ -144,6 +141,11 @@ class AIChatEngine(LoggerMixin):
                 r'\b(stop|halt|emergency|urgent|panic)\b',
                 r'\b(sell all|liquidate all|exit all)\b',
                 r'\b(emergency|crisis|problem)\b'
+            ],
+            "autonomous_control": [
+                r'\b(autonomous|auto|automatic|start.*auto|stop.*auto)\b',
+                r'\b(enable.*autonomous|disable.*autonomous)\b',
+                r'\b(auto.*mode|autonomous.*mode)\b'
             ]
         }
         
@@ -364,6 +366,8 @@ How can I help you manage your crypto investments today?""",
                 return await self._handle_strategy_discussion(session, message)
             elif intent == ChatIntent.PERFORMANCE_REVIEW:
                 return await self._handle_performance_review(session, message)
+            elif intent.value == "autonomous_control":
+                return await self._handle_autonomous_control(session, message)
             else:
                 return await self._handle_general_query(session, message)
                 
@@ -975,6 +979,187 @@ What would you like to know about your investments?"""
         """Handle performance review requests."""
         # Implementation for performance reviews
         return {"content": "Performance review handler - to be implemented", "confidence": 0.8}
+    
+    async def _handle_autonomous_control(self, session: ChatSession, message: ChatMessage) -> Dict[str, Any]:
+        """Handle autonomous mode control requests."""
+        
+        try:
+            user_id = session.user_id
+            message_lower = message.content.lower()
+            
+            # Determine if user wants to start or stop autonomous mode
+            if any(word in message_lower for word in ['start', 'enable', 'activate', 'turn on']):
+                # Starting autonomous mode
+                
+                # Extract trading mode if specified
+                trading_mode = "balanced"  # default
+                if "conservative" in message_lower:
+                    trading_mode = "conservative"
+                elif "aggressive" in message_lower:
+                    trading_mode = "aggressive"
+                elif "beast" in message_lower:
+                    trading_mode = "beast_mode"
+                
+                # Check if unified manager is available
+                if self.unified_manager:
+                    result = await self.unified_manager.start_autonomous_mode(user_id, {
+                        "mode": trading_mode,
+                        "interface": "web_chat"
+                    })
+                else:
+                    # Fallback to master controller
+                    result = await self.master_controller.start_autonomous_mode({
+                        "user_id": user_id,
+                        "mode": trading_mode
+                    })
+                
+                if result.get("success"):
+                    response_content = f"""🤖 **Autonomous AI Money Manager Activated**
+
+**Mode:** {trading_mode.replace('_', ' ').title()}
+**Status:** Active and monitoring markets
+
+**What I'm Now Doing Automatically:**
+• 📊 Continuous portfolio monitoring
+• 📈 Real-time market analysis
+• 💹 Automated trade execution based on AI signals
+• ⚖️ Dynamic portfolio rebalancing
+• 🛡️ Risk management and stop-loss adjustments
+• 🔍 Opportunity discovery and execution
+
+**AI Decision Making:**
+• Multi-model consensus (GPT-4, Claude, Gemini)
+• Confidence threshold: 85%+ for autonomous execution
+• Risk assessment before every trade
+• Emergency protocols activated
+
+**You Can Still:**
+• Monitor progress through this chat
+• Override decisions manually
+• Adjust settings anytime
+• Stop autonomous mode instantly
+
+**Estimated Activity:** {result.get('estimated_trades_per_day', 10)} trades per day
+
+I'm now actively managing your cryptocurrency portfolio. You can ask me "What are you doing?" anytime for updates!"""
+
+                else:
+                    response_content = f"""❌ **Failed to Start Autonomous Mode**
+
+Error: {result.get('error', 'Unknown error')}
+
+**Please Check:**
+• Sufficient account balance
+• Exchange connections active
+• No emergency stops in place
+• Proper permissions configured
+
+Try again or contact support if the issue persists."""
+
+            elif any(word in message_lower for word in ['stop', 'disable', 'deactivate', 'turn off']):
+                # Stopping autonomous mode
+                
+                if self.unified_manager:
+                    result = await self.unified_manager.stop_autonomous_mode(user_id, "web_chat")
+                else:
+                    result = await self.master_controller.stop_autonomous_mode(user_id)
+                
+                if result.get("success"):
+                    stats = result.get('session_stats', {})
+                    response_content = f"""🛑 **Autonomous AI Money Manager Stopped**
+
+**Session Summary:**
+• Duration: {stats.get('session_duration', 0) / 3600:.1f} hours
+• Trades Executed: {stats.get('trades_executed', 0)}
+• Total P&L: ${stats.get('total_pnl', 0):,.2f}
+
+**Current Status:**
+• Mode: Manual/Assisted
+• AI: Available for recommendations
+• Trading: Manual approval required
+
+**I'm Still Here To:**
+• Provide trading recommendations
+• Analyze your portfolio
+• Find market opportunities
+• Assess risks and suggest actions
+
+You can restart autonomous mode anytime by saying "Start autonomous mode" or use the UI controls."""
+
+                else:
+                    response_content = "✅ Autonomous mode was already stopped or not active."
+
+            else:
+                # General autonomous mode information
+                
+                # Check current status
+                if self.unified_manager:
+                    status = await self.unified_manager.get_ai_status(user_id)
+                    autonomous_active = status.get("autonomous_active", False)
+                else:
+                    # Fallback status check
+                    master_status = await self.master_controller.get_system_status(user_id)
+                    autonomous_active = master_status.get("autonomous_mode", False)
+                
+                if autonomous_active:
+                    response_content = """🤖 **Autonomous Mode Status: ACTIVE**
+
+I'm currently managing your portfolio autonomously with:
+• Real-time market monitoring
+• Automated trade execution
+• Dynamic risk management
+• Continuous optimization
+
+**Commands:**
+• "What are you doing?" - Current activity
+• "Stop autonomous mode" - Switch to manual
+• "Show performance" - Autonomous results
+• "Adjust settings" - Modify parameters
+
+**Current Activity:** Monitoring markets and executing AI-driven trades"""
+
+                else:
+                    response_content = """🤖 **Autonomous Mode Status: INACTIVE**
+
+I'm currently in assisted mode, providing recommendations that require your approval.
+
+**To Start Autonomous Mode:**
+• "Start autonomous mode" - Balanced approach
+• "Start conservative autonomous" - Lower risk
+• "Start aggressive autonomous" - Higher returns
+• "Start beast mode autonomous" - Maximum opportunity
+
+**In Autonomous Mode I Will:**
+• Monitor markets 24/7
+• Execute trades automatically
+• Rebalance your portfolio
+• Manage risk dynamically
+• Find and act on opportunities
+
+**Safety Features:**
+• AI confidence thresholds
+• Risk limits and stop-losses
+• Emergency protocols
+• Real-time monitoring
+
+Ready to activate autonomous AI money management?"""
+            
+            return {
+                "content": response_content,
+                "confidence": 0.95,
+                "metadata": {
+                    "autonomous_control": True,
+                    "current_mode": "autonomous" if autonomous_active else "assisted"
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error("Autonomous control handling failed", error=str(e))
+            return {
+                "content": "I encountered an error with autonomous mode control. Please try again or use the UI controls.",
+                "confidence": 0.0,
+                "metadata": {"error": str(e)}
+            }
     
     async def execute_confirmed_action(self, session_id: str, command: str, user_id: str) -> Dict[str, Any]:
         """Execute a confirmed action from chat interaction."""

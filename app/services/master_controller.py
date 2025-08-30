@@ -1280,13 +1280,30 @@ class MasterSystemController(LoggerMixin):
             self.logger.error("Global autonomous cycle failed", error=str(e))
     
     async def _run_user_autonomous_cycle(self, user_id: str, config: Dict):
-        """Run autonomous cycle for specific user."""
+        """Run autonomous cycle for specific user using unified AI manager."""
         try:
             mode = config.get("mode", "balanced")
             self.logger.debug(f"Running autonomous cycle for user {user_id}", mode=mode)
             
-            # This would contain the actual trading logic
-            # For now, just log the cycle
+            # Check if unified manager is available
+            if hasattr(self, 'unified_manager') and self.unified_manager:
+                # Use unified AI manager for autonomous decisions
+                market_context = {
+                    "current_mode": mode,
+                    "cycle_type": "autonomous_trading",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                
+                # Let the unified AI manager make autonomous decisions
+                result = await self.unified_manager.handle_autonomous_decision(user_id, market_context)
+                
+                if result.get("success"):
+                    self.logger.info("Autonomous AI decision executed", 
+                                   user_id=user_id, 
+                                   action=result.get("action"))
+            else:
+                # Fallback to basic cycle logging
+                self.logger.debug("Unified AI manager not available, basic cycle logging")
             
             # Update last cycle time
             await self.redis.hset(

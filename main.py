@@ -72,6 +72,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await background_manager.start_all()
         logger.info("✅ Background services started")
 
+        # Initialize Unified AI Manager System
+        try:
+            from app.services.ai_manager_startup import startup_ai_manager
+            ai_ready = await startup_ai_manager()
+            if ai_ready:
+                logger.info("🧠 Unified AI Money Manager ready")
+            else:
+                logger.warning("⚠️ AI Manager started with some issues")
+        except Exception as e:
+            logger.warning("⚠️ AI Manager initialization failed", error=str(e))
+
         logger.info(
             "🎉 CryptoUniverse Enterprise is ready!",
             api_docs=f"{settings.BASE_URL}/api/docs" if settings.ENVIRONMENT == "development" else "Contact admin",
@@ -90,6 +101,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Stop background services
         await background_manager.stop_all()
         logger.info("✅ Background services stopped")
+
+        # Shutdown Unified AI Manager System
+        try:
+            from app.services.ai_manager_startup import shutdown_ai_manager
+            await shutdown_ai_manager()
+            logger.info("🧠 Unified AI Manager shutdown complete")
+        except Exception as e:
+            logger.warning("⚠️ AI Manager shutdown failed", error=str(e))
 
         # Disconnect from database
         await db_manager.disconnect()
