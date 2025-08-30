@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from cryptography.fernet import Fernet
 
 from app.core.config import get_settings
@@ -125,7 +125,7 @@ class ExchangeTestResponse(BaseModel):
 async def connect_exchange(
     request: ExchangeApiKeyRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Connect a new exchange account with API keys."""
     
@@ -254,7 +254,7 @@ async def connect_exchange(
 @router.get("/list")
 async def list_exchange_connections(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """List all connected exchange accounts."""
     
@@ -355,7 +355,7 @@ async def update_exchange_connection(
     api_key_id: str,
     request: ExchangeApiKeyUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Update exchange connection settings."""
     
@@ -415,7 +415,7 @@ async def update_exchange_connection(
 async def test_exchange_connection_endpoint(
     api_key_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Test exchange connection and permissions."""
     
@@ -505,7 +505,7 @@ async def test_exchange_connection_endpoint(
 async def get_exchange_balances(
     exchange: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Get current balances from exchange."""
     
@@ -543,7 +543,7 @@ async def get_exchange_balances(
             )
         
         # Get fresh balances from exchange
-        balances = await fetch_exchange_balances(api_key)
+        balances = await fetch_exchange_balances(api_key, db)
         
         # Calculate total USD value
         total_value_usd = sum(
@@ -551,7 +551,7 @@ async def get_exchange_balances(
         )
         
         # Update balance records in database
-        await update_balance_records(current_user.id, exchange, balances)
+        await update_balance_records(current_user.id, exchange, balances, db)
         
         return ExchangeBalanceResponse(
             exchange=exchange,
@@ -574,7 +574,7 @@ async def get_exchange_balances(
 async def disconnect_exchange(
     api_key_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Disconnect and remove exchange connection."""
     
@@ -695,37 +695,35 @@ async def test_exchange_connection(
         }
 
 
-async def fetch_exchange_balances(api_key: ExchangeApiKey) -> List[Dict[str, Any]]:
+async def fetch_exchange_balances(api_key: ExchangeApiKey, db: AsyncSession) -> List[Dict[str, Any]]:
     """Fetch balances from exchange API."""
     try:
         # Get the exchange account to determine exchange type
         from sqlalchemy import select
-        from app.core.database import get_database_session
         
-        async with get_database_session() as db:
-            result = await db.execute(
-                select(ExchangeAccount).filter(ExchangeAccount.id == api_key.account_id)
-            )
-            account = result.scalar_one_or_none()
-            
-            if not account:
-                logger.error(f"No account found for API key {api_key.id}")
-                return []
-            
-            exchange_name = account.exchange_name.lower()
-            
-            # Decrypt API credentials
-            decrypted_key = decrypt_api_key(api_key.encrypted_key)
-            decrypted_secret = decrypt_api_key(api_key.encrypted_secret)
-            
-            if exchange_name == "binance":
-                return await fetch_binance_balances(decrypted_key, decrypted_secret)
-            elif exchange_name == "coinbase":
-                return await fetch_coinbase_balances(decrypted_key, decrypted_secret)
-            else:
-                logger.warning(f"Exchange {exchange_name} not yet supported for live balance fetching")
-                # Return empty list for unsupported exchanges
-                return []
+        result = await db.execute(
+            select(ExchangeAccount).filter(ExchangeAccount.id == api_key.account_id)
+        )
+        account = result.scalar_one_or_none()
+        
+        if not account:
+            logger.error(f"No account found for API key {api_key.id}")
+            return []
+        
+        exchange_name = account.exchange_name.lower()
+        
+        # Decrypt API credentials
+        decrypted_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
+        decrypted_secret = cipher_suite.decrypt(api_key.encrypted_secret_key.encode()).decode()
+        
+        if exchange_name == "binance":
+            return await fetch_binance_balances(decrypted_key, decrypted_secret)
+        elif exchange_name == "coinbase":
+            return await fetch_coinbase_balances(decrypted_key, decrypted_secret)
+        else:
+            logger.warning(f"Exchange {exchange_name} not yet supported for live balance fetching")
+            # Return empty list for unsupported exchanges
+            return []
         
     except Exception as e:
         logger.error(f"Failed to fetch balances for API key {api_key.id}", error=str(e))
@@ -869,12 +867,49 @@ async def sync_exchange_balances(user_id: str, exchange: str, api_key_id: str):
         logger.error("Balance sync failed", error=str(e))
 
 
-async def update_balance_records(user_id: str, exchange: str, balances: List[Dict]):
+async def update_balance_records(user_id: str, exchange: str, balances: List[Dict], db: AsyncSession):
     """Update balance records in database."""
     try:
-        # This would update the ExchangeBalance table
-        logger.info(f"Updating balance records for user {user_id}, exchange {exchange}")
+        from sqlalchemy import select, delete
+        from decimal import Decimal
+        
+        # Get the exchange account
+        account_result = await db.execute(
+            select(ExchangeAccount).filter(
+                ExchangeAccount.user_id == user_id,
+                ExchangeAccount.exchange_name == exchange
+            )
+        )
+        account = account_result.scalar_one_or_none()
+        
+        if not account:
+            logger.error(f"No exchange account found for user {user_id}, exchange {exchange}")
+            return
+        
+        # Delete existing balance records for this account
+        await db.execute(
+            delete(ExchangeBalance).filter(ExchangeBalance.account_id == account.id)
+        )
+        
+        # Insert new balance records
+        for balance in balances:
+            if balance.get("total", 0) > 0:  # Only store non-zero balances
+                exchange_balance = ExchangeBalance(
+                    account_id=account.id,
+                    symbol=balance.get("asset", ""),
+                    total_balance=Decimal(str(balance.get("total", 0))),
+                    available_balance=Decimal(str(balance.get("free", 0))),
+                    locked_balance=Decimal(str(balance.get("locked", 0))),
+                    usd_value=Decimal(str(balance.get("value_usd", 0))),
+                    last_updated=datetime.utcnow()
+                )
+                db.add(exchange_balance)
+        
+        await db.commit()
+        logger.info(f"Updated {len(balances)} balance records for user {user_id}, exchange {exchange}")
+        
     except Exception as e:
+        await db.rollback()
         logger.error("Balance update failed", error=str(e))
 
 
