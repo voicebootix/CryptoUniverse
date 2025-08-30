@@ -598,7 +598,8 @@ async def get_market_overview(
 
 @router.get("/recent-trades", response_model=RecentTradesResponse)
 async def get_recent_trades(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_database)
 ):
     """Get recent trading activity."""
     await rate_limiter.check_rate_limit(

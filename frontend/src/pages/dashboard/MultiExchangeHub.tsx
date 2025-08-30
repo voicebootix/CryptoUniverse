@@ -85,32 +85,7 @@ const EXCHANGE_NAMES: Record<string, string> = {
 
 // Arbitrage opportunities now loaded from API - no more hardcoded data
 
-// Unified order book
-const unifiedOrderBook = {
-  bids: [
-    { price: 43250.50, amount: 2.45, total: 105963.73, exchange: 'Binance' },
-    { price: 43248.30, amount: 1.89, total: 81739.29, exchange: 'Coinbase' },
-    { price: 43245.00, amount: 3.12, total: 134924.40, exchange: 'Kraken' },
-    { price: 43242.80, amount: 1.56, total: 67458.77, exchange: 'Bybit' },
-    { price: 43240.00, amount: 2.34, total: 101181.60, exchange: 'OKX' }
-  ],
-  asks: [
-    { price: 43255.20, amount: 2.12, total: 91701.02, exchange: 'Binance' },
-    { price: 43257.50, amount: 1.78, total: 76998.35, exchange: 'Coinbase' },
-    { price: 43260.00, amount: 2.89, total: 125021.40, exchange: 'Kraken' },
-    { price: 43262.30, amount: 1.45, total: 62730.34, exchange: 'Bybit' },
-    { price: 43265.00, amount: 2.67, total: 115517.55, exchange: 'OKX' }
-  ]
-};
-
-// Performance metrics by exchange
-const exchangePerformance = [
-  { name: 'Binance', trades: 342, winRate: 72, avgProfit: 13.4, volume: 2456789 },
-  { name: 'Coinbase', trades: 128, winRate: 58, avgProfit: -9.6, volume: 1234567 },
-  { name: 'Kraken', trades: 89, winRate: 65, avgProfit: 26.3, volume: 987654 },
-  { name: 'Bybit', trades: 156, winRate: 69, avgProfit: 22.1, volume: 1456789 },
-  { name: 'OKX', trades: 67, winRate: 61, avgProfit: 18.4, volume: 765432 }
-];
+// All data now loaded from real APIs via hooks - no more hardcoded data
 
 const MultiExchangeHub: React.FC = () => {
   const { exchanges, loading, connecting, aggregatedStats, actions } = useExchanges();
@@ -450,7 +425,48 @@ const MultiExchangeHub: React.FC = () => {
             </div>
 
             <div className="space-y-3">
-              {arbitrageOpportunities.map((opp) => (
+              {arbitrageError && (
+                <div className="p-4 border border-red-200 bg-red-50 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-red-500" />
+                    <span className="text-red-700">Error loading arbitrage data: {arbitrageError}</span>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={clearArbitrageError}
+                      className="ml-auto"
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                </div>
+              )}
+              
+              {arbitrageLoading && (
+                <div className="p-8 text-center">
+                  <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-2" />
+                  <p className="text-muted-foreground">Loading arbitrage opportunities...</p>
+                </div>
+              )}
+              
+              {!arbitrageLoading && !arbitrageError && arbitrageOpportunities.length === 0 && (
+                <div className="p-8 text-center">
+                  <Target className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">No Arbitrage Opportunities</h3>
+                  <p className="text-muted-foreground">
+                    Currently scanning for profitable opportunities across exchanges
+                  </p>
+                  <Button 
+                    variant="outline" 
+                    onClick={refreshArbitrageData}
+                    className="mt-4"
+                  >
+                    Refresh Scan
+                  </Button>
+                </div>
+              )}
+              
+              {!arbitrageLoading && !arbitrageError && arbitrageOpportunities.map((opp) => (
                 <motion.div
                   key={opp.id}
                   initial={{ opacity: 0, x: -20 }}
