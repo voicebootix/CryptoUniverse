@@ -77,8 +77,7 @@ async def startup_checks():
             from app.services.market_data_feeds import market_data_feeds
             from app.services.health_monitor import health_monitor
             
-            # Initialize services
-            await market_data_feeds.async_init()
+            # Initialize health monitor (which will initialize market_data_feeds)
             await health_monitor.initialize()
             
             # Test primary API

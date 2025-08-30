@@ -628,14 +628,14 @@ async def get_recent_trades(
                     time_str = trade.created_at.strftime("%Y-%m-%d")
                 
                 trade_list.append({
-                    "id": trade.id,
+                    "id": str(trade.id),  # Convert UUID to string
                     "symbol": trade.symbol,
-                    "side": trade.side,
-                    "amount": trade.amount,
-                    "price": trade.price,
+                    "side": trade.action.value,  # Use action enum, convert to string
+                    "amount": float(trade.quantity),  # Use quantity field, convert to float
+                    "price": float(trade.executed_price or trade.price or 0),  # Use executed_price or fallback
                     "time": time_str,
-                    "status": trade.status,
-                    "pnl": trade.profit_loss or Decimal("0"),
+                    "status": trade.status.value,  # Convert enum to string
+                    "pnl": float(trade.profit_realized_usd),  # Use profit_realized_usd field
                 })
             
             return RecentTradesResponse(recent_trades=trade_list)

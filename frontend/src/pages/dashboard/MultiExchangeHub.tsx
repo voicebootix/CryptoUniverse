@@ -114,6 +114,19 @@ const exchangePerformance = [
 
 const MultiExchangeHub: React.FC = () => {
   const { exchanges, loading, connecting, aggregatedStats, actions } = useExchanges();
+  const { 
+    opportunities: arbitrageOpportunities, 
+    orderBook: unifiedOrderBook, 
+    crossExchangeComparison,
+    isLoading: arbitrageLoading,
+    error: arbitrageError,
+    fetchArbitrageOpportunities,
+    fetchCrossExchangeComparison,
+    fetchOrderBook,
+    refreshAll: refreshArbitrageData,
+    clearError: clearArbitrageError
+  } = useArbitrage();
+  
   const [selectedExchange, setSelectedExchange] = useState<string>('all');
   const [showApiKeys, setShowApiKeys] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>('overview');
@@ -123,13 +136,22 @@ const MultiExchangeHub: React.FC = () => {
   const [filterExchange, setFilterExchange] = useState<string>('all');
   const [showConnectionModal, setShowConnectionModal] = useState<boolean>(false);
 
-  // Real-time data simulation
+  // Load real arbitrage data
+  useEffect(() => {
+    refreshArbitrageData();
+    fetchOrderBook('BTC');
+    fetchCrossExchangeComparison('BTC,ETH,SOL');
+  }, []);
+
+  // Real-time data updates
   useEffect(() => {
     const interval = setInterval(() => {
-      // Simulate real-time updates
-    }, 5000);
+      if (!arbitrageLoading) {
+        refreshArbitrageData();
+      }
+    }, 60000); // Refresh every minute
     return () => clearInterval(interval);
-  }, []);
+  }, [arbitrageLoading, refreshArbitrageData]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -422,7 +444,7 @@ const MultiExchangeHub: React.FC = () => {
                 </div>
                 <Badge variant="default">
                   <Zap className="w-3 h-3 mr-1" />
-                  4 Active Opportunities
+                  {arbitrageLoading ? 'Loading...' : `${arbitrageOpportunities.length} Active Opportunities`}
                 </Badge>
               </div>
             </div>

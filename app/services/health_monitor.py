@@ -15,6 +15,7 @@ from app.core.config import get_settings
 from app.core.redis import get_redis_client
 from app.services.market_data_feeds import MarketDataFeeds
 from app.services.market_analysis_core import MarketAnalysisService
+from app.services.market_analysis import ExchangeConfigurations
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -175,8 +176,9 @@ class HealthMonitor:
             health_result = await self.market_analysis.health_check()
             exchange_health = health_result.get("exchange_health", {})
             
-            # Add response time checks
-            for exchange in ["binance", "kraken", "kucoin", "coinbase", "bybit", "okx", "bitget", "gateio"]:
+            # Add response time checks using single source of truth
+            all_exchanges = ExchangeConfigurations.get_all_exchanges()
+            for exchange in all_exchanges:
                 if exchange not in exchange_health:
                     exchange_health[exchange] = {
                         "health_status": "UNKNOWN",
@@ -190,8 +192,9 @@ class HealthMonitor:
         
         except Exception as e:
             logger.error("Exchange health check failed", error=str(e))
-            # Provide fallback health status
-            for exchange in ["binance", "kraken", "kucoin", "coinbase", "bybit", "okx", "bitget", "gateio"]:
+            # Provide fallback health status using single source of truth
+            all_exchanges = ExchangeConfigurations.get_all_exchanges()
+            for exchange in all_exchanges:
                 exchange_health[exchange] = {
                     "health_status": "UNKNOWN",
                     "error": str(e),
@@ -256,22 +259,27 @@ class HealthMonitor:
         """Get comprehensive health status of all systems."""
         try:
             # Run all health checks in parallel
-            api_health, exchange_health, service_health = await asyncio.gather(
+            results = await asyncio.gather(
                 self.check_api_health(),
                 self.check_exchange_health(),
                 self.check_service_health(),
                 return_exceptions=True
             )
             
+            # Normalize results - handle exceptions
+            api_health = results[0] if not isinstance(results[0], Exception) else {"error": str(results[0])}
+            exchange_health = results[1] if not isinstance(results[1], Exception) else {"error": str(results[1])}
+            service_health = results[2] if not isinstance(results[2], Exception) else {"error": str(results[2])}
+            
             # Calculate overall health
-            healthy_apis = sum(1 for api in api_health.values() if api.get("status") == "HEALTHY")
-            total_apis = len(api_health)
+            healthy_apis = sum(1 for api in api_health.values() if isinstance(api, dict) and api.get("status") == "HEALTHY") if isinstance(api_health, dict) else 0
+            total_apis = len(api_health) if isinstance(api_health, dict) else 0
             
-            healthy_exchanges = sum(1 for ex in exchange_health.values() if ex.get("health_status") == "HEALTHY")
-            total_exchanges = len(exchange_health)
+            healthy_exchanges = sum(1 for ex in exchange_health.values() if isinstance(ex, dict) and ex.get("health_status") == "HEALTHY") if isinstance(exchange_health, dict) else 0
+            total_exchanges = len(exchange_health) if isinstance(exchange_health, dict) else 0
             
-            healthy_services = sum(1 for svc in service_health.values() if svc.get("status") == "HEALTHY")
-            total_services = len(service_health)
+            healthy_services = sum(1 for svc in service_health.values() if isinstance(svc, dict) and svc.get("status") == "HEALTHY") if isinstance(service_health, dict) else 0
+            total_services = len(service_health) if isinstance(service_health, dict) else 0
             
             # Determine overall status
             if (healthy_apis / max(total_apis, 1) >= 0.8 and 
@@ -315,10 +323,11 @@ class HealthMonitor:
                 await self.get_overall_health()
                 
                 # Store health status in Redis for quick access
+                import json
                 await self.redis.setex(
                     "system:health",
                     300,  # 5 minute cache
-                    str(self.health_status)
+                    json.dumps(self.health_status, default=str)  # Handle datetime objects
                 )
                 
                 # Check for alerts

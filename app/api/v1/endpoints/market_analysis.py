@@ -425,7 +425,7 @@ async def get_alpha_signals(
     
     try:
         result = await market_analysis.alpha_generation_coordinator(
-            symbols=symbols,
+            universe=symbols,
             strategies=strategies,
             user_id=str(current_user.id)
         )

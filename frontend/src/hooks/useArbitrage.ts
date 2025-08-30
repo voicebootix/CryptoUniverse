@@ -152,9 +152,17 @@ export const useArbitrageStore = create<ArbitrageState>((set, get) => ({
           draft.lastUpdated = new Date().toISOString();
           draft.isLoading = false;
         }));
+      } else {
+        set(produce((draft: Draft<ArbitrageState>) => {
+          draft.error = 'Failed to fetch price data for order book';
+          draft.isLoading = false;
+        }));
       }
     } catch (error: any) {
-      set({ error: error.message || 'Failed to fetch order book', isLoading: false });
+      set(produce((draft: Draft<ArbitrageState>) => {
+        draft.error = error.message || 'Failed to fetch order book';
+        draft.isLoading = false;
+      }));
     }
   },
 

@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import WebSocket
 import structlog
 
@@ -11,6 +11,7 @@ class ConnectionManager:
         self.active_connections: Dict[str, List[WebSocket]] = {}
         self.market_subscribers: Dict[str, List[WebSocket]] = {}  # Symbol -> WebSocket connections
         self.is_market_streaming = False
+        self._market_stream_task: Optional[asyncio.Task] = None
 
     async def connect(self, websocket: WebSocket, user_id: str):
         try:
@@ -50,9 +51,10 @@ class ConnectionManager:
             if websocket not in self.market_subscribers[symbol]:
                 self.market_subscribers[symbol].append(websocket)
         
-        # Start market streaming if not already running
+        # Start market streaming if not already running (prevent race condition)
         if not self.is_market_streaming:
-            asyncio.create_task(self._start_market_streaming())
+            self.is_market_streaming = True
+            self._market_stream_task = asyncio.create_task(self._start_market_streaming())
 
     async def broadcast(self, message: dict, user_id: str):
         if user_id in self.active_connections:
@@ -90,10 +92,6 @@ class ConnectionManager:
 
     async def _start_market_streaming(self):
         """Start background task for streaming market data."""
-        if self.is_market_streaming:
-            return
-        
-        self.is_market_streaming = True
         logger.info("Starting market data streaming")
         
         try:
@@ -128,6 +126,7 @@ class ConnectionManager:
             logger.error("Market streaming failed", error=str(e))
         finally:
             self.is_market_streaming = False
+            self._market_stream_task = None
             logger.info("Market data streaming stopped")
 
 manager = ConnectionManager()
