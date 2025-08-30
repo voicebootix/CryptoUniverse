@@ -300,10 +300,22 @@ export const exchangesAPI = axios.create({
 
 // Apply the same interceptors to specialized instances
 [tradingAPI, exchangesAPI].forEach(instance => {
-  // Add auth interceptor
-  instance.interceptors.request.use(authInterceptor);
+  // Add auth interceptor (same as apiClient)
+  instance.interceptors.request.use(
+    (config) => {
+      const authStore = useAuthStore.getState();
+      const token = authStore.accessToken;
+      
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+      
+      return config;
+    },
+    (error) => Promise.reject(error)
+  );
   
-  // Add response interceptor
+  // Add response interceptor (same as apiClient)
   instance.interceptors.response.use(
     (response) => response,
     async (error) => {
@@ -314,7 +326,8 @@ export const exchangesAPI = axios.create({
         
         try {
           const authStore = useAuthStore.getState();
-          const newToken = await authStore.refreshToken();
+          await authStore.refreshToken();
+          const newToken = authStore.accessToken;
           
           if (newToken) {
             originalRequest.headers.Authorization = `Bearer ${newToken}`;
