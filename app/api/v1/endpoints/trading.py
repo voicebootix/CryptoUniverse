@@ -603,7 +603,7 @@ async def get_recent_trades(
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     # Accept connection first
     await websocket.accept()
