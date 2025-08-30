@@ -18,7 +18,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
 from app.core.config import get_settings
@@ -167,7 +167,7 @@ auth_service = AuthService()
 # Dependency for getting current user
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ) -> User:
     """Get current authenticated user."""
     token = credentials.credentials
@@ -230,7 +230,7 @@ def require_role(allowed_roles: list):
 async def login(
     request: LoginRequest,
     client_request: Request,
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Authenticate user and return JWT tokens."""
     
@@ -318,7 +318,7 @@ async def login(
 async def register(
     request: RegisterRequest,
     client_request: Request,
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Register new user account."""
     
@@ -392,7 +392,7 @@ async def register(
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
     refresh_token: str,
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Refresh access token using refresh token."""
     
@@ -456,7 +456,7 @@ async def refresh_token(
 async def logout(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Logout user and revoke tokens."""
     
@@ -558,7 +558,7 @@ class OAuthTokenResponse(BaseModel):
 async def get_oauth_url(
     request: OAuthUrlRequest,
     client_request: Request,
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Get OAuth authorization URL for social login."""
     
@@ -592,7 +592,7 @@ async def oauth_callback(
     code: str,
     state: str,
     client_request: Request,
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Handle OAuth callback and redirect to frontend with tokens."""
     
@@ -663,7 +663,7 @@ async def link_oauth_account(
     provider: str,
     request: OAuthCallbackRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Link OAuth account to existing user."""
     
@@ -681,7 +681,7 @@ async def link_oauth_account(
 async def unlink_oauth_account(
     provider: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Unlink OAuth account from user."""
     
