@@ -123,12 +123,15 @@ def create_application() -> FastAPI:
             "https://cryptouniverse.onrender.com", 
             "http://localhost:3000",
             "http://localhost:8000",
-            "*"  # Temporary - for debugging
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:8000",
+            "*"  # Allow all for debugging CORS issues
         ],
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"],
+        allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=["*"],
+        max_age=86400,  # Cache preflight for 24 hours
     )
 
     # Add SessionMiddleware for OAuth

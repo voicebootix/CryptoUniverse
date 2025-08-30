@@ -6,10 +6,19 @@ class ConnectionManager:
         self.active_connections: Dict[str, List[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, user_id: str):
-        await websocket.accept()
-        if user_id not in self.active_connections:
-            self.active_connections[user_id] = []
-        self.active_connections[user_id].append(websocket)
+        try:
+            await websocket.accept()
+            if user_id not in self.active_connections:
+                self.active_connections[user_id] = []
+            self.active_connections[user_id].append(websocket)
+        except Exception as e:
+            # Connection might already be accepted or closed
+            print(f"WebSocket connection error: {e}")
+            # Still add to connections if not already there
+            if user_id not in self.active_connections:
+                self.active_connections[user_id] = []
+            if websocket not in self.active_connections[user_id]:
+                self.active_connections[user_id].append(websocket)
 
     def disconnect(self, websocket: WebSocket, user_id: str):
         if user_id in self.active_connections:

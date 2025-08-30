@@ -1432,52 +1432,71 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
     """Extended portfolio risk service with API integration methods."""
     
     async def get_portfolio_status(self, user_id: str) -> Dict[str, Any]:
-        """Get comprehensive portfolio status for a user."""
+        """Get comprehensive portfolio status for a user using real exchange data."""
         try:
             self.logger.info(f"Getting portfolio status for user {user_id}")
             
-            # Mock portfolio data (would be real in production)
-            portfolio_data = {
-                "portfolio": {
-                    "total_value_usd": 54250.75,
-                    "available_balance": 12500.00,
-                    "positions": [
-                        {
-                            "symbol": "BTC",
-                            "amount": 0.5,
-                            "value_usd": 25000.00,
-                            "unrealized_pnl": 1250.50,
-                            "side": "long"
-                        },
-                        {
-                            "symbol": "ETH", 
-                            "amount": 10.0,
-                            "value_usd": 24000.00,
-                            "unrealized_pnl": -200.25,
-                            "side": "long"
-                        },
-                        {
-                            "symbol": "SOL",
-                            "amount": 100.0,
-                            "value_usd": 5000.00,
-                            "unrealized_pnl": 125.00,
-                            "side": "long"
-                        }
-                    ],
-                    "daily_pnl": 475.25,
-                    "daily_pnl_pct": 0.88,
-                    "total_pnl": 1175.25,
-                    "total_pnl_pct": 2.21,
-                    "margin_used": 5000.00,
-                    "margin_available": 15000.00,
-                    "risk_score": 35.5,
-                    "active_orders": 3
-                }
-            }
+            # Get real exchange balances from database
+            from sqlalchemy.ext.asyncio import AsyncSession
+            from app.core.database import get_database_session
+            from app.models.exchange import ExchangeBalance, ExchangeAccount
+            from sqlalchemy import select, and_
             
-            return {
-                "success": True,
-                **portfolio_data
+            async with get_database_session() as db:
+                # Get all exchange balances for this user
+                stmt = select(ExchangeBalance).join(ExchangeAccount).where(
+                    and_(
+                        ExchangeAccount.user_id == user_id,
+                        ExchangeBalance.total_balance > 0
+                    )
+                )
+                result = await db.execute(stmt)
+                balances = result.scalars().all()
+                
+                total_value_usd = 0.0
+                available_balance = 0.0
+                positions = []
+                
+                for balance in balances:
+                    total_value_usd += float(balance.usd_value or 0)
+                    available_balance += float(balance.available_balance or 0)
+                    
+                    positions.append({
+                        "symbol": balance.symbol,
+                        "name": balance.symbol,  # Could enhance with full name lookup
+                        "amount": float(balance.total_balance),
+                        "value_usd": float(balance.usd_value or 0),
+                        "entry_price": float(balance.usd_value / balance.total_balance) if balance.total_balance > 0 else 0,
+                        "change_24h_pct": 0.0,  # Would need price history for this
+                        "unrealized_pnl": 0.0,  # Would need entry price tracking
+                        "side": "long"  # Assuming all holdings are long positions
+                    })
+                
+                # Calculate some basic metrics
+                daily_pnl = 0.0  # Would need historical data
+                daily_pnl_pct = 0.0
+                total_pnl = 0.0  # Would need entry cost basis
+                total_pnl_pct = 0.0
+                
+                portfolio_data = {
+                    "portfolio": {
+                        "total_value_usd": total_value_usd,
+                        "available_balance": available_balance,
+                        "positions": positions,
+                        "daily_pnl": daily_pnl,
+                        "daily_pnl_pct": daily_pnl_pct,
+                        "total_pnl": total_pnl,
+                        "total_pnl_pct": total_pnl_pct,
+                        "margin_used": 0.0,  # Would need margin account data
+                        "margin_available": available_balance,
+                        "risk_score": 25.0,  # Conservative default
+                        "active_orders": 0  # Would need open orders data
+                    }
+                }
+                
+                return {
+                    "success": True,
+                    **portfolio_data
             }
             
         except Exception as e:
