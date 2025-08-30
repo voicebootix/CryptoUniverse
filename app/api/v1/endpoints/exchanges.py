@@ -901,7 +901,7 @@ async def update_balance_records(user_id: str, exchange: str, balances: List[Dic
                     available_balance=Decimal(str(balance.get("free", 0))),
                     locked_balance=Decimal(str(balance.get("locked", 0))),
                     usd_value=Decimal(str(balance.get("value_usd", 0))),
-                    last_updated=datetime.utcnow()
+                    last_sync_at=datetime.utcnow()
                 )
                 db.add(exchange_balance)
         

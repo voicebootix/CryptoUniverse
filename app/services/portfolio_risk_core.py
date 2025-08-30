@@ -1438,11 +1438,11 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
             
             # Get real exchange balances from database
             from sqlalchemy.ext.asyncio import AsyncSession
-            from app.core.database import get_database_session
+            from app.core.database import get_database
             from app.models.exchange import ExchangeBalance, ExchangeAccount
             from sqlalchemy import select, and_
             
-            async with get_database_session() as db:
+            async for db in get_database():
                 # Get all exchange balances for this user
                 stmt = select(ExchangeBalance).join(ExchangeAccount).where(
                     and_(
