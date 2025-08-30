@@ -190,19 +190,19 @@ const LoginPage: React.FC = () => {
         </motion.div>
 
         {/* Main Content */}
-        <div className="flex-1 flex items-center justify-center px-4 py-8">
-          <div className="w-full max-w-6xl mx-auto">
-            <div className="grid lg:grid-cols-5 gap-12 items-center">
+        <div className="flex-1 flex items-center justify-center px-6 py-12">
+          <div className="w-full max-w-7xl mx-auto">
+            <div className="grid lg:grid-cols-2 gap-20 items-center">
               {/* Left Side - Feature Summary */}
               <motion.div
                 initial={{ opacity: 0, x: -30 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.6, delay: 0.2 }}
-                className="lg:col-span-2 space-y-8"
+                className="space-y-10 pr-10"
               >
-                <div className="space-y-4">
+                <div className="space-y-6">
                   <motion.h2
-                    className="text-3xl lg:text-4xl font-bold leading-tight"
+                    className="text-4xl lg:text-5xl font-bold leading-tight"
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3, duration: 0.6 }}
@@ -214,25 +214,64 @@ const LoginPage: React.FC = () => {
                     </span>
                   </motion.h2>
                   <motion.p
-                    className="text-lg text-gray-300 leading-relaxed"
+                    className="text-xl text-gray-300 leading-relaxed max-w-lg"
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.4, duration: 0.6 }}
                   >
-                    Advanced cryptocurrency trading with multi-model AI consensus and institutional-grade security.
+                    Advanced cryptocurrency trading with multi-model AI consensus, institutional-grade security, and real-time market analysis.
                   </motion.p>
                 </div>
 
-                <MotionDiv delay={0.5} className="space-y-4">
-                  <FeatureItem icon={Bot} title="AI-Powered Trading" color="text-green-400" />
-                  <FeatureItem icon={Globe} title="Multi-Exchange Support" color="text-blue-400" />
-                  <FeatureItem icon={Shield} title="Enterprise Security" color="text-purple-400" />
+                <MotionDiv delay={0.5} className="space-y-6">
+                  <div className="flex items-start space-x-4">
+                    <div className="w-14 h-14 bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl flex items-center justify-center flex-shrink-0 mt-1">
+                      <Bot className="w-7 h-7 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-white font-semibold text-xl mb-2">AI-Powered Trading</h3>
+                      <p className="text-gray-400 leading-relaxed">Multi-model consensus with GPT-4, Claude, and Gemini for superior trading decisions.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-4">
+                    <div className="w-14 h-14 bg-gradient-to-r from-blue-500 to-cyan-600 rounded-xl flex items-center justify-center flex-shrink-0 mt-1">
+                      <Globe className="w-7 h-7 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-white font-semibold text-xl mb-2">Multi-Exchange Support</h3>
+                      <p className="text-gray-400 leading-relaxed">Trade across 8+ major exchanges with advanced arbitrage scanning capabilities.</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start space-x-4">
+                    <div className="w-14 h-14 bg-gradient-to-r from-purple-500 to-pink-600 rounded-xl flex items-center justify-center flex-shrink-0 mt-1">
+                      <Shield className="w-7 h-7 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-white font-semibold text-xl mb-2">Enterprise Security</h3>
+                      <p className="text-gray-400 leading-relaxed">Bank-level encryption with multi-factor authentication and SOC 2 compliance.</p>
+                    </div>
+                  </div>
                 </MotionDiv>
 
-                <MotionDiv delay={0.6} className="grid grid-cols-3 gap-4 p-6 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10">
-                  <StatItem value="99.9%" label="Uptime" color="text-green-400" />
-                  <StatItem value="$100M+" label="AUM" color="text-blue-400" />
-                  <StatItem value="24/7" label="Trading" color="text-purple-400" />
+                <MotionDiv delay={0.6} className="relative">
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-pink-500/10 rounded-3xl blur-xl" />
+                  <div className="relative grid grid-cols-3 gap-6 p-8 bg-white/5 backdrop-blur-sm rounded-3xl border border-white/10">
+                    <div className="text-center">
+                      <CheckCircle className="w-10 h-10 text-green-400 mx-auto mb-3" />
+                      <div className="text-3xl font-bold text-green-400 mb-2">99.9%</div>
+                      <div className="text-sm text-gray-400 font-medium">Uptime</div>
+                    </div>
+                    <div className="text-center">
+                      <TrendingUp className="w-10 h-10 text-blue-400 mx-auto mb-3" />
+                      <div className="text-3xl font-bold text-blue-400 mb-2">$100M+</div>
+                      <div className="text-sm text-gray-400 font-medium">Assets Under Management</div>
+                    </div>
+                    <div className="text-center">
+                      <Zap className="w-10 h-10 text-purple-400 mx-auto mb-3" />
+                      <div className="text-3xl font-bold text-purple-400 mb-2">24/7</div>
+                      <div className="text-sm text-gray-400 font-medium">Trading</div>
+                    </div>
+                  </div>
                 </MotionDiv>
               </motion.div>
 
@@ -241,22 +280,22 @@ const LoginPage: React.FC = () => {
                 initial={{ opacity: 0, x: 30 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.6, delay: 0.4 }}
-                className="lg:col-span-3 flex justify-center"
+                className="flex justify-center"
               >
-                <div className="w-full max-w-md">
-                  <div className="relative bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl">
-                    <MotionDiv delay={0.6} className="text-center mb-8">
-                      <div className="flex items-center justify-center mb-4">
+                <div className="w-full max-w-xl">
+                  <div className="relative bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-12 shadow-2xl">
+                    <MotionDiv delay={0.6} className="text-center mb-12">
+                      <div className="flex items-center justify-center mb-6">
                         <motion.div
-                          className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg"
+                          className="w-24 h-24 bg-gradient-to-r from-blue-500 to-purple-600 rounded-3xl flex items-center justify-center shadow-2xl"
                           whileHover={{ rotate: 5, scale: 1.05 }}
                           transition={{ type: 'spring', stiffness: 400, damping: 17 }}
                         >
-                          <KeyRound className="w-8 h-8 text-white" />
+                          <KeyRound className="w-12 h-12 text-white" />
                         </motion.div>
                       </div>
-                      <h2 className="text-3xl font-bold text-white mb-2">Welcome Back</h2>
-                      <p className="text-gray-300">Sign in to your trading dashboard</p>
+                      <h2 className="text-4xl font-bold text-white mb-4">Welcome Back</h2>
+                      <p className="text-gray-300 text-xl">Sign in to your AI trading dashboard</p>
                     </MotionDiv>
 
                     {/* Alerts */}
@@ -290,10 +329,10 @@ const LoginPage: React.FC = () => {
                     </AnimatePresence>
 
                     {/* Login Form */}
-                    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-                      <MotionDiv delay={0.7} className="space-y-2">
-                        <Label htmlFor="email" className="text-white font-medium flex items-center space-x-2">
-                          <Mail className="w-4 h-4 text-blue-400" />
+                    <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+                      <MotionDiv delay={0.7} className="space-y-4">
+                        <Label htmlFor="email" className="text-white font-semibold text-lg flex items-center space-x-3">
+                          <Mail className="w-6 h-6 text-blue-400" />
                           <span>Email Address</span>
                         </Label>
                         <div className="relative group">
@@ -301,7 +340,7 @@ const LoginPage: React.FC = () => {
                             id="email"
                             type="email"
                             placeholder="Enter your email address"
-                            className="h-12 bg-white/10 border-white/20 focus:border-blue-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-xl transition-all duration-300"
+                            className="h-16 bg-white/10 border-white/20 focus:border-blue-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl transition-all duration-300 text-lg px-6"
                             {...register('email')}
                             aria-invalid={!!errors.email}
                             aria-describedby="email-error"
@@ -323,9 +362,9 @@ const LoginPage: React.FC = () => {
                         </AnimatePresence>
                       </MotionDiv>
 
-                      <MotionDiv delay={0.8} className="space-y-2">
-                        <Label htmlFor="password" className="text-white font-medium flex items-center space-x-2">
-                          <KeyRound className="w-4 h-4 text-purple-400" />
+                      <MotionDiv delay={0.8} className="space-y-4">
+                        <Label htmlFor="password" className="text-white font-semibold text-lg flex items-center space-x-3">
+                          <KeyRound className="w-6 h-6 text-purple-400" />
                           <span>Password</span>
                         </Label>
                         <div className="relative">
@@ -333,7 +372,7 @@ const LoginPage: React.FC = () => {
                             id="password"
                             type={showPassword ? 'text' : 'password'}
                             placeholder="Enter your password"
-                            className="h-12 bg-white/10 border-white/20 focus:border-purple-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-xl pr-12 transition-all duration-300"
+                            className="h-16 bg-white/10 border-white/20 focus:border-purple-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl pr-16 transition-all duration-300 text-lg px-6"
                             {...register('password')}
                             aria-invalid={!!errors.password}
                             aria-describedby="password-error"
@@ -341,12 +380,12 @@ const LoginPage: React.FC = () => {
                           <motion.button
                             type="button"
                             onClick={() => setShowPassword(!showPassword)}
-                            className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-white transition-colors duration-200"
+                            className="absolute inset-y-0 right-0 flex items-center pr-5 text-gray-400 hover:text-white transition-colors duration-200"
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.95 }}
                             aria-label={showPassword ? 'Hide password' : 'Show password'}
                           >
-                            {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                            {showPassword ? <EyeOff className="w-6 h-6" /> : <Eye className="w-6 h-6" />}
                           </motion.button>
                         </div>
                         <AnimatePresence>
@@ -367,16 +406,16 @@ const LoginPage: React.FC = () => {
 
                       <AnimatePresence>
                         {showMfaInput && (
-                          <MotionDiv delay={0.9} className="space-y-2">
-                            <Label htmlFor="mfa_code" className="text-white font-medium flex items-center space-x-2">
-                              <Shield className="w-4 h-4 text-green-400" />
+                          <MotionDiv delay={0.9} className="space-y-4">
+                            <Label htmlFor="mfa_code" className="text-white font-semibold text-lg flex items-center space-x-3">
+                              <Shield className="w-6 h-6 text-green-400" />
                               <span>MFA Code</span>
                             </Label>
                             <Input
                               id="mfa_code"
                               type="text"
                               placeholder="Enter your MFA code"
-                              className="h-12 bg-white/10 border-white/20 focus:border-green-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-xl transition-all duration-300"
+                              className="h-16 bg-white/10 border-white/20 focus:border-green-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl transition-all duration-300 text-lg px-6"
                               {...register('mfa_code')}
                               aria-invalid={!!errors.mfa_code}
                               aria-describedby="mfa-error"
@@ -396,21 +435,21 @@ const LoginPage: React.FC = () => {
                         )}
                       </AnimatePresence>
 
-                      <MotionDiv delay={1} className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
+                      <MotionDiv delay={1} className="flex items-center justify-between pt-4">
+                        <div className="flex items-center space-x-4">
                           <Checkbox
                             id="remember_me"
                             checked={watch('remember_me')}
                             onCheckedChange={(checked) => setValue('remember_me', checked as boolean)}
-                            className="border-white/30 data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500"
+                            className="border-white/30 data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 w-5 h-5"
                           />
-                          <Label htmlFor="remember_me" className="text-gray-300 font-normal">
+                          <Label htmlFor="remember_me" className="text-gray-300 font-medium text-lg">
                             Remember me
                           </Label>
                         </div>
                         <Link
                           to="/auth/forgot-password"
-                          className="text-blue-400 hover:text-blue-300 font-medium transition-colors duration-200"
+                          className="text-blue-400 hover:text-blue-300 font-semibold text-lg transition-colors duration-200"
                         >
                           Forgot password?
                         </Link>
@@ -420,63 +459,65 @@ const LoginPage: React.FC = () => {
                         <Button
                           type="submit"
                           disabled={isLoading}
-                          className="w-full h-12 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98]"
+                          className="w-full h-16 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white font-bold text-xl rounded-2xl shadow-2xl hover:shadow-3xl transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98]"
                           aria-live="polite"
                         >
                           {isLoading ? (
-                            <div className="flex items-center justify-center space-x-2">
-                              <Loader2 className="w-5 h-5 animate-spin" />
+                            <div className="flex items-center justify-center space-x-3">
+                              <Loader2 className="w-7 h-7 animate-spin" />
                               <span>Signing in...</span>
                             </div>
                           ) : (
-                            <div className="flex items-center justify-center space-x-2">
+                            <div className="flex items-center justify-center space-x-3">
                               <span>Sign in</span>
-                              <ArrowRight className="w-5 h-5" />
+                              <ArrowRight className="w-6 h-6" />
                             </div>
                           )}
                         </Button>
                       </MotionDiv>
                     </form>
 
-                    <MotionDiv delay={1.2} className="relative my-6">
+                    <MotionDiv delay={1.2} className="relative my-10">
                       <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-white/20" />
+                        <div className="w-full border-t border-white/30" />
                       </div>
                       <div className="relative flex justify-center">
-                        <span className="px-3 bg-white/5 backdrop-blur-sm text-gray-400 text-sm">Or continue with</span>
+                        <span className="px-6 bg-white/10 backdrop-blur-sm text-gray-300 text-lg font-medium rounded-full">
+                          Or continue with
+                        </span>
                       </div>
                     </MotionDiv>
 
-                    <MotionDiv delay={1.3} className="space-y-4">
+                    <MotionDiv delay={1.3} className="space-y-6">
                       <Button
                         type="button"
                         onClick={handleGoogleLogin}
                         variant="outline"
-                        className="w-full h-12 bg-white/10 border-white/20 hover:bg-white/15 text-white rounded-xl transition-all duration-300"
+                        className="w-full h-16 bg-white/10 border-white/30 hover:bg-white/20 text-white rounded-2xl transition-all duration-300 hover:scale-[1.02] text-lg font-semibold"
                         aria-label="Sign in with Google"
                       >
-                        <div className="flex items-center justify-center space-x-3">
-                          <svg className="w-5 h-5" viewBox="0 0 48 48">
+                        <div className="flex items-center justify-center space-x-4">
+                          <svg className="w-7 h-7" viewBox="0 0 48 48">
                             <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z" />
                             <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z" />
                             <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z" />
                             <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z" />
                           </svg>
-                          <span className="font-medium">Continue with Google</span>
+                          <span>Continue with Google</span>
                         </div>
                       </Button>
 
-                      <div className="text-center pt-2">
-                        <p className="text-gray-400 text-sm mb-3">Don't have an account?</p>
+                      <div className="text-center pt-6">
+                        <p className="text-gray-300 text-lg mb-5">Don't have an account?</p>
                         <Button
                           variant="outline"
-                          className="w-full h-12 border-white/20 hover:bg-white/10 text-white rounded-xl transition-all duration-300"
+                          className="w-full h-16 border-white/30 hover:bg-white/15 text-white rounded-2xl transition-all duration-300 hover:scale-[1.02] text-lg font-semibold"
                           onClick={() => navigate('/auth/register')}
                           aria-label="Create new account"
                         >
-                          <div className="flex items-center justify-center space-x-2">
-                            <Star className="w-4 h-4" />
-                            <span className="font-medium">Create new account</span>
+                          <div className="flex items-center justify-center space-x-3">
+                            <Star className="w-6 h-6" />
+                            <span>Create new account</span>
                           </div>
                         </Button>
                       </div>
