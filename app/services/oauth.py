@@ -9,7 +9,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 
 import httpx
 import structlog
@@ -114,23 +114,45 @@ class OAuthService:
             db.add(oauth_state)
             await db.commit()
         
-        # Use the correct redirect URI for the OAuth provider
-        redirect_uri = f"{settings.BASE_URL}/api/v1/auth/oauth/callback/google"
+        # Use hardcoded Render URL for production
+        redirect_uri = "https://cryptouniverse.onrender.com/api/v1/auth/oauth/callback/google"
         
-        # Build OAuth URL manually with our state
-        params = {
-            'client_id': settings.GOOGLE_CLIENT_ID,
-            'redirect_uri': redirect_uri,
-            'scope': 'openid email profile',
-            'response_type': 'code',
-            'state': state_token,
-            'access_type': 'offline',
-            'prompt': 'consent'
-        }
-        
-        oauth_url = f"https://accounts.google.com/o/oauth2/auth?{urlencode(params)}"
-        return oauth_url
-    
+        try:
+            # Build OAuth URL manually with our state
+            params = {
+                'client_id': settings.GOOGLE_CLIENT_ID,
+                'redirect_uri': redirect_uri,
+                'scope': 'openid email profile',
+                'response_type': 'code',
+                'state': state_token,
+                'access_type': 'offline',
+                'prompt': 'consent'
+            }
+            
+            # URL encode parameters properly
+            encoded_params = urlencode(params, quote_via=quote)
+            oauth_url = f"https://accounts.google.com/o/oauth2/auth?{encoded_params}"
+            
+            logger.info(
+                "Generated OAuth URL",
+                provider="google",
+                redirect_uri=redirect_uri,
+                state_token=state_token
+            )
+            
+            return oauth_url
+            
+        except Exception as e:
+            logger.error(
+                "Failed to generate OAuth URL",
+                error=str(e),
+                provider="google",
+                redirect_uri=redirect_uri
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to generate OAuth URL"
+            )
     async def handle_oauth_callback(
         self,
         provider: str,
@@ -219,52 +241,66 @@ class OAuthService:
     async def _handle_google_callback(self, code: str, db: AsyncSession) -> Dict[str, Any]:
         """Handle Google OAuth callback."""
         
-        # Exchange code for tokens manually
-        async with httpx.AsyncClient() as client:
-            token_response = await client.post(
-                "https://oauth2.googleapis.com/token",
-                data={
-                    "client_id": settings.GOOGLE_CLIENT_ID,
-                    "client_secret": settings.GOOGLE_CLIENT_SECRET,
-                    "code": code,
-                    "grant_type": "authorization_code",
-                    "redirect_uri": f"{settings.BASE_URL}/api/v1/auth/oauth/callback/google",
-                }
-            )
-            
-            if token_response.status_code != 200:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Failed to exchange OAuth code for tokens"
-                )
-            
-            token_data = token_response.json()
-            
-            # Get user info
-            user_info_response = await client.get(
-                "https://www.googleapis.com/oauth2/v3/userinfo",
-                headers={"Authorization": f"Bearer {token_data['access_token']}"}
-            )
-            
-            if user_info_response.status_code != 200:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Failed to get user info from Google"
-                )
-            
-            user_data = user_info_response.json()
+        # Use hardcoded Render URL for production
+        redirect_uri = "https://cryptouniverse.onrender.com/api/v1/auth/oauth/callback/google"
         
-        return {
-            "provider": "google",
-            "provider_user_id": user_data["sub"],
-            "email": user_data["email"],
-            "name": user_data.get("name", ""),
-            "avatar_url": user_data.get("picture"),
-            "profile_data": user_data,
-            "access_token": token_data["access_token"],
-            "refresh_token": token_data.get("refresh_token"),
-            "token_expires_at": datetime.utcnow() + timedelta(seconds=token_data.get("expires_in", 3600))
-        }
+        try:
+            # Exchange code for tokens manually
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                token_response = await client.post(
+                    "https://oauth2.googleapis.com/token",
+                    data={
+                        "client_id": settings.GOOGLE_CLIENT_ID,
+                        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                        "code": code,
+                        "grant_type": "authorization_code",
+                        "redirect_uri": redirect_uri,
+                    },
+                    headers={
+                        "Accept": "application/json",
+                        "Content-Type": "application/x-www-form-urlencoded"
+                    }
+                )
+                
+                if token_response.status_code != 200:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Failed to exchange OAuth code for tokens"
+                    )
+                
+                token_data = token_response.json()
+                
+                # Get user info
+                user_info_response = await client.get(
+                    "https://www.googleapis.com/oauth2/v3/userinfo",
+                    headers={"Authorization": f"Bearer {token_data['access_token']}"}
+                )
+                
+                if user_info_response.status_code != 200:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Failed to get user info from Google"
+                    )
+                
+                user_data = user_info_response.json()
+                
+                return {
+                    "provider": "google",
+                    "provider_user_id": user_data["sub"],
+                    "email": user_data["email"],
+                    "name": user_data.get("name", ""),
+                    "avatar_url": user_data.get("picture"),
+                    "profile_data": user_data,
+                    "access_token": token_data["access_token"],
+                    "refresh_token": token_data.get("refresh_token"),
+                    "token_expires_at": datetime.utcnow() + timedelta(seconds=token_data.get("expires_in", 3600))
+                }
+        except Exception as e:
+            logger.error("Google OAuth callback failed", error=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to complete Google OAuth process"
+            )
     
     async def _find_or_create_user(
         self,
