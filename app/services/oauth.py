@@ -18,6 +18,7 @@ from authlib.integrations.starlette_client import OAuth
 from fastapi import HTTPException, status, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.models.user import User, UserRole, UserStatus
@@ -191,11 +192,16 @@ class OAuthService:
                 "access_token": access_token,
                 "refresh_token": refresh_token,
                 "token_type": "bearer",
+                "expires_in": int(self.access_token_expire.total_seconds()),
                 "user": {
                     "id": str(user.id),
                     "email": user.email,
+                    "full_name": user.profile.full_name if user.profile else "",
                     "role": user.role.value,
                     "status": user.status.value,
+                    "tenant_id": str(user.tenant_id) if user.tenant_id else "",
+                    "created_at": user.created_at,
+                    "last_login": user.last_login,
                     "mfa_enabled": user.two_factor_enabled
                 },
                 "redirect_url": oauth_state.redirect_url
@@ -276,7 +282,7 @@ class OAuthService:
             select(UserOAuthConnection).filter(
                 UserOAuthConnection.provider == provider,
                 UserOAuthConnection.provider_user_id == provider_user_id
-            )
+            ).options(selectinload(UserOAuthConnection.user).selectinload(User.profile))
         )
         oauth_connection = result.scalar_one_or_none()
         
@@ -292,7 +298,9 @@ class OAuthService:
             return oauth_connection.user
         
         # Check if user exists by email
-        result = await db.execute(select(User).filter(User.email == email))
+        result = await db.execute(
+            select(User).filter(User.email == email).options(selectinload(User.profile))
+        )
         user = result.scalar_one_or_none()
         
         if not user:
