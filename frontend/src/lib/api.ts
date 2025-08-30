@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { AuthTokens } from '@/types/auth';
 
 // API configuration
@@ -18,44 +18,41 @@ export const apiClient: AxiosInstance = axios.create({
 });
 
 // Request interceptor to add auth token
-apiClient.interceptors.request.use(
-  async (config) => {
-    // Add timestamp to prevent caching
-    if (config.method === 'get') {
-      config.params = {
-        ...config.params,
-        _t: Date.now(),
-      };
-    }
-
-    // Skip auth for certain endpoints
-    const skipAuthEndpoints = [
-      '/auth/login',
-      '/auth/register', 
-      '/auth/forgot-password',
-      '/auth/reset-password',
-      '/auth/verify-email'
-    ];
-
-    const shouldSkipAuth = skipAuthEndpoints.some(endpoint => 
-      config.url?.includes(endpoint)
-    );
-
-    if (!shouldSkipAuth) {
-      // Import auth store dynamically to avoid circular dependencies
-      const { useAuthStore } = await import('@/store/authStore');
-      const token = useAuthStore.getState().tokens?.access_token;
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    }
-
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
+const authInterceptor = (config: InternalAxiosRequestConfig) => {
+  // Add timestamp to prevent caching
+  if (config.method === 'get') {
+    config.params = {
+      ...config.params,
+      _t: Date.now(),
+    };
   }
-);
+
+  // Skip auth for certain endpoints
+  const skipAuthEndpoints = [
+    '/auth/login',
+    '/auth/register', 
+    '/auth/forgot-password',
+    '/auth/reset-password',
+    '/auth/verify-email'
+  ];
+
+  const shouldSkipAuth = skipAuthEndpoints.some(endpoint => 
+    config.url?.includes(endpoint)
+  );
+
+  if (!shouldSkipAuth) {
+    // Import auth store dynamically to avoid circular dependencies
+    const { useAuthStore } = await import('@/store/authStore');
+    const token = useAuthStore.getState().tokens?.access_token;
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+
+  return config;
+};
+
+apiClient.interceptors.request.use(authInterceptor);
 
 // Response interceptor for error handling
 apiClient.interceptors.response.use(
@@ -133,6 +130,46 @@ apiClient.interceptors.response.use(
   }
 );
 
+export const tradingAPI = axios.create({
+  baseURL: `${API_BASE_URL}/trading`,
+});
+
+tradingAPI.interceptors.request.use(authInterceptor);
+
+tradingAPI.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      try {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (refreshToken) {
+          const response = await axios.post<{ tokens: AuthTokens }>(`${API_BASE_URL}/auth/refresh`, {
+            refresh_token: refreshToken,
+          });
+          const { tokens } = response.data;
+          localStorage.setItem('access_token', tokens.access_token);
+          localStorage.setItem('refresh_token', tokens.refresh_token);
+          
+          const { useAuthStore } = await import('@/store/authStore');
+          useAuthStore.getState().setTokens(tokens);
+
+          tradingAPI.defaults.headers.common['Authorization'] = `Bearer ${tokens.access_token}`;
+          if (originalRequest.headers) {
+            originalRequest.headers['Authorization'] = `Bearer ${tokens.access_token}`;
+          }
+          return tradingAPI(originalRequest);
+        }
+      } catch (refreshError) {
+        // Handle failed refresh
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 // API endpoints
 export const authAPI = {
   login: (credentials: { email: string; password: string; mfa_code?: string }) =>
@@ -194,22 +231,44 @@ export const marketAPI = {
     apiClient.get(`/market/ticker/${symbol}`),
 };
 
-export const exchangesAPI = {
-  getConnected: () =>
-    apiClient.get('/exchanges/list'),
-  
-  connect: (exchange: string, credentials: any) =>
-    apiClient.post('/exchanges/connect', { exchange, ...credentials }),
-  
-  disconnect: (exchangeId: string) =>
-    apiClient.delete(`/exchanges/${exchangeId}`),
-  
-  testConnection: (exchangeId: string) =>
-    apiClient.post(`/exchanges/${exchangeId}/test`),
-  
-  getBalances: (exchange: string) =>
-    apiClient.get(`/exchanges/${exchange}/balances`),
-};
+export const exchangesAPI = axios.create({
+  baseURL: `${API_BASE_URL}/exchanges`,
+});
+
+exchangesAPI.interceptors.request.use(authInterceptor);
+exchangesAPI.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
+
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      try {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (refreshToken) {
+          const response = await axios.post<{ tokens: AuthTokens }>(`${API_BASE_URL}/auth/refresh`, {
+            refresh_token: refreshToken,
+          });
+          const { tokens } = response.data;
+          localStorage.setItem('access_token', tokens.access_token);
+          localStorage.setItem('refresh_token', tokens.refresh_token);
+          
+          const { useAuthStore } = await import('@/store/authStore');
+          useAuthStore.getState().setTokens(tokens);
+
+          exchangesAPI.defaults.headers.common['Authorization'] = `Bearer ${tokens.access_token}`;
+          if (originalRequest.headers) {
+            originalRequest.headers['Authorization'] = `Bearer ${tokens.access_token}`;
+          }
+          return exchangesAPI(originalRequest);
+        }
+      } catch (refreshError) {
+        // Handle failed refresh
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 export const adminAPI = {
   getUsers: (params?: any) =>
