@@ -526,7 +526,7 @@ def get_user_permissions(role: UserRole) -> list:
 # OAuth Request/Response Models
 class OAuthUrlRequest(BaseModel):
     provider: str
-    redirect_url: str  # Now required
+    redirect_url: Optional[str] = None  # Optional since backend handles it
     is_signup: bool = False  # Flag to indicate registration flow
 
     @field_validator('provider')
