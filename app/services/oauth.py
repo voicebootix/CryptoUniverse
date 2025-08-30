@@ -193,8 +193,11 @@ class OAuthService:
                     detail=f"Unsupported provider: {provider}"
                 )
             
-            # Find or create user
+            # Find or create user.
             user = await self._find_or_create_user(user_info, provider, db)
+            
+            # Commit the transaction after successful user creation
+            await db.commit()
             
             # Create authentication tokens
             access_token = self.create_access_token(user)
@@ -229,13 +232,13 @@ class OAuthService:
             }
             
         except Exception as e:
+            # Rollback transaction on error
+            await db.rollback()
             logger.error("OAuth callback failed", provider=provider, error=str(e))
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="OAuth authentication failed"
             )
-        finally:
-            await db.commit()
     
     async def _handle_google_callback(self, code: str, db: AsyncSession) -> Dict[str, Any]:
         """Handle Google OAuth callback."""
