@@ -249,28 +249,28 @@ const LoginPage: React.FC = () => {
                 transition={{ duration: 0.6, delay: 0.4 }}
                 className="lg:col-span-3 flex justify-center"
               >
-                <div className="w-full max-w-md">
+                <div className="w-full max-w-lg">
                   {/* Glassmorphism Container */}
-                  <div className="relative bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl">
+                  <div className="relative bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-12 shadow-2xl">
                     
                     {/* Form Header */}
                     <motion.div
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.6, duration: 0.6 }}
-                      className="text-center mb-8"
+                      className="text-center mb-12"
                     >
-                      <div className="flex items-center justify-center mb-4">
+                      <div className="flex items-center justify-center mb-6">
                         <motion.div
-                          className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg"
+                          className="w-24 h-24 bg-gradient-to-r from-blue-500 to-purple-600 rounded-3xl flex items-center justify-center shadow-2xl"
                           whileHover={{ rotate: 5, scale: 1.05 }}
                           transition={{ type: "spring", stiffness: 400, damping: 17 }}
                         >
-                          <KeyRound className="w-8 h-8 text-white" />
+                          <KeyRound className="w-12 h-12 text-white" />
                         </motion.div>
                       </div>
-                      <h2 className="text-3xl font-bold text-white mb-2">Welcome Back</h2>
-                      <p className="text-gray-300">Sign in to your trading dashboard</p>
+                      <h2 className="text-4xl font-bold text-white mb-4">Welcome Back</h2>
+                      <p className="text-gray-300 text-xl">Sign in to your AI trading dashboard</p>
                     </motion.div>
 
                     {/* Alerts */}
@@ -305,17 +305,17 @@ const LoginPage: React.FC = () => {
                     </AnimatePresence>
 
                     {/* Login Form */}
-                    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+                    <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
                       
                       {/* Email Field */}
                       <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.7, duration: 0.5 }}
-                        className="space-y-2"
+                        className="space-y-4"
                       >
-                        <Label htmlFor="email" className="text-white font-medium flex items-center space-x-2">
-                          <Mail className="w-4 h-4 text-blue-400" />
+                        <Label htmlFor="email" className="text-white font-semibold text-lg flex items-center space-x-3">
+                          <Mail className="w-6 h-6 text-blue-400" />
                           <span>Email Address</span>
                         </Label>
                         <div className="relative group">
@@ -323,9 +323,10 @@ const LoginPage: React.FC = () => {
                             id="email"
                             type="email"
                             placeholder="Enter your email address"
-                            className="h-12 bg-white/10 border-white/20 focus:border-blue-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-xl transition-all duration-300"
+                            className="h-16 bg-white/10 border-white/20 focus:border-blue-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl transition-all duration-300 text-lg px-6"
                             {...register('email')}
                           />
+                          <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-blue-500/10 via-transparent to-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                         </div>
                         <AnimatePresence>
                           {errors.email && (
@@ -347,29 +348,30 @@ const LoginPage: React.FC = () => {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.8, duration: 0.5 }}
-                        className="space-y-2"
+                        className="space-y-4"
                       >
-                        <Label htmlFor="password" className="text-white font-medium flex items-center space-x-2">
-                          <KeyRound className="w-4 h-4 text-purple-400" />
+                        <Label htmlFor="password" className="text-white font-semibold text-lg flex items-center space-x-3">
+                          <KeyRound className="w-6 h-6 text-purple-400" />
                           <span>Password</span>
                         </Label>
-                        <div className="relative">
+                        <div className="relative group">
                           <Input
                             id="password"
                             type={showPassword ? 'text' : 'password'}
                             placeholder="Enter your password"
-                            className="h-12 bg-white/10 border-white/20 focus:border-purple-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-xl pr-12 transition-all duration-300"
+                            className="h-16 bg-white/10 border-white/20 focus:border-purple-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl pr-16 transition-all duration-300 text-lg px-6"
                             {...register('password')}
                           />
                           <motion.button
                             type="button"
                             onClick={() => setShowPassword(!showPassword)}
-                            className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-white transition-colors duration-200"
+                            className="absolute inset-y-0 right-0 flex items-center pr-5 text-gray-400 hover:text-white transition-colors duration-200"
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.95 }}
                           >
-                            {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                            {showPassword ? <EyeOff className="w-6 h-6" /> : <Eye className="w-6 h-6" />}
                           </motion.button>
+                          <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-purple-500/10 via-transparent to-pink-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                         </div>
                         <AnimatePresence>
                           {errors.password && (
@@ -394,19 +396,22 @@ const LoginPage: React.FC = () => {
                             animate={{ opacity: 1, height: "auto" }}
                             exit={{ opacity: 0, height: 0 }}
                             transition={{ duration: 0.3 }}
-                            className="space-y-2"
+                            className="space-y-4"
                           >
-                            <Label htmlFor="mfa_code" className="text-white font-medium flex items-center space-x-2">
-                              <Shield className="w-4 h-4 text-green-400" />
+                            <Label htmlFor="mfa_code" className="text-white font-semibold text-lg flex items-center space-x-3">
+                              <Shield className="w-6 h-6 text-green-400" />
                               <span>MFA Code</span>
                             </Label>
-                            <Input
-                              id="mfa_code"
-                              type="text"
-                              placeholder="Enter your MFA code"
-                              className="h-12 bg-white/10 border-white/20 focus:border-green-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-xl transition-all duration-300"
-                              {...register('mfa_code')}
-                            />
+                            <div className="relative group">
+                              <Input
+                                id="mfa_code"
+                                type="text"
+                                placeholder="Enter your MFA code"
+                                className="h-16 bg-white/10 border-white/20 focus:border-green-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl transition-all duration-300 text-lg px-6"
+                                {...register('mfa_code')}
+                              />
+                              <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-green-500/10 via-transparent to-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+                            </div>
                             {errors.mfa_code && (
                               <motion.p
                                 initial={{ opacity: 0, y: -10 }}
@@ -426,22 +431,22 @@ const LoginPage: React.FC = () => {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.9, duration: 0.5 }}
-                        className="flex items-center justify-between"
+                        className="flex items-center justify-between pt-4"
                       >
-                        <div className="flex items-center space-x-3">
+                        <div className="flex items-center space-x-4">
                           <Checkbox
                             id="remember_me"
                             checked={watch('remember_me')}
                             onCheckedChange={(checked) => setValue('remember_me', checked as boolean)}
-                            className="border-white/30 data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500"
+                            className="border-white/30 data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 w-5 h-5"
                           />
-                          <Label htmlFor="remember_me" className="text-gray-300 font-normal">
+                          <Label htmlFor="remember_me" className="text-gray-300 font-medium text-lg">
                             Remember me
                           </Label>
                         </div>
                         <Link
                           to="/auth/forgot-password"
-                          className="text-blue-400 hover:text-blue-300 font-medium transition-colors duration-200"
+                          className="text-blue-400 hover:text-blue-300 font-semibold text-lg transition-colors duration-200"
                         >
                           Forgot password?
                         </Link>
@@ -456,17 +461,17 @@ const LoginPage: React.FC = () => {
                         <Button
                           type="submit"
                           disabled={isLoading}
-                          className="w-full h-12 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98]"
+                          className="w-full h-16 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white font-bold text-xl rounded-2xl shadow-2xl hover:shadow-3xl transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98]"
                         >
                           {isLoading ? (
-                            <div className="flex items-center justify-center space-x-2">
-                              <Loader2 className="w-5 h-5 animate-spin" />
+                            <div className="flex items-center justify-center space-x-3">
+                              <Loader2 className="w-7 h-7 animate-spin" />
                               <span>Signing in...</span>
                             </div>
                           ) : (
-                            <div className="flex items-center justify-center space-x-2">
+                            <div className="flex items-center justify-center space-x-3">
                               <span>Sign in</span>
-                              <ArrowRight className="w-5 h-5" />
+                              <ArrowRight className="w-6 h-6" />
                             </div>
                           )}
                         </Button>
@@ -478,13 +483,13 @@ const LoginPage: React.FC = () => {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: 1.1, duration: 0.5 }}
-                      className="relative my-6"
+                      className="relative my-10"
                     >
                       <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-white/20" />
+                        <div className="w-full border-t border-white/30" />
                       </div>
                       <div className="relative flex justify-center">
-                        <span className="px-3 bg-white/5 backdrop-blur-sm text-gray-400 text-sm">
+                        <span className="px-6 bg-white/10 backdrop-blur-sm text-gray-300 text-lg font-medium rounded-full">
                           Or continue with
                         </span>
                       </div>
@@ -495,17 +500,17 @@ const LoginPage: React.FC = () => {
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 1.2, duration: 0.5 }}
-                      className="space-y-4"
+                      className="space-y-6"
                     >
                       {/* Google Sign In */}
                       <Button
                         type="button"
                         onClick={handleGoogleLogin}
                         variant="outline"
-                        className="w-full h-12 bg-white/10 border-white/20 hover:bg-white/15 text-white rounded-xl transition-all duration-300"
+                        className="w-full h-16 bg-white/10 border-white/30 hover:bg-white/20 text-white rounded-2xl transition-all duration-300 hover:scale-[1.02] text-lg font-semibold"
                       >
-                        <div className="flex items-center justify-center space-x-3">
-                          <svg className="w-5 h-5" viewBox="0 0 48 48">
+                        <div className="flex items-center justify-center space-x-4">
+                          <svg className="w-7 h-7" viewBox="0 0 48 48">
                             <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"></path>
                             <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"></path>
                             <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"></path>
@@ -516,18 +521,18 @@ const LoginPage: React.FC = () => {
                       </Button>
 
                       {/* Sign Up Link */}
-                      <div className="text-center pt-2">
-                        <p className="text-gray-400 text-sm mb-3">
+                      <div className="text-center pt-6">
+                        <p className="text-gray-300 text-lg mb-5">
                           Don't have an account?
                         </p>
                         <Button
                           variant="outline"
-                          className="w-full h-12 border-white/20 hover:bg-white/10 text-white rounded-xl transition-all duration-300"
+                          className="w-full h-16 border-white/30 hover:bg-white/15 text-white rounded-2xl transition-all duration-300 hover:scale-[1.02] text-lg font-semibold"
                           onClick={() => navigate('/auth/register')}
                         >
-                          <div className="flex items-center justify-center space-x-2">
-                            <Star className="w-4 h-4" />
-                            <span className="font-medium">Create new account</span>
+                          <div className="flex items-center justify-center space-x-3">
+                            <Star className="w-6 h-6" />
+                            <span>Create new account</span>
                           </div>
                         </Button>
                       </div>
