@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from cryptography.fernet import Fernet
 
 from app.core.config import get_settings
@@ -125,7 +125,7 @@ class ExchangeTestResponse(BaseModel):
 async def connect_exchange(
     request: ExchangeApiKeyRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Connect a new exchange account with API keys."""
     
@@ -252,7 +252,7 @@ async def connect_exchange(
 @router.get("/list")
 async def list_exchange_connections(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """List all connected exchange accounts."""
     
@@ -353,7 +353,7 @@ async def update_exchange_connection(
     api_key_id: str,
     request: ExchangeApiKeyUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Update exchange connection settings."""
     
@@ -413,7 +413,7 @@ async def update_exchange_connection(
 async def test_exchange_connection_endpoint(
     api_key_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Test exchange connection and permissions."""
     
@@ -501,7 +501,7 @@ async def test_exchange_connection_endpoint(
 async def get_exchange_balances(
     exchange: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Get current balances from exchange."""
     
@@ -570,7 +570,7 @@ async def get_exchange_balances(
 async def disconnect_exchange(
     api_key_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Disconnect and remove exchange connection."""
     
