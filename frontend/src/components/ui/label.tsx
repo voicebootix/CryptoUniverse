@@ -1,16 +1,24 @@
-import React from 'react';
+import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
+import { cn } from "@/lib/utils"
 
-interface LabelProps extends React.LabelHTMLAttributes<HTMLLabelElement> {
-  children: React.ReactNode;
-}
+const labelVariants = cva(
+  "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+)
 
-export const Label: React.FC<LabelProps> = ({ children, className = '', ...props }) => {
-  return (
+export interface LabelProps
+  extends React.LabelHTMLAttributes<HTMLLabelElement>,
+    VariantProps<typeof labelVariants> {}
+
+const Label = React.forwardRef<HTMLLabelElement, LabelProps>(
+  ({ className, ...props }, ref) => (
     <label
-      className={`block text-sm font-medium text-gray-700 mb-1 ${className}`}
+      ref={ref}
+      className={cn(labelVariants(), className)}
       {...props}
-    >
-      {children}
-    </label>
-  );
-};
+    />
+  )
+)
+Label.displayName = "Label"
+
+export { Label }
