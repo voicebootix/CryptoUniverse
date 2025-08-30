@@ -9,7 +9,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
-from urllib.parse import urlencode, parse_qs, quote_plus
+from urllib.parse import urlencode
 
 import httpx
 import structlog
@@ -129,8 +129,8 @@ class OAuthService:
                 'prompt': 'consent'
             }
             
-            # Simple URL encoding
-            oauth_url = f"https://accounts.google.com/o/oauth2/auth?{urlencode(params)}"
+            # Generate OAuth URL
+            oauth_url = 'https://accounts.google.com/o/oauth2/auth?' + urlencode(params, doseq=True)
             
             logger.info(
                 "Generated OAuth URL",
@@ -245,16 +245,18 @@ class OAuthService:
         
         try:
             # Exchange code for tokens manually
+            token_data = {
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+            }
+
             async with httpx.AsyncClient(timeout=30.0) as client:
                 token_response = await client.post(
                     "https://oauth2.googleapis.com/token",
-                    data={
-                        "client_id": settings.GOOGLE_CLIENT_ID,
-                        "client_secret": settings.GOOGLE_CLIENT_SECRET,
-                        "code": code,
-                        "grant_type": "authorization_code",
-                        "redirect_uri": redirect_uri,
-                    },
+                    data=token_data,  # Let httpx handle URL encoding
                     headers={
                         "Accept": "application/json",
                         "Content-Type": "application/x-www-form-urlencoded"
