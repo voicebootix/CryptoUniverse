@@ -85,7 +85,7 @@ class OAuthService:
         self,
         provider: str,
         client_request: Request,
-        redirect_url: str,
+        redirect_url: Optional[str] = None,  # Made optional since we'll use our own
         is_signup: bool = False,
         db: AsyncSession = None,
         ip_address: Optional[str] = None,
@@ -244,9 +244,8 @@ class OAuthService:
     async def _handle_google_callback(self, code: str, db: AsyncSession) -> Dict[str, Any]:
         """Handle Google OAuth callback."""
         
-        # Use backend URL for Google OAuth callback
-        backend_url = "https://cryptouniverse.onrender.com/api/v1"
-        redirect_uri = f"{backend_url}/auth/oauth/callback/google"
+        # Always use the backend callback URL
+        redirect_uri = "https://cryptouniverse.onrender.com/api/v1/auth/oauth/callback/google"
         
         try:
             # Exchange code for tokens manually

@@ -587,7 +587,7 @@ async def get_oauth_url(
 
 
 
-@router.get("/oauth/callback")
+@router.get("/oauth/callback/google")
 async def oauth_callback(
     code: str,
     state: str,
@@ -595,8 +595,11 @@ async def oauth_callback(
     db: AsyncSession = Depends(get_database)
 ):
     """Handle OAuth callback from Google and redirect to frontend with tokens."""
-    # Always use Google as provider since it's our only OAuth provider for now
-    provider = "google"
+    logger.info(
+        "Received OAuth callback",
+        state=state,
+        client_ip=client_request.client.host
+    )
     
     client_ip = client_request.client.host
     
