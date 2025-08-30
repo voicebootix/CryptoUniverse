@@ -8,7 +8,48 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || (
     : 'http://localhost:8000/api/v1'
 );
 
-// Create specialized API instances that use the same interceptors as the main client
+// Auth interceptor function (same as in client.ts)
+const authInterceptor = (config: any) => {
+  const token = localStorage.getItem('access_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+};
+
+// Response interceptor function (same as in client.ts)
+const setupResponseInterceptor = (instance: any) => {
+  instance.interceptors.response.use(
+    (response: any) => response,
+    async (error: any) => {
+      if (error.response?.status === 401 && error.response?.data?.detail === 'Token has expired') {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (refreshToken) {
+          try {
+            const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+              refresh_token: refreshToken
+            });
+            
+            const { access_token, refresh_token: newRefreshToken } = response.data;
+            localStorage.setItem('access_token', access_token);
+            localStorage.setItem('refresh_token', newRefreshToken);
+            
+            // Retry the original request
+            error.config.headers.Authorization = `Bearer ${access_token}`;
+            return axios.request(error.config);
+          } catch (refreshError) {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+            window.location.href = '/login';
+          }
+        }
+      }
+      return Promise.reject(error);
+    }
+  );
+};
+
+// Create specialized API instances
 export const tradingAPI = axios.create({
   baseURL: `${API_BASE_URL}/trading`,
   timeout: 30000,
@@ -19,21 +60,10 @@ export const exchangesAPI = axios.create({
   timeout: 30000,
 });
 
-// Copy interceptors from main client to specialized instances
+// Add interceptors to specialized instances
 [tradingAPI, exchangesAPI].forEach(instance => {
-  // Copy request interceptors
-  apiClient.interceptors.request.handlers.forEach(handler => {
-    if (handler.fulfilled) {
-      instance.interceptors.request.use(handler.fulfilled, handler.rejected);
-    }
-  });
-
-  // Copy response interceptors
-  apiClient.interceptors.response.handlers.forEach(handler => {
-    if (handler.fulfilled) {
-      instance.interceptors.response.use(handler.fulfilled, handler.rejected);
-    }
-  });
+  instance.interceptors.request.use(authInterceptor);
+  setupResponseInterceptor(instance);
 });
 
 // Export the main client as default
