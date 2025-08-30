@@ -192,15 +192,22 @@ async def connect_exchange(
         await db.flush()  # Get the ID
         
         # Create API key record with minimal fields
+        import hashlib
+        key_hash = hashlib.sha256(request.api_key.encode()).hexdigest()
+        
         api_key_record = ExchangeApiKey(
             account_id=exchange_account.id,
             key_name=request.nickname or f"{request.exchange}_main",
             encrypted_api_key=encrypted_api_key,
             encrypted_secret_key=encrypted_secret_key,
             encrypted_passphrase=encrypted_passphrase,
+            key_hash=key_hash,  # Required field - SHA256 hash of API key
             permissions=test_result.get("permissions", []),
+            ip_restrictions=[],  # Default empty list
             status=ApiKeyStatus.ACTIVE,
-            is_validated=True
+            is_validated=True,
+            total_requests=0,
+            failed_requests=0
         )
         db.add(api_key_record)
         await db.commit()
