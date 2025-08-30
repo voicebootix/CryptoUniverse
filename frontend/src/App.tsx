@@ -30,6 +30,7 @@ import AutonomousPage from '@/pages/dashboard/AutonomousPage';
 import ExchangesPage from '@/pages/dashboard/ExchangesPage';
 import SettingsPage from '@/pages/dashboard/SettingsPage';
 import AdminPage from '@/pages/dashboard/AdminPage';
+import MarketAnalysisPage from '@/pages/dashboard/MarketAnalysisPage';
 
 // Loading Component
 const LoadingScreen: React.FC = () => (
@@ -143,6 +144,9 @@ const App: React.FC = () => {
             
             {/* Advanced Analytics */}
             <Route path="analytics" element={<AdvancedAnalytics />} />
+            
+            {/* Market Analysis */}
+            <Route path="market-analysis" element={<MarketAnalysisPage />} />
             
             {/* Trading */}
             <Route path="trading" element={<TradingPage />} />

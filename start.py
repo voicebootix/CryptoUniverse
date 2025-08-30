@@ -72,14 +72,41 @@ async def startup_checks():
         # Check API dependencies
         logger.info("🔑 Checking API dependencies...")
         
-        # Market data API check
+        # Enhanced market data API check with all sources
         try:
             from app.services.market_data_feeds import market_data_feeds
+            from app.services.health_monitor import health_monitor
+            
+            # Initialize health monitor (which will initialize market_data_feeds)
+            await health_monitor.initialize()
+            
+            # Test primary API
             btc_price = await market_data_feeds.get_real_time_price("BTC")
             if btc_price.get("success"):
-                logger.info("✅ Market data APIs accessible")
+                logger.info(f"✅ Market data APIs accessible - BTC price: ${btc_price['data']['price']}")
+                logger.info(f"✅ Data source: {btc_price['data']['source']}")
             else:
                 logger.warning("⚠️ Market data APIs may have limited access")
+            
+            # Check API key configuration
+            api_keys_status = []
+            if hasattr(settings, 'ALPHA_VANTAGE_API_KEY') and settings.ALPHA_VANTAGE_API_KEY:
+                api_keys_status.append("Alpha Vantage ✅")
+            else:
+                api_keys_status.append("Alpha Vantage ❌")
+            
+            if hasattr(settings, 'COINGECKO_API_KEY') and settings.COINGECKO_API_KEY:
+                api_keys_status.append("CoinGecko ✅")
+            else:
+                api_keys_status.append("CoinGecko ❌")
+            
+            if hasattr(settings, 'FINNHUB_API_KEY') and settings.FINNHUB_API_KEY:
+                api_keys_status.append("Finnhub ✅")
+            else:
+                api_keys_status.append("Finnhub ❌")
+            
+            logger.info(f"🔑 API Keys Status: {', '.join(api_keys_status)}")
+            
         except Exception as e:
             logger.warning(f"⚠️ Market data API check failed: {e}")
         

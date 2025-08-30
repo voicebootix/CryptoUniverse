@@ -37,34 +37,8 @@ import aiohttp
 import structlog
 
 from app.core.logging import LoggerMixin
-# Avoid circular import - define configurations locally
-class ExchangeConfigurations:
-    """Exchange API configurations for market data."""
-    
-    BINANCE = {
-        "base_url": "https://api.binance.com",
-        "endpoints": {
-            "ticker": "/api/v3/ticker/24hr",
-            "price": "/api/v3/ticker/price"
-        },
-        "rate_limit": 1200
-    }
-    
-    KRAKEN = {
-        "base_url": "https://api.kraken.com", 
-        "endpoints": {
-            "ticker": "/0/public/Ticker"
-        },
-        "rate_limit": 60
-    }
-    
-    KUCOIN = {
-        "base_url": "https://api.kucoin.com",
-        "endpoints": {
-            "stats": "/api/v1/market/stats"
-        },
-        "rate_limit": 1800
-    }
+# Import exchange configurations to avoid duplication
+from app.services.market_analysis import ExchangeConfigurations
 
 logger = structlog.get_logger(__name__)
 
@@ -76,7 +50,75 @@ class DynamicExchangeManager(LoggerMixin):
         self.exchange_configs = {
             "binance": ExchangeConfigurations.BINANCE,
             "kraken": ExchangeConfigurations.KRAKEN,
-            "kucoin": ExchangeConfigurations.KUCOIN
+            "kucoin": ExchangeConfigurations.KUCOIN,
+            "coinbase": ExchangeConfigurations.COINBASE,
+            "bybit": ExchangeConfigurations.BYBIT,
+            "okx": ExchangeConfigurations.OKX,
+            "bitget": ExchangeConfigurations.BITGET,
+            "gateio": ExchangeConfigurations.GATEIO
+        }
+        self.rate_limiters = {}
+        self.circuit_breakers = {}
+        
+        # Initialize rate limiters for each exchange
+        for exchange in self.exchange_configs:
+            self.rate_limiters[exchange] = {
+                "requests": 0,
+                "window_start": time.time(),
+                "max_requests": self.exchange_configs[exchange]["rate_limit"]
+            }
+            self.circuit_breakers[exchange] = {
+                "state": "CLOSED",
+                "failure_count": 0,
+                "last_failure": None,
+                "success_count": 0
+            }
+    
+    async def fetch_from_exchange(
+        self, 
+        exchange: str, 
+        endpoint: str, 
+        params: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """Fetch data from specific exchange with rate limiting."""
+        config = self.exchange_configs[exchange]
+        url = config["base_url"] + endpoint
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    raise Exception(f"{exchange} API error: {response.status}")
+                return await response.json()
+    
+    async def get_exchange_health(self) -> Dict[str, Any]:
+        """Get health status of all exchanges."""
+        health_report = {}
+        
+        for exchange in self.exchange_configs:
+            breaker = self.circuit_breakers[exchange]
+            health_report[exchange] = {
+                "circuit_breaker_state": breaker["state"],
+                "failure_count": breaker["failure_count"],
+                "success_count": breaker["success_count"],
+                "health_status": "HEALTHY" if breaker["state"] == "CLOSED" else "DEGRADED"
+            }
+        
+        return health_report
+
+
+class DynamicExchangeManager(LoggerMixin):
+    """Dynamic Exchange Manager - handles multi-exchange connectivity."""
+    
+    def __init__(self):
+        self.exchange_configs = {
+            "binance": ExchangeConfigurations.BINANCE,
+            "kraken": ExchangeConfigurations.KRAKEN,
+            "kucoin": ExchangeConfigurations.KUCOIN,
+            "coinbase": ExchangeConfigurations.COINBASE,
+            "bybit": ExchangeConfigurations.BYBIT,
+            "okx": ExchangeConfigurations.OKX,
+            "bitget": ExchangeConfigurations.BITGET,
+            "gateio": ExchangeConfigurations.GATEIO
         }
         self.rate_limiters = {}
         self.circuit_breakers = {}
@@ -543,8 +585,86 @@ class MarketAnalysisService(LoggerMixin):
                 return {
                     "price": float(data["data"]["last"]),
                     "volume": float(data["data"]["vol"]),
+                    "change_24h": float(data["data"]["changeRate"]) * 100,
                     "timestamp": datetime.utcnow().isoformat()
                 }
+            
+            elif exchange == "coinbase":
+                coinbase_symbol = symbol.replace("/", "-")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    f"/products/{coinbase_symbol}/ticker"
+                )
+                return {
+                    "price": float(data["price"]),
+                    "volume": float(data["volume"]),
+                    "change_24h": 0,  # Calculate from price and open
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            
+            elif exchange == "bybit":
+                bybit_symbol = symbol.replace("/", "")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    "/v5/market/tickers",
+                    {"category": "spot", "symbol": bybit_symbol}
+                )
+                if data.get("result", {}).get("list"):
+                    ticker = data["result"]["list"][0]
+                    return {
+                        "price": float(ticker["lastPrice"]),
+                        "volume": float(ticker["volume24h"]),
+                        "change_24h": float(ticker["price24hPcnt"]) * 100,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            
+            elif exchange == "okx":
+                okx_symbol = symbol.replace("/", "-")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    "/api/v5/market/ticker",
+                    {"instId": okx_symbol}
+                )
+                if data.get("data"):
+                    ticker = data["data"][0]
+                    return {
+                        "price": float(ticker["last"]),
+                        "volume": float(ticker["vol24h"]),
+                        "change_24h": float(ticker["chgPct"]) * 100,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            
+            elif exchange == "bitget":
+                bitget_symbol = symbol.replace("/", "")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    "/api/spot/v1/market/ticker",
+                    {"symbol": bitget_symbol}
+                )
+                if data.get("data"):
+                    ticker = data["data"]
+                    return {
+                        "price": float(ticker["close"]),
+                        "volume": float(ticker["baseVol"]),
+                        "change_24h": float(ticker["chgRate"]) * 100,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            
+            elif exchange == "gateio":
+                gateio_symbol = symbol.replace("/", "_")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    "/api/v4/spot/tickers",
+                    {"currency_pair": gateio_symbol}
+                )
+                if isinstance(data, list) and data:
+                    ticker = data[0]
+                    return {
+                        "price": float(ticker["last"]),
+                        "volume": float(ticker["base_volume"]),
+                        "change_24h": float(ticker["change_percentage"]),
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
         
         except Exception as e:
             self.logger.error(f"Error fetching price for {symbol} from {exchange}: {e}")
