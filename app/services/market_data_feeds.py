@@ -210,8 +210,15 @@ class MarketDataFeeds:
                     json.dumps(price_data)
                 )
                 
-                # Sync to Supabase
-                await supabase_client.sync_market_data(symbol, price_data.get("data", {}))
+                # Sync to Supabase (if available)
+                try:
+                    from app.core.supabase import supabase_client
+                    await supabase_client.sync_market_data(symbol, price_data.get("data", {}))
+                except ImportError:
+                    # Supabase not configured, skip sync
+                    pass
+                except Exception as e:
+                    logger.warning("Supabase sync failed", error=str(e))
             
             return price_data
             
@@ -236,10 +243,11 @@ class MarketDataFeeds:
             detailed_data = await self._fetch_coingecko_detailed(symbol)
             
             if detailed_data.get("success"):
+                import json
                 await self.redis.setex(
                     cache_key,
                     self.cache_ttl["detailed"],
-                    str(detailed_data)
+                    json.dumps(detailed_data)
                 )
             
             return detailed_data

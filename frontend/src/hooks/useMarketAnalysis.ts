@@ -39,6 +39,15 @@ interface MarketAnalysisState {
   getSinglePrice: (symbol: string) => Promise<any>;
   getCrossExchangeComparison: (symbols: string) => Promise<any>;
   
+  // Additional analysis methods
+  fetchTrendAnalysis: (symbols: string, timeframes?: string) => Promise<void>;
+  fetchVolumeAnalysis: (symbols: string, timeframes?: string) => Promise<void>;
+  fetchMomentumIndicators: (symbols: string, timeframes?: string, indicators?: string) => Promise<void>;
+  fetchMarketInefficiencies: (symbols?: string, inefficiencyTypes?: string) => Promise<void>;
+  fetchCrossAssetArbitrage: (assetPairs?: string, exchanges?: string, minProfitBps?: number) => Promise<void>;
+  fetchSpreadMonitoring: (symbols?: string, exchanges?: string) => Promise<void>;
+  fetchSystemStatus: () => Promise<void>;
+  
   // Utility actions
   refreshAll: () => Promise<void>;
   clearError: () => void;
@@ -313,6 +322,140 @@ export const useMarketAnalysisStore = create<MarketAnalysisState>((set, get) => 
       get().fetchTrendingCoins(),
       get().fetchMarketHealth()
     ]);
+  },
+
+  // Trend analysis
+  fetchTrendAnalysis: async (symbols: string, timeframes: string = '1h,4h,1d') => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await marketApi.getTrendAnalysis(symbols, timeframes);
+      if (result.success) {
+        set(produce((draft: Draft<MarketAnalysisState>) => {
+          // Store in a new state property
+          (draft as any).trendAnalysis = result.data;
+          draft.lastUpdated = new Date().toISOString();
+          draft.isLoading = false;
+        }));
+      } else {
+        set({ error: result.error || 'Failed to fetch trend analysis', isLoading: false });
+      }
+    } catch (error: any) {
+      set({ error: error.message || 'Failed to fetch trend analysis', isLoading: false });
+    }
+  },
+
+  // Volume analysis
+  fetchVolumeAnalysis: async (symbols: string, timeframes: string = '1h,4h,1d') => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await marketApi.getVolumeAnalysis(symbols, timeframes);
+      if (result.success) {
+        set(produce((draft: Draft<MarketAnalysisState>) => {
+          (draft as any).volumeAnalysis = result.data;
+          draft.lastUpdated = new Date().toISOString();
+          draft.isLoading = false;
+        }));
+      } else {
+        set({ error: result.error || 'Failed to fetch volume analysis', isLoading: false });
+      }
+    } catch (error: any) {
+      set({ error: error.message || 'Failed to fetch volume analysis', isLoading: false });
+    }
+  },
+
+  // Momentum indicators
+  fetchMomentumIndicators: async (symbols: string, timeframes: string = '1h,4h,1d', indicators: string = 'rsi,macd,stoch') => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await marketApi.getMomentumIndicators(symbols, timeframes, indicators);
+      if (result.success) {
+        set(produce((draft: Draft<MarketAnalysisState>) => {
+          (draft as any).momentumIndicators = result.data;
+          draft.lastUpdated = new Date().toISOString();
+          draft.isLoading = false;
+        }));
+      } else {
+        set({ error: result.error || 'Failed to fetch momentum indicators', isLoading: false });
+      }
+    } catch (error: any) {
+      set({ error: error.message || 'Failed to fetch momentum indicators', isLoading: false });
+    }
+  },
+
+  // Market inefficiencies
+  fetchMarketInefficiencies: async (symbols: string = 'BTC,ETH,SOL', inefficiencyTypes: string = 'spread,volume,time') => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await marketApi.getMarketInefficiencies(symbols, inefficiencyTypes);
+      if (result.success) {
+        set(produce((draft: Draft<MarketAnalysisState>) => {
+          (draft as any).marketInefficiencies = result.data;
+          draft.lastUpdated = new Date().toISOString();
+          draft.isLoading = false;
+        }));
+      } else {
+        set({ error: result.error || 'Failed to fetch market inefficiencies', isLoading: false });
+      }
+    } catch (error: any) {
+      set({ error: error.message || 'Failed to fetch market inefficiencies', isLoading: false });
+    }
+  },
+
+  // Cross-asset arbitrage
+  fetchCrossAssetArbitrage: async (assetPairs: string = 'BTC-ETH,ETH-BNB,BTC-SOL', exchanges: string = 'all', minProfitBps: number = 5) => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await marketApi.getCrossAssetArbitrage(assetPairs, exchanges, minProfitBps);
+      if (result.success) {
+        set(produce((draft: Draft<MarketAnalysisState>) => {
+          (draft as any).crossAssetArbitrage = result.data;
+          draft.lastUpdated = new Date().toISOString();
+          draft.isLoading = false;
+        }));
+      } else {
+        set({ error: result.error || 'Failed to fetch cross-asset arbitrage', isLoading: false });
+      }
+    } catch (error: any) {
+      set({ error: error.message || 'Failed to fetch cross-asset arbitrage', isLoading: false });
+    }
+  },
+
+  // Spread monitoring
+  fetchSpreadMonitoring: async (symbols: string = 'BTC,ETH,SOL', exchanges: string = 'all') => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await marketApi.getSpreadMonitoring(symbols, exchanges);
+      if (result.success) {
+        set(produce((draft: Draft<MarketAnalysisState>) => {
+          (draft as any).spreadMonitoring = result.data;
+          draft.lastUpdated = new Date().toISOString();
+          draft.isLoading = false;
+        }));
+      } else {
+        set({ error: result.error || 'Failed to fetch spread monitoring', isLoading: false });
+      }
+    } catch (error: any) {
+      set({ error: error.message || 'Failed to fetch spread monitoring', isLoading: false });
+    }
+  },
+
+  // System status
+  fetchSystemStatus: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await marketApi.getSystemStatus();
+      if (result.success) {
+        set(produce((draft: Draft<MarketAnalysisState>) => {
+          (draft as any).systemStatus = result.data;
+          draft.lastUpdated = new Date().toISOString();
+          draft.isLoading = false;
+        }));
+      } else {
+        set({ error: result.error || 'Failed to fetch system status', isLoading: false });
+      }
+    } catch (error: any) {
+      set({ error: error.message || 'Failed to fetch system status', isLoading: false });
+    }
   },
 
   // Clear error

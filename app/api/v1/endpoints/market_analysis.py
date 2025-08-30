@@ -637,6 +637,250 @@ async def get_single_crypto_price(
         )
 
 
+@router.get("/trend-analysis")
+async def get_trend_analysis(
+    symbols: str = Query(..., description="Comma-separated list of symbols"),
+    timeframes: str = Query("1h,4h,1d", description="Comma-separated list of timeframes"),
+    current_user: User = Depends(get_current_user)
+):
+    """Get comprehensive trend analysis."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:trend_analysis",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        result = await market_analysis.trend_analysis(
+            symbols=symbols,
+            timeframes=timeframes,
+            user_id=str(current_user.id)
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("error", "Trend analysis failed")
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Trend analysis failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Trend analysis failed: {str(e)}"
+        )
+
+
+@router.get("/volume-analysis")
+async def get_volume_analysis(
+    symbols: str = Query(..., description="Comma-separated list of symbols"),
+    timeframes: str = Query("1h,4h,1d", description="Comma-separated list of timeframes"),
+    current_user: User = Depends(get_current_user)
+):
+    """Get comprehensive volume analysis."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:volume_analysis",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        result = await market_analysis.volume_analysis(
+            symbols=symbols,
+            timeframes=timeframes,
+            user_id=str(current_user.id)
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("error", "Volume analysis failed")
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Volume analysis failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Volume analysis failed: {str(e)}"
+        )
+
+
+@router.get("/momentum-indicators")
+async def get_momentum_indicators(
+    symbols: str = Query(..., description="Comma-separated list of symbols"),
+    timeframes: str = Query("1h,4h,1d", description="Comma-separated list of timeframes"),
+    indicators: str = Query("rsi,macd,stoch", description="Comma-separated list of indicators"),
+    current_user: User = Depends(get_current_user)
+):
+    """Get momentum indicator analysis."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:momentum_indicators",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        result = await market_analysis.momentum_indicators(
+            symbols=symbols,
+            timeframes=timeframes,
+            indicators=indicators,
+            user_id=str(current_user.id)
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("error", "Momentum indicators analysis failed")
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Momentum indicators analysis failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Momentum indicators analysis failed: {str(e)}"
+        )
+
+
+@router.get("/market-inefficiencies")
+async def get_market_inefficiencies(
+    symbols: str = Query("BTC,ETH,SOL", description="Comma-separated list of symbols"),
+    inefficiency_types: str = Query("spread,volume,time", description="Types of inefficiencies to scan"),
+    current_user: User = Depends(get_current_user)
+):
+    """Scan for market inefficiencies across exchanges."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:inefficiencies",
+        limit=20,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        result = await market_analysis.market_inefficiency_scanner(
+            symbols=symbols,
+            inefficiency_types=inefficiency_types,
+            user_id=str(current_user.id)
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("error", "Market inefficiency scan failed")
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Market inefficiency scan failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Market inefficiency scan failed: {str(e)}"
+        )
+
+
+@router.get("/cross-asset-arbitrage")
+async def get_cross_asset_arbitrage(
+    asset_pairs: str = Query("BTC-ETH,ETH-BNB,BTC-SOL", description="Comma-separated asset pairs"),
+    exchanges: str = Query("all", description="Comma-separated list of exchanges"),
+    min_profit_bps: int = Query(5, description="Minimum profit in basis points"),
+    current_user: User = Depends(get_current_user)
+):
+    """Get cross-asset arbitrage opportunities."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:cross_asset_arbitrage",
+        limit=20,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        result = await market_analysis.cross_asset_arbitrage(
+            asset_pairs=asset_pairs,
+            exchanges=exchanges,
+            min_profit_bps=min_profit_bps,
+            user_id=str(current_user.id)
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("error", "Cross-asset arbitrage analysis failed")
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Cross-asset arbitrage analysis failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cross-asset arbitrage analysis failed: {str(e)}"
+        )
+
+
+@router.get("/spread-monitoring")
+async def get_spread_monitoring(
+    symbols: str = Query("BTC,ETH,SOL", description="Comma-separated list of symbols"),
+    exchanges: str = Query("all", description="Comma-separated list of exchanges"),
+    current_user: User = Depends(get_current_user)
+):
+    """Monitor bid-ask spreads across exchanges."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:spread_monitoring",
+        limit=30,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        result = await market_analysis.monitor_spreads(
+            symbols=symbols,
+            exchanges=exchanges,
+            user_id=str(current_user.id)
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("error", "Spread monitoring failed")
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Spread monitoring failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Spread monitoring failed: {str(e)}"
+        )
+
+
 @router.get("/cross-exchange-comparison")
 async def get_cross_exchange_comparison(
     symbols: str = Query(..., description="Comma-separated list of symbols"),
@@ -652,8 +896,9 @@ async def get_cross_exchange_comparison(
     )
     
     try:
-        result = await market_analysis.cross_exchange_price_comparison(
+        result = await market_analysis.realtime_price_tracking(
             symbols=symbols,
+            exchanges="all",
             user_id=str(current_user.id)
         )
         

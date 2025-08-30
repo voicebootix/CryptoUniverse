@@ -221,6 +221,74 @@ export const marketApi = {
       params: { symbols }
     });
     return response.data;
+  },
+
+  // Trend analysis
+  async getTrendAnalysis(symbols: string, timeframes: string = '1h,4h,1d'): Promise<any> {
+    const response = await apiClient.get('/market/trend-analysis', {
+      params: { symbols, timeframes }
+    });
+    return response.data;
+  },
+
+  // Volume analysis
+  async getVolumeAnalysis(symbols: string, timeframes: string = '1h,4h,1d'): Promise<any> {
+    const response = await apiClient.get('/market/volume-analysis', {
+      params: { symbols, timeframes }
+    });
+    return response.data;
+  },
+
+  // Momentum indicators
+  async getMomentumIndicators(
+    symbols: string, 
+    timeframes: string = '1h,4h,1d',
+    indicators: string = 'rsi,macd,stoch'
+  ): Promise<any> {
+    const response = await apiClient.get('/market/momentum-indicators', {
+      params: { symbols, timeframes, indicators }
+    });
+    return response.data;
+  },
+
+  // Market inefficiencies
+  async getMarketInefficiencies(
+    symbols: string = 'BTC,ETH,SOL',
+    inefficiency_types: string = 'spread,volume,time'
+  ): Promise<any> {
+    const response = await apiClient.get('/market/market-inefficiencies', {
+      params: { symbols, inefficiency_types }
+    });
+    return response.data;
+  },
+
+  // Cross-asset arbitrage
+  async getCrossAssetArbitrage(
+    asset_pairs: string = 'BTC-ETH,ETH-BNB,BTC-SOL',
+    exchanges: string = 'all',
+    min_profit_bps: number = 5
+  ): Promise<any> {
+    const response = await apiClient.get('/market/cross-asset-arbitrage', {
+      params: { asset_pairs, exchanges, min_profit_bps }
+    });
+    return response.data;
+  },
+
+  // Spread monitoring
+  async getSpreadMonitoring(
+    symbols: string = 'BTC,ETH,SOL',
+    exchanges: string = 'all'
+  ): Promise<any> {
+    const response = await apiClient.get('/market/spread-monitoring', {
+      params: { symbols, exchanges }
+    });
+    return response.data;
+  },
+
+  // System status
+  async getSystemStatus(): Promise<any> {
+    const response = await apiClient.get('/market/system-status');
+    return response.data;
   }
 };
 
