@@ -584,7 +584,8 @@ async def get_oauth_url(
     )
 
 
-@router.get("/oauth/callback/{provider}", response_model=OAuthTokenResponse)
+
+@router.get("/oauth/callback/{provider}")
 async def oauth_callback(
     provider: str,
     code: str,
@@ -592,7 +593,7 @@ async def oauth_callback(
     client_request: Request,
     db: Session = Depends(get_database)
 ):
-    """Handle OAuth callback and authenticate user."""
+    """Handle OAuth callback and redirect to frontend with tokens."""
     
     client_ip = client_request.client.host
     
@@ -605,15 +606,49 @@ async def oauth_callback(
         window=300  # 10 attempts per 5 minutes
     )
     
-    result = await oauth_service.handle_oauth_callback(
-        provider=provider,
-        code=code,
-        state=state,
-        db=db,
-        ip_address=client_ip
-    )
-    
-    return OAuthTokenResponse(**result)
+    try:
+        result = await oauth_service.handle_oauth_callback(
+            provider=provider,
+            code=code,
+            state=state,
+            db=db,
+            ip_address=client_ip
+        )
+        
+        # Encode the auth data as URL-safe base64
+        import base64
+        import json
+        from urllib.parse import quote
+        
+        auth_data = {
+            "access_token": result["access_token"],
+            "refresh_token": result["refresh_token"],
+            "token_type": result["token_type"],
+            "expires_in": result["expires_in"],
+            "user": result["user"]
+        }
+        
+        # Base64 encode the auth data
+        auth_data_json = json.dumps(auth_data)
+        auth_data_encoded = base64.urlsafe_b64encode(auth_data_json.encode()).decode()
+        
+        # Redirect to frontend with success data
+        frontend_url = settings.FRONTEND_URL or "https://cryptouniverse-frontend.onrender.com"
+        redirect_url = f"{frontend_url}/auth/callback?success=true&data={auth_data_encoded}"
+        
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=redirect_url, status_code=302)
+        
+    except Exception as e:
+        logger.error("OAuth callback failed", provider=provider, error=str(e))
+        
+        # Redirect to frontend with error
+        frontend_url = settings.FRONTEND_URL or "https://cryptouniverse-frontend.onrender.com"
+        error_message = quote(str(e))
+        redirect_url = f"{frontend_url}/auth/callback?error=true&message={error_message}"
+        
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=redirect_url, status_code=302)
 
 
 @router.post("/oauth/link/{provider}")

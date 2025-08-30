@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     HOST: str = Field(default="0.0.0.0", description="Server host")
     PORT: int = Field(default=8000, description="Server port")
     BASE_URL: str = Field(default="http://localhost:8000", description="Base URL for the application")
+    FRONTEND_URL: str = Field(default="https://cryptouniverse-frontend.onrender.com", description="Frontend URL for redirects")
     ALLOWED_HOSTS: List[str] = Field(default=[], description="Allowed hosts for the application")
     
     # Security settings

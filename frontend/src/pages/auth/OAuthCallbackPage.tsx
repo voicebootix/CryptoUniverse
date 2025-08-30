@@ -18,61 +18,70 @@ const OAuthCallbackPage: React.FC = () => {
   useEffect(() => {
     const handleOAuthCallback = async () => {
       try {
+        const success = searchParams.get('success');
+        const errorParam = searchParams.get('error');
+        const message = searchParams.get('message');
+        const data = searchParams.get('data');
+
+        // Handle OAuth errors from backend redirect
+        if (errorParam === 'true') {
+          setStatus('error');
+          setError(message ? decodeURIComponent(message) : 'OAuth authentication failed');
+          return;
+        }
+
+        // Handle success from backend redirect
+        if (success === 'true' && data) {
+          try {
+            // Decode the base64 encoded auth data
+            const decodedData = atob(data);
+            const authData = JSON.parse(decodedData);
+
+            // Store tokens and user data
+            setTokens({
+              access_token: authData.access_token,
+              refresh_token: authData.refresh_token,
+              token_type: authData.token_type || 'bearer',
+              expires_in: authData.expires_in || 3600
+            });
+            setUser(authData.user);
+
+            setStatus('success');
+
+            // Redirect to dashboard after a brief success message
+            setTimeout(() => {
+              navigate('/dashboard', { replace: true });
+            }, 2000);
+
+            return;
+          } catch (decodeError) {
+            console.error('Failed to decode auth data:', decodeError);
+            setStatus('error');
+            setError('Failed to process authentication data');
+            return;
+          }
+        }
+
+        // Fallback: Handle legacy direct callback (shouldn't happen now)
         const code = searchParams.get('code');
         const state = searchParams.get('state');
         const error = searchParams.get('error');
 
-        // Handle OAuth errors
         if (error) {
           setStatus('error');
           setError(`OAuth error: ${error}`);
           return;
         }
 
-        // Validate required parameters
-        if (!code || !state) {
+        if (code && state) {
           setStatus('error');
-          setError('Missing required OAuth parameters');
+          setError('Direct OAuth callback detected. Please try signing in again.');
           return;
         }
 
-        // Get API base URL
-        const API_BASE_URL = import.meta.env.VITE_API_URL || (
-          import.meta.env.PROD 
-            ? 'https://cryptouniverse.onrender.com/api/v1'
-            : 'http://localhost:8000/api/v1'
-        );
-
-        // Exchange code for tokens
-        const response = await fetch(`${API_BASE_URL}/auth/oauth/callback/google?code=${code}&state=${state}`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.detail || 'OAuth authentication failed');
-        }
-
-        const data = await response.json();
-
-        // Store tokens and user data
-        setTokens({
-          access_token: data.access_token,
-          refresh_token: data.refresh_token,
-          token_type: data.token_type || 'bearer',
-          expires_in: data.expires_in || 3600  // Default to 1 hour if not provided
-        });
-        setUser(data.user);
-
-        setStatus('success');
-
-        // Redirect to dashboard after a brief success message
-        setTimeout(() => {
-          navigate('/dashboard', { replace: true });
-        }, 2000);
+        // No valid parameters found
+        setStatus('error');
+        setError('Invalid OAuth callback parameters');
 
       } catch (err) {
         console.error('OAuth callback error:', err);
