@@ -17,7 +17,8 @@ const Label = React.forwardRef<HTMLLabelElement, LabelProps>(
       className={cn(labelVariants(), className)}
       {...props}
     />
-  )
+  ) 
+  
 )
 Label.displayName = "Label"
 
