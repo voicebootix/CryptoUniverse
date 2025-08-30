@@ -102,6 +102,7 @@ const TradingDashboard: React.FC = () => {
     fetchStatus,
     fetchMarketData,
     fetchRecentTrades,
+    connectWebSocket,
   } = usePortfolioStore();
   
   const [autonomousMode, setAutonomousMode] = useState(false);
@@ -111,7 +112,8 @@ const TradingDashboard: React.FC = () => {
     fetchStatus();
     fetchMarketData();
     fetchRecentTrades();
-  }, [fetchPortfolio, fetchStatus, fetchMarketData, fetchRecentTrades]);
+    connectWebSocket();
+  }, [fetchPortfolio, fetchStatus, fetchMarketData, fetchRecentTrades, connectWebSocket]);
 
   const handleRefresh = async () => {
     await Promise.all([fetchPortfolio(), fetchStatus(), fetchMarketData(), fetchRecentTrades()]);
