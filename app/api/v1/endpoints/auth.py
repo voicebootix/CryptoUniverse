@@ -635,8 +635,6 @@ async def oauth_callback(
         }
 
         # Base64 encode the auth data
-        import base64
-        import json
         auth_data_json = json.dumps(auth_data, default=str)  # Handle datetime serialization
         auth_data_encoded = base64.urlsafe_b64encode(auth_data_json.encode()).decode()
 
@@ -657,62 +655,9 @@ async def oauth_callback(
         # Redirect to frontend with error
         frontend_url = settings.FRONTEND_URL
         error_message = str(e)
-        from urllib.parse import quote
         return RedirectResponse(
             url=f"{frontend_url}/auth/callback?error=true&message={quote(error_message)}"
         )
-        window=300  # 10 attempts per 5 minutes
-    )
-    
-    # Import required modules at function level to avoid scope issues
-    import base64
-    import json
-    from urllib.parse import quote
-    from datetime import datetime
-    from fastapi.responses import RedirectResponse
-    
-    try:
-        result = await oauth_service.handle_oauth_callback(
-            provider=provider,
-            code=code,
-            state=state,
-            db=db,
-            ip_address=client_ip
-        )
-        
-        # Custom JSON encoder for datetime objects
-        def json_serializer(obj):
-            if isinstance(obj, datetime):
-                return obj.isoformat()
-            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-        
-        auth_data = {
-            "access_token": result["access_token"],
-            "refresh_token": result["refresh_token"],
-            "token_type": result["token_type"],
-            "expires_in": result["expires_in"],
-            "user": result["user"]
-        }
-        
-        # Base64 encode the auth data with custom serializer
-        auth_data_json = json.dumps(auth_data, default=json_serializer)
-        auth_data_encoded = base64.urlsafe_b64encode(auth_data_json.encode()).decode()
-        
-        # Redirect to frontend with success data
-        frontend_url = settings.FRONTEND_URL or "https://cryptouniverse-frontend.onrender.com"
-        redirect_url = f"{frontend_url}/auth/callback?success=true&data={auth_data_encoded}"
-        
-        return RedirectResponse(url=redirect_url, status_code=302)
-        
-    except Exception as e:
-        logger.error("OAuth callback failed", provider=provider, error=str(e))
-        
-        # Redirect to frontend with error
-        frontend_url = settings.FRONTEND_URL or "https://cryptouniverse-frontend.onrender.com"
-        error_message = quote(str(e))
-        redirect_url = f"{frontend_url}/auth/callback?error=true&message={error_message}"
-        
-        return RedirectResponse(url=redirect_url, status_code=302)
 
 
 @router.post("/oauth/link/{provider}")
