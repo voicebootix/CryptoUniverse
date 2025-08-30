@@ -48,7 +48,7 @@ export const useAuthStore = create<AuthStore>()(
               mfaRequired: true,
               error: null 
             });
-            return true;
+            return;
           }
 
           // Handle the actual backend response format
@@ -98,7 +98,6 @@ export const useAuthStore = create<AuthStore>()(
           });
           throw error;
         }
-        return false;
       },
 
       register: async (data: RegisterRequest) => {
