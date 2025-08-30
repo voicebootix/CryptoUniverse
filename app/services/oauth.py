@@ -9,7 +9,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 
 import httpx
 import structlog
