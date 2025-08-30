@@ -24,7 +24,7 @@ from app.models.exchange import ExchangeAccount
 from app.models.credit import CreditAccount, CreditTransaction
 from app.services.trade_execution import TradeExecutionService
 from app.services.master_controller import MasterSystemController
-from app.services.portfolio_risk import PortfolioRiskService
+from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
 from app.services.market_analysis_core import MarketAnalysisService
 from app.services.rate_limit import rate_limiter
 from app.services.websocket import manager
@@ -37,7 +37,7 @@ router = APIRouter()
 # Initialize services
 trade_executor = TradeExecutionService()
 master_controller = MasterSystemController()
-risk_service = PortfolioRiskService()
+risk_service = PortfolioRiskServiceExtended()
 market_analysis = MarketAnalysisService()
 
 

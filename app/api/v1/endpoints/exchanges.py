@@ -698,38 +698,166 @@ async def test_exchange_connection(
 async def fetch_exchange_balances(api_key: ExchangeApiKey) -> List[Dict[str, Any]]:
     """Fetch balances from exchange API."""
     try:
-        # This would use the actual exchange APIs
-        # For now, return mock data
+        # Get the exchange account to determine exchange type
+        from sqlalchemy import select
+        from app.core.database import get_database_session
         
-        mock_balances = [
-            {
-                "asset": "BTC",
-                "free": 0.5,
-                "locked": 0.0,
-                "total": 0.5,
-                "value_usd": 25000.0
-            },
-            {
-                "asset": "ETH", 
-                "free": 10.0,
-                "locked": 2.0,
-                "total": 12.0,
-                "value_usd": 24000.0
-            },
-            {
-                "asset": "USDT",
-                "free": 5000.0,
-                "locked": 0.0,
-                "total": 5000.0,
-                "value_usd": 5000.0
-            }
-        ]
-        
-        return mock_balances
+        async with get_database_session() as db:
+            result = await db.execute(
+                select(ExchangeAccount).filter(ExchangeAccount.id == api_key.account_id)
+            )
+            account = result.scalar_one_or_none()
+            
+            if not account:
+                logger.error(f"No account found for API key {api_key.id}")
+                return []
+            
+            exchange_name = account.exchange_name.lower()
+            
+            # Decrypt API credentials
+            decrypted_key = decrypt_api_key(api_key.encrypted_key)
+            decrypted_secret = decrypt_api_key(api_key.encrypted_secret)
+            
+            if exchange_name == "binance":
+                return await fetch_binance_balances(decrypted_key, decrypted_secret)
+            elif exchange_name == "coinbase":
+                return await fetch_coinbase_balances(decrypted_key, decrypted_secret)
+            else:
+                logger.warning(f"Exchange {exchange_name} not yet supported for live balance fetching")
+                # Return empty list for unsupported exchanges
+                return []
         
     except Exception as e:
         logger.error(f"Failed to fetch balances for {api_key.exchange}", error=str(e))
         return []
+
+
+async def fetch_binance_balances(api_key: str, api_secret: str) -> List[Dict[str, Any]]:
+    """Fetch balances from Binance API."""
+    import aiohttp
+    import hmac
+    import hashlib
+    import time
+    from urllib.parse import urlencode
+    
+    try:
+        base_url = "https://api.binance.com"
+        endpoint = "/api/v3/account"
+        timestamp = int(time.time() * 1000)
+        
+        # Prepare query parameters
+        params = {
+            "timestamp": timestamp
+        }
+        
+        # Create signature
+        query_string = urlencode(params)
+        signature = hmac.new(
+            api_secret.encode('utf-8'),
+            query_string.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+        
+        params["signature"] = signature
+        
+        headers = {
+            "X-MBX-APIKEY": api_key
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{base_url}{endpoint}",
+                params=params,
+                headers=headers
+            ) as response:
+                if response.status != 200:
+                    logger.error(f"Binance API error: {response.status}")
+                    return []
+                
+                data = await response.json()
+                balances = []
+                
+                # Get current prices for USD conversion
+                prices = await get_binance_prices(list(set([b["asset"] for b in data.get("balances", []) if float(b.get("free", 0)) + float(b.get("locked", 0)) > 0])))
+                
+                # Process balances
+                for balance in data.get("balances", []):
+                    free = float(balance.get("free", 0))
+                    locked = float(balance.get("locked", 0))
+                    total = free + locked
+                    
+                    # Only include assets with non-zero balance
+                    if total > 0:
+                        asset = balance.get("asset")
+                        usd_price = prices.get(asset, 0.0)
+                        value_usd = total * usd_price
+                        
+                        balances.append({
+                            "asset": asset,
+                            "free": free,
+                            "locked": locked,
+                            "total": total,
+                            "value_usd": round(value_usd, 2)
+                        })
+                
+                return balances
+                
+    except Exception as e:
+        logger.error(f"Failed to fetch Binance balances: {str(e)}")
+        return []
+
+
+async def get_binance_prices(assets: List[str]) -> Dict[str, float]:
+    """Get current USD prices for assets from Binance."""
+    import aiohttp
+    
+    if not assets:
+        return {}
+    
+    try:
+        # Binance price ticker endpoint (public, no auth needed)
+        base_url = "https://api.binance.com"
+        endpoint = "/api/v3/ticker/price"
+        
+        prices = {}
+        
+        async with aiohttp.ClientSession() as session:
+            # Get all price tickers
+            async with session.get(f"{base_url}{endpoint}") as response:
+                if response.status != 200:
+                    logger.error(f"Binance price API error: {response.status}")
+                    return {}
+                
+                data = await response.json()
+                
+                # Create price mapping
+                for ticker in data:
+                    symbol = ticker.get("symbol", "")
+                    price = float(ticker.get("price", 0))
+                    
+                    # Match assets to USDT pairs (most common)
+                    for asset in assets:
+                        if symbol == f"{asset}USDT":
+                            prices[asset] = price
+                        elif asset == "USDT":
+                            prices["USDT"] = 1.0  # USDT is always $1
+                        elif asset == "BUSD":
+                            prices["BUSD"] = 1.0  # BUSD is always $1
+                        elif asset == "USDC":
+                            prices["USDC"] = 1.0  # USDC is always $1
+                
+                return prices
+                
+    except Exception as e:
+        logger.error(f"Failed to fetch Binance prices: {str(e)}")
+        return {}
+
+
+async def fetch_coinbase_balances(api_key: str, api_secret: str) -> List[Dict[str, Any]]:
+    """Fetch balances from Coinbase API."""
+    # TODO: Implement Coinbase API integration
+    logger.warning("Coinbase balance fetching not yet implemented")
+    return []
 
 
 async def sync_exchange_balances(user_id: str, exchange: str, api_key_id: str):
