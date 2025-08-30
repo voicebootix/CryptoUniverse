@@ -156,7 +156,12 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
       return;
     }
 
-    const wsUrl = `wss://${window.location.host}/api/v1/trading/ws`;
+    // Use backend URL for WebSocket connection
+    const wsUrl = import.meta.env.VITE_API_URL 
+      ? `wss://${import.meta.env.VITE_API_URL.replace('https://', '').replace('/api/v1', '')}/api/v1/trading/ws`
+      : `wss://cryptouniverse.onrender.com/api/v1/trading/ws`;
+    
+    console.log('Connecting to WebSocket:', wsUrl);
     socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
