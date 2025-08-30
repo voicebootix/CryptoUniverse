@@ -1503,6 +1503,26 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                     "success": True,
                     **portfolio_data
                 }
+                
+        except Exception as e:
+            self.logger.error(f"Failed to get portfolio status for user {user_id}", error=str(e))
+            return {
+                "success": False,
+                "error": str(e),
+                "portfolio": {
+                    "total_value_usd": 0.0,
+                    "available_balance": 0.0,
+                    "positions": [],
+                    "daily_pnl": 0.0,
+                    "daily_pnl_pct": 0.0,
+                    "total_pnl": 0.0,
+                    "total_pnl_pct": 0.0,
+                    "margin_used": 0.0,
+                    "margin_available": 0.0,
+                    "risk_score": 0.0,
+                    "active_orders": 0
+                }
+            }
     
     async def calculate_daily_pnl(self, user_id: str, current_portfolio_value: float) -> tuple[float, float]:
         """Calculate daily P&L using historical portfolio values."""
