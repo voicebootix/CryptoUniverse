@@ -25,6 +25,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { apiClient } from '@/lib/api/client';
+import { Container } from '@/components/ui/container';
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -109,7 +110,7 @@ const LoginPage: React.FC = () => {
       </div>
 
       <div className="relative z-10 min-h-screen flex items-center justify-center p-4">
-        <div className="w-full max-w-6xl mx-auto">
+        <Container>
           
           {/* Header Section */}
           <motion.div
@@ -394,7 +395,7 @@ const LoginPage: React.FC = () => {
               </div>
             </motion.div>
           </div>
-        </div>
+        </Container>
       </div>
     </div>
   );
