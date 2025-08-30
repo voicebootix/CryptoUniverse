@@ -244,8 +244,9 @@ class OAuthService:
     async def _handle_google_callback(self, code: str, db: AsyncSession) -> Dict[str, Any]:
         """Handle Google OAuth callback."""
         
-        # Use hardcoded Render URL for production
-        redirect_uri = "https://cryptouniverse.onrender.com/api/v1/auth/oauth/callback/google"
+        # Use backend URL for Google OAuth callback
+        backend_url = "https://cryptouniverse.onrender.com/api/v1"
+        redirect_uri = f"{backend_url}/auth/oauth/callback/google"
         
         try:
             # Exchange code for tokens manually
