@@ -177,7 +177,8 @@ class MarketDataFeeds:
             
             if cached_data:
                 try:
-                    return eval(cached_data)
+                    import json
+                    return json.loads(cached_data)
                 except:
                     pass
             
@@ -202,10 +203,11 @@ class MarketDataFeeds:
             
             if price_data.get("success"):
                 # Cache the result
+                import json
                 await self.redis.setex(
                     cache_key,
                     self.cache_ttl["price"],
-                    str(price_data)
+                    json.dumps(price_data)
                 )
                 
                 # Sync to Supabase
@@ -225,7 +227,8 @@ class MarketDataFeeds:
             
             if cached_data:
                 try:
-                    return eval(cached_data)
+                    import json
+                    return json.loads(cached_data)
                 except:
                     pass
             

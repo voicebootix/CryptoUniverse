@@ -37,102 +37,73 @@ import aiohttp
 import structlog
 
 from app.core.logging import LoggerMixin
-# Avoid circular import - define configurations locally
-class ExchangeConfigurations:
-    """Exchange API configurations for market data - All 7 exchanges supported."""
-    
-    BINANCE = {
-        "base_url": "https://api.binance.com",
-        "endpoints": {
-            "ticker": "/api/v3/ticker/24hr",
-            "price": "/api/v3/ticker/price",
-            "depth": "/api/v3/depth",
-            "klines": "/api/v3/klines",
-            "exchange_info": "/api/v3/exchangeInfo"
-        },
-        "rate_limit": 1200
-    }
-    
-    KRAKEN = {
-        "base_url": "https://api.kraken.com", 
-        "endpoints": {
-            "ticker": "/0/public/Ticker",
-            "depth": "/0/public/Depth",
-            "trades": "/0/public/Trades",
-            "ohlc": "/0/public/OHLC",
-            "asset_pairs": "/0/public/AssetPairs"
-        },
-        "rate_limit": 60
-    }
-    
-    KUCOIN = {
-        "base_url": "https://api.kucoin.com",
-        "endpoints": {
-            "ticker": "/api/v1/market/allTickers",
-            "stats": "/api/v1/market/stats",
-            "orderbook": "/api/v1/market/orderbook/level2_20",
-            "klines": "/api/v1/market/candles",
-            "symbols": "/api/v1/symbols"
-        },
-        "rate_limit": 1800
-    }
-    
-    COINBASE = {
-        "base_url": "https://api.exchange.coinbase.com",
-        "endpoints": {
-            "ticker": "/products/{symbol}/ticker",
-            "products": "/products",
-            "stats": "/products/{symbol}/stats",
-            "orderbook": "/products/{symbol}/book"
-        },
-        "rate_limit": 600
-    }
-    
-    BYBIT = {
-        "base_url": "https://api.bybit.com",
-        "endpoints": {
-            "ticker": "/v5/market/tickers",
-            "orderbook": "/v5/market/orderbook",
-            "kline": "/v5/market/kline",
-            "instruments": "/v5/market/instruments-info"
-        },
-        "rate_limit": 600
-    }
-    
-    OKX = {
-        "base_url": "https://www.okx.com",
-        "endpoints": {
-            "ticker": "/api/v5/market/ticker",
-            "tickers": "/api/v5/market/tickers",
-            "orderbook": "/api/v5/market/books",
-            "instruments": "/api/v5/public/instruments"
-        },
-        "rate_limit": 600
-    }
-    
-    BITGET = {
-        "base_url": "https://api.bitget.com",
-        "endpoints": {
-            "ticker": "/api/spot/v1/market/ticker",
-            "tickers": "/api/spot/v1/market/tickers",
-            "depth": "/api/spot/v1/market/depth",
-            "symbols": "/api/spot/v1/public/products"
-        },
-        "rate_limit": 600
-    }
-    
-    GATEIO = {
-        "base_url": "https://api.gateio.ws",
-        "endpoints": {
-            "ticker": "/api/v4/spot/tickers",
-            "orderbook": "/api/v4/spot/order_book",
-            "trades": "/api/v4/spot/trades",
-            "currency_pairs": "/api/v4/spot/currency_pairs"
-        },
-        "rate_limit": 300
-    }
+# Import exchange configurations to avoid duplication
+from app.services.market_analysis import ExchangeConfigurations
 
 logger = structlog.get_logger(__name__)
+
+
+class DynamicExchangeManager(LoggerMixin):
+    """Dynamic Exchange Manager - handles multi-exchange connectivity."""
+    
+    def __init__(self):
+        self.exchange_configs = {
+            "binance": ExchangeConfigurations.BINANCE,
+            "kraken": ExchangeConfigurations.KRAKEN,
+            "kucoin": ExchangeConfigurations.KUCOIN,
+            "coinbase": ExchangeConfigurations.COINBASE,
+            "bybit": ExchangeConfigurations.BYBIT,
+            "okx": ExchangeConfigurations.OKX,
+            "bitget": ExchangeConfigurations.BITGET,
+            "gateio": ExchangeConfigurations.GATEIO
+        }
+        self.rate_limiters = {}
+        self.circuit_breakers = {}
+        
+        # Initialize rate limiters for each exchange
+        for exchange in self.exchange_configs:
+            self.rate_limiters[exchange] = {
+                "requests": 0,
+                "window_start": time.time(),
+                "max_requests": self.exchange_configs[exchange]["rate_limit"]
+            }
+            self.circuit_breakers[exchange] = {
+                "state": "CLOSED",
+                "failure_count": 0,
+                "last_failure": None,
+                "success_count": 0
+            }
+    
+    async def fetch_from_exchange(
+        self, 
+        exchange: str, 
+        endpoint: str, 
+        params: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """Fetch data from specific exchange with rate limiting."""
+        config = self.exchange_configs[exchange]
+        url = config["base_url"] + endpoint
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    raise Exception(f"{exchange} API error: {response.status}")
+                return await response.json()
+    
+    async def get_exchange_health(self) -> Dict[str, Any]:
+        """Get health status of all exchanges."""
+        health_report = {}
+        
+        for exchange in self.exchange_configs:
+            breaker = self.circuit_breakers[exchange]
+            health_report[exchange] = {
+                "circuit_breaker_state": breaker["state"],
+                "failure_count": breaker["failure_count"],
+                "success_count": breaker["success_count"],
+                "health_status": "HEALTHY" if breaker["state"] == "CLOSED" else "DEGRADED"
+            }
+        
+        return health_report
 
 
 class DynamicExchangeManager(LoggerMixin):

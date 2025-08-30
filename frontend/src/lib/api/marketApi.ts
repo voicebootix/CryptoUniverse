@@ -63,11 +63,11 @@ export interface ArbitrageOpportunity {
 
 export interface MarketAssessment {
   assessment: {
-    price_tracking: any;
-    technical_analysis: any;
-    market_sentiment: any;
-    arbitrage_opportunities: any;
-    alpha_signals: any;
+    price_tracking: Record<string, any> | null;
+    technical_analysis: Record<string, TechnicalAnalysis> | null;
+    market_sentiment: Record<string, any> | null;
+    arbitrage_opportunities: ArbitrageOpportunity[] | null;
+    alpha_signals: Record<string, any> | null;
   };
   market_score: number;
   executive_summary: string;
@@ -76,7 +76,11 @@ export interface MarketAssessment {
 // Market Analysis API Functions
 export const marketApi = {
   // Real-time price tracking
-  async getRealtimePrices(symbols: string, exchanges: string = 'all'): Promise<any> {
+  async getRealtimePrices(symbols: string, exchanges: string = 'all'): Promise<{
+    success: boolean;
+    data: Record<string, any>;
+    metadata: Record<string, any>;
+  }> {
     const response = await apiClient.get('/market/realtime-prices', {
       params: { symbols, exchanges }
     });
