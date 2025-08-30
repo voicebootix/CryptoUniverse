@@ -56,18 +56,50 @@ class ConnectionManager:
             self.is_market_streaming = True
             self._market_stream_task = asyncio.create_task(self._start_market_streaming())
 
+    async def unsubscribe_from_market_data(self, websocket: WebSocket, symbols: List[str]):
+        """Unsubscribe WebSocket from market data updates for specific symbols."""
+        for symbol in symbols:
+            if symbol in self.market_subscribers and websocket in self.market_subscribers[symbol]:
+                self.market_subscribers[symbol].remove(websocket)
+                
+                # Clean up empty symbol entries
+                if not self.market_subscribers[symbol]:
+                    del self.market_subscribers[symbol]
+        
+        # Stop market streaming if no subscribers remain
+        if not self.market_subscribers and self.is_market_streaming and self._market_stream_task:
+            try:
+                self._market_stream_task.cancel()
+                try:
+                    await self._market_stream_task
+                except asyncio.CancelledError:
+                    pass
+            except Exception as e:
+                logger.error("Error cancelling market stream task", error=str(e))
+            finally:
+                self.is_market_streaming = False
+                self._market_stream_task = None
+
     async def broadcast(self, message: dict, user_id: str):
         if user_id in self.active_connections:
             broken_connections = []
             for connection in self.active_connections[user_id]:
                 try:
                     await connection.send_json(message)
-                except:
+                except Exception as e:
+                    logger.exception(f"Failed to send message to user {user_id}", error=str(e))
                     broken_connections.append(connection)
             
-            # Clean up broken connections
-            for broken_conn in broken_connections:
-                self.active_connections[user_id].remove(broken_conn)
+            # Clean up broken connections safely
+            if broken_connections:
+                self.active_connections[user_id] = [
+                    conn for conn in self.active_connections[user_id] 
+                    if conn not in broken_connections
+                ]
+                
+                # Remove user if no connections remain
+                if not self.active_connections[user_id]:
+                    del self.active_connections[user_id]
 
     async def broadcast_market_update(self, symbol: str, price_data: Dict[str, Any]):
         """Broadcast market data update to subscribed connections."""
@@ -80,15 +112,30 @@ class ConnectionManager:
             }
             
             broken_connections = []
-            for connection in self.market_subscribers[symbol]:
+            # Iterate over a copy to avoid mutation during iteration
+            for connection in list(self.market_subscribers[symbol]):
                 try:
                     await connection.send_json(message)
-                except:
+                except Exception as e:
+                    logger.exception(f"Failed to send market update for {symbol}", error=str(e))
                     broken_connections.append(connection)
+                    
+                    # Attempt to close broken connection
+                    try:
+                        await connection.close()
+                    except Exception as close_error:
+                        logger.warning(f"Failed to close broken connection", error=str(close_error))
             
-            # Clean up broken connections
-            for broken_conn in broken_connections:
-                self.market_subscribers[symbol].remove(broken_conn)
+            # Clean up broken connections safely
+            if broken_connections:
+                self.market_subscribers[symbol] = [
+                    conn for conn in self.market_subscribers[symbol] 
+                    if conn not in broken_connections
+                ]
+                
+                # Remove symbol if no connections remain
+                if not self.market_subscribers[symbol]:
+                    del self.market_subscribers[symbol]
 
     async def _start_market_streaming(self):
         """Start background task for streaming market data."""

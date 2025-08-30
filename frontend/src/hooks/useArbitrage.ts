@@ -65,7 +65,7 @@ export const useArbitrageStore = create<ArbitrageState>((set, get) => ({
       
       if (result.success) {
         // Transform API data to match UI expectations
-        const opportunities = (result.data?.arbitrage_results || []).map((opp: any, index: number) => ({
+        const opportunities = (result.data || []).map((opp: any, index: number) => ({
           id: index + 1,
           pair: opp.symbol || `${symbols.split(',')[0]}/USDT`,
           buyExchange: opp.buy_exchange || 'Unknown',
@@ -99,17 +99,24 @@ export const useArbitrageStore = create<ArbitrageState>((set, get) => ({
     try {
       const result = await marketApi.getCrossExchangeComparison(symbols);
       
-      if (result.success) {
+      // API returns response.data directly, not wrapped in { success, data }
+      if (result) {
         set(produce((draft: Draft<ArbitrageState>) => {
-          draft.crossExchangeComparison = result.data;
+          draft.crossExchangeComparison = result;
           draft.lastUpdated = new Date().toISOString();
           draft.isLoading = false;
         }));
       } else {
-        set({ error: result.error || 'Failed to fetch cross-exchange comparison', isLoading: false });
+        set(produce((draft: Draft<ArbitrageState>) => {
+          draft.error = 'Failed to fetch cross-exchange comparison';
+          draft.isLoading = false;
+        }));
       }
     } catch (error: any) {
-      set({ error: error.message || 'Failed to fetch cross-exchange comparison', isLoading: false });
+      set(produce((draft: Draft<ArbitrageState>) => {
+        draft.error = error.message || 'Failed to fetch cross-exchange comparison';
+        draft.isLoading = false;
+      }));
     }
   },
 

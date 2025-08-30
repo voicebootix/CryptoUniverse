@@ -632,11 +632,11 @@ async def get_recent_trades(
                     "id": str(trade.id),  # Convert UUID to string
                     "symbol": trade.symbol,
                     "side": trade.action.value,  # Use action enum, convert to string
-                    "amount": float(trade.quantity),  # Use quantity field, convert to float
-                    "price": float(trade.executed_price or trade.price or 0),  # Use executed_price or fallback
+                    "amount": Decimal(str(trade.quantity)),  # Preserve decimal precision
+                    "price": Decimal(str(trade.executed_price or trade.price or 0)),  # Preserve decimal precision
                     "time": time_str,
                     "status": trade.status.value,  # Convert enum to string
-                    "pnl": float(trade.profit_realized_usd),  # Use profit_realized_usd field
+                    "pnl": Decimal(str(trade.profit_realized_usd)),  # Preserve decimal precision
                 })
             
             return RecentTradesResponse(recent_trades=trade_list)
