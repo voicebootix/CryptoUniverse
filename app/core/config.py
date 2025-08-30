@@ -47,12 +47,14 @@ class Settings(BaseSettings):
     
     # CORS settings
     BACKEND_CORS_ORIGINS: str = Field(default="*", env="BACKEND_CORS_ORIGINS", description="Allowed CORS origins (comma-separated or JSON list)")
+    CORS_ORIGINS: str = Field(default="", env="CORS_ORIGINS", description="Alternative CORS origins env var")
     
     @computed_field
     @property
     def cors_origins(self) -> List[str]:
         """Parse CORS origins from string to list."""
-        v = self.BACKEND_CORS_ORIGINS
+        # Try CORS_ORIGINS first, then fall back to BACKEND_CORS_ORIGINS
+        v = self.CORS_ORIGINS or self.BACKEND_CORS_ORIGINS
         if not v or v == "":
             return ["*"]
         # Handle JSON array format

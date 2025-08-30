@@ -20,7 +20,7 @@ from app.core.config import get_settings
 from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user, require_role
 from app.models.user import User, UserRole
-from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance
+from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance, ApiKeyStatus, ExchangeStatus
 from app.services.trade_execution import TradeExecutionService
 from app.services.rate_limit import rate_limiter
 
@@ -192,15 +192,22 @@ async def connect_exchange(
         await db.flush()  # Get the ID
         
         # Create API key record with minimal fields
+        import hashlib
+        key_hash = hashlib.sha256(request.api_key.encode()).hexdigest()
+        
         api_key_record = ExchangeApiKey(
             account_id=exchange_account.id,
             key_name=request.nickname or f"{request.exchange}_main",
             encrypted_api_key=encrypted_api_key,
             encrypted_secret_key=encrypted_secret_key,
             encrypted_passphrase=encrypted_passphrase,
+            key_hash=key_hash,  # Required field - SHA256 hash of API key
             permissions=test_result.get("permissions", []),
+            ip_restrictions=[],  # Default empty list
             status=ApiKeyStatus.ACTIVE,
-            is_validated=True
+            is_validated=True,
+            total_requests=0,
+            failed_requests=0
         )
         db.add(api_key_record)
         await db.commit()
@@ -604,6 +611,7 @@ async def disconnect_exchange(
         # Remove exchange account if no other API keys
         if exchange_account:
             # Check if this was the only API key for this account
+            from sqlalchemy import select, func
             count_result = await db.execute(
                 select(func.count(ExchangeApiKey.id)).filter(
                     ExchangeApiKey.account_id == exchange_account.id
