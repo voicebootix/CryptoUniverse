@@ -1029,8 +1029,5 @@ class PortfolioOptimizationEngine(LoggerMixin):
         )
 
 
-# Import the complete Portfolio Risk Service implementation
-from app.services.portfolio_risk_core import (
-    PositionSizingEngine, CorrelationAnalysisEngine, StressTestingEngine,
-    PortfolioRiskService, portfolio_risk_service
-)
+# Note: Removed circular import to portfolio_risk_core
+# These classes should be imported directly where needed to avoid circular dependencies

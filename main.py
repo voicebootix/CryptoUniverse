@@ -115,19 +115,27 @@ def create_application() -> FastAPI:
         lifespan=lifespan
     )
 
-    # Add SessionMiddleware for OAuth
-    app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
-
-    # Set all CORS enabled origins
+    # CORS FIRST - must be added before other middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["https://cryptouniverse-frontend.onrender.com"],
+        allow_origins=[
+            "https://cryptouniverse-frontend.onrender.com",
+            "https://cryptouniverse.onrender.com", 
+            "http://localhost:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:8000",
+            "*"  # Allow all for debugging CORS issues
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=["*"],
-        max_age=3600,
+        max_age=86400,  # Cache preflight for 24 hours
     )
+
+    # Add SessionMiddleware for OAuth
+    app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
 
     # Security middleware
     if settings.ALLOWED_HOSTS:

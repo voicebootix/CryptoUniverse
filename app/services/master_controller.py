@@ -30,6 +30,7 @@ import structlog
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
 from app.core.redis import get_redis_client
+from app.services.websocket import manager
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -913,6 +914,12 @@ class MasterSystemController(LoggerMixin):
                            total_profit=self.performance_metrics["total_profit_usd"],
                            success_rate=f"{self.performance_metrics['success_rate']:.2%}",
                            cycles_executed=self.performance_metrics["cycles_executed"])
+            
+            # Broadcast update to user
+            user_id = cycle_result.get("user_id")
+            if user_id:
+                status_update = await self.get_system_status(user_id)
+                await manager.broadcast(status_update, user_id)
             
         except Exception as e:
             self.logger.error("Failed to update performance metrics", error=str(e))
