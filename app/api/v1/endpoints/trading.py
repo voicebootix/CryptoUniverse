@@ -603,15 +603,24 @@ async def get_recent_trades(
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_database)
 ):
-    await manager.connect(websocket, str(current_user.id))
+    # Accept connection first
+    await websocket.accept()
+    
+    # For now, connect without authentication
+    # TODO: Implement WebSocket token authentication via query params
+    user_id = "anonymous"  # Temporary
+    await manager.connect(websocket, user_id)
+    
     try:
         while True:
             # Keep the connection alive
-            await websocket.receive_text()
+            data = await websocket.receive_text()
+            # Echo back for testing
+            await websocket.send_text(f"Echo: {data}")
     except WebSocketDisconnect:
-        manager.disconnect(websocket, str(current_user.id))
+        manager.disconnect(websocket, user_id)
 
 @router.post("/stop-all")
 async def emergency_stop_all_trading(
