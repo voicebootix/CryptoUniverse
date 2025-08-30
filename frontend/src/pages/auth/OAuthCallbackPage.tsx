@@ -62,7 +62,8 @@ const OAuthCallbackPage: React.FC = () => {
         setTokens({
           access_token: data.access_token,
           refresh_token: data.refresh_token,
-          token_type: data.token_type || 'bearer'
+          token_type: data.token_type || 'bearer',
+          expires_in: data.expires_in || 3600  // Default to 1 hour if not provided
         });
         setUser(data.user);
 
