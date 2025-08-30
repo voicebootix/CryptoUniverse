@@ -117,6 +117,25 @@ const App: React.FC = () => {
     }
   }, [isAuthenticated, tokens]);
 
+  // WebSocket message handlers
+  useEffect(() => {
+    const unsubscribePortfolio = wsManager.subscribe('portfolioUpdate', (data: PortfolioState) => {
+      usePortfolioStore.setState(data);
+    });
+    const unsubscribeExchanges = wsManager.subscribe('exchangesUpdate', (data: ExchangeConnection[]) => {
+      useExchangesStore.setState({ connections: data });
+    });
+    const unsubscribeStatus = wsManager.subscribe('statusUpdate', (data: any) => {
+      // Handle status updates
+    });
+
+    return () => {
+      unsubscribePortfolio();
+      unsubscribeExchanges();
+      unsubscribeStatus();
+    };
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <Router>

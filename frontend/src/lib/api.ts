@@ -79,4 +79,11 @@ export const exchangesAPI = axios.create({
 exchangesAPI.interceptors.request.use(authInterceptor);
 setupResponseInterceptor(exchangesAPI);
 
-export default apiClient;
+export {
+  apiClient,
+  tradingAPI,
+  exchangesAPI,
+  authAPI,
+  marketAPI,
+  wsManager,
+};
