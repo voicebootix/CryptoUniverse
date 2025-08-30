@@ -619,6 +619,13 @@ async def oauth_callback(
         import base64
         import json
         from urllib.parse import quote
+        from datetime import datetime
+        
+        # Custom JSON encoder for datetime objects
+        def json_serializer(obj):
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
         
         auth_data = {
             "access_token": result["access_token"],
@@ -628,8 +635,8 @@ async def oauth_callback(
             "user": result["user"]
         }
         
-        # Base64 encode the auth data
-        auth_data_json = json.dumps(auth_data)
+        # Base64 encode the auth data with custom serializer
+        auth_data_json = json.dumps(auth_data, default=json_serializer)
         auth_data_encoded = base64.urlsafe_b64encode(auth_data_json.encode()).decode()
         
         # Redirect to frontend with success data

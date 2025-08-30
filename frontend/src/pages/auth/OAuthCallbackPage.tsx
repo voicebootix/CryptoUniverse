@@ -37,6 +37,14 @@ const OAuthCallbackPage: React.FC = () => {
             const decodedData = atob(data);
             const authData = JSON.parse(decodedData);
 
+            // Convert datetime strings back to Date objects if needed
+            if (authData.user.created_at) {
+              authData.user.created_at = new Date(authData.user.created_at);
+            }
+            if (authData.user.last_login) {
+              authData.user.last_login = new Date(authData.user.last_login);
+            }
+
             // Store tokens and user data
             setTokens({
               access_token: authData.access_token,

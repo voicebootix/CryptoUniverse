@@ -20,7 +20,7 @@ from app.core.config import get_settings
 from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user, require_role
 from app.models.user import User, UserRole
-from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance
+from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance, ApiKeyStatus, ExchangeStatus
 from app.services.trade_execution import TradeExecutionService
 from app.services.rate_limit import rate_limiter
 
@@ -604,6 +604,7 @@ async def disconnect_exchange(
         # Remove exchange account if no other API keys
         if exchange_account:
             # Check if this was the only API key for this account
+            from sqlalchemy import select, func
             count_result = await db.execute(
                 select(func.count(ExchangeApiKey.id)).filter(
                     ExchangeApiKey.account_id == exchange_account.id
