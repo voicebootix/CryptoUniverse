@@ -193,7 +193,7 @@ class OAuthService:
                     detail=f"Unsupported provider: {provider}"
                 )
             
-            # Find or create user
+            # Find or create user.
             user = await self._find_or_create_user(user_info, provider, db)
             
             # Commit the transaction after successful user creation
