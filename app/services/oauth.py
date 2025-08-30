@@ -9,7 +9,7 @@ import secrets
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
-from urllib.parse import urlencode, quote
+from urllib.parse import urlencode, parse_qs, quote_plus
 
 import httpx
 import structlog
@@ -129,9 +129,8 @@ class OAuthService:
                 'prompt': 'consent'
             }
             
-            # URL encode parameters properly
-            encoded_params = urlencode(params, quote_via=quote)
-            oauth_url = f"https://accounts.google.com/o/oauth2/auth?{encoded_params}"
+            # Simple URL encoding
+            oauth_url = f"https://accounts.google.com/o/oauth2/auth?{urlencode(params)}"
             
             logger.info(
                 "Generated OAuth URL",
