@@ -1454,12 +1454,19 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                 balances = result.scalars().all()
                 
                 total_value_usd = 0.0
-                available_balance = 0.0
+                available_balance_usd = 0.0
                 positions = []
                 
                 for balance in balances:
-                    total_value_usd += float(balance.usd_value or 0)
-                    available_balance += float(balance.available_balance or 0)
+                    usd_value = float(balance.usd_value or 0)
+                    total_value_usd += usd_value
+                    
+                    # Calculate available balance in USD (proportional to total balance)
+                    if balance.total_balance and balance.total_balance > 0:
+                        available_ratio = float(balance.available_balance) / float(balance.total_balance)
+                        available_balance_usd += usd_value * available_ratio
+                    else:
+                        available_balance_usd += usd_value
                     
                     positions.append({
                         "symbol": balance.symbol,
@@ -1481,14 +1488,14 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                 portfolio_data = {
                     "portfolio": {
                         "total_value_usd": total_value_usd,
-                        "available_balance": available_balance,
+                        "available_balance": available_balance_usd,
                         "positions": positions,
                         "daily_pnl": daily_pnl,
                         "daily_pnl_pct": daily_pnl_pct,
                         "total_pnl": total_pnl,
                         "total_pnl_pct": total_pnl_pct,
                         "margin_used": 0.0,  # Would need margin account data
-                        "margin_available": available_balance,
+                        "margin_available": available_balance_usd,
                         "risk_score": 25.0,  # Conservative default
                         "active_orders": 0  # Would need open orders data
                     }
