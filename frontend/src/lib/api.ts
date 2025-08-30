@@ -84,6 +84,10 @@ apiClient.interceptors.response.use(
           localStorage.setItem('access_token', tokens.access_token);
           localStorage.setItem('refresh_token', tokens.refresh_token);
           
+          // Update auth store
+          const { useAuthStore } = await import('@/store/authStore');
+          useAuthStore.getState().setTokens(tokens);
+          
           // Update default header
           apiClient.defaults.headers.common['Authorization'] = `Bearer ${tokens.access_token}`;
           

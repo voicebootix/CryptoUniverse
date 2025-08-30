@@ -186,7 +186,9 @@ async def connect_exchange(
         exchange_account = ExchangeAccount(
             user_id=current_user.id,
             exchange_name=request.exchange,  # Use exchange_name field as defined in model
-            account_name=request.nickname or f"{request.exchange}_main"
+            account_name=request.nickname or f"{request.exchange}_main",
+            status=ExchangeStatus.ACTIVE,  # Set to ACTIVE so balance queries work
+            trading_enabled=True
         )
         db.add(exchange_account)
         await db.flush()  # Get the ID
@@ -425,12 +427,14 @@ async def test_exchange_connection_endpoint(
     )
     
     try:
-        # Get API key record
+        # Get API key record through account relationship
         from sqlalchemy import select
         result = await db.execute(
-            select(ExchangeApiKey).filter(
+            select(ExchangeApiKey)
+            .join(ExchangeAccount, ExchangeApiKey.account_id == ExchangeAccount.id)
+            .filter(
                 ExchangeApiKey.id == api_key_id,
-                ExchangeApiKey.user_id == current_user.id
+                ExchangeAccount.user_id == current_user.id
             )
         )
         api_key = result.scalar_one_or_none()
