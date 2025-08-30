@@ -9,7 +9,11 @@ import asyncio
 import secrets
 import time
 from datetime import datetime, timedelta
+import base64
+import json
 from typing import Optional, Dict, Any
+from urllib.parse import quote
+from fastapi.responses import RedirectResponse
 
 import bcrypt
 import jwt
@@ -570,9 +574,10 @@ async def get_oauth_url(
     authorization_url = await oauth_service.generate_oauth_url(
         provider=request.provider,
         client_request=client_request,
-        redirect_url=request.redirect_url,
         is_signup=request.is_signup,
-        db=db
+        db=db,
+        ip_address=client_ip,
+        user_agent=user_agent
     )
     
     # Extract state from URL (simple approach)
@@ -587,28 +592,76 @@ async def get_oauth_url(
 
 
 
-@router.get("/oauth/callback/google")
+@router.get("/oauth/callback/google", response_class=RedirectResponse)
 async def oauth_callback(
     code: str,
     state: str,
-    client_request: Request,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+    client_request: Request = None,
     db: AsyncSession = Depends(get_database)
 ):
     """Handle OAuth callback from Google and redirect to frontend with tokens."""
     logger.info(
         "Received OAuth callback",
         state=state,
-        client_ip=client_request.client.host
+        error=error,
+        client_ip=client_request.client.host if client_request else None
     )
-    
-    client_ip = client_request.client.host
-    
-    logger.info("OAuth callback", provider=provider, ip=client_ip)
-    
-    # Rate limiting
-    await rate_limiter.check_rate_limit(
-        key=f"oauth_callback:{client_ip}",
-        limit=10,
+
+    if error:
+        error_msg = error_description or error
+        frontend_url = settings.FRONTEND_URL
+        return RedirectResponse(
+            url=f"{frontend_url}/auth/callback?error=true&message={error_msg}"
+        )
+
+    try:
+        # Process OAuth callback
+        result = await oauth_service.handle_oauth_callback(
+            provider="google",
+            code=code,
+            state=state,
+            db=db,
+            ip_address=client_request.client.host if client_request else None
+        )
+
+        # Encode the auth data for frontend
+        auth_data = {
+            "access_token": result["access_token"],
+            "refresh_token": result["refresh_token"],
+            "token_type": result["token_type"],
+            "expires_in": result["expires_in"],
+            "user": result["user"]
+        }
+
+        # Base64 encode the auth data
+        import base64
+        import json
+        auth_data_json = json.dumps(auth_data, default=str)  # Handle datetime serialization
+        auth_data_encoded = base64.urlsafe_b64encode(auth_data_json.encode()).decode()
+
+        # Redirect to frontend with success data
+        frontend_url = settings.FRONTEND_URL
+        return RedirectResponse(
+            url=f"{frontend_url}/auth/callback?success=true&data={auth_data_encoded}"
+        )
+
+    except Exception as e:
+        logger.error(
+            "OAuth callback failed",
+            error=str(e),
+            state=state,
+            client_ip=client_request.client.host if client_request else None
+        )
+        
+        # Redirect to frontend with error
+        frontend_url = settings.FRONTEND_URL
+        error_message = str(e)
+        from urllib.parse import quote
+        return RedirectResponse(
+            url=f"{frontend_url}/auth/callback?error=true&message={quote(error_message)}"
+        )
         window=300  # 10 attempts per 5 minutes
     )
     

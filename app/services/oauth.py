@@ -115,8 +115,8 @@ class OAuthService:
             db.add(oauth_state)
             await db.commit()
         
-        # Use hardcoded Render URL for production
-        redirect_uri = "https://cryptouniverse.onrender.com/api/v1/auth/oauth/callback/google"
+        # Use configured callback URL
+        redirect_uri = f"{settings.API_V1_PREFIX}/auth/oauth/callback/google"
         
         try:
             # Build OAuth URL manually with our state
@@ -244,8 +244,8 @@ class OAuthService:
     async def _handle_google_callback(self, code: str, db: AsyncSession) -> Dict[str, Any]:
         """Handle Google OAuth callback."""
         
-        # Always use the backend callback URL
-        redirect_uri = "https://cryptouniverse.onrender.com/api/v1/auth/oauth/callback/google"
+        # Use configured callback URL
+        redirect_uri = f"{settings.API_V1_PREFIX}/auth/oauth/callback/google"
         
         try:
             # Exchange code for tokens manually

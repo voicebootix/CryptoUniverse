@@ -70,15 +70,10 @@ const LoginPage: React.FC = () => {
 
   const handleGoogleLogin = async () => {
     try {
-      // Use backend URL for callback
-      const backendUrl =
-        import.meta.env.VITE_API_URL ||
-        "https://cryptouniverse.onrender.com/api/v1";
-      const callbackUrl = `${backendUrl}/auth/oauth/callback/google`;
-
+      // Let backend handle the callback URL
       const response = await apiClient.post("/auth/oauth/url", {
         provider: "google",
-        redirect_url: callbackUrl,
+        is_signup: false,
       });
 
       if (response.status !== 200) {
@@ -87,8 +82,8 @@ const LoginPage: React.FC = () => {
 
       const data = response.data;
 
-      // Store callback URL in session storage for verification
-      sessionStorage.setItem("oauth_callback_url", callbackUrl);
+      // Store login intent in session storage
+      sessionStorage.setItem("oauth_intent", "login");
 
       // Redirect to Google OAuth
       window.location.href = data.authorization_url;
