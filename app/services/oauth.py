@@ -210,11 +210,43 @@ class OAuthService:
         finally:
             await db.commit()
     
-    async def _handle_google_callback(self, request: Request, db: AsyncSession) -> Dict[str, Any]:
+    async def _handle_google_callback(self, code: str, db: AsyncSession) -> Dict[str, Any]:
         """Handle Google OAuth callback."""
         
-        token = await self.oauth.google.authorize_access_token(request)
-        user_data = await self.oauth.google.userinfo(token=token)
+        # Exchange code for tokens manually
+        async with httpx.AsyncClient() as client:
+            token_response = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "client_id": settings.GOOGLE_CLIENT_ID,
+                    "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": f"{settings.BASE_URL}/api/v1/auth/oauth/callback/google",
+                }
+            )
+            
+            if token_response.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to exchange OAuth code for tokens"
+                )
+            
+            token_data = token_response.json()
+            
+            # Get user info
+            user_info_response = await client.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {token_data['access_token']}"}
+            )
+            
+            if user_info_response.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to get user info from Google"
+                )
+            
+            user_data = user_info_response.json()
         
         return {
             "provider": "google",
@@ -223,9 +255,9 @@ class OAuthService:
             "name": user_data.get("name", ""),
             "avatar_url": user_data.get("picture"),
             "profile_data": user_data,
-            "access_token": user_data["access_token"],
-            "refresh_token": user_data.get("refresh_token"),
-            "token_expires_at": datetime.utcnow() + timedelta(seconds=user_data.get("expires_in", 3600))
+            "access_token": token_data["access_token"],
+            "refresh_token": token_data.get("refresh_token"),
+            "token_expires_at": datetime.utcnow() + timedelta(seconds=token_data.get("expires_in", 3600))
         }
     
     async def _find_or_create_user(

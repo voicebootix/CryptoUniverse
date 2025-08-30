@@ -1,56 +1,54 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
+import { Container } from '@/components/ui/container';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 const OAuthCallbackPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string>('');
   
   const setUser = useAuthStore((state) => state.setUser);
   const setTokens = useAuthStore((state) => state.setTokens);
 
   useEffect(() => {
     const handleOAuthCallback = async () => {
-      const code = searchParams.get('code');
-      const state = searchParams.get('state');
-      const error = searchParams.get('error');
-      const provider = window.location.pathname.includes('google') ? 'google' : 'google'; // Default to google for now
-
-      // Handle OAuth error
-      if (error) {
-        setStatus('error');
-        setError(`OAuth error: ${error}`);
-        return;
-      }
-
-      // Check for required parameters
-      if (!code || !state) {
-        setStatus('error');
-        setError('Missing OAuth parameters');
-        return;
-      }
-
       try {
-        // Send callback data to backend  
+        const code = searchParams.get('code');
+        const state = searchParams.get('state');
+        const error = searchParams.get('error');
+
+        // Handle OAuth errors
+        if (error) {
+          setStatus('error');
+          setError(`OAuth error: ${error}`);
+          return;
+        }
+
+        // Validate required parameters
+        if (!code || !state) {
+          setStatus('error');
+          setError('Missing required OAuth parameters');
+          return;
+        }
+
+        // Get API base URL
         const API_BASE_URL = import.meta.env.VITE_API_URL || (
           import.meta.env.PROD 
             ? 'https://cryptouniverse.onrender.com/api/v1'
             : 'http://localhost:8000/api/v1'
         );
-        const response = await fetch(`${API_BASE_URL}/auth/oauth/callback/${provider}`, {
-          method: 'POST',
+
+        // Exchange code for tokens
+        const response = await fetch(`${API_BASE_URL}/auth/oauth/callback/google?code=${code}&state=${state}`, {
+          method: 'GET',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            code,
-            state,
-          }),
         });
 
         if (!response.ok) {
@@ -59,117 +57,136 @@ const OAuthCallbackPage: React.FC = () => {
         }
 
         const data = await response.json();
-        
-        // Store authentication data
-        setTokens({
-          access_token: data.access_token,
-          refresh_token: data.refresh_token,
-          token_type: data.token_type || 'bearer',
-          expires_in: 3600 // 1 hour default
-        });
+
+        // Store tokens and user data
+        setTokens(data.access_token, data.refresh_token);
         setUser(data.user);
-        
+
         setStatus('success');
-        
-        // Redirect to dashboard after short delay
+
+        // Redirect to dashboard after a brief success message
         setTimeout(() => {
-          navigate('/dashboard');
+          navigate('/dashboard', { replace: true });
         }, 2000);
-        
-      } catch (error) {
-        console.error('OAuth callback error:', error);
+
+      } catch (err) {
+        console.error('OAuth callback error:', err);
         setStatus('error');
-        setError(error instanceof Error ? error.message : 'Authentication failed');
+        setError(err instanceof Error ? err.message : 'Authentication failed');
       }
     };
 
     handleOAuthCallback();
   }, [searchParams, navigate, setUser, setTokens]);
 
-  const handleRetry = () => {
-    navigate('/auth/login');
-  };
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-secondary/20 flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="w-full max-w-md"
-      >
-        <div className="bg-card rounded-lg border shadow-lg p-8">
-          <div className="text-center space-y-6">
-            {status === 'loading' && (
-              <>
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                  className="mx-auto w-12 h-12 text-primary"
-                >
-                  <Loader2 className="w-full h-full" />
-                </motion.div>
-                <div>
-                  <h2 className="text-2xl font-bold mb-2">Authenticating...</h2>
-                  <p className="text-muted-foreground">
-                    Please wait while we complete your Google sign-in.
-                  </p>
-                </div>
-              </>
-            )}
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-slate-800 text-white">
+      {/* Background Effects */}
+      <div className="absolute inset-0">
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-600/5 via-purple-600/10 to-pink-600/5" />
+        <motion.div
+          className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/8 rounded-full blur-3xl"
+          animate={{
+            scale: [1, 1.1, 1],
+            opacity: [0.3, 0.4, 0.3],
+          }}
+          transition={{
+            duration: 8,
+            repeat: Infinity,
+            ease: "easeInOut"
+          }}
+        />
+        <motion.div
+          className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/8 rounded-full blur-3xl"
+          animate={{
+            scale: [1.1, 1, 1.1],
+            opacity: [0.4, 0.3, 0.4],
+          }}
+          transition={{
+            duration: 10,
+            repeat: Infinity,
+            ease: "easeInOut"
+          }}
+        />
+      </div>
 
-            {status === 'success' && (
-              <>
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
-                  className="mx-auto w-12 h-12 text-green-500"
-                >
-                  <CheckCircle className="w-full h-full" />
-                </motion.div>
-                <div>
-                  <h2 className="text-2xl font-bold mb-2 text-green-600">Success!</h2>
-                  <p className="text-muted-foreground">
-                    You've been successfully authenticated. Redirecting to your dashboard...
-                  </p>
-                </div>
-              </>
-            )}
-
-            {status === 'error' && (
-              <>
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
-                  className="mx-auto w-12 h-12 text-destructive"
-                >
-                  <XCircle className="w-full h-full" />
-                </motion.div>
-                <div>
-                  <h2 className="text-2xl font-bold mb-2 text-destructive">Authentication Failed</h2>
-                  <p className="text-muted-foreground mb-4">
-                    We couldn't complete your Google sign-in.
-                  </p>
-                  
-                  {error && (
-                    <Alert variant="destructive" className="mb-4">
-                      <AlertDescription>{error}</AlertDescription>
-                    </Alert>
-                  )}
-                  
-                  <button
-                    onClick={handleRetry}
-                    className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
+      <div className="relative z-10 min-h-screen flex items-center justify-center px-4">
+        <Container>
+          <div className="max-w-md mx-auto">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6 }}
+              className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-12 shadow-2xl text-center"
+            >
+              {status === 'loading' && (
+                <>
+                  <motion.div
+                    className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
                   >
-                    Try Again
-                  </button>
-                </div>
-              </>
-            )}
+                    <Loader2 className="w-8 h-8 text-white" />
+                  </motion.div>
+                  <h2 className="text-2xl font-bold text-white mb-4">
+                    Completing Sign In
+                  </h2>
+                  <p className="text-gray-300">
+                    Please wait while we complete your authentication...
+                  </p>
+                </>
+              )}
+
+              {status === 'success' && (
+                <>
+                  <motion.div
+                    className="w-16 h-16 bg-gradient-to-r from-green-500 to-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ duration: 0.5, type: "spring" }}
+                  >
+                    <CheckCircle className="w-8 h-8 text-white" />
+                  </motion.div>
+                  <h2 className="text-2xl font-bold text-white mb-4">
+                    Welcome to CryptoUniverse!
+                  </h2>
+                  <p className="text-gray-300">
+                    Authentication successful. Redirecting to your dashboard...
+                  </p>
+                </>
+              )}
+
+              {status === 'error' && (
+                <>
+                  <motion.div
+                    className="w-16 h-16 bg-gradient-to-r from-red-500 to-pink-600 rounded-full flex items-center justify-center mx-auto mb-6"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ duration: 0.5, type: "spring" }}
+                  >
+                    <AlertCircle className="w-8 h-8 text-white" />
+                  </motion.div>
+                  <h2 className="text-2xl font-bold text-white mb-4">
+                    Authentication Failed
+                  </h2>
+                  <Alert className="border-red-500/30 bg-red-500/10 backdrop-blur-sm text-red-300 mb-6">
+                    <AlertCircle className="h-4 w-4 text-red-400" />
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                  <motion.button
+                    className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white font-bold py-3 px-6 rounded-2xl transition-all duration-300"
+                    onClick={() => navigate('/auth/login')}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                  >
+                    Return to Login
+                  </motion.button>
+                </>
+              )}
+            </motion.div>
           </div>
-        </div>
-      </motion.div>
+        </Container>
+      </div>
     </div>
   );
 };

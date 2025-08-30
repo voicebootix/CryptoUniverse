@@ -65,13 +65,17 @@ const LoginPage: React.FC = () => {
 
   const handleGoogleLogin = async () => {
     try {
+      // Use the API client which already handles the correct base URL for Render
+      
       const response = await apiClient.post('/auth/oauth/url', {
         provider: 'google',
-        redirect_url: window.location.origin + '/auth/callback'
+        redirect_url: null  // Let backend handle the redirect URL
       });
+      
       if (response.status !== 200) {
         throw new Error('Failed to get OAuth URL');
       }
+      
       const data = response.data;
       window.location.href = data.authorization_url;
     } catch (error) {
