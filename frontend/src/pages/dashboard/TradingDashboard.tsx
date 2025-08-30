@@ -93,19 +93,28 @@ const TradingDashboard: React.FC = () => {
     dailyPnLPercent,
     totalPnLPercent,
     positions,
+    performanceHistory,
+    marketData,
+    recentTrades,
     isLoading,
     error,
-    fetchPortfolio 
+    fetchPortfolio,
+    fetchStatus,
+    fetchMarketData,
+    fetchRecentTrades,
   } = usePortfolioStore();
   
   const [autonomousMode, setAutonomousMode] = useState(false);
 
   useEffect(() => {
     fetchPortfolio();
-  }, [fetchPortfolio]);
+    fetchStatus();
+    fetchMarketData();
+    fetchRecentTrades();
+  }, [fetchPortfolio, fetchStatus, fetchMarketData, fetchRecentTrades]);
 
   const handleRefresh = async () => {
-    await fetchPortfolio();
+    await Promise.all([fetchPortfolio(), fetchStatus(), fetchMarketData(), fetchRecentTrades()]);
   };
 
   const toggleAutonomousMode = () => {
@@ -309,7 +318,7 @@ const TradingDashboard: React.FC = () => {
             <CardContent>
               <div className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={performanceData}>
+                  <LineChart data={performanceHistory}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                     <XAxis
                       dataKey="time"
