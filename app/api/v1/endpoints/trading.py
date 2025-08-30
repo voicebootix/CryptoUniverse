@@ -560,23 +560,19 @@ async def get_market_overview(
             if market_data_items:
                 return MarketOverviewResponse(market_data=market_data_items)
         
-        # Fallback to market data feeds if market analysis fails
-        from app.services.market_data_feeds import get_market_overview
-        fallback_result = await get_market_overview()
+        # Fallback to unified price service
+        from app.services.unified_price_service import get_market_overview_prices
+        fallback_prices = await get_market_overview_prices()
         
-        if fallback_result.get("success"):
+        if fallback_prices:
             market_data_items = []
-            data = fallback_result.get("data", {})
             
-            for symbol, symbol_data in data.items():
-                volume = symbol_data.get("volume_24h", 0)
-                volume_str = f"{volume/1e9:.1f}B" if volume > 1e9 else f"{volume/1e6:.0f}M"
-                
+            for symbol, price in fallback_prices.items():
                 market_data_items.append({
                     "symbol": symbol,
-                    "price": Decimal(str(symbol_data.get("price", 0))),
-                    "change": float(symbol_data.get("change_24h", 0)),
-                    "volume": volume_str
+                    "price": Decimal(str(price)),
+                    "change": 0.0,  # No change data available from price-only service
+                    "volume": "N/A"
                 })
             
             return MarketOverviewResponse(market_data=market_data_items)

@@ -881,6 +881,111 @@ async def get_spread_monitoring(
         )
 
 
+@router.get("/test/unified-prices")
+async def test_unified_price_service(
+    symbols: str = Query("BTC,ETH,SOL", description="Comma-separated list of symbols to test"),
+    current_user: User = Depends(get_current_user)
+):
+    """Test endpoint to validate unified price service integration."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:test_unified",
+        limit=20,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        from app.services.unified_price_service import unified_price_service
+        
+        # Initialize if needed
+        if unified_price_service.redis is None:
+            await unified_price_service.async_init()
+        
+        symbol_list = [s.strip().upper() for s in symbols.split(",")]
+        
+        # Test different sources
+        test_results = {
+            "symbols_tested": symbol_list,
+            "market_data_source": {},
+            "exchange_source": {},
+            "auto_selection": {},
+            "service_health": {},
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        # Test market data source
+        try:
+            market_prices = await unified_price_service.get_batch_prices(
+                symbol_list, 
+                source=PriceSource.MARKET_DATA,
+                use_case="market_analysis"
+            )
+            test_results["market_data_source"] = {
+                "success": bool(market_prices),
+                "prices": market_prices,
+                "count": len(market_prices)
+            }
+        except Exception as e:
+            test_results["market_data_source"] = {
+                "success": False,
+                "error": str(e)
+            }
+        
+        # Test exchange source
+        try:
+            exchange_prices = await unified_price_service.get_batch_prices(
+                symbol_list, 
+                source=PriceSource.EXCHANGE,
+                use_case="portfolio"
+            )
+            test_results["exchange_source"] = {
+                "success": bool(exchange_prices),
+                "prices": exchange_prices,
+                "count": len(exchange_prices)
+            }
+        except Exception as e:
+            test_results["exchange_source"] = {
+                "success": False,
+                "error": str(e)
+            }
+        
+        # Test auto selection
+        try:
+            auto_prices = await unified_price_service.get_batch_prices(
+                symbol_list, 
+                source=PriceSource.AUTO,
+                use_case="general"
+            )
+            test_results["auto_selection"] = {
+                "success": bool(auto_prices),
+                "prices": auto_prices,
+                "count": len(auto_prices)
+            }
+        except Exception as e:
+            test_results["auto_selection"] = {
+                "success": False,
+                "error": str(e)
+            }
+        
+        # Test service health
+        test_results["service_health"] = await unified_price_service.health_check()
+        
+        return {
+            "success": True,
+            "data": test_results
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Unified price service test failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unified price service test failed: {str(e)}"
+        )
+
+
 @router.get("/cross-exchange-comparison")
 async def get_cross_exchange_comparison(
     symbols: str = Query(..., description="Comma-separated list of symbols"),

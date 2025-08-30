@@ -775,8 +775,10 @@ async def fetch_binance_balances(api_key: str, api_secret: str) -> List[Dict[str
                 data = await response.json()
                 balances = []
                 
-                # Get current prices for USD conversion
-                prices = await get_binance_prices(list(set([b["asset"] for b in data.get("balances", []) if float(b.get("free", 0)) + float(b.get("locked", 0)) > 0])))
+                # Get current prices for USD conversion using unified service
+                from app.services.unified_price_service import get_portfolio_prices
+                active_currencies = list(set([b["asset"] for b in data.get("balances", []) if float(b.get("free", 0)) + float(b.get("locked", 0)) > 0]))
+                prices = await get_portfolio_prices(active_currencies)
                 
                 # Process balances
                 for balance in data.get("balances", []):
