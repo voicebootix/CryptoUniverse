@@ -13,7 +13,7 @@ from decimal import Decimal
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, field_validator
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -159,7 +159,7 @@ class RecentTradesResponse(BaseModel):
 async def execute_manual_trade(
     request: TradeRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Execute a manual trade order."""
     
@@ -278,7 +278,7 @@ async def start_autonomous_mode(
     request: AutonomousModeRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Start or configure autonomous trading mode."""
     
@@ -366,7 +366,7 @@ async def start_autonomous_mode(
 async def toggle_simulation_mode(
     request: SimulationModeRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Toggle between simulation and live trading mode."""
     
@@ -436,7 +436,7 @@ async def toggle_simulation_mode(
 @router.get("/portfolio", response_model=PortfolioResponse)
 async def get_portfolio_status(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Get current portfolio status and performance."""
     
@@ -625,7 +625,7 @@ async def websocket_endpoint(
 @router.post("/stop-all")
 async def emergency_stop_all_trading(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_database)
+    db: AsyncSession = Depends(get_database)
 ):
     """Emergency stop all trading activities."""
     
