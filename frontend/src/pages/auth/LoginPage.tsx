@@ -40,11 +40,37 @@ const loginSchema = z.object({
 });
 type LoginFormData = z.infer<typeof loginSchema>;
 
+const MotionDiv = ({ children, delay = 0, ...props }: { children: React.ReactNode; delay?: number; [key: string]: any }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ delay, duration: 0.5 }}
+    {...props}
+  >
+    {children}
+  </motion.div>
+);
+
+const FeatureItem = ({ icon: Icon, title, color }: { icon: React.ComponentType<{ className?: string }>; title: string; color: string }) => (
+  <div className="flex items-center space-x-3">
+    <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center">
+      <Icon className={`w-4 h-4 ${color}`} />
+    </div>
+    <span className="text-gray-300 font-medium">{title}</span>
+  </div>
+);
+
+const StatItem = ({ value, label, color }: { value: string; label: string; color: string }) => (
+  <div className="text-center">
+    <div className={`text-xl font-bold ${color} mb-1`}>{value}</div>
+    <div className="text-xs text-gray-400">{label}</div>
+  </div>
+);
+
 const LoginPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showMfaInput, setShowMfaInput] = useState(false);
   const navigate = useNavigate();
-
   const login = useAuthStore((state) => state.login);
   const clearError = useAuthStore((state) => state.clearError);
   const mfaRequired = useMfaRequired();
@@ -67,7 +93,7 @@ const LoginPage: React.FC = () => {
     try {
       const response = await apiClient.post('/auth/oauth/url', {
         provider: 'google',
-        redirect_url: window.location.origin + '/auth/callback'
+        redirect_url: window.location.origin + '/auth/callback',
       });
       if (response.status !== 200) {
         throw new Error('Failed to get OAuth URL');
@@ -108,7 +134,7 @@ const LoginPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-slate-800 text-white">
       {/* Background Effects */}
-      <div className="absolute inset-0">
+      <div className="absolute inset-0 overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-blue-600/5 via-purple-600/10 to-pink-600/5" />
         <motion.div
           className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/8 rounded-full blur-3xl"
@@ -119,7 +145,7 @@ const LoginPage: React.FC = () => {
           transition={{
             duration: 8,
             repeat: Infinity,
-            ease: "easeInOut"
+            ease: 'easeInOut',
           }}
         />
         <motion.div
@@ -131,7 +157,7 @@ const LoginPage: React.FC = () => {
           transition={{
             duration: 10,
             repeat: Infinity,
-            ease: "easeInOut"
+            ease: 'easeInOut',
           }}
         />
       </div>
@@ -149,7 +175,7 @@ const LoginPage: React.FC = () => {
               <motion.div
                 className="w-16 h-16 bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 rounded-2xl flex items-center justify-center shadow-lg mr-4"
                 whileHover={{ scale: 1.05 }}
-                transition={{ type: "spring", stiffness: 400, damping: 17 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 17 }}
               >
                 <TrendingUp className="w-8 h-8 text-white" />
               </motion.div>
@@ -157,19 +183,16 @@ const LoginPage: React.FC = () => {
                 <h1 className="text-4xl font-bold bg-gradient-to-r from-white via-blue-100 to-purple-200 bg-clip-text text-transparent">
                   CryptoUniverse
                 </h1>
-                <p className="text-blue-300 text-lg font-medium">
-                  Enterprise AI Trading v2.0.1
-                </p>
+                <p className="text-blue-300 text-lg font-medium">Enterprise AI Trading v2.0.1</p>
               </div>
             </div>
           </Container>
         </motion.div>
 
-        {/* Main Content - Centered Layout */}
+        {/* Main Content */}
         <div className="flex-1 flex items-center justify-center px-4 py-8">
           <div className="w-full max-w-6xl mx-auto">
             <div className="grid lg:grid-cols-5 gap-12 items-center">
-              
               {/* Left Side - Feature Summary */}
               <motion.div
                 initial={{ opacity: 0, x: -30 }}
@@ -177,7 +200,6 @@ const LoginPage: React.FC = () => {
                 transition={{ duration: 0.6, delay: 0.2 }}
                 className="lg:col-span-2 space-y-8"
               >
-                {/* Hero Text */}
                 <div className="space-y-4">
                   <motion.h2
                     className="text-3xl lg:text-4xl font-bold leading-tight"
@@ -201,48 +223,20 @@ const LoginPage: React.FC = () => {
                   </motion.p>
                 </div>
 
-                {/* Quick Features */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.5, duration: 0.6 }}
-                  className="space-y-4"
-                >
-                  {[
-                    { icon: Bot, title: "AI-Powered Trading", color: "text-green-400" },
-                    { icon: Globe, title: "Multi-Exchange Support", color: "text-blue-400" },
-                    { icon: Shield, title: "Enterprise Security", color: "text-purple-400" }
-                  ].map((feature, index) => (
-                    <div key={index} className="flex items-center space-x-3">
-                      <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center">
-                        <feature.icon className={`w-4 h-4 ${feature.color}`} />
-                      </div>
-                      <span className="text-gray-300 font-medium">{feature.title}</span>
-                    </div>
-                  ))}
-                </motion.div>
+                <MotionDiv delay={0.5} className="space-y-4">
+                  <FeatureItem icon={Bot} title="AI-Powered Trading" color="text-green-400" />
+                  <FeatureItem icon={Globe} title="Multi-Exchange Support" color="text-blue-400" />
+                  <FeatureItem icon={Shield} title="Enterprise Security" color="text-purple-400" />
+                </MotionDiv>
 
-                {/* Stats */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.6, duration: 0.6 }}
-                  className="grid grid-cols-3 gap-4 p-6 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10"
-                >
-                  {[
-                    { value: "99.9%", label: "Uptime", color: "text-green-400" },
-                    { value: "$100M+", label: "AUM", color: "text-blue-400" },
-                    { value: "24/7", label: "Trading", color: "text-purple-400" }
-                  ].map((stat, index) => (
-                    <div key={index} className="text-center">
-                      <div className={`text-xl font-bold ${stat.color} mb-1`}>{stat.value}</div>
-                      <div className="text-xs text-gray-400">{stat.label}</div>
-                    </div>
-                  ))}
-                </motion.div>
+                <MotionDiv delay={0.6} className="grid grid-cols-3 gap-4 p-6 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10">
+                  <StatItem value="99.9%" label="Uptime" color="text-green-400" />
+                  <StatItem value="$100M+" label="AUM" color="text-blue-400" />
+                  <StatItem value="24/7" label="Trading" color="text-purple-400" />
+                </MotionDiv>
               </motion.div>
 
-              {/* Right Side - Login Form (Centered & Larger) */}
+              {/* Right Side - Login Form */}
               <motion.div
                 initial={{ opacity: 0, x: 30 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -250,35 +244,27 @@ const LoginPage: React.FC = () => {
                 className="lg:col-span-3 flex justify-center"
               >
                 <div className="w-full max-w-md">
-                  {/* Glassmorphism Container */}
                   <div className="relative bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl">
-                    
-                    {/* Form Header */}
-                    <motion.div
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.6, duration: 0.6 }}
-                      className="text-center mb-8"
-                    >
+                    <MotionDiv delay={0.6} className="text-center mb-8">
                       <div className="flex items-center justify-center mb-4">
                         <motion.div
                           className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg"
                           whileHover={{ rotate: 5, scale: 1.05 }}
-                          transition={{ type: "spring", stiffness: 400, damping: 17 }}
+                          transition={{ type: 'spring', stiffness: 400, damping: 17 }}
                         >
                           <KeyRound className="w-8 h-8 text-white" />
                         </motion.div>
                       </div>
                       <h2 className="text-3xl font-bold text-white mb-2">Welcome Back</h2>
                       <p className="text-gray-300">Sign in to your trading dashboard</p>
-                    </motion.div>
+                    </MotionDiv>
 
                     {/* Alerts */}
                     <AnimatePresence>
                       {error && (
                         <motion.div
                           initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                          animate={{ opacity: 1, height: "auto", marginBottom: 24 }}
+                          animate={{ opacity: 1, height: 'auto', marginBottom: 24 }}
                           exit={{ opacity: 0, height: 0, marginBottom: 0 }}
                           transition={{ duration: 0.3 }}
                         >
@@ -288,11 +274,10 @@ const LoginPage: React.FC = () => {
                           </Alert>
                         </motion.div>
                       )}
-
                       {mfaRequired && (
                         <motion.div
                           initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                          animate={{ opacity: 1, height: "auto", marginBottom: 24 }}
+                          animate={{ opacity: 1, height: 'auto', marginBottom: 24 }}
                           exit={{ opacity: 0, height: 0, marginBottom: 0 }}
                           transition={{ duration: 0.3 }}
                         >
@@ -306,14 +291,7 @@ const LoginPage: React.FC = () => {
 
                     {/* Login Form */}
                     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-                      
-                      {/* Email Field */}
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.7, duration: 0.5 }}
-                        className="space-y-2"
-                      >
+                      <MotionDiv delay={0.7} className="space-y-2">
                         <Label htmlFor="email" className="text-white font-medium flex items-center space-x-2">
                           <Mail className="w-4 h-4 text-blue-400" />
                           <span>Email Address</span>
@@ -325,11 +303,14 @@ const LoginPage: React.FC = () => {
                             placeholder="Enter your email address"
                             className="h-12 bg-white/10 border-white/20 focus:border-blue-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-xl transition-all duration-300"
                             {...register('email')}
+                            aria-invalid={!!errors.email}
+                            aria-describedby="email-error"
                           />
                         </div>
                         <AnimatePresence>
                           {errors.email && (
                             <motion.p
+                              id="email-error"
                               initial={{ opacity: 0, y: -10 }}
                               animate={{ opacity: 1, y: 0 }}
                               exit={{ opacity: 0, y: -10 }}
@@ -340,15 +321,9 @@ const LoginPage: React.FC = () => {
                             </motion.p>
                           )}
                         </AnimatePresence>
-                      </motion.div>
+                      </MotionDiv>
 
-                      {/* Password Field */}
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.8, duration: 0.5 }}
-                        className="space-y-2"
-                      >
+                      <MotionDiv delay={0.8} className="space-y-2">
                         <Label htmlFor="password" className="text-white font-medium flex items-center space-x-2">
                           <KeyRound className="w-4 h-4 text-purple-400" />
                           <span>Password</span>
@@ -360,6 +335,8 @@ const LoginPage: React.FC = () => {
                             placeholder="Enter your password"
                             className="h-12 bg-white/10 border-white/20 focus:border-purple-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-xl pr-12 transition-all duration-300"
                             {...register('password')}
+                            aria-invalid={!!errors.password}
+                            aria-describedby="password-error"
                           />
                           <motion.button
                             type="button"
@@ -367,6 +344,7 @@ const LoginPage: React.FC = () => {
                             className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-white transition-colors duration-200"
                             whileHover={{ scale: 1.1 }}
                             whileTap={{ scale: 0.95 }}
+                            aria-label={showPassword ? 'Hide password' : 'Show password'}
                           >
                             {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                           </motion.button>
@@ -374,6 +352,7 @@ const LoginPage: React.FC = () => {
                         <AnimatePresence>
                           {errors.password && (
                             <motion.p
+                              id="password-error"
                               initial={{ opacity: 0, y: -10 }}
                               animate={{ opacity: 1, y: 0 }}
                               exit={{ opacity: 0, y: -10 }}
@@ -384,18 +363,11 @@ const LoginPage: React.FC = () => {
                             </motion.p>
                           )}
                         </AnimatePresence>
-                      </motion.div>
+                      </MotionDiv>
 
-                      {/* MFA Field */}
                       <AnimatePresence>
                         {showMfaInput && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "auto" }}
-                            exit={{ opacity: 0, height: 0 }}
-                            transition={{ duration: 0.3 }}
-                            className="space-y-2"
-                          >
+                          <MotionDiv delay={0.9} className="space-y-2">
                             <Label htmlFor="mfa_code" className="text-white font-medium flex items-center space-x-2">
                               <Shield className="w-4 h-4 text-green-400" />
                               <span>MFA Code</span>
@@ -406,9 +378,12 @@ const LoginPage: React.FC = () => {
                               placeholder="Enter your MFA code"
                               className="h-12 bg-white/10 border-white/20 focus:border-green-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-xl transition-all duration-300"
                               {...register('mfa_code')}
+                              aria-invalid={!!errors.mfa_code}
+                              aria-describedby="mfa-error"
                             />
                             {errors.mfa_code && (
                               <motion.p
+                                id="mfa-error"
                                 initial={{ opacity: 0, y: -10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 className="text-sm text-red-400 flex items-center space-x-2"
@@ -417,17 +392,11 @@ const LoginPage: React.FC = () => {
                                 <span>{errors.mfa_code.message}</span>
                               </motion.p>
                             )}
-                          </motion.div>
+                          </MotionDiv>
                         )}
                       </AnimatePresence>
 
-                      {/* Remember Me & Forgot Password */}
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.9, duration: 0.5 }}
-                        className="flex items-center justify-between"
-                      >
+                      <MotionDiv delay={1} className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
                           <Checkbox
                             id="remember_me"
@@ -445,18 +414,14 @@ const LoginPage: React.FC = () => {
                         >
                           Forgot password?
                         </Link>
-                      </motion.div>
+                      </MotionDiv>
 
-                      {/* Sign In Button */}
-                      <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 1, duration: 0.5 }}
-                      >
+                      <MotionDiv delay={1.1}>
                         <Button
                           type="submit"
                           disabled={isLoading}
                           className="w-full h-12 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98]"
+                          aria-live="polite"
                         >
                           {isLoading ? (
                             <div className="flex items-center justify-center space-x-2">
@@ -470,60 +435,44 @@ const LoginPage: React.FC = () => {
                             </div>
                           )}
                         </Button>
-                      </motion.div>
+                      </MotionDiv>
                     </form>
 
-                    {/* Divider */}
-                    <motion.div
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ delay: 1.1, duration: 0.5 }}
-                      className="relative my-6"
-                    >
+                    <MotionDiv delay={1.2} className="relative my-6">
                       <div className="absolute inset-0 flex items-center">
                         <div className="w-full border-t border-white/20" />
                       </div>
                       <div className="relative flex justify-center">
-                        <span className="px-3 bg-white/5 backdrop-blur-sm text-gray-400 text-sm">
-                          Or continue with
-                        </span>
+                        <span className="px-3 bg-white/5 backdrop-blur-sm text-gray-400 text-sm">Or continue with</span>
                       </div>
-                    </motion.div>
+                    </MotionDiv>
 
-                    {/* Social Login & Sign Up */}
-                    <motion.div
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 1.2, duration: 0.5 }}
-                      className="space-y-4"
-                    >
-                      {/* Google Sign In */}
+                    <MotionDiv delay={1.3} className="space-y-4">
                       <Button
                         type="button"
                         onClick={handleGoogleLogin}
                         variant="outline"
                         className="w-full h-12 bg-white/10 border-white/20 hover:bg-white/15 text-white rounded-xl transition-all duration-300"
+                        aria-label="Sign in with Google"
                       >
                         <div className="flex items-center justify-center space-x-3">
                           <svg className="w-5 h-5" viewBox="0 0 48 48">
-                            <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z"></path>
-                            <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z"></path>
-                            <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z"></path>
-                            <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z"></path>
+                            <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z" />
+                            <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z" />
+                            <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z" />
+                            <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z" />
                           </svg>
                           <span className="font-medium">Continue with Google</span>
                         </div>
                       </Button>
 
-                      {/* Sign Up Link */}
                       <div className="text-center pt-2">
-                        <p className="text-gray-400 text-sm mb-3">
-                          Don't have an account?
-                        </p>
+                        <p className="text-gray-400 text-sm mb-3">Don't have an account?</p>
                         <Button
                           variant="outline"
                           className="w-full h-12 border-white/20 hover:bg-white/10 text-white rounded-xl transition-all duration-300"
                           onClick={() => navigate('/auth/register')}
+                          aria-label="Create new account"
                         >
                           <div className="flex items-center justify-center space-x-2">
                             <Star className="w-4 h-4" />
@@ -531,7 +480,7 @@ const LoginPage: React.FC = () => {
                           </div>
                         </Button>
                       </div>
-                    </motion.div>
+                    </MotionDiv>
                   </div>
                 </div>
               </motion.div>
