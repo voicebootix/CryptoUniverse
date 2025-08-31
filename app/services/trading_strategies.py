@@ -3737,16 +3737,42 @@ class TradingStrategiesService(LoggerMixin):
             market_assessment = market_data.get("market_assessment", {})
             symbol_analysis = market_data.get("symbol_analysis", {})
             
-            # Default to BTC if no specific symbol analysis
-            target_symbol = "BTC"
+            # Dynamic symbol selection based on market analysis (no hardcoded defaults)
+            target_symbol = None
             if symbol_analysis:
                 # Get best opportunity from market analysis
                 best_symbol = max(
                     symbol_analysis.keys(),
                     key=lambda s: symbol_analysis[s].get("opportunity_score", 0),
-                    default="BTC"
+                    default=None
                 )
                 target_symbol = best_symbol
+            
+            # If no symbol from analysis, dynamically discover high-volume symbols
+            if not target_symbol:
+                from app.services.market_analysis_core import MarketAnalysisService
+                market_service = MarketAnalysisService()
+                
+                # Use your existing asset discovery to find active symbols
+                discovery_result = await market_service.discover_exchange_assets(
+                    exchanges="binance",  # Start with Binance for speed
+                    asset_types="spot",
+                    user_id=user_id
+                )
+                
+                if discovery_result.get("success"):
+                    discovered_assets = discovery_result.get("asset_discovery", {}).get("detailed_results", {})
+                    binance_data = discovered_assets.get("binance", {})
+                    spot_data = binance_data.get("asset_types", {}).get("spot", {})
+                    volume_leaders = spot_data.get("volume_leaders", [])
+                    
+                    if volume_leaders:
+                        # Use highest volume symbol
+                        target_symbol = volume_leaders[0].get("base_asset", "BTC")
+                    else:
+                        target_symbol = "BTC"  # Emergency fallback only
+                else:
+                    target_symbol = "BTC"  # Emergency fallback only
             
             # Execute the specific strategy to generate signal
             if strategy_type == "spot_momentum_strategy":

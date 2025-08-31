@@ -668,6 +668,7 @@ class MasterSystemController(LoggerMixin):
                 "expected_return": best_signal["signal"].get("expected_return", 5.0)
             }
             
+            # Use your sophisticated PortfolioRiskServiceExtended for position sizing
             sizing_result = await portfolio_risk_service.position_sizing(
                 opportunity=json.dumps(opportunity_data),
                 user_id=user_id,
@@ -696,10 +697,11 @@ class MasterSystemController(LoggerMixin):
             
             mode_config = self.mode_configs[self.current_mode]
             
+            # Use your sophisticated AI consensus service for validation
             validation_result = await ai_consensus_service.validate_trade(
                 analysis_request=json.dumps(validation_data),
                 confidence_threshold=mode_config.validation_threshold,
-                ai_models="cost_optimized",
+                ai_models="all",  # Use all AI models for maximum consensus
                 user_id=user_id
             )
             
@@ -822,12 +824,19 @@ class MasterSystemController(LoggerMixin):
         start_time = time.time()
         
         try:
-            from app.services.market_analysis import market_analysis_service
-            from app.services.trade_execution import trade_execution_service
-            from app.services.telegram_commander import telegram_commander_service
+            from app.services.market_analysis_core import MarketAnalysisService
+            from app.services.trade_execution import TradeExecutionService
+            from app.services.telegram_core import TelegramService
             
-            # Rapid Arbitrage Scan
-            arbitrage_result = await market_analysis_service.cross_exchange_arbitrage_scanner(
+            # Initialize services
+            market_service = MarketAnalysisService()
+            trade_service = TradeExecutionService()
+            telegram_service = TelegramService()
+            
+            # Use your sophisticated cross_exchange_arbitrage_scanner
+            arbitrage_result = await market_service.cross_exchange_arbitrage_scanner(
+                symbols="SMART_ADAPTIVE",  # Dynamic symbol selection
+                exchanges="all",
                 min_profit_bps=5,
                 user_id=user_id
             )
@@ -839,10 +848,11 @@ class MasterSystemController(LoggerMixin):
             if arbitrage_result.get("success") and arbitrage_result.get("opportunities"):
                 opportunities = arbitrage_result.get("opportunities", [])
                 
-                for opp in opportunities[:3]:  # Limit to top 3 for speed
-                    if opp.get("profit_percentage", 0) > 0.1:  # Min 0.1% profit
-                        # Execute REAL arbitrage trade (time-sensitive)
-                        execution_result = await trade_execution_service.execute_real_trade(
+                # Execute ALL profitable opportunities (no hardcoded limits)
+                for opp in opportunities:
+                    if opp.get("profit_percentage", 0) > 0.05:  # Min 0.05% profit (more aggressive)
+                        # Execute REAL arbitrage trade using your trade execution service
+                        execution_result = await trade_service.execute_real_trade(
                             symbol=opp.get("symbol", "BTC"),
                             side="buy",
                             quantity=opp.get("optimal_quantity", 0.01),
