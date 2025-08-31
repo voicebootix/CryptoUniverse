@@ -37,10 +37,64 @@ import aiohttp
 import structlog
 
 from app.core.logging import LoggerMixin
-# Import exchange configurations to avoid duplication
-from app.services.market_analysis import ExchangeConfigurations
+# Avoid circular import - define configurations locally
 
 logger = structlog.get_logger(__name__)
+
+
+class ExchangeConfigurations:
+    """Exchange API configurations for market data."""
+    
+    BINANCE = {
+        "base_url": "https://api.binance.com",
+        "endpoints": {
+            "ticker": "/api/v3/ticker/24hr",
+            "price": "/api/v3/ticker/price"
+        },
+        "rate_limit": 1200,
+        "weight_limits": {
+            "ticker": 1,
+            "price": 1
+        }
+    }
+    
+    KRAKEN = {
+        "base_url": "https://api.kraken.com",
+        "endpoints": {
+            "ticker": "/0/public/Ticker",
+            "depth": "/0/public/Depth"
+        },
+        "rate_limit": 60,
+        "counter_limit": 15
+    }
+    
+    KUCOIN = {
+        "base_url": "https://api.kucoin.com",
+        "endpoints": {
+            "ticker": "/api/v1/market/allTickers",
+            "stats": "/api/v1/market/stats"
+        },
+        "rate_limit": 1800,
+        "weight_limits": {
+            "ticker": 1,
+            "stats": 1
+        }
+    }
+    
+    @classmethod
+    def get_all_exchanges(cls) -> list[str]:
+        """Get list of all supported exchanges."""
+        return ["binance", "kraken", "kucoin"]
+    
+    @classmethod
+    def get_config(cls, exchange: str) -> dict:
+        """Get configuration for specific exchange."""
+        configs = {
+            "binance": cls.BINANCE,
+            "kraken": cls.KRAKEN, 
+            "kucoin": cls.KUCOIN
+        }
+        return configs.get(exchange.lower(), {})
 
 
 class DynamicExchangeManager(LoggerMixin):
@@ -50,12 +104,7 @@ class DynamicExchangeManager(LoggerMixin):
         self.exchange_configs = {
             "binance": ExchangeConfigurations.BINANCE,
             "kraken": ExchangeConfigurations.KRAKEN,
-            "kucoin": ExchangeConfigurations.KUCOIN,
-            "coinbase": ExchangeConfigurations.COINBASE,
-            "bybit": ExchangeConfigurations.BYBIT,
-            "okx": ExchangeConfigurations.OKX,
-            "bitget": ExchangeConfigurations.BITGET,
-            "gateio": ExchangeConfigurations.GATEIO
+            "kucoin": ExchangeConfigurations.KUCOIN
         }
         self.rate_limiters = {}
         self.circuit_breakers = {}
@@ -113,12 +162,7 @@ class DynamicExchangeManager(LoggerMixin):
         self.exchange_configs = {
             "binance": ExchangeConfigurations.BINANCE,
             "kraken": ExchangeConfigurations.KRAKEN,
-            "kucoin": ExchangeConfigurations.KUCOIN,
-            "coinbase": ExchangeConfigurations.COINBASE,
-            "bybit": ExchangeConfigurations.BYBIT,
-            "okx": ExchangeConfigurations.OKX,
-            "bitget": ExchangeConfigurations.BITGET,
-            "gateio": ExchangeConfigurations.GATEIO
+            "kucoin": ExchangeConfigurations.KUCOIN
         }
         self.rate_limiters = {}
         self.circuit_breakers = {}
