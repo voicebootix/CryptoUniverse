@@ -105,18 +105,22 @@ class RedisConnectionManager:
             return
         
         try:
-            # ENTERPRISE: Robust ping with proper timeout handling
-            ping_result = await asyncio.wait_for(self.client.ping(), timeout=5.0)
-            
-            # Validate ping response properly
-            if ping_result == True or ping_result == "PONG" or ping_result == b"PONG":
-                self.is_healthy = True
-                self.connection_failures = 0
-                if self.circuit_breaker_open_until > 0:
-                    logger.info("Redis circuit breaker CLOSED - connection restored")
-                    self.circuit_breaker_open_until = 0
+            # ENTERPRISE: Simple robust ping - avoid timeout complexity 
+            if self.client:
+                ping_result = await self.client.ping()
+                
+                # Validate ping response properly
+                if ping_result == True or ping_result == "PONG" or ping_result == b"PONG":
+                    self.is_healthy = True
+                    self.connection_failures = 0
+                    if self.circuit_breaker_open_until > 0:
+                        logger.info("Redis circuit breaker CLOSED - connection restored")
+                        self.circuit_breaker_open_until = 0
+                else:
+                    logger.warning("Redis ping returned unexpected result", result=ping_result)
+                    self.is_healthy = False
+                    await self._handle_connection_failure()
             else:
-                logger.warning("Redis ping returned unexpected result", result=ping_result)
                 self.is_healthy = False
                 await self._handle_connection_failure()
         except Exception as e:

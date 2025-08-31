@@ -395,17 +395,12 @@ async def register(
     )
 
 
-class RefreshTokenRequest(BaseModel):
-    refresh_token: str
-
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
-    request: RefreshTokenRequest,
+    refresh_token: str,
     db: AsyncSession = Depends(get_database)
 ):
     """Refresh access token using refresh token."""
-    
-    refresh_token = request.refresh_token
     
     # Verify refresh token
     payload = auth_service.verify_token(refresh_token)
