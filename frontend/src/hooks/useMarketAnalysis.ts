@@ -172,7 +172,7 @@ export const useMarketAnalysis = (): MarketAnalysisHookState => {
     setLoading(true);
     setError(null);
     try {
-      const response = await tradingAPI.get('/market/overview');
+      const response = await tradingAPI.get('/trading/market-overview');
       
       if (response.data && response.data.success !== false) {
         // Handle different response structures
@@ -232,17 +232,30 @@ export const useMarketAnalysis = (): MarketAnalysisHookState => {
     setLoading(true);
     setError(null);
     try {
-      const response = await tradingAPI.get('/arbitrage/scan');
+      const response = await tradingAPI.post('/market/arbitrage-opportunities', {
+        symbols: 'BTC,ETH,SOL,ADA',
+        exchanges: 'binance,kraken,kucoin',
+        min_profit_bps: 5
+      });
       
       if (response.data && response.data.success !== false) {
         // Handle different response structures
-        if (Array.isArray(response.data.data)) {
-          setArbitrageOpportunities(response.data.data);
-        } else if (Array.isArray(response.data)) {
-          setArbitrageOpportunities(response.data);
-        } else {
-          setArbitrageOpportunities([]);
-        }
+        const opportunities = Array.isArray(response.data.data) ? response.data.data : 
+                             response.data.data?.opportunities || 
+                             response.data.opportunities || [];
+        
+        setArbitrageOpportunities(opportunities.map((opp: any) => ({
+          id: opp.id || Math.random().toString(36).substr(2, 9),
+          symbol: opp.symbol || 'UNKNOWN',
+          buyExchange: opp.buyExchange || opp.buy_exchange || 'UNKNOWN',
+          sellExchange: opp.sellExchange || opp.sell_exchange || 'UNKNOWN',
+          buyPrice: parseFloat(opp.buyPrice || opp.buy_price || 0),
+          sellPrice: parseFloat(opp.sellPrice || opp.sell_price || 0),
+          profitBps: parseFloat(opp.profitBps || opp.profit_bps || 0),
+          profitUsd: parseFloat(opp.profitUsd || opp.profit_usd || 0),
+          volume: parseFloat(opp.volume || 0),
+          confidence: parseFloat(opp.confidence || 0.5)
+        })));
       } else {
         throw new Error(response.data?.message || 'Failed to fetch arbitrage data');
       }

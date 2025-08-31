@@ -1437,7 +1437,6 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
             self.logger.info(f"Getting portfolio status for user {user_id}")
             
             # Get real exchange balances from database
-            from sqlalchemy.ext.asyncio import AsyncSession
             from app.core.database import AsyncSessionLocal
             from app.models.exchange import ExchangeBalance, ExchangeAccount
             from sqlalchemy import select, and_

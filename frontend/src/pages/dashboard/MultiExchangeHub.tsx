@@ -537,7 +537,7 @@ const MultiExchangeHub: React.FC = () => {
               <div>
                 <h4 className="font-medium text-green-600 mb-3">Bids</h4>
                 <div className="space-y-2">
-                  {unifiedOrderBook.bids.map((bid: any, idx: number) => (
+                  {(orderBook?.bids || []).map((bid: any, idx: number) => (
                     <div key={idx} className="flex justify-between items-center p-2 bg-green-50 rounded">
                       <span className="text-sm font-medium">{formatCurrency(bid.price)}</span>
                       <span className="text-sm">{bid.amount} BTC</span>
@@ -549,7 +549,7 @@ const MultiExchangeHub: React.FC = () => {
               <div>
                 <h4 className="font-medium text-red-600 mb-3">Asks</h4>
                 <div className="space-y-2">
-                  {unifiedOrderBook.asks.map((ask: any, idx: number) => (
+                  {(orderBook?.asks || []).map((ask: any, idx: number) => (
                     <div key={idx} className="flex justify-between items-center p-2 bg-red-50 rounded">
                       <span className="text-sm font-medium">{formatCurrency(ask.price)}</span>
                       <span className="text-sm">{ask.amount} BTC</span>

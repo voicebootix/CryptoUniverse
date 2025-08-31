@@ -397,57 +397,7 @@ class MarketAnalysisService(LoggerMixin):
         except Exception as e:
             await self._update_performance_metrics(time.time() - start_time, False, user_id)
             raise e
-    
-    async def cross_exchange_arbitrage_scanner(
-        self, 
-        symbols: Optional[str] = None,
-        min_profit_bps: int = 5,
-        max_opportunities: int = 10,
-        user_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Cross-exchange arbitrage opportunity scanner."""
-        start_time = time.time()
-        
-        try:
-            if symbols:
-                symbol_list = [s.strip() for s in symbols.split(",")]
-            else:
-                symbol_list = ["BTC/USDT", "ETH/USDT", "ADA/USDT", "SOL/USDT", "DOT/USDT"]
-            
-            # Simple arbitrage opportunities
-            simple_arbitrage = await self._scan_simple_arbitrage(symbol_list, min_profit_bps)
-            
-            # Triangular arbitrage opportunities  
-            triangular_arbitrage = await self._scan_triangular_arbitrage()
-            
-            # Combine and rank all opportunities
-            all_opportunities = simple_arbitrage + triangular_arbitrage
-            all_opportunities.sort(key=lambda x: x.get("net_profit_bps", 0), reverse=True)
-            
-            # Risk analysis for top opportunities
-            risk_analyzed = []
-            for opp in all_opportunities[:max_opportunities]:
-                risk_score = await self._calculate_arbitrage_risk(opp)
-                opp["risk_analysis"] = risk_score
-                risk_analyzed.append(opp)
-            
-            response_time = time.time() - start_time
-            await self._update_performance_metrics(response_time, True, user_id)
-            
-            return {
-                "success": True,
-                "function": "cross_exchange_arbitrage_scanner",
-                "data": {
-                    "opportunities": risk_analyzed,
-                    "summary": {
-                        "total_opportunities": len(risk_analyzed),
-                        "simple_arbitrage_count": len(simple_arbitrage),
-                        "triangular_arbitrage_count": len(triangular_arbitrage),
-                        "avg_profit_bps": round(np.mean([o.get("net_profit_bps", 0) for o in risk_analyzed]), 2) if risk_analyzed else 0,
-                        "max_profit_bps": max([o.get("net_profit_bps", 0) for o in risk_analyzed]) if risk_analyzed else 0
-                    }
-                },
-                "metadata": {
+
                     "symbols_scanned": len(symbol_list),
                     "min_profit_threshold": min_profit_bps,
                     "exchanges_checked": len(self.exchange_manager.exchange_configs),
