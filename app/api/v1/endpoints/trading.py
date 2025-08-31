@@ -667,9 +667,7 @@ async def websocket_endpoint(
     websocket: WebSocket,
     db: AsyncSession = Depends(get_database)
 ):
-    # Accept connection first
-    await websocket.accept()
-    
+    # ENTERPRISE: Let connection manager handle the accept() call
     # For now, connect without authentication
     # TODO: Implement WebSocket token authentication via query params
     user_id = "anonymous"  # Temporary
@@ -1056,10 +1054,9 @@ async def get_market_trending(
     )
     
     try:
-        result = await market_analysis.trending_coins_tracker(
-            timeframe="24h",
-            user_id=str(current_user.id)
-        )
+        # Use MarketDataFeeds service for trending coins
+        from app.services.market_data_feeds import market_data_feeds
+        result = await market_data_feeds.get_trending_coins(limit=10)
         return result
         
     except Exception as e:

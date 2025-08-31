@@ -67,27 +67,58 @@ class KrakenNonceManager:
         self._lock = threading.Lock()
         self._nonce_increment = 0
         self._call_count = 0
+        self._server_time_offset = 0  # Kraken server time offset
+        self._last_time_sync = 0
     
-    def get_nonce(self) -> str:
-        """Generate a unique, strictly increasing nonce for Kraken API calls."""
+    async def _sync_server_time(self) -> bool:
+        """ENTERPRISE: Sync with Kraken server time for accurate nonces."""
+        try:
+            import aiohttp
+            current_time = time.time()
+            
+            # Only sync every 5 minutes to avoid excessive calls
+            if current_time - self._last_time_sync < 300:
+                return True
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://api.kraken.com/0/public/Time", timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get("result") and data["result"].get("unixtime"):
+                            server_time = float(data["result"]["unixtime"])
+                            self._server_time_offset = server_time - current_time
+                            self._last_time_sync = current_time
+                            logger.info(f"Kraken server time synced", offset=self._server_time_offset)
+                            return True
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to sync Kraken server time: {e}")
+            return False
+    
+    async def get_nonce(self) -> str:
+        """Generate a unique, strictly increasing nonce using Kraken server time."""
         with self._lock:
             self._call_count += 1
-            current_time_microseconds = int(time.time() * 1000000)
             
-            # ENTERPRISE: Ensure nonce is ALWAYS strictly increasing with larger gaps
+            # ENTERPRISE: Use server-synchronized time
+            await self._sync_server_time()
+            server_time = time.time() + self._server_time_offset
+            current_time_microseconds = int(server_time * 1000000)
+            
+            # ENTERPRISE: Ensure nonce is ALWAYS strictly increasing with large gaps
             if current_time_microseconds <= self._last_nonce:
-                # If time hasn't advanced enough, increment from last nonce with bigger gap
-                self._last_nonce += 100  # Larger increment to avoid collisions
+                # If server time hasn't advanced enough, use last nonce + large increment
+                self._last_nonce += 10000  # Very large increment to avoid any collisions
             else:
                 self._last_nonce = current_time_microseconds
             
-            # Add call count to ensure uniqueness even in high-frequency scenarios
-            self._nonce_increment = (self._nonce_increment + 1) % 10000  # Larger range
+            # Add unique call identifier to guarantee uniqueness
+            self._nonce_increment = (self._nonce_increment + 1) % 100000  # Very large range
             final_nonce = self._last_nonce + self._nonce_increment
             
-            # Log for debugging nonce issues
-            if self._call_count % 10 == 0:  # Log every 10th call
-                logger.debug(f"Kraken nonce generated", nonce=final_nonce, call_count=self._call_count)
+            # Log for debugging critical nonce issues
+            logger.info(f"Kraken nonce generated", nonce=final_nonce, call_count=self._call_count, 
+                       server_offset=self._server_time_offset)
             
             return str(final_nonce)
 

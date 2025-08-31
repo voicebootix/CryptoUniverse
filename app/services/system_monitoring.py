@@ -277,39 +277,113 @@ class SystemMonitoringService:
             logger.error("Failed to check alert conditions", error=str(e))
     
     async def _trigger_disk_cleanup(self):
-        """ENTERPRISE: Trigger automatic disk cleanup when usage is high."""
+        """ENTERPRISE: Aggressive disk cleanup when usage is critical."""
         try:
             import os
             import tempfile
+            import subprocess
+            import shutil
             
-            logger.warning("High disk usage detected - triggering cleanup")
+            logger.warning("High disk usage detected - triggering AGGRESSIVE cleanup")
+            files_cleaned = 0
+            space_freed_mb = 0
             
-            # Clean up temp files
+            # Get initial disk usage
+            try:
+                initial_usage = shutil.disk_usage('/')
+                initial_free = initial_usage.free
+            except Exception:
+                initial_free = 0
+            
+            # 1. Clean up temp files (more aggressive - 6 hours instead of 1 day)
             temp_dir = tempfile.gettempdir()
-            for root, dirs, files in os.walk(temp_dir):
-                for file in files:
+            if os.path.exists(temp_dir):
+                for root, dirs, files in os.walk(temp_dir):
+                    for file in files:
+                        try:
+                            file_path = os.path.join(root, file)
+                            if os.path.getmtime(file_path) < time.time() - 21600:  # 6 hours
+                                file_size = os.path.getsize(file_path)
+                                os.remove(file_path)
+                                files_cleaned += 1
+                                space_freed_mb += file_size / 1024 / 1024
+                        except Exception:
+                            pass
+            
+            # 2. Clean up Docker build cache (if available)
+            try:
+                result = subprocess.run(['docker', 'system', 'prune', '-f'], 
+                                      capture_output=True, text=True, timeout=30)
+                if result.returncode == 0:
+                    logger.info("Docker cache cleanup completed", output=result.stdout)
+            except Exception:
+                pass  # Docker might not be available
+            
+            # 3. Clean up package manager cache
+            cache_dirs = [
+                "/root/.cache",
+                "/tmp/.cache", 
+                "/app/.cache",
+                "/var/cache",
+                "/home/appuser/.cache"
+            ]
+            
+            for cache_dir in cache_dirs:
+                if os.path.exists(cache_dir):
                     try:
-                        file_path = os.path.join(root, file)
-                        if os.path.getmtime(file_path) < time.time() - 86400:  # Older than 1 day
-                            os.remove(file_path)
+                        for root, dirs, files in os.walk(cache_dir):
+                            for file in files:
+                                try:
+                                    file_path = os.path.join(root, file)
+                                    if os.path.getmtime(file_path) < time.time() - 3600:  # 1 hour
+                                        file_size = os.path.getsize(file_path)
+                                        os.remove(file_path)
+                                        files_cleaned += 1
+                                        space_freed_mb += file_size / 1024 / 1024
+                                except Exception:
+                                    pass
                     except Exception:
                         pass
             
-            # Clean up old log files
-            log_dirs = ["/var/log", "/tmp", "./logs"]
+            # 4. Clean up old log files (more aggressive)
+            log_dirs = ["/var/log", "/tmp", "./logs", "/app/logs"]
             for log_dir in log_dirs:
                 if os.path.exists(log_dir):
                     for root, dirs, files in os.walk(log_dir):
                         for file in files:
                             try:
-                                if file.endswith('.log') or file.endswith('.log.gz'):
+                                if (file.endswith('.log') or file.endswith('.log.gz') or 
+                                    file.endswith('.out') or file.endswith('.err')):
                                     file_path = os.path.join(root, file)
-                                    if os.path.getmtime(file_path) < time.time() - 604800:  # Older than 1 week
+                                    if os.path.getmtime(file_path) < time.time() - 86400:  # 1 day instead of 1 week
+                                        file_size = os.path.getsize(file_path)
                                         os.remove(file_path)
+                                        files_cleaned += 1
+                                        space_freed_mb += file_size / 1024 / 1024
                             except Exception:
                                 pass
             
-            logger.info("Disk cleanup completed")
+            # 5. Clean up Python cache files
+            python_cache_dirs = ["/app/__pycache__", "/tmp/__pycache__"]
+            for cache_dir in python_cache_dirs:
+                if os.path.exists(cache_dir):
+                    try:
+                        shutil.rmtree(cache_dir)
+                        logger.info(f"Removed Python cache directory: {cache_dir}")
+                    except Exception:
+                        pass
+            
+            # Get final disk usage
+            try:
+                final_usage = shutil.disk_usage('/')
+                final_free = final_usage.free
+                actual_freed_mb = (final_free - initial_free) / 1024 / 1024
+            except Exception:
+                actual_freed_mb = space_freed_mb
+            
+            logger.info("AGGRESSIVE disk cleanup completed", 
+                       files_cleaned=files_cleaned, 
+                       space_freed_mb=round(actual_freed_mb, 2))
             
         except Exception as e:
             logger.error("Disk cleanup failed", error=str(e))

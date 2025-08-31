@@ -14,20 +14,29 @@ class ConnectionManager:
         self._market_stream_task: Optional[asyncio.Task] = None
 
     async def connect(self, websocket: WebSocket, user_id: str):
+        """ENTERPRISE: Robust WebSocket connection with proper ASGI handling."""
         try:
-            await websocket.accept()
+            # Check if WebSocket is already in a connected state
+            if websocket.application_state.value == 1:  # CONNECTING state
+                await websocket.accept()
+                logger.info(f"WebSocket accepted for user {user_id}")
+            elif websocket.application_state.value == 2:  # CONNECTED state
+                logger.debug(f"WebSocket already connected for user {user_id}")
+            else:
+                logger.warning(f"WebSocket in unexpected state: {websocket.application_state}")
+                return
+            
+            # Add to active connections
             if user_id not in self.active_connections:
                 self.active_connections[user_id] = []
-            self.active_connections[user_id].append(websocket)
-            logger.info(f"WebSocket connected for user {user_id}")
-        except Exception as e:
-            # Connection might already be accepted or closed
-            logger.warning(f"WebSocket connection error: {e}")
-            # Still add to connections if not already there
-            if user_id not in self.active_connections:
-                self.active_connections[user_id] = []
+            
             if websocket not in self.active_connections[user_id]:
                 self.active_connections[user_id].append(websocket)
+                logger.info(f"WebSocket registered for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"WebSocket connection error: {e}", exc_info=True)
+            # Don't add broken connections to the pool
 
     def disconnect(self, websocket: WebSocket, user_id: str):
         if user_id in self.active_connections:

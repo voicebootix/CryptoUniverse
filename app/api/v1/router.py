@@ -220,3 +220,45 @@ async def start_monitoring(interval_seconds: int = 30):
             "error": str(e),
             "timestamp": datetime.utcnow().isoformat()
         }
+
+
+@api_router.post("/system/cleanup")
+async def trigger_system_cleanup():
+    """ENTERPRISE: Manual system cleanup for high disk usage."""
+    try:
+        from app.services.system_monitoring import system_monitoring_service
+        
+        # Get current disk usage
+        import shutil
+        initial_usage = shutil.disk_usage('/')
+        initial_free_gb = initial_usage.free / (1024**3)
+        disk_percent = (initial_usage.used / initial_usage.total) * 100
+        
+        # Trigger cleanup
+        await system_monitoring_service._trigger_disk_cleanup()
+        
+        # Get updated disk usage
+        final_usage = shutil.disk_usage('/')
+        final_free_gb = final_usage.free / (1024**3)
+        space_freed_gb = final_free_gb - initial_free_gb
+        final_disk_percent = (final_usage.used / final_usage.total) * 100
+        
+        return {
+            "success": True,
+            "cleanup_completed": True,
+            "disk_usage": {
+                "before_percent": round(disk_percent, 2),
+                "after_percent": round(final_disk_percent, 2),
+                "space_freed_gb": round(space_freed_gb, 2),
+                "improvement": round(disk_percent - final_disk_percent, 2)
+            },
+            "message": f"Cleanup freed {space_freed_gb:.2f}GB, reduced usage by {disk_percent - final_disk_percent:.1f}%",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error("Manual cleanup failed", error=str(e))
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
