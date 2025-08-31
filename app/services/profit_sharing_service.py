@@ -350,6 +350,129 @@ class ProfitSharingService(LoggerMixin):
             "market_making": 6.5,          # Conservative, steady income
         }
         return value_scores.get(strategy, 6.0)
+    
+    async def setup_new_user_welcome_package(self, user_id: str) -> Dict[str, Any]:
+        """
+        SETUP $100 FREE CREDIT WELCOME PACKAGE FOR NEW USERS
+        
+        Give new users $100 profit potential + 3 basic strategies for free!
+        This is our customer acquisition strategy.
+        """
+        try:
+            from app.core.database import get_async_session
+            from app.models.user import User
+            from app.models.credits import CreditTransaction
+            from app.services.strategy_marketplace_service import strategy_marketplace_service
+            from sqlalchemy import select
+            
+            async with get_async_session() as db:
+                # Check if user already received welcome package
+                existing_welcome = await db.execute(
+                    select(CreditTransaction).where(
+                        CreditTransaction.user_id == user_id,
+                        CreditTransaction.transaction_type == "welcome_bonus"
+                    )
+                )
+                
+                if existing_welcome.first():
+                    return {
+                        "success": False,
+                        "error": "User already received welcome package",
+                        "already_claimed": True
+                    }
+                
+                # Create welcome credit transaction
+                welcome_transaction = CreditTransaction(
+                    user_id=user_id,
+                    amount=100,  # $100 profit potential
+                    transaction_type="welcome_bonus",
+                    description="Welcome Package: $100 Free Profit Potential",
+                    status="completed",
+                    created_at=datetime.utcnow()
+                )
+                
+                db.add(welcome_transaction)
+                await db.commit()
+                
+                # Add 3 basic strategies to user's portfolio
+                basic_strategies = [
+                    "spot_momentum_strategy",
+                    "spot_mean_reversion", 
+                    "market_making"
+                ]
+                
+                strategy_results = []
+                for strategy in basic_strategies:
+                    # Add strategy to user's portfolio (free)
+                    purchase_result = await strategy_marketplace_service.purchase_strategy(
+                        user_id=user_id,
+                        strategy_id=f"ai_{strategy}",
+                        payment_amount=0,  # Free for welcome package
+                        payment_method="welcome_bonus"
+                    )
+                    strategy_results.append({
+                        "strategy": strategy,
+                        "success": purchase_result.get("success", False)
+                    })
+                
+                # Update user's credit balance
+                await self._update_user_credit_balance(user_id, 100, "welcome_bonus")
+                
+                self.logger.info(
+                    f"🎁 Welcome package setup complete for {user_id}",
+                    free_credits=100,
+                    free_strategies=len(basic_strategies),
+                    strategies_added=len([r for r in strategy_results if r["success"]])
+                )
+                
+                return {
+                    "success": True,
+                    "welcome_package": {
+                        "free_credits": 100,
+                        "profit_potential_usd": 400,  # $100 credits = $400 earning potential
+                        "free_strategies": basic_strategies,
+                        "strategies_activated": len([r for r in strategy_results if r["success"]]),
+                        "message": "Welcome! Start earning up to $400 with 3 free strategies!"
+                    },
+                    "strategy_results": strategy_results
+                }
+                
+        except Exception as e:
+            self.logger.error("Welcome package setup failed", error=str(e))
+            return {"success": False, "error": str(e)}
+    
+    async def _update_user_credit_balance(self, user_id: str, amount: int, transaction_type: str):
+        """Update user's credit balance in Redis."""
+        try:
+            from app.core.redis import get_redis_client
+            redis = await get_redis_client()
+            
+            # Get current balance
+            current_balance_key = f"user_credits:{user_id}"
+            current_balance = await redis.get(current_balance_key)
+            current_balance = int(current_balance) if current_balance else 0
+            
+            # Add credits
+            new_balance = current_balance + amount
+            
+            # Update balance
+            await redis.set(current_balance_key, new_balance, ex=365 * 24 * 3600)  # 1 year expiry
+            
+            # Log transaction
+            transaction_key = f"credit_transactions:{user_id}"
+            transaction_data = {
+                "amount": amount,
+                "type": transaction_type,
+                "timestamp": datetime.utcnow().isoformat(),
+                "new_balance": new_balance
+            }
+            
+            await redis.lpush(transaction_key, json.dumps(transaction_data))
+            await redis.ltrim(transaction_key, 0, 99)  # Keep last 100 transactions
+            await redis.expire(transaction_key, 365 * 24 * 3600)  # 1 year
+            
+        except Exception as e:
+            self.logger.error("Credit balance update failed", error=str(e))
 
 
 # Global service instance
