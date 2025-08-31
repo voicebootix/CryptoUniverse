@@ -93,6 +93,15 @@ class MarketDataFeeds:
             }
         }
         
+        # Rate limiting tracking
+        self.rate_limiters = {}
+        for api_name, config in self.apis.items():
+            self.rate_limiters[api_name] = {
+                "requests": 0,
+                "window_start": time.time(),
+                "max_requests": config["rate_limit"]
+            }
+        
         # Symbol mappings for different APIs
         self.symbol_mappings = {
             "coingecko": {
