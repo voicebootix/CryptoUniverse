@@ -28,6 +28,7 @@ from app.models.exchange import ExchangeAccount
 from app.models.credit import CreditAccount, CreditTransaction
 from app.services.trading_strategies import trading_strategies_service
 from app.services.trade_execution import TradeExecutionService
+from app.services.strategy_marketplace_service import strategy_marketplace_service
 from app.services.rate_limit import rate_limiter
 
 settings = get_settings()
@@ -459,13 +460,116 @@ async def deactivate_strategy(
         )
 
 
+@router.get("/marketplace")
+async def get_strategy_marketplace(
+    current_user: User = Depends(get_current_user),
+    include_ai: bool = True,
+    include_community: bool = True
+):
+    """Get unified strategy marketplace with AI strategies and community strategies."""
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:marketplace",
+        limit=100,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # Get marketplace strategies using the new unified service
+        marketplace_result = await strategy_marketplace_service.get_marketplace_strategies(
+            user_id=str(current_user.id),
+            include_ai_strategies=include_ai,
+            include_community_strategies=include_community
+        )
+        
+        if not marketplace_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=marketplace_result.get("error", "Failed to get marketplace strategies")
+            )
+        
+        return marketplace_result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Strategy marketplace retrieval failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get strategy marketplace: {str(e)}"
+        )
+
+
+@router.post("/purchase")
+async def purchase_strategy_access(
+    strategy_id: str,
+    subscription_type: str = "monthly",
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
+):
+    """Purchase access to strategy using credits."""
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:purchase",
+        limit=20,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        purchase_result = await strategy_marketplace_service.purchase_strategy_access(
+            user_id=str(current_user.id),
+            strategy_id=strategy_id,
+            subscription_type=subscription_type
+        )
+        
+        if not purchase_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=purchase_result.get("error", "Strategy purchase failed")
+            )
+        
+        return purchase_result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Strategy purchase failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Strategy purchase failed: {str(e)}"
+        )
+
+
+@router.get("/my-portfolio")
+async def get_user_strategy_portfolio(
+    current_user: User = Depends(get_current_user)
+):
+    """Get user's purchased strategy portfolio."""
+    
+    try:
+        portfolio_result = await strategy_marketplace_service.get_user_strategy_portfolio(
+            user_id=str(current_user.id)
+        )
+        
+        return portfolio_result
+        
+    except Exception as e:
+        logger.error("Failed to get user strategy portfolio", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get strategy portfolio: {str(e)}"
+        )
+
+
 @router.get("/available")
 async def get_available_strategies(
     current_user: User = Depends(get_current_user)
 ):
-    """Get list of available strategy functions with descriptions."""
+    """Get list of available strategy functions with descriptions (legacy endpoint)."""
     
-    # Your 25+ strategy functions with descriptions
+    # Your 25+ strategy functions with descriptions (now integrated with marketplace)
     available_strategies = {
         # Derivatives Trading
         "futures_trade": {
