@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { tradingAPI } from '@/lib/api/client';
+import { tradingAPI, apiClient } from '@/lib/api/client';
 import { ArbitrageOpportunity } from './useArbitrage';
 
 export interface TechnicalAnalysis {
@@ -202,7 +202,7 @@ export const useMarketAnalysis = (): MarketAnalysisHookState => {
     setError(null);
     try {
       const symbolsArray = Array.isArray(symbols) ? symbols : [symbols];
-      const response = await tradingAPI.post('/market/technical-analysis', {
+      const response = await apiClient.post('/market/technical-analysis', {
         symbols: symbolsArray
       });
       
@@ -232,7 +232,7 @@ export const useMarketAnalysis = (): MarketAnalysisHookState => {
     setLoading(true);
     setError(null);
     try {
-      const response = await tradingAPI.post('/market/arbitrage-opportunities', {
+      const response = await apiClient.post('/market/arbitrage-opportunities', {
         symbols: 'BTC,ETH,SOL,ADA',
         exchanges: 'binance,kraken,kucoin',
         min_profit_bps: 5

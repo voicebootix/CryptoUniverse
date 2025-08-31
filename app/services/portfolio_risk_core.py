@@ -19,6 +19,8 @@ import math
 import numpy as np
 import pandas as pd
 import structlog
+from sqlalchemy import select, and_
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import LoggerMixin
 from app.services.portfolio_risk import (

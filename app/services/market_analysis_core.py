@@ -532,8 +532,11 @@ class MarketAnalysisService(LoggerMixin):
         """Get price for symbol from specific exchange with proper error handling."""
         try:
             if exchange == "binance":
-                # Use price endpoint instead of 24hr ticker for better reliability
-                binance_symbol = symbol.replace("/", "")
+                # Convert single symbols to USDT trading pairs for Binance
+                binance_symbol = self._convert_to_binance_symbol(symbol)
+                if not binance_symbol:
+                    return None
+                    
                 try:
                     data = await self.exchange_manager.fetch_from_exchange(
                         exchange, 
@@ -548,17 +551,20 @@ class MarketAnalysisService(LoggerMixin):
                         }
                 except Exception:
                     # Fallback to 24hr ticker
-                    data = await self.exchange_manager.fetch_from_exchange(
-                        exchange, 
-                        "/api/v3/ticker/24hr",
-                        {"symbol": binance_symbol}
-                    )
-                    if data and "lastPrice" in data:
-                        return {
-                            "price": float(data["lastPrice"]),
-                            "volume": float(data.get("volume", 0)),
-                            "timestamp": datetime.utcnow().isoformat()
-                        }
+                    try:
+                        data = await self.exchange_manager.fetch_from_exchange(
+                            exchange, 
+                            "/api/v3/ticker/24hr",
+                            {"symbol": binance_symbol}
+                        )
+                        if data and "lastPrice" in data:
+                            return {
+                                "price": float(data["lastPrice"]),
+                                "volume": float(data.get("volume", 0)),
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                    except Exception:
+                        pass
             
             elif exchange == "kraken":
                 kraken_symbol = self._convert_to_kraken_symbol(symbol)
@@ -675,6 +681,26 @@ class MarketAnalysisService(LoggerMixin):
         except Exception as e:
             self.logger.error(f"Error fetching price for {symbol} from {exchange}: {str(e)}")
             return None
+    
+    def _convert_to_binance_symbol(self, symbol: str) -> str:
+        """Convert standard symbol format to Binance trading pair format."""
+        # Handle both single symbols and trading pairs
+        if "/" in symbol:
+            # Already a trading pair, remove slash
+            return symbol.replace("/", "")
+        else:
+            # Single symbol, convert to USDT pair
+            symbol_mappings = {
+                "BTC": "BTCUSDT",
+                "ETH": "ETHUSDT", 
+                "SOL": "SOLUSDT",
+                "ADA": "ADAUSDT",
+                "DOT": "DOTUSDT",
+                "MATIC": "MATICUSDT",
+                "LINK": "LINKUSDT",
+                "UNI": "UNIUSDT"
+            }
+            return symbol_mappings.get(symbol, f"{symbol}USDT")
     
     def _convert_to_kraken_symbol(self, symbol: str) -> str:
         """Convert standard symbol format to Kraken format."""
