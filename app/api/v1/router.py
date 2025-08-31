@@ -8,7 +8,7 @@ from fastapi import APIRouter
 import structlog
 
 # Import endpoint routers
-from app.api.v1.endpoints import auth, trading, admin, exchanges, strategies, credits, telegram, paper_trading
+from app.api.v1.endpoints import auth, trading, admin, exchanges, strategies, credits, telegram, paper_trading, chat
 
 logger = structlog.get_logger(__name__)
 
@@ -24,6 +24,7 @@ api_router.include_router(credits.router, prefix="/credits", tags=["Credit Syste
 api_router.include_router(telegram.router, prefix="/telegram", tags=["Telegram Integration"])
 api_router.include_router(paper_trading.router, prefix="/paper-trading", tags=["Paper Trading"])
 api_router.include_router(admin.router, prefix="/admin", tags=["Administration"])
+api_router.include_router(chat.router, prefix="/chat", tags=["AI Chat"])
 
 @api_router.get("/status")
 async def api_status():
@@ -40,6 +41,7 @@ async def api_status():
             "credits": "/api/v1/credits",
             "telegram": "/api/v1/telegram",
             "paper_trading": "/api/v1/paper-trading",
+            "ai_chat": "/api/v1/chat",
             "administration": "/api/v1/admin"
         },
         "features": [

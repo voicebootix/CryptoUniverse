@@ -321,8 +321,9 @@ async def start_autonomous_mode(
                 "trading_hours": request.trading_hours or {"start": "00:00", "end": "23:59"}
             }
             
-            # Start autonomous trading
-            result = await master_controller.start_autonomous_mode(config)
+            # Start autonomous trading through unified AI manager
+            from app.services.unified_ai_manager import unified_ai_manager
+            result = await unified_ai_manager.start_autonomous_mode(str(current_user.id), config)
             
             if not result.get("success"):
                 raise HTTPException(
@@ -342,8 +343,9 @@ async def start_autonomous_mode(
                 "message": f"Autonomous trading started in {request.mode} mode"
             }
         else:
-            # Stop autonomous mode
-            result = await master_controller.stop_autonomous_mode(str(current_user.id))
+            # Stop autonomous mode through unified AI manager
+            from app.services.unified_ai_manager import unified_ai_manager
+            result = await unified_ai_manager.stop_autonomous_mode(str(current_user.id), "web_ui")
             
             return {
                 "status": "autonomous_mode_stopped",

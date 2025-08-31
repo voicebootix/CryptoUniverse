@@ -17,6 +17,7 @@ import OAuthCallbackPage from '@/pages/auth/OAuthCallbackPage';
 // Dashboard Pages
 import TradingDashboard from '@/pages/dashboard/TradingDashboard';
 import AICommandCenter from '@/pages/dashboard/AICommandCenter';
+import AIChatPage from '@/pages/dashboard/AIChatPage';
 import BeastModeDashboard from '@/pages/dashboard/BeastModeDashboard';
 import StrategyMarketplace from '@/pages/dashboard/StrategyMarketplace';
 import MultiExchangeHub from '@/pages/dashboard/MultiExchangeHub';
@@ -123,6 +124,9 @@ const App: React.FC = () => {
               
               {/* AI Command Center */}
               <Route path="ai-command" element={<AICommandCenter />} />
+              
+              {/* AI Chat Manager */}
+              <Route path="ai-chat" element={<AIChatPage />} />
               
               {/* Beast Mode Dashboard */}
               <Route path="beast-mode" element={<BeastModeDashboard />} />

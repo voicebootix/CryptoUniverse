@@ -1708,13 +1708,33 @@ class MasterSystemController(LoggerMixin):
             self.logger.error("Global autonomous cycle failed", error=str(e))
     
     async def _run_user_autonomous_cycle(self, user_id: str, config: Dict):
-        """Run complete autonomous trading cycle for specific user - THE MONEY MAKING MACHINE."""
+        """Run complete autonomous trading cycle for specific user - THE MONEY MAKING MACHINE with AI Chat Integration."""
         try:
             mode = config.get("mode", "balanced")
             self.logger.info(f"🤖 AUTONOMOUS CYCLE STARTING for user {user_id}", mode=mode)
             
             # Set trading mode for this user
             self.current_mode = TradingMode(mode)
+            
+            # Check if unified AI manager is available for enhanced decision making
+            if hasattr(self, 'unified_manager') and self.unified_manager:
+                # Use unified AI manager for autonomous decisions
+                market_context = {
+                    "current_mode": mode,
+                    "cycle_type": "autonomous_trading",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                
+                # Let the unified AI manager make autonomous decisions
+                try:
+                    result = await self.unified_manager.handle_autonomous_decision(user_id, market_context)
+                    
+                    if result.get("success"):
+                        self.logger.info("Autonomous AI decision executed", 
+                                       user_id=user_id, 
+                                       action=result.get("action"))
+                except Exception as e:
+                    self.logger.warning("Unified AI manager failed, continuing with standard cycle", error=str(e))
             
             # Get USER'S PURCHASED STRATEGIES for autonomous trading
             from app.services.strategy_marketplace_service import strategy_marketplace_service
