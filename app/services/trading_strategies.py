@@ -424,37 +424,46 @@ class DerivativesEngine(LoggerMixin):
             
             # Generate realistic strike ranges based on real price
             strikes = [current_price * (1 + i * 0.05) for i in range(-5, 6)]
-        
-        options_chain = {
-            "symbol": symbol,
-            "expiry_date": expiry_date,
-            "current_price": current_price,
-            "options": []
-        }
-        
-        for strike in strikes:
-            options_chain["options"].extend([
-                {
-                    "contract_symbol": f"{symbol}{expiry_date}C{int(strike)}",
-                    "strike_price": strike,
-                    "option_type": "CALL",
-                    "bid_price": max(current_price - strike + 100, 10),
-                    "ask_price": max(current_price - strike + 120, 15),
-                    "volume": np.random.randint(10, 1000),
-                    "open_interest": np.random.randint(100, 10000)
-                },
-                {
-                    "contract_symbol": f"{symbol}{expiry_date}P{int(strike)}",
-                    "strike_price": strike,
-                    "option_type": "PUT", 
-                    "bid_price": max(strike - current_price + 100, 10),
-                    "ask_price": max(strike - current_price + 120, 15),
-                    "volume": np.random.randint(10, 1000),
-                    "open_interest": np.random.randint(100, 10000)
-                }
-            ])
-        
-        return options_chain
+            
+            options_chain = {
+                "symbol": symbol,
+                "expiry_date": expiry_date,
+                "current_price": current_price,
+                "options": []
+            }
+            
+            for strike in strikes:
+                options_chain["options"].extend([
+                    {
+                        "contract_symbol": f"{symbol}{expiry_date}C{int(strike)}",
+                        "strike_price": strike,
+                        "option_type": "CALL",
+                        "bid_price": max(current_price - strike + 100, 10),
+                        "ask_price": max(current_price - strike + 120, 15),
+                        "volume": np.random.randint(10, 1000),
+                        "open_interest": np.random.randint(100, 10000)
+                    },
+                    {
+                        "contract_symbol": f"{symbol}{expiry_date}P{int(strike)}",
+                        "strike_price": strike,
+                        "option_type": "PUT", 
+                        "bid_price": max(strike - current_price + 100, 10),
+                        "ask_price": max(strike - current_price + 120, 15),
+                        "volume": np.random.randint(10, 1000),
+                        "open_interest": np.random.randint(100, 10000)
+                    }
+                ])
+            
+            return options_chain
+            
+        except Exception as e:
+            self.logger.error(f"Options chain failed for {symbol}", error=str(e))
+            return {
+                "symbol": symbol,
+                "expiry_date": expiry_date,
+                "current_price": 0,
+                "options": []
+            }
     
     async def _find_option_contract(
         self,
@@ -856,9 +865,17 @@ class SpotAlgorithms(LoggerMixin):
                 current_price = float(price_data.get("price", 0)) if price_data else 0
                 
                 if current_price <= 0:
-                    continue  # Skip this symbol if price unavailable
-            except Exception:
-                continue  # Skip this symbol if price lookup fails
+                    return {
+                        "success": False,
+                        "error": "Price unavailable for symbol",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Price lookup failed: {str(e)}",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
             resistance_levels = symbol_data.get("resistance_levels", [])
             support_levels = symbol_data.get("support_levels", [])
             

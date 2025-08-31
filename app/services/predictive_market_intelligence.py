@@ -155,8 +155,21 @@ class PredictiveMarketIntelligence(LoggerMixin):
         try:
             from app.services.market_data_feeds import market_data_feeds
             
-            # Get price data for major assets
-            symbols = ["BTC", "ETH", "SOL", "BNB", "ADA", "MATIC", "AVAX", "DOT"]
+            # Get price data for dynamically discovered assets
+            from app.services.market_analysis_core import MarketAnalysisService
+            market_service = MarketAnalysisService()
+            
+            # Dynamically discover active trading symbols
+            discovery_result = await market_service.discover_exchange_assets(
+                exchanges=["binance", "kraken", "kucoin"],
+                min_volume_24h=1000000  # $1M minimum volume
+            )
+            
+            if discovery_result.get("success") and discovery_result.get("discovered_assets"):
+                symbols = [asset["symbol"] for asset in discovery_result["discovered_assets"][:20]]  # Top 20 by volume
+            else:
+                # Emergency fallback only if discovery fails
+                symbols = ["BTC", "ETH", "SOL", "BNB"]
             historical_data = {}
             
             for symbol in symbols:

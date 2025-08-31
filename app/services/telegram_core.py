@@ -629,7 +629,7 @@ Need help with something specific? Just ask me naturally! 🤖
                 return {"success": False, "error": "Market data retrieval failed"}
             
             # Format market response
-            market_text = self._format_market_response(symbol, market_result)
+            market_text = await self._format_market_response(symbol, market_result)
             await self.telegram_api.send_message(chat_id, market_text)
             
             return {"success": True, "command": "market"}
@@ -813,7 +813,7 @@ Current settings are optimized for safety and comprehensive analysis. 🛡️
         
         return "\n".join(response_parts)
     
-    def _format_market_response(self, symbol: str, market_result: Dict[str, Any]) -> str:
+    async def _format_market_response(self, symbol: str, market_result: Dict[str, Any]) -> str:
         """Format market data for Telegram display."""
         
         market_data = market_result.get("price_data", {})

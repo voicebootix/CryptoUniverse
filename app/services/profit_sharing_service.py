@@ -361,7 +361,7 @@ class ProfitSharingService(LoggerMixin):
         try:
             from app.core.database import get_async_session
             from app.models.user import User
-            from app.models.credits import CreditTransaction
+            from app.models.credit import CreditTransaction
             from app.services.strategy_marketplace_service import strategy_marketplace_service
             from sqlalchemy import select
             

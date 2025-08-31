@@ -536,7 +536,8 @@ class DynamicRiskManagement(LoggerMixin):
             
             return 0
             
-        except Exception:
+        except Exception as e:
+            self.logger.warning("Exception in dynamic risk management", error=str(e))
             return 0
     
     async def execute_risk_management_action(
@@ -661,7 +662,8 @@ class DynamicRiskManagement(LoggerMixin):
             price_data = await market_data_feeds.get_real_time_price(symbol)
             return price_data.get("price", 0) if price_data.get("success") else 0
             
-        except Exception:
+        except Exception as e:
+            self.logger.warning("Exception in dynamic risk management", error=str(e))
             return 0
 
 

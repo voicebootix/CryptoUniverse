@@ -724,12 +724,17 @@ class MasterSystemController(LoggerMixin):
                 # Get sentiment-optimized symbols for this strategy
                 optimal_symbols = await self._get_sentiment_optimized_symbols(strategy, sentiment_result)
                 
+                # Enhance market data with sentiment-optimized symbols
+                enhanced_market_data = market_result.copy()
+                if optimal_symbols:
+                    # Add preferred symbols to market data for strategy to use
+                    enhanced_market_data["preferred_symbols"] = optimal_symbols
+                
                 task = trading_strategies_service.generate_trading_signal(
                     strategy_type=strategy,
-                    market_data=market_result,
+                    market_data=enhanced_market_data,
                     risk_mode=self.current_mode.value,
-                    user_id=user_id,
-                    preferred_symbols=optimal_symbols  # Sentiment-driven symbol selection
+                    user_id=user_id
                 )
                 strategy_tasks.append((strategy, task))
             
@@ -1055,8 +1060,6 @@ class MasterSystemController(LoggerMixin):
             from app.services.market_analysis_core import MarketAnalysisService
             from app.services.trade_execution import TradeExecutionService
             from app.services.telegram_core import TelegramService
-            from app.api.v1.endpoints.exchanges import get_user_exchange_accounts
-            
             # Initialize services
             market_service = MarketAnalysisService()
             trade_service = TradeExecutionService()
@@ -1064,8 +1067,26 @@ class MasterSystemController(LoggerMixin):
             
             # Get user's connected exchanges for coordinated arbitrage
             from app.core.database import get_async_session
+            from app.models.exchange import ExchangeAccount
+            from sqlalchemy import select
+            
             async with get_async_session() as db:
-                user_exchanges = await get_user_exchange_accounts(user_id, db)
+                # Get user's exchange accounts
+                result = await db.execute(
+                    select(ExchangeAccount).where(
+                        ExchangeAccount.user_id == user_id,
+                        ExchangeAccount.is_active == True
+                    )
+                )
+                exchange_accounts = result.scalars().all()
+                
+                user_exchanges = {
+                    "success": True,
+                    "accounts": [
+                        {"exchange": acc.exchange, "is_active": acc.is_active}
+                        for acc in exchange_accounts
+                    ]
+                }
             
             if not user_exchanges.get("success") or len(user_exchanges.get("accounts", [])) < 2:
                 return {
@@ -1641,47 +1662,47 @@ class MasterSystemController(LoggerMixin):
             for key in autonomous_keys:
                 user_id = key.decode().split(":")[-1]
                 
-                            # Check if emergency stop is active
-            emergency = await self.redis.get(f"emergency_stop:{user_id}")
-            if emergency:
-                continue
+                # Check if emergency stop is active
+                emergency = await self.redis.get(f"emergency_stop:{user_id}")
+                if emergency:
+                    continue
+                
+                # Get user config
+                config = await self.redis.hgetall(f"autonomous_config:{user_id}")
+                if not config:
+                    continue
             
-            # Get user config
-            config = await self.redis.hgetall(f"autonomous_config:{user_id}")
-            if not config:
-                continue
-            
-            # Enhanced: Check profit potential and exchange connections before trading
-            from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
-            from app.services.profit_sharing_service import profit_sharing_service
-            
-            # Check if user has remaining profit potential
-            profit_status = await profit_sharing_service.calculate_profit_potential_usage(
-                user_id=user_id,
-                period_start=datetime.utcnow() - timedelta(days=365),
-                period_end=datetime.utcnow()
-            )
-            
-            if not profit_status.get("success") or profit_status.get("needs_more_credits", False):
-                self.logger.info(f"Skipping cycle for user {user_id} - profit potential exhausted")
-                # Send notification that user needs to buy more credits
-                await self._notify_user_needs_credits(user_id, profit_status)
-                continue
-            
-            # Check portfolio status
-            portfolio_service = PortfolioRiskServiceExtended()
-            portfolio_status = await portfolio_service.get_portfolio_status(user_id)
-            if not portfolio_status.get("success"):
-                self.logger.warning(f"Skipping cycle for user {user_id} - portfolio unavailable")
-                continue
-            
-            portfolio_data = portfolio_status.get("portfolio", {})
-            if portfolio_data.get("total_value_usd", 0) < 100:  # Minimum $100 to trade
-                self.logger.debug(f"Skipping cycle for user {user_id} - insufficient balance")
-                continue
-            
-            # Run enhanced trading cycle for this user
-            await self._run_user_autonomous_cycle(user_id, config)
+                # Enhanced: Check profit potential and exchange connections before trading
+                from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+                from app.services.profit_sharing_service import profit_sharing_service
+                
+                # Check if user has remaining profit potential
+                profit_status = await profit_sharing_service.calculate_profit_potential_usage(
+                    user_id=user_id,
+                    period_start=datetime.utcnow() - timedelta(days=365),
+                    period_end=datetime.utcnow()
+                )
+                
+                if not profit_status.get("success") or profit_status.get("needs_more_credits", False):
+                    self.logger.info(f"Skipping cycle for user {user_id} - profit potential exhausted")
+                    # Send notification that user needs to buy more credits
+                    await self._notify_user_needs_credits(user_id, profit_status)
+                    continue
+                
+                # Check portfolio status
+                portfolio_service = PortfolioRiskServiceExtended()
+                portfolio_status = await portfolio_service.get_portfolio_status(user_id)
+                if not portfolio_status.get("success"):
+                    self.logger.warning(f"Skipping cycle for user {user_id} - portfolio unavailable")
+                    continue
+                
+                portfolio_data = portfolio_status.get("portfolio", {})
+                if portfolio_data.get("total_value_usd", 0) < 100:  # Minimum $100 to trade
+                    self.logger.debug(f"Skipping cycle for user {user_id} - insufficient balance")
+                    continue
+                
+                # Run enhanced trading cycle for this user
+                await self._run_user_autonomous_cycle(user_id, config)
                 
         except Exception as e:
             self.logger.error("Global autonomous cycle failed", error=str(e))

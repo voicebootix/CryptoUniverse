@@ -16,6 +16,9 @@ from datetime import datetime
 from app.core.auth import get_current_user
 from app.models.user import User
 from app.services.paper_trading_engine import get_paper_trading_engine, PaperTradingEngine
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
@@ -57,6 +60,7 @@ async def setup_paper_trading(
             )
             
     except Exception as e:
+        logger.error("Paper trading setup failed", user_id=str(current_user.id), error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Paper trading setup failed: {str(e)}"
@@ -95,6 +99,7 @@ async def execute_paper_trade(
             )
             
     except Exception as e:
+        logger.error("Paper trade execution failed", user_id=str(current_user.id), error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Paper trade failed: {str(e)}"
@@ -134,6 +139,7 @@ async def get_paper_trading_performance(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error("Performance analysis failed", user_id=str(current_user.id), error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Performance analysis failed: {str(e)}"
@@ -170,6 +176,7 @@ async def run_what_if_analysis(
             )
             
     except Exception as e:
+        logger.error("What-if analysis failed", user_id=str(current_user.id), error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"What-if analysis failed: {str(e)}"
@@ -200,6 +207,7 @@ async def get_paper_vs_live_comparison(
             )
             
     except Exception as e:
+        logger.error("Paper vs live comparison failed", user_id=str(current_user.id), error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Comparison failed: {str(e)}"
