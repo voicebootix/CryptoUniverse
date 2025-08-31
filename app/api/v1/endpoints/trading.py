@@ -190,9 +190,9 @@ async def execute_manual_trade(
             )
         
         # Check credit balance
-        credit_account = db.query(CreditAccount).filter(
-            CreditAccount.user_id == current_user.id
-        ).first()
+        stmt = select(CreditAccount).where(CreditAccount.user_id == current_user.id)
+        result = await db.execute(stmt)
+        credit_account = result.scalar_one_or_none()
         
         if not credit_account or credit_account.available_credits <= 0:
             raise HTTPException(
@@ -301,9 +301,9 @@ async def start_autonomous_mode(
     try:
         if request.enable:
             # Validate credit balance for autonomous trading
-            credit_account = db.query(CreditAccount).filter(
-                CreditAccount.user_id == current_user.id
-            ).first()
+            stmt = select(CreditAccount).where(CreditAccount.user_id == current_user.id)
+            result = await db.execute(stmt)
+            credit_account = result.scalar_one_or_none()
             
             if not credit_account or credit_account.available_credits < 10:
                 raise HTTPException(
@@ -408,10 +408,12 @@ async def toggle_simulation_mode(
         else:
             # Switch to live trading
             # Verify user has real exchange accounts
-            exchange_accounts = db.query(ExchangeAccount).filter(
+            stmt = select(ExchangeAccount).where(
                 ExchangeAccount.user_id == current_user.id,
                 ExchangeAccount.is_active == True
-            ).count()
+            )
+            result = await db.execute(stmt)
+            exchange_accounts = len(result.scalars().all())
             
             if exchange_accounts == 0:
                 raise HTTPException(
