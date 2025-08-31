@@ -110,13 +110,24 @@ class MarketDataFeeds:
             "global": 900     # 15 minutes for global data
         }
         
-        # API fallback hierarchy for different data types
+        # ENTERPRISE API fallback hierarchy with circuit breaker status
         self.api_fallbacks = {
             "price": ["coingecko", "coincap", "coinpaprika"],
             "market": ["coingecko", "alpha_vantage", "finnhub"],
             "trending": ["coingecko", "coinpaprika"],
             "global": ["coingecko", "coinpaprika"]
         }
+        
+        # ENTERPRISE CIRCUIT BREAKER STATE for external APIs
+        self.circuit_breakers = {}
+        for api_name in self.apis.keys():
+            self.circuit_breakers[api_name] = {
+                "failures": 0,
+                "last_failure": 0,
+                "open_until": 0,
+                "max_failures": 5,
+                "timeout": 300  # 5 minutes
+            }
         
         # Symbol mappings for different APIs
         self.symbol_mappings = {
@@ -173,9 +184,17 @@ class MarketDataFeeds:
             self.redis = None
     
     async def _check_rate_limit(self, api_name: str) -> bool:
-        """Check if API call is within rate limits."""
-        limiter = self.rate_limiters.get(api_name, {})
+        """ENTERPRISE: Check rate limits with circuit breaker protection."""
         current_time = time.time()
+        
+        # ENTERPRISE CIRCUIT BREAKER CHECK
+        breaker = self.circuit_breakers.get(api_name, {})
+        if current_time < breaker.get("open_until", 0):
+            logger.debug(f"Circuit breaker OPEN for {api_name}")
+            return False
+        
+        # Check traditional rate limits
+        limiter = self.rate_limiters.get(api_name, {})
         
         # Reset window if needed (1 minute windows)
         if current_time - limiter.get("window_start", 0) >= 60:
@@ -188,6 +207,27 @@ class MarketDataFeeds:
             return True
         
         return False
+    
+    def _handle_api_failure(self, api_name: str, error: str):
+        """ENTERPRISE: Handle API failure with circuit breaker logic."""
+        current_time = time.time()
+        breaker = self.circuit_breakers.get(api_name, {})
+        
+        breaker["failures"] = breaker.get("failures", 0) + 1
+        breaker["last_failure"] = current_time
+        
+        # Open circuit breaker if too many failures
+        if breaker["failures"] >= breaker.get("max_failures", 5):
+            breaker["open_until"] = current_time + breaker.get("timeout", 300)
+            logger.warning(f"Circuit breaker OPENED for {api_name} after {breaker['failures']} failures")
+    
+    def _handle_api_success(self, api_name: str):
+        """ENTERPRISE: Handle API success - reset circuit breaker."""
+        breaker = self.circuit_breakers.get(api_name, {})
+        if breaker.get("failures", 0) > 0:
+            logger.info(f"Circuit breaker CLOSED for {api_name} - API recovered")
+        breaker["failures"] = 0
+        breaker["open_until"] = 0
     
     def _get_api_params(self, api_name: str, base_params: Dict = None) -> Dict[str, Any]:
         """Get API parameters including API key if required."""
@@ -203,16 +243,17 @@ class MarketDataFeeds:
     async def get_real_time_price(self, symbol: str) -> Dict[str, Any]:
         """Get real-time price data for a symbol."""
         try:
-            # Check cache first
+            # ENTERPRISE REDIS RESILIENCE - Check cache first if Redis is available
             cache_key = f"price:{symbol}"
-            cached_data = await self.redis.get(cache_key)
-            
-            if cached_data:
-                try:
-                    import json
-                    return json.loads(cached_data)
-                except:
-                    pass
+            if self.redis:
+                cached_data = await self.redis.get(cache_key)
+                
+                if cached_data:
+                    try:
+                        import json
+                        return json.loads(cached_data)
+                    except:
+                        pass
             
             # Try APIs in order of preference with rate limiting
             apis_to_try = [
@@ -226,21 +267,33 @@ class MarketDataFeeds:
             
             for api_name, fetch_method in apis_to_try:
                 try:
+                    # ENTERPRISE: Check circuit breaker before API call
+                    if not await self._check_rate_limit(api_name):
+                        continue
+                    
                     price_data = await fetch_method(symbol)
                     if price_data.get("success"):
+                        # ENTERPRISE: Record successful API call
+                        self._handle_api_success(api_name)
                         break
+                    else:
+                        # ENTERPRISE: Handle API failure
+                        self._handle_api_failure(api_name, price_data.get("error", "Unknown error"))
                 except Exception as e:
                     logger.warning(f"Failed to fetch from {api_name}", error=str(e))
+                    # ENTERPRISE: Handle API exception
+                    self._handle_api_failure(api_name, str(e))
                     continue
             
             if price_data.get("success"):
-                # Cache the result
-                import json
-                await self.redis.setex(
-                    cache_key,
-                    self.cache_ttl["price"],
-                    json.dumps(price_data)
-                )
+                # ENTERPRISE REDIS RESILIENCE - Cache the result if Redis is available
+                if self.redis:
+                    import json
+                    await self.redis.setex(
+                        cache_key,
+                        self.cache_ttl["price"],
+                        json.dumps(price_data)
+                    )
                 
                 # Sync to Supabase (if available)
                 try:
@@ -321,26 +374,30 @@ class MarketDataFeeds:
     async def get_detailed_market_data(self, symbol: str) -> Dict[str, Any]:
         """Get detailed market data including volume, market cap, etc."""
         try:
+            # ENTERPRISE REDIS RESILIENCE
             cache_key = f"detailed:{symbol}"
-            cached_data = await self.redis.get(cache_key)
-            
-            if cached_data:
-                try:
-                    import json
-                    return json.loads(cached_data)
-                except:
-                    pass
+            if self.redis:
+                cached_data = await self.redis.get(cache_key)
+                
+                if cached_data:
+                    try:
+                        import json
+                        return json.loads(cached_data)
+                    except:
+                        pass
             
             # Get detailed data from CoinGecko
             detailed_data = await self._fetch_coingecko_detailed(symbol)
             
             if detailed_data.get("success"):
-                import json
-                await self.redis.setex(
-                    cache_key,
-                    self.cache_ttl["detailed"],
-                    json.dumps(detailed_data)
-                )
+                # ENTERPRISE REDIS RESILIENCE - Cache if Redis is available
+                if self.redis:
+                    import json
+                    await self.redis.setex(
+                        cache_key,
+                        self.cache_ttl["detailed"],
+                        json.dumps(detailed_data)
+                    )
             
             return detailed_data
             
@@ -393,15 +450,16 @@ class MarketDataFeeds:
                                 "source": "coingecko"
                             }
                             
-                            # Cache individual prices
-                            await self.redis.setex(
-                                f"price:{symbol}",
-                                self.cache_ttl["price"],
-                                str({
-                                    "success": True,
-                                    "data": result["data"][symbol]
-                                })
-                            )
+                            # ENTERPRISE REDIS RESILIENCE - Cache individual prices if Redis is available
+                            if self.redis:
+                                await self.redis.setex(
+                                    f"price:{symbol}",
+                                    self.cache_ttl["price"],
+                                    str({
+                                        "success": True,
+                                        "data": result["data"][symbol]
+                                    })
+                                )
                         
                         return result
                     else:
@@ -466,7 +524,7 @@ class MarketDataFeeds:
             params = self._get_api_params("coingecko", base_params)
             
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params) as response:
+                async with session.get(url, params=params, timeout=10) as response:
                     if response.status == 200:
                         data = await response.json()
                         coin_data = data.get(coin_id, {})
@@ -484,6 +542,12 @@ class MarketDataFeeds:
                                     "source": "coingecko"
                                 }
                             }
+                    elif response.status == 429:
+                        # ENTERPRISE: Handle rate limiting specifically
+                        retry_after = response.headers.get("Retry-After", "60")
+                        error_msg = f"API error: 429 - Rate limited (retry after {retry_after}s)"
+                        logger.warning(f"CoinGecko rate limited", symbol=symbol, retry_after=retry_after)
+                        return {"success": False, "error": error_msg}
                     
                     return {"success": False, "error": f"API error: {response.status}"}
                     

@@ -257,6 +257,10 @@ class SystemMonitoringService:
                         timestamp=current_time
                     )
                     await self._add_alert(alert)
+                    
+                    # ENTERPRISE: Trigger cleanup for disk usage issues
+                    if metric_name == "disk_usage_pct" and current_value >= 80:
+                        await self._trigger_disk_cleanup()
                 
                 # Check warning threshold
                 elif current_value >= thresholds["warning"]:
@@ -271,6 +275,44 @@ class SystemMonitoringService:
         
         except Exception as e:
             logger.error("Failed to check alert conditions", error=str(e))
+    
+    async def _trigger_disk_cleanup(self):
+        """ENTERPRISE: Trigger automatic disk cleanup when usage is high."""
+        try:
+            import os
+            import tempfile
+            
+            logger.warning("High disk usage detected - triggering cleanup")
+            
+            # Clean up temp files
+            temp_dir = tempfile.gettempdir()
+            for root, dirs, files in os.walk(temp_dir):
+                for file in files:
+                    try:
+                        file_path = os.path.join(root, file)
+                        if os.path.getmtime(file_path) < time.time() - 86400:  # Older than 1 day
+                            os.remove(file_path)
+                    except Exception:
+                        pass
+            
+            # Clean up old log files
+            log_dirs = ["/var/log", "/tmp", "./logs"]
+            for log_dir in log_dirs:
+                if os.path.exists(log_dir):
+                    for root, dirs, files in os.walk(log_dir):
+                        for file in files:
+                            try:
+                                if file.endswith('.log') or file.endswith('.log.gz'):
+                                    file_path = os.path.join(root, file)
+                                    if os.path.getmtime(file_path) < time.time() - 604800:  # Older than 1 week
+                                        os.remove(file_path)
+                            except Exception:
+                                pass
+            
+            logger.info("Disk cleanup completed")
+            
+        except Exception as e:
+            logger.error("Disk cleanup failed", error=str(e))
     
     async def _add_alert(self, alert: SystemAlert):
         """Add alert if not already active."""

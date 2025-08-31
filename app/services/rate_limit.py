@@ -35,11 +35,13 @@ class RateLimitService:
             "admin": {"limit": 50, "window": 60}       # 50 per minute
         }
         
-        # Exchange-specific rate limits (conservative to avoid bans)
+        # ENTERPRISE Exchange-specific rate limits (conservative to avoid bans)
         self.exchange_limits = {
             "binance": {
-                "spot": {"limit": 1200, "window": 60},    # 1200/min (actual limit 2400)
+                "spot": {"limit": 1200, "window": 60},     # 1200/min (actual limit 2400)
                 "futures": {"limit": 2400, "window": 60},  # 2400/min (actual limit 4800)
+                "private": {"limit": 200, "window": 60},   # ENTERPRISE: Private API endpoints
+                "public": {"limit": 1200, "window": 60},   # ENTERPRISE: Public API endpoints
                 "api_key": {"limit": 100, "window": 60}    # Per API key
             },
             "kraken": {
@@ -51,6 +53,16 @@ class RateLimitService:
                 "public": {"limit": 100, "window": 10},    # 100/10sec
                 "private": {"limit": 45, "window": 10},    # 45/10sec
                 "api_key": {"limit": 100, "window": 60}
+            },
+            "coinbase": {
+                "public": {"limit": 100, "window": 60},    # ENTERPRISE: Coinbase public
+                "private": {"limit": 50, "window": 60},    # ENTERPRISE: Coinbase private
+                "api_key": {"limit": 50, "window": 60}
+            },
+            "bybit": {
+                "public": {"limit": 120, "window": 60},    # ENTERPRISE: Bybit public
+                "private": {"limit": 60, "window": 60},    # ENTERPRISE: Bybit private
+                "api_key": {"limit": 60, "window": 60}
             }
         }
     

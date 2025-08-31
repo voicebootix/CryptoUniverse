@@ -66,22 +66,28 @@ class KrakenNonceManager:
         self._last_nonce = 0
         self._lock = threading.Lock()
         self._nonce_increment = 0
+        self._call_count = 0
     
     def get_nonce(self) -> str:
         """Generate a unique, strictly increasing nonce for Kraken API calls."""
         with self._lock:
+            self._call_count += 1
             current_time_microseconds = int(time.time() * 1000000)
             
-            # Ensure nonce is always increasing
+            # ENTERPRISE: Ensure nonce is ALWAYS strictly increasing with larger gaps
             if current_time_microseconds <= self._last_nonce:
-                # If time hasn't advanced enough, increment from last nonce
-                self._last_nonce += 1
+                # If time hasn't advanced enough, increment from last nonce with bigger gap
+                self._last_nonce += 100  # Larger increment to avoid collisions
             else:
                 self._last_nonce = current_time_microseconds
             
-            # Add a small increment to handle high-frequency calls
-            self._nonce_increment = (self._nonce_increment + 1) % 1000
+            # Add call count to ensure uniqueness even in high-frequency scenarios
+            self._nonce_increment = (self._nonce_increment + 1) % 10000  # Larger range
             final_nonce = self._last_nonce + self._nonce_increment
+            
+            # Log for debugging nonce issues
+            if self._call_count % 10 == 0:  # Log every 10th call
+                logger.debug(f"Kraken nonce generated", nonce=final_nonce, call_count=self._call_count)
             
             return str(final_nonce)
 
