@@ -172,7 +172,7 @@ export const useMarketAnalysis = (): MarketAnalysisHookState => {
     setLoading(true);
     setError(null);
     try {
-      const response = await tradingAPI.get('/trading/market-overview');
+      const response = await tradingAPI.get('/market-overview');
       
       if (response.data && response.data.success !== false) {
         // Handle different response structures
