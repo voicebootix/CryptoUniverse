@@ -1280,19 +1280,126 @@ class MasterSystemController(LoggerMixin):
             self.logger.error("Global autonomous cycle failed", error=str(e))
     
     async def _run_user_autonomous_cycle(self, user_id: str, config: Dict):
-        """Run autonomous cycle for specific user."""
+        """Run complete autonomous trading cycle for specific user - THE MONEY MAKING MACHINE."""
         try:
             mode = config.get("mode", "balanced")
-            self.logger.debug(f"Running autonomous cycle for user {user_id}", mode=mode)
+            self.logger.info(f"🤖 AUTONOMOUS CYCLE STARTING for user {user_id}", mode=mode)
             
-            # This would contain the actual trading logic
-            # For now, just log the cycle
+            # Set trading mode for this user
+            self.current_mode = TradingMode(mode)
             
-            # Update last cycle time
+            # Get current timezone strategy for optimal trading
+            timezone_strategy = self.get_current_timezone_strategy()
+            preferred_strategies = timezone_strategy.get("preferred_strategies", ["spot_momentum_strategy"])
+            
+            # Determine current trading cycle based on minute
+            current_minute = datetime.utcnow().minute
+            active_cycles = []
+            
+            for cycle, minutes in self.cycle_schedule.items():
+                if current_minute in minutes:
+                    active_cycles.append(cycle)
+            
+            # Default to momentum cycle if no specific cycle scheduled
+            if not active_cycles:
+                active_cycles = [TradingCycle.MOMENTUM_FUTURES.value]
+            
+            self.logger.info(f"🎯 Active cycles for minute {current_minute}: {active_cycles}")
+            
+            # Execute each active cycle
+            cycle_results = []
+            total_profit = 0.0
+            total_trades = 0
+            
+            for cycle in active_cycles:
+                try:
+                    if cycle == TradingCycle.ARBITRAGE_HUNTER.value:
+                        # Fast arbitrage execution
+                        result = await self.execute_arbitrage_cycle(user_id)
+                    else:
+                        # Full 5-phase execution for other cycles
+                        cycle_enum = TradingCycle(cycle)
+                        result = await self.execute_5_phase_flow(
+                            cycle_type=cycle_enum,
+                            focus_strategies=preferred_strategies,
+                            user_id=user_id
+                        )
+                    
+                    cycle_results.append(result)
+                    
+                    if result.get("success"):
+                        total_trades += result.get("trades_executed", 0)
+                        total_profit += result.get("profit_generated_usd", 0.0)
+                        
+                        self.logger.info(
+                            f"✅ CYCLE COMPLETED: {cycle}",
+                            user_id=user_id,
+                            trades=result.get("trades_executed", 0),
+                            profit=result.get("profit_generated_usd", 0.0)
+                        )
+                    else:
+                        self.logger.warning(
+                            f"⚠️ CYCLE FAILED: {cycle}",
+                            user_id=user_id,
+                            error=result.get("error")
+                        )
+                        
+                except Exception as e:
+                    self.logger.error(f"Cycle {cycle} failed for user {user_id}", error=str(e))
+                    continue
+            
+            # Update performance metrics
+            self.performance_metrics["cycles_executed"] += len(cycle_results)
+            self.performance_metrics["trades_executed"] += total_trades
+            self.performance_metrics["total_profit_usd"] += total_profit
+            
+            if total_trades > 0:
+                if total_profit > 0:
+                    self.performance_metrics["consecutive_wins"] += 1
+                    self.performance_metrics["consecutive_losses"] = 0
+                else:
+                    self.performance_metrics["consecutive_losses"] += 1
+                    self.performance_metrics["consecutive_wins"] = 0
+            
+            # Calculate success rate
+            total_cycles = self.performance_metrics["cycles_executed"]
+            successful_cycles = sum(1 for result in cycle_results if result.get("success"))
+            if total_cycles > 0:
+                self.performance_metrics["success_rate"] = (successful_cycles / total_cycles) * 100
+            
+            # Send Telegram update if significant activity
+            if total_trades > 0 or total_profit != 0:
+                try:
+                    from app.services.telegram_commander import telegram_commander_service
+                    await telegram_commander_service.send_autonomous_update(
+                        user_id=user_id,
+                        cycles_run=len(active_cycles),
+                        trades_executed=total_trades,
+                        profit_generated=total_profit,
+                        mode=mode
+                    )
+                except Exception as e:
+                    self.logger.warning("Failed to send Telegram update", error=str(e))
+            
+            # Update last cycle time and metrics
             await self.redis.hset(
                 f"autonomous_config:{user_id}",
                 "last_cycle",
                 datetime.utcnow().isoformat()
+            )
+            
+            await self.redis.hset(
+                f"autonomous_metrics:{user_id}",
+                "total_profit_today",
+                str(total_profit)
+            )
+            
+            self.logger.info(
+                f"🎉 AUTONOMOUS CYCLE COMPLETED for user {user_id}",
+                cycles_run=len(active_cycles),
+                trades_executed=total_trades,
+                profit_generated=total_profit,
+                mode=mode
             )
             
         except Exception as e:

@@ -1062,6 +1062,60 @@ class TradeExecutionService(LoggerMixin):
                 order_id=execution_result.get("order_id")
             )
     
+    async def execute_real_trade(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str = "market",
+        exchange: str = "auto",
+        user_id: str = "system"
+    ) -> Dict[str, Any]:
+        """
+        Execute real trade for autonomous operations.
+        
+        This is the bridge between autonomous signals and real trade execution
+        using user's exchange credentials.
+        """
+        try:
+            # Create trade request in expected format
+            trade_request = {
+                "symbol": symbol,
+                "action": side.upper(),
+                "quantity": quantity,
+                "order_type": order_type.upper(),
+                "exchange": exchange,
+                "user_id": user_id
+            }
+            
+            # Execute using existing real order execution (now with user credentials)
+            result = await self._execute_real_order(trade_request, user_id)
+            
+            if result.get("success"):
+                execution_data = result.get("execution_result", {})
+                
+                return {
+                    "success": True,
+                    "execution_price": execution_data.get("execution_price", 0),
+                    "executed_quantity": execution_data.get("executed_quantity", 0),
+                    "order_id": execution_data.get("order_id"),
+                    "exchange": execution_data.get("exchange"),
+                    "fees": execution_data.get("total_fee", 0),
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            else:
+                return result
+                
+        except Exception as e:
+            self.logger.error(
+                "Real trade execution failed",
+                error=str(e),
+                symbol=symbol,
+                side=side,
+                user_id=user_id
+            )
+            return {"success": False, "error": str(e)}
+
     async def _get_current_price(self, symbol: str, exchange: str) -> float:
         """Get current price for symbol - simulated for now."""
         # In production, this would call real APIs
