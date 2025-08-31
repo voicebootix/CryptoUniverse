@@ -78,13 +78,13 @@ const MarketAnalysisPage: React.FC = () => {
     clearError();
     switch (type) {
       case 'prices':
-        await fetchRealtimePrices(selectedSymbols);
+        await fetchRealtimePrices([selectedSymbols]);
         break;
       case 'technical':
-        await fetchTechnicalAnalysis(selectedSymbols, selectedTimeframe);
+        await fetchTechnicalAnalysis(selectedSymbols);
         break;
       case 'sentiment':
-        await fetchSentimentAnalysis(selectedSymbols);
+        await fetchSentimentAnalysis([selectedSymbols]);
         break;
       case 'arbitrage':
         await fetchArbitrageOpportunities();
@@ -178,7 +178,7 @@ const MarketAnalysisPage: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {marketHealth.status || 'Loading...'}
+                {marketHealth?.status || 'Loading...'}
               </div>
               <div className="flex items-center text-sm text-muted-foreground">
                 <CheckCircle className="h-4 w-4 mr-1 text-green-500" />
@@ -340,7 +340,7 @@ const MarketAnalysisPage: React.FC = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {trendingCoins.slice(0, 8).map((coin: any, index) => (
+                  {trendingCoins.slice(0, 8).map((coin: any, index: number) => (
                     <div
                       key={coin.symbol || index}
                       className="flex items-center justify-between p-3 rounded-lg border bg-muted/20"

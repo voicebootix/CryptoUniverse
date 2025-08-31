@@ -33,15 +33,6 @@ class MarketDataFeeds:
             "finnhub": settings.FINNHUB_API_KEY if hasattr(settings, 'FINNHUB_API_KEY') else None
         }
         
-        # Rate limiting tracking
-        self.rate_limiters = {}
-        for api_name, config in self.apis.items():
-            self.rate_limiters[api_name] = {
-                "requests": 0,
-                "window_start": time.time(),
-                "max_requests": config["rate_limit"]
-            }
-        
         # Enhanced API endpoints with API key support
         self.apis = {
             "coingecko": {

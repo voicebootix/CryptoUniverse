@@ -213,7 +213,7 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
       
       // Attempt to reconnect after 5 seconds
       setTimeout(() => {
-        get().connectWebSocket();
+        usePortfolioStore.getState().connectWebSocket();
       }, 5000);
     };
 

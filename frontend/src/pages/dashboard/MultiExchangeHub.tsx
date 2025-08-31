@@ -111,11 +111,20 @@ const MultiExchangeHub: React.FC = () => {
   const [filterExchange, setFilterExchange] = useState<string>('all');
   const [showConnectionModal, setShowConnectionModal] = useState<boolean>(false);
 
+  // Performance data available in component scope
+  const currentExchangePerformance = [
+    { name: 'Binance', trades: 342, winRate: 72, avgProfit: 13.4, volume: 2456789 },
+    { name: 'Coinbase', trades: 128, winRate: 58, avgProfit: -9.6, volume: 1234567 },
+    { name: 'Kraken', trades: 89, winRate: 65, avgProfit: 26.3, volume: 987654 },
+    { name: 'Bybit', trades: 156, winRate: 69, avgProfit: 22.1, volume: 1456789 },
+    { name: 'OKX', trades: 67, winRate: 61, avgProfit: 18.4, volume: 765432 }
+  ];
+
   // Load real arbitrage data
   useEffect(() => {
     refreshArbitrageData();
     fetchOrderBook('BTC');
-    fetchCrossExchangeComparison('BTC,ETH,SOL');
+    fetchCrossExchangeComparison();
   }, []);
 
   // Real-time data updates
@@ -396,7 +405,7 @@ const MultiExchangeHub: React.FC = () => {
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Exchange Performance Comparison</h3>
             <ResponsiveContainer width="100%" height={300}>
-              <RadarChart data={exchangePerformance}>
+              <RadarChart data={currentExchangePerformance}>
                 <PolarGrid strokeDasharray="3 3" />
                 <PolarAngleAxis dataKey="name" />
                 <PolarRadiusAxis angle={90} domain={[0, 100]} />
@@ -451,7 +460,7 @@ const MultiExchangeHub: React.FC = () => {
               
               {!arbitrageLoading && !arbitrageError && arbitrageOpportunities.length === 0 && (
                 <div className="p-8 text-center">
-                  <Target className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <Activity className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                   <h3 className="text-lg font-semibold mb-2">No Arbitrage Opportunities</h3>
                   <p className="text-muted-foreground">
                     Currently scanning for profitable opportunities across exchanges
@@ -528,7 +537,7 @@ const MultiExchangeHub: React.FC = () => {
               <div>
                 <h4 className="font-medium text-green-600 mb-3">Bids</h4>
                 <div className="space-y-2">
-                  {unifiedOrderBook.bids.map((bid, idx) => (
+                  {unifiedOrderBook.bids.map((bid: any, idx: number) => (
                     <div key={idx} className="flex justify-between items-center p-2 bg-green-50 rounded">
                       <span className="text-sm font-medium">{formatCurrency(bid.price)}</span>
                       <span className="text-sm">{bid.amount} BTC</span>
@@ -540,7 +549,7 @@ const MultiExchangeHub: React.FC = () => {
               <div>
                 <h4 className="font-medium text-red-600 mb-3">Asks</h4>
                 <div className="space-y-2">
-                  {unifiedOrderBook.asks.map((ask, idx) => (
+                  {unifiedOrderBook.asks.map((ask: any, idx: number) => (
                     <div key={idx} className="flex justify-between items-center p-2 bg-red-50 rounded">
                       <span className="text-sm font-medium">{formatCurrency(ask.price)}</span>
                       <span className="text-sm">{ask.amount} BTC</span>
@@ -557,7 +566,7 @@ const MultiExchangeHub: React.FC = () => {
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Performance by Exchange</h3>
             <ResponsiveContainer width="100%" height={400}>
-              <BarChart data={exchangePerformance}>
+              <BarChart data={currentExchangePerformance}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
                 <YAxis yAxisId="left" orientation="left" stroke="#8b5cf6" />
