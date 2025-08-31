@@ -987,13 +987,18 @@ class MasterSystemController(LoggerMixin):
         """Comprehensive system health check."""
         
         try:
-            # Import services dynamically
+            # Use your existing service instances (no duplication)
             from app.services.market_analysis import market_analysis_service
             from app.services.trading_strategies import trading_strategies_service
-            from app.services.portfolio_risk import portfolio_risk_service
-            from app.services.ai_consensus import ai_consensus_service
-            from app.services.trade_execution import trade_execution_service
-            from app.services.telegram_commander import telegram_commander_service
+            from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+            from app.services.ai_consensus_core import ai_consensus_service
+            from app.services.trade_execution import TradeExecutionService
+            from app.services.telegram_core import TelegramService
+            
+            # Initialize only if needed (some are already global instances)
+            portfolio_risk_service = PortfolioRiskServiceExtended()
+            trade_execution_service = TradeExecutionService()
+            telegram_service = TelegramService()
             
             # Check all services in parallel
             health_checks = await asyncio.gather(
@@ -1320,18 +1325,33 @@ class MasterSystemController(LoggerMixin):
             for key in autonomous_keys:
                 user_id = key.decode().split(":")[-1]
                 
-                # Check if emergency stop is active
-                emergency = await self.redis.get(f"emergency_stop:{user_id}")
-                if emergency:
-                    continue
-                
-                # Get user config
-                config = await self.redis.hgetall(f"autonomous_config:{user_id}")
-                if not config:
-                    continue
-                
-                # Run trading cycle for this user
-                await self._run_user_autonomous_cycle(user_id, config)
+                            # Check if emergency stop is active
+            emergency = await self.redis.get(f"emergency_stop:{user_id}")
+            if emergency:
+                continue
+            
+            # Get user config
+            config = await self.redis.hgetall(f"autonomous_config:{user_id}")
+            if not config:
+                continue
+            
+            # Enhanced: Check if user has sufficient balance and exchange connections
+            # Use your existing portfolio service to validate before running cycle
+            from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+            portfolio_service = PortfolioRiskServiceExtended()
+            
+            portfolio_status = await portfolio_service.get_portfolio_status(user_id)
+            if not portfolio_status.get("success"):
+                self.logger.warning(f"Skipping cycle for user {user_id} - portfolio unavailable")
+                continue
+            
+            portfolio_data = portfolio_status.get("portfolio", {})
+            if portfolio_data.get("total_value_usd", 0) < 100:  # Minimum $100 to trade
+                self.logger.debug(f"Skipping cycle for user {user_id} - insufficient balance")
+                continue
+            
+            # Run enhanced trading cycle for this user
+            await self._run_user_autonomous_cycle(user_id, config)
                 
         except Exception as e:
             self.logger.error("Global autonomous cycle failed", error=str(e))
