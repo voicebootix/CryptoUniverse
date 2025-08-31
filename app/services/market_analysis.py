@@ -106,10 +106,87 @@ class ExchangeConfigurations:
         }
     }
     
+    COINBASE = {
+        "base_url": "https://api.exchange.coinbase.com",
+        "endpoints": {
+            "ticker": "/products/{symbol}/ticker",
+            "products": "/products",
+            "stats": "/products/{symbol}/stats",
+            "orderbook": "/products/{symbol}/book"
+        },
+        "rate_limit": 600,
+        "weight_limits": {
+            "ticker": 1,
+            "stats": 1,
+            "orderbook": 1
+        }
+    }
+    
+    BYBIT = {
+        "base_url": "https://api.bybit.com",
+        "endpoints": {
+            "ticker": "/v5/market/tickers",
+            "orderbook": "/v5/market/orderbook",
+            "kline": "/v5/market/kline",
+            "instruments": "/v5/market/instruments-info"
+        },
+        "rate_limit": 600,
+        "weight_limits": {
+            "ticker": 1,
+            "orderbook": 1,
+            "kline": 1
+        }
+    }
+    
+    OKX = {
+        "base_url": "https://www.okx.com",
+        "endpoints": {
+            "ticker": "/api/v5/market/ticker",
+            "tickers": "/api/v5/market/tickers",
+            "orderbook": "/api/v5/market/books",
+            "instruments": "/api/v5/public/instruments"
+        },
+        "rate_limit": 600,
+        "weight_limits": {
+            "ticker": 1,
+            "orderbook": 1
+        }
+    }
+    
+    BITGET = {
+        "base_url": "https://api.bitget.com",
+        "endpoints": {
+            "ticker": "/api/spot/v1/market/ticker",
+            "tickers": "/api/spot/v1/market/tickers",
+            "depth": "/api/spot/v1/market/depth",
+            "symbols": "/api/spot/v1/public/products"
+        },
+        "rate_limit": 600,
+        "weight_limits": {
+            "ticker": 1,
+            "depth": 1
+        }
+    }
+    
+    GATEIO = {
+        "base_url": "https://api.gateio.ws",
+        "endpoints": {
+            "ticker": "/api/v4/spot/tickers",
+            "orderbook": "/api/v4/spot/order_book",
+            "trades": "/api/v4/spot/trades",
+            "currency_pairs": "/api/v4/spot/currency_pairs"
+        },
+        "rate_limit": 300,
+        "weight_limits": {
+            "ticker": 1,
+            "orderbook": 1
+        }
+    }
+    
     @classmethod
     def get_all_exchanges(cls) -> List[str]:
         """Get list of all supported exchanges."""
-        return ["binance", "kraken", "kucoin"]
+        return ["binance", "kraken", "kucoin", "coinbase", "bybit", "okx", "bitget", "gateio"]
     
     @classmethod
     def get_config(cls, exchange: str) -> Dict[str, Any]:
@@ -117,7 +194,12 @@ class ExchangeConfigurations:
         configs = {
             "binance": cls.BINANCE,
             "kraken": cls.KRAKEN, 
-            "kucoin": cls.KUCOIN
+            "kucoin": cls.KUCOIN,
+            "coinbase": cls.COINBASE,
+            "bybit": cls.BYBIT,
+            "okx": cls.OKX,
+            "bitget": cls.BITGET,
+            "gateio": cls.GATEIO
         }
         return configs.get(exchange.lower(), {})
 

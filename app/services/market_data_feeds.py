@@ -26,7 +26,23 @@ class MarketDataFeeds:
     def __init__(self):
         self.redis = None
         
-        # Free API endpoints
+        # Load API keys from environment
+        self.api_keys = {
+            "alpha_vantage": settings.ALPHA_VANTAGE_API_KEY if hasattr(settings, 'ALPHA_VANTAGE_API_KEY') else None,
+            "coingecko": settings.COINGECKO_API_KEY if hasattr(settings, 'COINGECKO_API_KEY') else None,
+            "finnhub": settings.FINNHUB_API_KEY if hasattr(settings, 'FINNHUB_API_KEY') else None
+        }
+        
+        # Rate limiting tracking
+        self.rate_limiters = {}
+        for api_name, config in self.apis.items():
+            self.rate_limiters[api_name] = {
+                "requests": 0,
+                "window_start": time.time(),
+                "max_requests": config["rate_limit"]
+            }
+        
+        # Enhanced API endpoints with API key support
         self.apis = {
             "coingecko": {
                 "base_url": "https://api.coingecko.com/api/v3",
@@ -34,8 +50,34 @@ class MarketDataFeeds:
                 "endpoints": {
                     "price": "/simple/price",
                     "coins": "/coins/{id}",
-                    "markets": "/coins/markets"
-                }
+                    "markets": "/coins/markets",
+                    "trending": "/search/trending",
+                    "global": "/global"
+                },
+                "requires_key": False,
+                "api_key_param": "x_cg_demo_api_key"
+            },
+            "alpha_vantage": {
+                "base_url": "https://www.alphavantage.co/query",
+                "rate_limit": 5,  # 5 calls per minute for free tier
+                "endpoints": {
+                    "quote": "?function=GLOBAL_QUOTE",
+                    "intraday": "?function=TIME_SERIES_INTRADAY",
+                    "crypto": "?function=DIGITAL_CURRENCY_DAILY"
+                },
+                "requires_key": True,
+                "api_key_param": "apikey"
+            },
+            "finnhub": {
+                "base_url": "https://finnhub.io/api/v1",
+                "rate_limit": 60,  # 60 calls per minute for free tier
+                "endpoints": {
+                    "quote": "/quote",
+                    "crypto": "/crypto/symbol",
+                    "candle": "/crypto/candle"
+                },
+                "requires_key": True,
+                "api_key_param": "token"
             },
             "coincap": {
                 "base_url": "https://api.coincap.io/v2",
@@ -43,16 +85,20 @@ class MarketDataFeeds:
                 "endpoints": {
                     "assets": "/assets",
                     "asset": "/assets/{id}",
-                    "rates": "/rates"
-                }
+                    "rates": "/rates",
+                    "markets": "/markets"
+                },
+                "requires_key": False
             },
             "coinpaprika": {
                 "base_url": "https://api.coinpaprika.com/v1",
                 "rate_limit": 20000,  # 20k calls per month
                 "endpoints": {
                     "tickers": "/tickers",
-                    "ticker": "/tickers/{id}"
-                }
+                    "ticker": "/tickers/{id}",
+                    "global": "/global"
+                },
+                "requires_key": False
             }
         }
         
@@ -94,6 +140,34 @@ class MarketDataFeeds:
     async def async_init(self):
         self.redis = await get_redis_client()
     
+    async def _check_rate_limit(self, api_name: str) -> bool:
+        """Check if API call is within rate limits."""
+        limiter = self.rate_limiters.get(api_name, {})
+        current_time = time.time()
+        
+        # Reset window if needed (1 minute windows)
+        if current_time - limiter.get("window_start", 0) >= 60:
+            limiter["requests"] = 0
+            limiter["window_start"] = current_time
+        
+        # Check if under limit
+        if limiter["requests"] < limiter["max_requests"]:
+            limiter["requests"] += 1
+            return True
+        
+        return False
+    
+    def _get_api_params(self, api_name: str, base_params: Dict = None) -> Dict[str, Any]:
+        """Get API parameters including API key if required."""
+        params = base_params or {}
+        
+        api_config = self.apis.get(api_name, {})
+        if api_config.get("requires_key") and self.api_keys.get(api_name):
+            key_param = api_config.get("api_key_param", "apikey")
+            params[key_param] = self.api_keys[api_name]
+        
+        return params
+    
     async def get_real_time_price(self, symbol: str) -> Dict[str, Any]:
         """Get real-time price data for a symbol."""
         try:
@@ -103,27 +177,48 @@ class MarketDataFeeds:
             
             if cached_data:
                 try:
-                    return eval(cached_data)
+                    import json
+                    return json.loads(cached_data)
                 except:
                     pass
             
-            # Try CoinGecko first (most reliable)
-            price_data = await self._fetch_coingecko_price(symbol)
+            # Try APIs in order of preference with rate limiting
+            apis_to_try = [
+                ("coingecko", self._fetch_coingecko_price),
+                ("alpha_vantage", self._fetch_alpha_vantage_price),
+                ("finnhub", self._fetch_finnhub_price),
+                ("coincap", self._fetch_coincap_price)
+            ]
             
-            if not price_data.get("success"):
-                # Fallback to CoinCap
-                price_data = await self._fetch_coincap_price(symbol)
+            price_data = {"success": False, "error": "No APIs available"}
+            
+            for api_name, fetch_method in apis_to_try:
+                try:
+                    price_data = await fetch_method(symbol)
+                    if price_data.get("success"):
+                        break
+                except Exception as e:
+                    logger.warning(f"Failed to fetch from {api_name}", error=str(e))
+                    continue
             
             if price_data.get("success"):
                 # Cache the result
+                import json
                 await self.redis.setex(
                     cache_key,
                     self.cache_ttl["price"],
-                    str(price_data)
+                    json.dumps(price_data)
                 )
                 
-                # Sync to Supabase
-                await supabase_client.sync_market_data(symbol, price_data.get("data", {}))
+                # Sync to Supabase (if available)
+                try:
+                    from app.core.supabase import supabase_client
+                    await supabase_client.sync_market_data(symbol, price_data.get("data", {}))
+                except ImportError:
+                    # Supabase not configured, skip sync
+                    pass
+                except Exception as e:
+                    logger.warning("Supabase sync failed", error=str(e))
             
             return price_data
             
@@ -139,7 +234,8 @@ class MarketDataFeeds:
             
             if cached_data:
                 try:
-                    return eval(cached_data)
+                    import json
+                    return json.loads(cached_data)
                 except:
                     pass
             
@@ -147,10 +243,11 @@ class MarketDataFeeds:
             detailed_data = await self._fetch_coingecko_detailed(symbol)
             
             if detailed_data.get("success"):
+                import json
                 await self.redis.setex(
                     cache_key,
                     self.cache_ttl["detailed"],
-                    str(detailed_data)
+                    json.dumps(detailed_data)
                 )
             
             return detailed_data
@@ -255,19 +352,26 @@ class MarketDataFeeds:
             return {"success": False, "error": str(e)}
     
     async def _fetch_coingecko_price(self, symbol: str) -> Dict[str, Any]:
-        """Fetch price from CoinGecko API."""
+        """Fetch price from CoinGecko API with API key support."""
         try:
+            if not await self._check_rate_limit("coingecko"):
+                return {"success": False, "error": "Rate limit exceeded for CoinGecko"}
+            
             if symbol not in self.symbol_mappings["coingecko"]:
                 return {"success": False, "error": f"Symbol {symbol} not supported"}
             
             coin_id = self.symbol_mappings["coingecko"][symbol]
             url = f"{self.apis['coingecko']['base_url']}/simple/price"
-            params = {
+            
+            base_params = {
                 "ids": coin_id,
                 "vs_currencies": "usd",
                 "include_24hr_change": "true",
-                "include_24hr_vol": "true"
+                "include_24hr_vol": "true",
+                "include_market_cap": "true"
             }
+            
+            params = self._get_api_params("coingecko", base_params)
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, params=params) as response:
@@ -283,6 +387,7 @@ class MarketDataFeeds:
                                     "price": coin_data.get("usd", 0),
                                     "change_24h": coin_data.get("usd_24h_change", 0),
                                     "volume_24h": coin_data.get("usd_24h_vol", 0),
+                                    "market_cap": coin_data.get("usd_market_cap", 0),
                                     "timestamp": datetime.utcnow().isoformat(),
                                     "source": "coingecko"
                                 }
@@ -421,6 +526,91 @@ class MarketDataFeeds:
                         
         except Exception as e:
             logger.error("Failed to get exchange rates", error=str(e))
+            return {"success": False, "error": str(e)}
+    
+    async def _fetch_alpha_vantage_price(self, symbol: str) -> Dict[str, Any]:
+        """Fetch price from Alpha Vantage API."""
+        try:
+            if not self.api_keys.get("alpha_vantage"):
+                return {"success": False, "error": "Alpha Vantage API key not configured"}
+            
+            if not await self._check_rate_limit("alpha_vantage"):
+                return {"success": False, "error": "Rate limit exceeded for Alpha Vantage"}
+            
+            url = self.apis['alpha_vantage']['base_url']
+            params = self._get_api_params("alpha_vantage", {
+                "function": "CURRENCY_EXCHANGE_RATE",
+                "from_currency": symbol,
+                "to_currency": "USD"
+            })
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        rate_data = data.get("Realtime Currency Exchange Rate", {})
+                        
+                        if rate_data:
+                            price = float(rate_data.get("5. Exchange Rate", 0))
+                            return {
+                                "success": True,
+                                "data": {
+                                    "symbol": symbol,
+                                    "price": price,
+                                    "change_24h": 0,  # Alpha Vantage doesn't provide 24h change in this endpoint
+                                    "volume_24h": 0,
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                    "source": "alpha_vantage"
+                                }
+                            }
+                    
+                    return {"success": False, "error": f"API error: {response.status}"}
+                    
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    async def _fetch_finnhub_price(self, symbol: str) -> Dict[str, Any]:
+        """Fetch price from Finnhub API."""
+        try:
+            if not self.api_keys.get("finnhub"):
+                return {"success": False, "error": "Finnhub API key not configured"}
+            
+            if not await self._check_rate_limit("finnhub"):
+                return {"success": False, "error": "Rate limit exceeded for Finnhub"}
+            
+            # Finnhub crypto symbols format
+            finnhub_symbol = f"BINANCE:{symbol}USDT"
+            url = f"{self.apis['finnhub']['base_url']}/quote"
+            
+            params = self._get_api_params("finnhub", {
+                "symbol": finnhub_symbol
+            })
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if data.get("c"):  # Current price
+                            current_price = float(data.get("c", 0))
+                            prev_close = float(data.get("pc", current_price))
+                            change_24h = ((current_price - prev_close) / prev_close * 100) if prev_close > 0 else 0
+                            
+                            return {
+                                "success": True,
+                                "data": {
+                                    "symbol": symbol,
+                                    "price": current_price,
+                                    "change_24h": change_24h,
+                                    "volume_24h": 0,  # Finnhub doesn't provide volume in quote endpoint
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                    "source": "finnhub"
+                                }
+                            }
+                    
+                    return {"success": False, "error": f"API error: {response.status}"}
+                    
+        except Exception as e:
             return {"success": False, "error": str(e)}
 
 

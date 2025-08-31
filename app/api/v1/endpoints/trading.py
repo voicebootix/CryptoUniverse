@@ -6,6 +6,7 @@ portfolio management, and real-time trading data for the AI money manager.
 """
 
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
@@ -14,6 +15,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -142,7 +144,7 @@ class MarketOverviewResponse(BaseModel):
     market_data: List[MarketDataItem]
 
 class RecentTrade(BaseModel):
-    id: int
+    id: str  # UUID as string
     symbol: str
     side: str
     amount: Decimal
@@ -188,9 +190,9 @@ async def execute_manual_trade(
             )
         
         # Check credit balance
-        credit_account = db.query(CreditAccount).filter(
-            CreditAccount.user_id == current_user.id
-        ).first()
+        stmt = select(CreditAccount).where(CreditAccount.user_id == current_user.id)
+        result = await db.execute(stmt)
+        credit_account = result.scalar_one_or_none()
         
         if not credit_account or credit_account.available_credits <= 0:
             raise HTTPException(
@@ -245,7 +247,7 @@ async def execute_manual_trade(
                     reference_id=result.get("trade_id")
                 )
                 db.add(credit_tx)
-                db.commit()
+                await db.commit()
         
         trade_result = result.get("trade_result", {}) or result.get("simulation_result", {})
         
@@ -299,9 +301,9 @@ async def start_autonomous_mode(
     try:
         if request.enable:
             # Validate credit balance for autonomous trading
-            credit_account = db.query(CreditAccount).filter(
-                CreditAccount.user_id == current_user.id
-            ).first()
+            stmt = select(CreditAccount).where(CreditAccount.user_id == current_user.id)
+            result = await db.execute(stmt)
+            credit_account = result.scalar_one_or_none()
             
             if not credit_account or credit_account.available_credits < 10:
                 raise HTTPException(
@@ -406,10 +408,12 @@ async def toggle_simulation_mode(
         else:
             # Switch to live trading
             # Verify user has real exchange accounts
-            exchange_accounts = db.query(ExchangeAccount).filter(
+            stmt = select(ExchangeAccount).where(
                 ExchangeAccount.user_id == current_user.id,
                 ExchangeAccount.is_active == True
-            ).count()
+            )
+            result = await db.execute(stmt)
+            exchange_accounts = len(result.scalars().all())
             
             if exchange_accounts == 0:
                 raise HTTPException(
@@ -531,15 +535,59 @@ async def get_market_overview(
         user_id=str(current_user.id)
     )
     try:
-        # In a real application, this data would come from the MarketAnalysisService
-        mock_market_data = [
-            {"symbol": "BTC", "price": Decimal("50000"), "change": 2.5, "volume": "2.1B"},
-            {"symbol": "ETH", "price": Decimal("2400"), "change": -1.2, "volume": "1.8B"},
-            {"symbol": "SOL", "price": Decimal("50"), "change": 5.8, "volume": "450M"},
-            {"symbol": "ADA", "price": Decimal("0.45"), "change": 3.2, "volume": "320M"},
-            {"symbol": "DOT", "price": Decimal("8.50"), "change": -0.8, "volume": "180M"},
+        # Get real market data from MarketAnalysisService
+        market_result = await market_analysis.realtime_price_tracking(
+            symbols="BTC,ETH,SOL,ADA,DOT,MATIC,LINK,UNI",
+            exchanges="all",
+            user_id=str(current_user.id)
+        )
+        
+        if market_result.get("success"):
+            market_data_items = []
+            data = market_result.get("data", {})
+            
+            for symbol, symbol_data in data.items():
+                if symbol_data.get("aggregated"):
+                    agg = symbol_data["aggregated"]
+                    # Calculate volume in readable format
+                    volume = agg.get("total_volume", 0)
+                    volume_str = f"{volume/1e9:.1f}B" if volume > 1e9 else f"{volume/1e6:.0f}M"
+                    
+                    market_data_items.append({
+                        "symbol": symbol,
+                        "price": Decimal(str(agg.get("average_price", 0))),
+                        "change": float(symbol_data.get("exchanges", [{}])[0].get("change_24h", 0)) if symbol_data.get("exchanges") else 0.0,
+                        "volume": volume_str
+                    })
+            
+            if market_data_items:
+                return MarketOverviewResponse(market_data=market_data_items)
+        
+        # Fallback to unified price service
+        from app.services.unified_price_service import get_market_overview_prices
+        fallback_prices = await get_market_overview_prices()
+        
+        if fallback_prices:
+            market_data_items = []
+            
+            for symbol, price in fallback_prices.items():
+                market_data_items.append({
+                    "symbol": symbol,
+                    "price": Decimal(str(price)),
+                    "change": 0.0,  # No change data available from price-only service
+                    "volume": "N/A"
+                })
+            
+            return MarketOverviewResponse(market_data=market_data_items)
+        
+        # Final fallback to prevent errors
+        logger.warning("All market data sources failed, using minimal fallback data")
+        fallback_data = [
+            {"symbol": "BTC", "price": Decimal("0"), "change": 0.0, "volume": "N/A"},
+            {"symbol": "ETH", "price": Decimal("0"), "change": 0.0, "volume": "N/A"},
         ]
-        return MarketOverviewResponse(market_data=mock_market_data)
+        return MarketOverviewResponse(market_data=fallback_data)
+        
     except Exception as e:
         logger.error("Market overview retrieval failed", error=str(e))
         raise HTTPException(
@@ -549,7 +597,8 @@ async def get_market_overview(
 
 @router.get("/recent-trades", response_model=RecentTradesResponse)
 async def get_recent_trades(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
 ):
     """Get recent trading activity."""
     await rate_limiter.check_rate_limit(
@@ -559,40 +608,53 @@ async def get_recent_trades(
         user_id=str(current_user.id)
     )
     try:
-        # In a real application, this data would come from the database
-        mock_recent_trades = [
+        # Get real trades from database using async SQLAlchemy 2.0 pattern
+        stmt = select(Trade).where(
+            Trade.user_id == current_user.id
+        ).order_by(Trade.created_at.desc()).limit(10)
+        
+        result = await db.execute(stmt)
+        trades = result.scalars().all()
+        
+        if trades:
+            trade_list = []
+            for trade in trades:
+                # Calculate time difference
+                time_diff = datetime.utcnow() - trade.created_at
+                if time_diff.total_seconds() < 3600:  # Less than 1 hour
+                    time_str = f"{int(time_diff.total_seconds() / 60)} min ago"
+                elif time_diff.total_seconds() < 86400:  # Less than 1 day
+                    time_str = f"{int(time_diff.total_seconds() / 3600)} hour ago"
+                else:
+                    time_str = trade.created_at.strftime("%Y-%m-%d")
+                
+                trade_list.append({
+                    "id": str(trade.id),  # Convert UUID to string
+                    "symbol": trade.symbol,
+                    "side": trade.action.value,  # Use action enum, convert to string
+                    "amount": Decimal(str(trade.quantity)),  # Preserve decimal precision
+                    "price": Decimal(str(trade.executed_price or trade.price or 0)),  # Preserve decimal precision
+                    "time": time_str,
+                    "status": trade.status.value,  # Convert enum to string
+                    "pnl": Decimal(str(trade.profit_realized_usd)),  # Preserve decimal precision
+                })
+            
+            return RecentTradesResponse(recent_trades=trade_list)
+        
+        # Fallback to demo data if no trades exist
+        demo_trades = [
             {
-                "id": 1,
+                "id": "0",  # String to match RecentTrade.id type
                 "symbol": "BTC",
                 "side": "buy",
-                "amount": Decimal("0.1"),
-                "price": Decimal("49800"),
-                "time": "2 min ago",
-                "status": "completed",
-                "pnl": Decimal("120.50"),
-            },
-            {
-                "id": 2,
-                "symbol": "ETH",
-                "side": "sell",
-                "amount": Decimal("2.0"),
-                "price": Decimal("2420"),
-                "time": "15 min ago",
-                "status": "completed",
-                "pnl": Decimal("-45.20"),
-            },
-            {
-                "id": 3,
-                "symbol": "SOL",
-                "side": "buy",
-                "amount": Decimal("50"),
-                "price": Decimal("48.50"),
-                "time": "1 hour ago",
-                "status": "pending",
+                "amount": Decimal("0.001"),
+                "price": Decimal("0"),
+                "time": "No trades yet",
+                "status": "demo",
                 "pnl": Decimal("0"),
-            },
+            }
         ]
-        return RecentTradesResponse(recent_trades=mock_recent_trades)
+        return RecentTradesResponse(recent_trades=demo_trades)
     except Exception as e:
         logger.error("Recent trades retrieval failed", error=str(e))
         raise HTTPException(
@@ -615,10 +677,52 @@ async def websocket_endpoint(
     
     try:
         while True:
-            # Keep the connection alive
+            # Receive client messages
             data = await websocket.receive_text()
-            # Echo back for testing
-            await websocket.send_text(f"Echo: {data}")
+            
+            try:
+                message = json.loads(data)
+                message_type = message.get("type")
+                
+                if message_type == "subscribe_market":
+                    # Subscribe to market data updates
+                    symbols = message.get("symbols", [])
+                    await manager.subscribe_to_market_data(websocket, symbols)
+                    await websocket.send_json({
+                        "type": "subscription_confirmed",
+                        "symbols": symbols,
+                        "message": f"Subscribed to market data for {', '.join(symbols)}"
+                    })
+                
+                elif message_type == "unsubscribe_market":
+                    # Unsubscribe from market data
+                    symbols = message.get("symbols", [])
+                    await manager.unsubscribe_from_market_data(websocket, symbols)
+                    await websocket.send_json({
+                        "type": "unsubscription_confirmed",
+                        "symbols": symbols,
+                        "message": f"Unsubscribed from market data for {', '.join(symbols)}"
+                    })
+                
+                elif message_type == "ping":
+                    # Heartbeat
+                    await websocket.send_json({
+                        "type": "pong",
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+                
+                else:
+                    # Echo back for testing
+                    await websocket.send_json({
+                        "type": "echo",
+                        "data": message,
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+                    
+            except json.JSONDecodeError:
+                # Handle plain text messages
+                await websocket.send_text(f"Echo: {data}")
+                
     except WebSocketDisconnect:
         manager.disconnect(websocket, user_id)
 
