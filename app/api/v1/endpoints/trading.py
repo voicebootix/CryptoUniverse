@@ -26,7 +26,7 @@ from app.services.trade_execution import TradeExecutionService
 from app.services.master_controller import MasterSystemController
 from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
 from app.services.market_analysis_core import MarketAnalysisService
-from app.services.real_market_data_service import real_market_data_service
+# Using existing MarketAnalysisService instead
 from app.services.rate_limit import rate_limiter
 from app.services.websocket import manager
 
@@ -561,16 +561,17 @@ async def get_market_overview(
         user_id=str(current_user.id)
     )
     try:
-        # Get real market data from real market data service
-        market_data_result = await real_market_data_service.get_market_overview()
+        # Use your existing sophisticated MarketAnalysisService
+        market_data_result = await market_analysis.get_market_overview()
         
-        if not market_data_result.get("success"):
+        if market_data_result.get("success"):
+            return MarketOverviewResponse(market_data=market_data_result.get("market_data", []))
+        else:
+            # If your market analysis service isn't ready, return error
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Market data service unavailable: {market_data_result.get('error')}"
+                detail="Market analysis service unavailable"
             )
-        
-        return MarketOverviewResponse(market_data=market_data_result["market_data"])
     except Exception as e:
         logger.error("Market overview retrieval failed", error=str(e))
         raise HTTPException(
