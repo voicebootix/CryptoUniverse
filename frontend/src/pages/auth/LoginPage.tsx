@@ -380,7 +380,6 @@ const LoginPage: React.FC = () => {
                         <div className="relative group">
                           <Input
                             id="email"
-                            name="email"
                             type="email"
                             autoComplete="username"
                             placeholder="Enter your email address"
@@ -421,7 +420,6 @@ const LoginPage: React.FC = () => {
                         <div className="relative group">
                           <Input
                             id="password"
-                            name="password"
                             type={showPassword ? "text" : "password"}
                             autoComplete="current-password"
                             placeholder="Enter your password"
