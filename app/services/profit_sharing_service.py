@@ -30,15 +30,15 @@ logger = structlog.get_logger(__name__)
 
 class ProfitSharingService(LoggerMixin):
     """
-    Revolutionary profit-sharing service.
+    Revolutionary credit-based profit potential system.
     
-    Users pay 25% of profits, get credits equal to fees paid,
-    can use credits to purchase additional strategies.
+    Users pay for profit potential in credits, get strategies to earn that potential.
+    More strategies = faster profit generation.
     """
     
     def __init__(self):
-        self.profit_share_percentage = 25.0  # 25% of profits
-        self.credit_to_dollar_ratio = 1.0    # 1 credit = $1 earning potential
+        self.credit_to_profit_ratio = 4.0    # $1 credit = $4 profit potential
+        self.credit_to_dollar_cost = 1.0     # $1 = 1 credit
         
         # Base package strategies (included free)
         self.base_package_strategies = [
@@ -65,13 +65,13 @@ class ProfitSharingService(LoggerMixin):
             # Community strategies will be priced dynamically based on performance
         }
     
-    async def calculate_profit_sharing(
+    async def calculate_profit_potential_usage(
         self, 
         user_id: str, 
         period_start: datetime,
         period_end: datetime
     ) -> Dict[str, Any]:
-        """Calculate profit sharing and credit allocation for user."""
+        """Calculate how much profit potential user has used and remaining."""
         try:
             async for db in get_database():
                 # Get all completed trades in period
@@ -98,52 +98,43 @@ class ProfitSharingService(LoggerMixin):
                         "message": "No profitable trades in period"
                     }
                 
-                # Calculate total profit (only positive P&L)
-                total_profit = sum(
+                # Calculate total profit earned
+                total_profit_earned = sum(
                     float(trade.profit_realized_usd) 
                     for trade in trades 
                     if trade.profit_realized_usd > 0
                 )
                 
-                # Calculate total losses (for net calculation)
-                total_losses = sum(
-                    abs(float(trade.profit_realized_usd))
-                    for trade in trades
-                    if trade.profit_realized_usd < 0
-                )
+                # Get user's current credit account
+                credit_stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
+                credit_result = await db.execute(credit_stmt)
+                credit_account = credit_result.scalar_one_or_none()
                 
-                # Net profit calculation
-                net_profit = total_profit - total_losses
+                if not credit_account:
+                    return {"success": False, "error": "No credit account found"}
                 
-                if net_profit <= 0:
-                    return {
-                        "success": True,
-                        "total_profit": 0,
-                        "platform_fee": 0,
-                        "user_keeps": 0,
-                        "credits_earned": 0,
-                        "message": "No net profit in period"
-                    }
+                # Calculate profit potential purchased
+                total_credits_purchased = credit_account.total_purchased_credits
+                profit_potential = total_credits_purchased * self.credit_to_profit_ratio
                 
-                # Calculate platform fee (25% of NET profit)
-                platform_fee = net_profit * (self.profit_share_percentage / 100)
-                user_keeps = net_profit - platform_fee
+                # Calculate remaining profit potential
+                remaining_potential = profit_potential - total_profit_earned
                 
-                # Credits earned = platform fee paid (1:1 ratio)
-                credits_earned = int(platform_fee * self.credit_to_dollar_ratio)
+                # Check if user needs to buy more credits
+                needs_more_credits = remaining_potential <= 0
                 
                 return {
                     "success": True,
                     "period_start": period_start.isoformat(),
                     "period_end": period_end.isoformat(),
-                    "total_profit": total_profit,
-                    "total_losses": total_losses,
-                    "net_profit": net_profit,
-                    "platform_fee": platform_fee,
-                    "user_keeps": user_keeps,
-                    "credits_earned": credits_earned,
-                    "profit_share_percentage": self.profit_share_percentage,
-                    "trades_analyzed": len(trades)
+                    "total_profit_earned": total_profit_earned,
+                    "total_credits_purchased": total_credits_purchased,
+                    "profit_potential": profit_potential,
+                    "remaining_potential": remaining_potential,
+                    "needs_more_credits": needs_more_credits,
+                    "utilization_percentage": (total_profit_earned / profit_potential * 100) if profit_potential > 0 else 0,
+                    "trades_analyzed": len(trades),
+                    "message": "Credits consumed as profits are earned" if not needs_more_credits else "Buy more credits to continue earning"
                 }
                 
         except Exception as e:
