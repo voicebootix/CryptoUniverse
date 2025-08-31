@@ -102,6 +102,22 @@ class MarketDataFeeds:
                 "max_requests": config["rate_limit"]
             }
         
+        # ENTERPRISE CACHING AND FALLBACK CONFIGURATION
+        self.cache_ttl = {
+            "price": 30,      # 30 seconds for prices
+            "market": 300,    # 5 minutes for market data
+            "trending": 600,  # 10 minutes for trending
+            "global": 900     # 15 minutes for global data
+        }
+        
+        # API fallback hierarchy for different data types
+        self.api_fallbacks = {
+            "price": ["coingecko", "coincap", "coinpaprika"],
+            "market": ["coingecko", "alpha_vantage", "finnhub"],
+            "trending": ["coingecko", "coinpaprika"],
+            "global": ["coingecko", "coinpaprika"]
+        }
+        
         # Symbol mappings for different APIs
         self.symbol_mappings = {
             "coingecko": {
@@ -127,6 +143,18 @@ class MarketDataFeeds:
                 "UNI": "uniswap",
                 "AVAX": "avalanche",
                 "ATOM": "cosmos"
+            },
+            "coinpaprika": {
+                "BTC": "btc-bitcoin",
+                "ETH": "eth-ethereum",
+                "SOL": "sol-solana",
+                "ADA": "ada-cardano",
+                "DOT": "dot-polkadot",
+                "MATIC": "matic-polygon",
+                "LINK": "link-chainlink",
+                "UNI": "uni-uniswap",
+                "AVAX": "avax-avalanche",
+                "ATOM": "atom-cosmos"
             }
         }
         
@@ -226,6 +254,64 @@ class MarketDataFeeds:
             logger.error(f"Failed to get price for {symbol}", error=str(e))
             return {"success": False, "error": str(e)}
     
+    async def get_price_with_enterprise_fallback(self, symbol: str, data_type: str = "price") -> Dict[str, Any]:
+        """ENTERPRISE-GRADE price fetching with comprehensive fallback strategies."""
+        cache_key = f"{data_type}:{symbol}"
+        
+        try:
+            # Check cache first
+            cached_data = await self.redis.get(cache_key)
+            if cached_data:
+                import json
+                return json.loads(cached_data)
+            
+            # Get fallback hierarchy for this data type
+            api_hierarchy = self.api_fallbacks.get(data_type, ["coingecko", "coincap"])
+            
+            last_error = None
+            for api_name in api_hierarchy:
+                try:
+                    # Check rate limits
+                    if not self._check_rate_limit(api_name):
+                        logger.warning(f"Rate limit exceeded for {api_name}, trying next API")
+                        continue
+                    
+                    # Attempt to fetch data
+                    if api_name == "coingecko":
+                        result = await self._fetch_coingecko_price(symbol)
+                    elif api_name == "coincap":
+                        result = await self._fetch_coincap_price(symbol)
+                    elif api_name == "coinpaprika":
+                        result = await self._fetch_coinpaprika_price(symbol)
+                    else:
+                        continue
+                    
+                    if result.get("success"):
+                        # Cache successful result
+                        import json
+                        await self.redis.setex(
+                            cache_key,
+                            self.cache_ttl.get(data_type, 60),
+                            json.dumps(result)
+                        )
+                        return result
+                        
+                except Exception as e:
+                    logger.warning(f"API {api_name} failed for {symbol}: {str(e)}")
+                    last_error = e
+                    continue
+            
+            # All APIs failed, return error
+            return {
+                "success": False,
+                "error": f"All APIs failed. Last error: {str(last_error)}",
+                "data": {}
+            }
+            
+        except Exception as e:
+            logger.error(f"Enterprise fallback failed for {symbol}: {str(e)}")
+            return {"success": False, "error": str(e), "data": {}}
+
     async def get_detailed_market_data(self, symbol: str) -> Dict[str, Any]:
         """Get detailed market data including volume, market cap, etc."""
         try:
@@ -605,6 +691,44 @@ class MarketDataFeeds:
                                     "volume_24h": 0,  # Finnhub doesn't provide volume in quote endpoint
                                     "timestamp": datetime.utcnow().isoformat(),
                                     "source": "finnhub"
+                                }
+                            }
+                    
+                    return {"success": False, "error": f"API error: {response.status}"}
+                    
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    async def _fetch_coinpaprika_price(self, symbol: str) -> Dict[str, Any]:
+        """Fetch price from CoinPaprika API as additional fallback."""
+        try:
+            if symbol not in self.symbol_mappings.get("coinpaprika", {}):
+                return {"success": False, "error": f"Symbol {symbol} not supported"}
+            
+            if not await self._check_rate_limit("coinpaprika"):
+                return {"success": False, "error": "Rate limit exceeded"}
+            
+            mapped_symbol = self.symbol_mappings["coinpaprika"][symbol]
+            
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.apis['coinpaprika']['base_url']}/tickers/{mapped_symbol}"
+                
+                async with session.get(url, timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        if data and "quotes" in data and "USD" in data["quotes"]:
+                            quote = data["quotes"]["USD"]
+                            return {
+                                "success": True,
+                                "data": {
+                                    "symbol": symbol,
+                                    "price": float(quote["price"]),
+                                    "market_cap": float(quote.get("market_cap", 0)),
+                                    "volume_24h": float(quote.get("volume_24h", 0)),
+                                    "percent_change_24h": float(quote.get("percent_change_24h", 0)),
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                    "source": "coinpaprika"
                                 }
                             }
                     

@@ -19,7 +19,7 @@ from app.core.config import get_settings
 from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
-from app.services.market_analysis_core import MarketAnalysisService
+from app.services.market_analysis_core import market_analysis_service
 from app.services.market_data_feeds import MarketDataFeeds, get_crypto_price, get_crypto_prices, get_market_overview
 from app.services.health_monitor import health_monitor
 from app.services.rate_limit import rate_limiter
@@ -29,8 +29,8 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
-# Initialize services
-market_analysis = MarketAnalysisService()
+# Use shared singleton instances - ENTERPRISE PATTERN
+market_analysis = market_analysis_service
 # Use shared singleton from market_data_feeds module
 
 
@@ -63,8 +63,15 @@ class TechnicalAnalysisRequest(BaseModel):
 
 
 class SentimentAnalysisRequest(BaseModel):
-    symbols: str
+    symbols: Union[str, List[str]]
     timeframes: Optional[str] = "1h,4h,1d"
+    
+    @model_validator(mode='after')
+    def normalize_symbols(self):
+        # Convert array to comma-separated string if needed
+        if isinstance(self.symbols, list):
+            self.symbols = ','.join(self.symbols)
+        return self
 
 
 class ArbitrageRequest(BaseModel):
@@ -88,8 +95,15 @@ class ArbitrageRequest(BaseModel):
 
 
 class MarketAssessmentRequest(BaseModel):
-    symbols: str
+    symbols: Union[str, List[str]]
     depth: str = "comprehensive"
+    
+    @model_validator(mode='after')
+    def normalize_symbols(self):
+        # Convert array to comma-separated string if needed
+        if isinstance(self.symbols, list):
+            self.symbols = ','.join(self.symbols)
+        return self
     
     @field_validator('depth')
     @classmethod

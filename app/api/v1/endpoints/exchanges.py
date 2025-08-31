@@ -7,6 +7,8 @@ for the AI money manager platform with encrypted storage and security.
 
 import asyncio
 import base64
+import threading
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 
@@ -54,6 +56,37 @@ def get_encryption_key():
 
 encryption_key = get_encryption_key()
 cipher_suite = Fernet(encryption_key)
+
+
+# ENTERPRISE KRAKEN NONCE MANAGER
+class KrakenNonceManager:
+    """Enterprise-grade Kraken nonce manager to prevent EAPI:Invalid nonce errors."""
+    
+    def __init__(self):
+        self._last_nonce = 0
+        self._lock = threading.Lock()
+        self._nonce_increment = 0
+    
+    def get_nonce(self) -> str:
+        """Generate a unique, strictly increasing nonce for Kraken API calls."""
+        with self._lock:
+            current_time_microseconds = int(time.time() * 1000000)
+            
+            # Ensure nonce is always increasing
+            if current_time_microseconds <= self._last_nonce:
+                # If time hasn't advanced enough, increment from last nonce
+                self._last_nonce += 1
+            else:
+                self._last_nonce = current_time_microseconds
+            
+            # Add a small increment to handle high-frequency calls
+            self._nonce_increment = (self._nonce_increment + 1) % 1000
+            final_nonce = self._last_nonce + self._nonce_increment
+            
+            return str(final_nonce)
+
+# Global nonce manager instance
+kraken_nonce_manager = KrakenNonceManager()
 
 
 # Request/Response Models
@@ -1012,7 +1045,7 @@ async def fetch_kraken_balances(api_key: str, api_secret: str) -> List[Dict[str,
         
         base_url = "https://api.kraken.com"
         endpoint = "/0/private/Balance"
-        nonce = str(int(time.time() * 1000000))
+        nonce = kraken_nonce_manager.get_nonce()  # ENTERPRISE NONCE MANAGEMENT
         
         # Prepare POST data
         post_data = urllib.parse.urlencode({"nonce": nonce})
@@ -1326,10 +1359,12 @@ async def sync_exchange_balances(user_id: str, exchange: str, api_key_id: str):
 
 
 async def update_balance_records(user_id: str, exchange: str, balances: List[Dict], db: AsyncSession):
-    """Update balance records in database."""
+    """Update balance records in database using ENTERPRISE UPSERT logic."""
     try:
-        from sqlalchemy import select, delete
+        from sqlalchemy import select, update
+        from sqlalchemy.dialects.postgresql import insert
         from decimal import Decimal
+        import uuid
         
         # Get the exchange account
         account_result = await db.execute(
@@ -1344,31 +1379,62 @@ async def update_balance_records(user_id: str, exchange: str, balances: List[Dic
             logger.error(f"No exchange account found for user {user_id}, exchange {exchange}")
             return
         
-        # Delete existing balance records for this account
-        await db.execute(
-            delete(ExchangeBalance).filter(ExchangeBalance.account_id == account.id)
-        )
-        
-        # Insert new balance records
+        # ENTERPRISE UPSERT LOGIC - Handle concurrent updates gracefully
+        updated_count = 0
         for balance in balances:
             if balance.get("total", 0) > 0:  # Only store non-zero balances
-                exchange_balance = ExchangeBalance(
-                    account_id=account.id,
-                    symbol=balance.get("asset", ""),
-                    total_balance=Decimal(str(balance.get("total", 0))),
-                    available_balance=Decimal(str(balance.get("free", 0))),
-                    locked_balance=Decimal(str(balance.get("locked", 0))),
-                    usd_value=Decimal(str(balance.get("value_usd", 0))),
-                    last_sync_at=datetime.utcnow()
+                balance_data = {
+                    "id": uuid.uuid4(),
+                    "account_id": account.id,
+                    "symbol": balance.get("asset", ""),
+                    "asset_type": "crypto",
+                    "total_balance": Decimal(str(balance.get("total", 0))),
+                    "available_balance": Decimal(str(balance.get("free", 0))),
+                    "locked_balance": Decimal(str(balance.get("locked", 0))),
+                    "usd_value": Decimal(str(balance.get("value_usd", 0))),
+                    "is_active": True,
+                    "sync_enabled": True,
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                    "last_sync_at": datetime.utcnow()
+                }
+                
+                # PostgreSQL UPSERT - INSERT ON CONFLICT UPDATE
+                stmt = insert(ExchangeBalance).values(balance_data)
+                stmt = stmt.on_conflict_do_update(
+                    constraint="unique_account_symbol_balance",
+                    set_={
+                        "total_balance": stmt.excluded.total_balance,
+                        "available_balance": stmt.excluded.available_balance,
+                        "locked_balance": stmt.excluded.locked_balance,
+                        "usd_value": stmt.excluded.usd_value,
+                        "updated_at": stmt.excluded.updated_at,
+                        "last_sync_at": stmt.excluded.last_sync_at,
+                        "is_active": True
+                    }
                 )
-                db.add(exchange_balance)
+                
+                await db.execute(stmt)
+                updated_count += 1
+        
+        # Set inactive for balances not in current update (zero balances)
+        current_symbols = [b.get("asset", "") for b in balances if b.get("total", 0) > 0]
+        if current_symbols:
+            await db.execute(
+                update(ExchangeBalance)
+                .where(
+                    ExchangeBalance.account_id == account.id,
+                    ~ExchangeBalance.symbol.in_(current_symbols)
+                )
+                .values(is_active=False, updated_at=datetime.utcnow())
+            )
         
         await db.commit()
-        logger.info(f"Updated {len(balances)} balance records for user {user_id}, exchange {exchange}")
+        logger.info(f"Updated {updated_count} balance records for user {user_id}, exchange {exchange}")
         
     except Exception as e:
         await db.rollback()
-        logger.error("Balance update failed", error=str(e))
+        logger.error("Balance update failed", error=str(e), exc_info=True)
 
 
 async def get_daily_volume_usage(user_id: str, exchange: str) -> float:

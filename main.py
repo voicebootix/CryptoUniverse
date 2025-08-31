@@ -72,6 +72,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await background_manager.start_all()
         logger.info("✅ Background services started")
 
+        # Start enhanced system monitoring
+        try:
+            from app.services.system_monitoring import system_monitoring_service
+            await system_monitoring_service.start_monitoring(interval_seconds=30)
+            logger.info("✅ Enhanced system monitoring started")
+        except Exception as e:
+            logger.warning("⚠️ System monitoring failed to start", error=str(e))
+
         logger.info(
             "🎉 CryptoUniverse Enterprise is ready!",
             api_docs=f"{settings.BASE_URL}/api/docs" if settings.ENVIRONMENT == "development" else "Contact admin",
@@ -87,6 +95,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("🔄 CryptoUniverse Enterprise shutting down...")
 
     try:
+        # Stop enhanced system monitoring  
+        try:
+            from app.services.system_monitoring import system_monitoring_service
+            await system_monitoring_service.stop_monitoring()
+            logger.info("✅ Enhanced system monitoring stopped")
+        except Exception as e:
+            logger.warning("⚠️ System monitoring cleanup failed", error=str(e))
+
         # Stop background services
         await background_manager.stop_all()
         logger.info("✅ Background services stopped")

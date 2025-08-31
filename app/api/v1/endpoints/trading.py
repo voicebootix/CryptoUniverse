@@ -27,7 +27,7 @@ from app.models.credit import CreditAccount, CreditTransaction
 from app.services.trade_execution import TradeExecutionService
 from app.services.master_controller import MasterSystemController
 from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
-from app.services.market_analysis_core import MarketAnalysisService
+from app.services.market_analysis_core import market_analysis_service
 from app.services.rate_limit import rate_limiter
 from app.services.websocket import manager
 
@@ -36,11 +36,11 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
-# Initialize services
+# Initialize services - ENTERPRISE SINGLETON PATTERN
 trade_executor = TradeExecutionService()
 master_controller = MasterSystemController()
 risk_service = PortfolioRiskServiceExtended()
-market_analysis = MarketAnalysisService()
+market_analysis = market_analysis_service  # Use global singleton
 
 
 # Request/Response Models
@@ -966,6 +966,46 @@ async def get_arbitrage_orderbook(
             "data": {"symbol": symbol, "exchange_orderbooks": {}, "unified_orderbook": {"bids": [], "asks": []}},
             "error": str(e)
         }
+
+
+# Market Analysis Endpoints (Trading namespace compatibility)
+@router.post("/market/sentiment")
+async def get_market_sentiment(
+    current_user: User = Depends(get_current_user)
+):
+    """Get market sentiment analysis - TRADING namespace compatibility endpoint."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:sentiment_analysis",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # Default parameters for sentiment analysis
+        result = await market_analysis.market_sentiment(
+            symbols="BTC,ETH,SOL,ADA,DOT,MATIC,LINK,UNI",
+            timeframes="1h,4h,1d",
+            user_id=str(current_user.id)
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("error", "Sentiment analysis failed")
+            )
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Market sentiment analysis failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Sentiment analysis failed: {str(e)}"
+        )
 
 
 # Helper Functions

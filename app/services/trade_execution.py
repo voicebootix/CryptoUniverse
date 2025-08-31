@@ -480,7 +480,9 @@ class ExchangeConnector(LoggerMixin):
         if not config.get("api_key") or not config.get("secret_key"):
             raise Exception("Kraken API credentials not configured")
         
-        nonce = str(int(time.time() * 1000000))
+        # ENTERPRISE KRAKEN NONCE MANAGEMENT - Import and use global nonce manager
+        from app.api.v1.endpoints.exchanges import kraken_nonce_manager
+        nonce = kraken_nonce_manager.get_nonce()
         params = {
             "nonce": nonce,
             "pair": order_params["symbol"].replace("/", ""),
