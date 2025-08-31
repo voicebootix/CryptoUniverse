@@ -7,12 +7,12 @@ technical analysis, sentiment analysis, and arbitrage opportunities.
 
 import asyncio
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from decimal import Decimal
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -42,9 +42,16 @@ class PriceTrackingResponse(BaseModel):
 
 
 class TechnicalAnalysisRequest(BaseModel):
-    symbols: str
+    symbols: Union[str, List[str]]
     timeframe: str = "1h"
     indicators: Optional[str] = None
+    
+    @model_validator(mode='after')
+    def normalize_symbols(self):
+        # Convert array to comma-separated string if needed
+        if isinstance(self.symbols, list):
+            self.symbols = ','.join(self.symbols)
+        return self
     
     @field_validator('timeframe')
     @classmethod
@@ -61,9 +68,16 @@ class SentimentAnalysisRequest(BaseModel):
 
 
 class ArbitrageRequest(BaseModel):
-    symbols: str = "BTC,ETH,SOL"
+    symbols: Union[str, List[str]] = "BTC,ETH,SOL"
     exchanges: str = "all"
     min_profit_bps: int = 5
+    
+    @model_validator(mode='after')
+    def normalize_symbols(self):
+        # Convert array to comma-separated string if needed
+        if isinstance(self.symbols, list):
+            self.symbols = ','.join(self.symbols)
+        return self
     
     @field_validator('min_profit_bps')
     @classmethod

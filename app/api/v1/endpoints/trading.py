@@ -771,6 +771,203 @@ async def emergency_stop_all_trading(
         )
 
 
+# Arbitrage Endpoints
+@router.get("/arbitrage/opportunities")
+async def get_arbitrage_opportunities(
+    current_user: User = Depends(get_current_user)
+):
+    """Get real-time arbitrage opportunities across exchanges."""
+    
+    await rate_limiter.check_rate_limit(
+        key="trading:arbitrage_opportunities",
+        limit=30,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        result = await market_analysis.cross_exchange_arbitrage_scanner(
+            symbols="BTC,ETH,SOL,ADA,DOT,MATIC,LINK,UNI",
+            exchanges="binance,kraken,kucoin",
+            min_profit_bps=5,
+            user_id=str(current_user.id)
+        )
+        
+        if result.get("success"):
+            return {
+                "success": True,
+                "data": {
+                    "opportunities": result["data"]["opportunities"],
+                    "total_found": len(result["data"]["opportunities"]),
+                    "metadata": result["data"]["metadata"]
+                }
+            }
+        else:
+            return {
+                "success": False,
+                "data": {"opportunities": []},
+                "error": result.get("error", "Failed to scan arbitrage opportunities")
+            }
+            
+    except Exception as e:
+        logger.error("Arbitrage opportunities scan failed", error=str(e), exc_info=True)
+        return {
+            "success": False,
+            "data": {"opportunities": []},
+            "error": str(e)
+        }
+
+
+@router.get("/arbitrage/cross-exchange-comparison")
+async def get_cross_exchange_comparison(
+    symbols: str = "BTC,ETH,SOL",
+    current_user: User = Depends(get_current_user)
+):
+    """Get cross-exchange price comparison for arbitrage analysis."""
+    
+    await rate_limiter.check_rate_limit(
+        key="trading:cross_exchange",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        symbol_list = [s.strip().upper() for s in symbols.split(",")]
+        exchange_list = ["binance", "kraken", "kucoin"]
+        
+        comparison_data = []
+        
+        for symbol in symbol_list:
+            prices = {}
+            
+            # Get prices from all exchanges
+            for exchange in exchange_list:
+                try:
+                    price_data = await market_analysis._get_symbol_price(exchange, symbol)
+                    if price_data and price_data.get("price"):
+                        prices[exchange] = {
+                            "price": float(price_data["price"]),
+                            "volume": float(price_data.get("volume", 0)),
+                            "timestamp": price_data.get("timestamp")
+                        }
+                except Exception as e:
+                    logger.debug(f"Failed to get {symbol} price from {exchange}: {str(e)}")
+                    continue
+            
+            if len(prices) >= 2:
+                # Calculate spreads
+                price_values = [data["price"] for data in prices.values()]
+                max_price = max(price_values)
+                min_price = min(price_values)
+                spread_percentage = ((max_price - min_price) / min_price) * 100
+                
+                comparison_data.append({
+                    "symbol": symbol,
+                    "exchanges": prices,
+                    "spread": {
+                        "absolute": round(max_price - min_price, 6),
+                        "percentage": round(spread_percentage, 4),
+                        "max_price": max_price,
+                        "min_price": min_price
+                    },
+                    "arbitrage_potential": spread_percentage > 0.1  # 0.1% threshold
+                })
+        
+        return {
+            "success": True,
+            "data": {
+                "comparisons": comparison_data,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        }
+        
+    except Exception as e:
+        logger.error("Cross-exchange comparison failed", error=str(e), exc_info=True)
+        return {
+            "success": False,
+            "data": {"comparisons": []},
+            "error": str(e)
+        }
+
+
+@router.get("/arbitrage/orderbook/{symbol}")
+async def get_arbitrage_orderbook(
+    symbol: str,
+    exchanges: str = "binance,kraken,kucoin",
+    current_user: User = Depends(get_current_user)
+):
+    """Get orderbook data for arbitrage analysis."""
+    
+    await rate_limiter.check_rate_limit(
+        key="trading:orderbook",
+        limit=100,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        symbol = symbol.upper()
+        exchange_list = [e.strip().lower() for e in exchanges.split(",")]
+        
+        orderbooks = {}
+        
+        # Get orderbook from each exchange
+        for exchange in exchange_list:
+            try:
+                # For now, return mock orderbook data
+                # TODO: Implement real orderbook fetching from exchanges
+                orderbooks[exchange] = {
+                    "bids": [
+                        {"price": 50000 + (i * 10), "quantity": 0.1 * (5 - i)} 
+                        for i in range(5)
+                    ],
+                    "asks": [
+                        {"price": 50100 + (i * 10), "quantity": 0.1 * (5 - i)} 
+                        for i in range(5)
+                    ],
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            except Exception as e:
+                logger.debug(f"Failed to get {symbol} orderbook from {exchange}: {str(e)}")
+                continue
+        
+        # Calculate unified orderbook (best bids/asks across all exchanges)
+        all_bids = []
+        all_asks = []
+        
+        for exchange, book in orderbooks.items():
+            for bid in book["bids"]:
+                all_bids.append({**bid, "exchange": exchange})
+            for ask in book["asks"]:
+                all_asks.append({**ask, "exchange": exchange})
+        
+        # Sort bids (highest first) and asks (lowest first)
+        all_bids.sort(key=lambda x: x["price"], reverse=True)
+        all_asks.sort(key=lambda x: x["price"])
+        
+        return {
+            "success": True,
+            "data": {
+                "symbol": symbol,
+                "exchange_orderbooks": orderbooks,
+                "unified_orderbook": {
+                    "bids": all_bids[:10],  # Top 10 bids
+                    "asks": all_asks[:10],  # Top 10 asks
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        }
+        
+    except Exception as e:
+        logger.error("Orderbook fetch failed", error=str(e), exc_info=True)
+        return {
+            "success": False,
+            "data": {"symbol": symbol, "exchange_orderbooks": {}, "unified_orderbook": {"bids": [], "asks": []}},
+            "error": str(e)
+        }
+
+
 # Helper Functions
 def calculate_credit_cost(amount: Decimal, symbol: str) -> int:
     """Calculate credit cost for a trade."""

@@ -28,6 +28,8 @@ from app.services.portfolio_risk import (
     PortfolioPosition, RiskMetrics, OptimizationResult,
     ExchangePortfolioConnector, RiskCalculationEngine, PortfolioOptimizationEngine
 )
+from app.models.exchange import ExchangeBalance, ExchangeAccount
+from app.models.trading import Portfolio
 
 logger = structlog.get_logger(__name__)
 

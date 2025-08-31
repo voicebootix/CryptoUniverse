@@ -1808,6 +1808,125 @@ class MarketAnalysisService(LoggerMixin):
             self.logger.error("Exchange asset discovery failed", error=str(e), exc_info=True)
             return {"success": False, "error": str(e), "function": "discover_exchange_assets"}
     
+    async def cross_exchange_arbitrage_scanner(
+        self,
+        symbols: str = "BTC,ETH,SOL,ADA",
+        exchanges: str = "binance,kraken,kucoin",
+        min_profit_bps: int = 5,
+        user_id: str = "system"
+    ) -> Dict[str, Any]:
+        """ENTERPRISE CROSS-EXCHANGE ARBITRAGE SCANNER - Identify profitable arbitrage opportunities."""
+        
+        start_time = time.time()
+        
+        try:
+            await self._update_performance_metrics(time.time() - start_time, True, user_id)
+            
+            symbol_list = [s.strip().upper() for s in symbols.split(",")]
+            exchange_list = [e.strip().lower() for e in exchanges.split(",")]
+            
+            opportunities = []
+            total_scanned = 0
+            
+            # Scan each symbol across all exchanges
+            for symbol in symbol_list:
+                prices = {}
+                
+                # Get prices from all exchanges
+                for exchange in exchange_list:
+                    try:
+                        price_data = await self._get_symbol_price(exchange, symbol)
+                        if price_data and price_data.get("price"):
+                            prices[exchange] = {
+                                "price": float(price_data["price"]),
+                                "volume": float(price_data.get("volume", 0)),
+                                "timestamp": price_data.get("timestamp", datetime.utcnow().isoformat())
+                            }
+                    except Exception as e:
+                        self.logger.debug(f"Failed to get {symbol} price from {exchange}: {str(e)}")
+                        continue
+                
+                total_scanned += len(exchange_list)
+                
+                # Find arbitrage opportunities
+                if len(prices) >= 2:
+                    price_items = list(prices.items())
+                    
+                    for i in range(len(price_items)):
+                        for j in range(i + 1, len(price_items)):
+                            buy_exchange, buy_data = price_items[i]
+                            sell_exchange, sell_data = price_items[j]
+                            
+                            # Calculate profit for both directions
+                            profit_direction_1 = (sell_data["price"] - buy_data["price"]) / buy_data["price"] * 10000
+                            profit_direction_2 = (buy_data["price"] - sell_data["price"]) / sell_data["price"] * 10000
+                            
+                            # Check if profit exceeds minimum threshold
+                            if profit_direction_1 >= min_profit_bps:
+                                opportunities.append({
+                                    "id": f"{symbol}_{buy_exchange}_{sell_exchange}_{int(time.time())}",
+                                    "symbol": symbol,
+                                    "buy_exchange": buy_exchange,
+                                    "sell_exchange": sell_exchange,
+                                    "buy_price": buy_data["price"],
+                                    "sell_price": sell_data["price"],
+                                    "profit_bps": round(profit_direction_1, 2),
+                                    "profit_percentage": round(profit_direction_1 / 100, 4),
+                                    "min_volume": min(buy_data["volume"], sell_data["volume"]),
+                                    "confidence": min(85.0, 60.0 + (profit_direction_1 / 10)),
+                                    "risk_score": max(1, 10 - (profit_direction_1 / 2)),
+                                    "timestamp": datetime.utcnow().isoformat()
+                                })
+                            
+                            elif profit_direction_2 >= min_profit_bps:
+                                opportunities.append({
+                                    "id": f"{symbol}_{sell_exchange}_{buy_exchange}_{int(time.time())}",
+                                    "symbol": symbol,
+                                    "buy_exchange": sell_exchange,
+                                    "sell_exchange": buy_exchange,
+                                    "buy_price": sell_data["price"],
+                                    "sell_price": buy_data["price"],
+                                    "profit_bps": round(profit_direction_2, 2),
+                                    "profit_percentage": round(profit_direction_2 / 100, 4),
+                                    "min_volume": min(buy_data["volume"], sell_data["volume"]),
+                                    "confidence": min(85.0, 60.0 + (profit_direction_2 / 10)),
+                                    "risk_score": max(1, 10 - (profit_direction_2 / 2)),
+                                    "timestamp": datetime.utcnow().isoformat()
+                                })
+            
+            # Sort opportunities by profit (descending)
+            opportunities.sort(key=lambda x: x["profit_bps"], reverse=True)
+            
+            response_time = time.time() - start_time
+            await self._update_performance_metrics(response_time, True, user_id)
+            
+            return {
+                "success": True,
+                "data": {
+                    "opportunities": opportunities,
+                    "summary": {
+                        "total_opportunities": len(opportunities),
+                        "symbols_scanned": len(symbol_list),
+                        "exchanges_scanned": len(exchange_list),
+                        "pairs_analyzed": total_scanned,
+                        "min_profit_threshold": min_profit_bps,
+                        "max_profit_found": max([opp["profit_bps"] for opp in opportunities]) if opportunities else 0,
+                        "avg_confidence": round(sum([opp["confidence"] for opp in opportunities]) / len(opportunities), 2) if opportunities else 0
+                    },
+                    "metadata": {
+                        "scan_timestamp": datetime.utcnow().isoformat(),
+                        "response_time_ms": round(response_time * 1000, 2),
+                        "user_id": user_id,
+                        "scan_type": "cross_exchange_arbitrage"
+                    }
+                }
+            }
+            
+        except Exception as e:
+            await self._update_performance_metrics(time.time() - start_time, False, user_id)
+            self.logger.error("Cross-exchange arbitrage scan failed", error=str(e), exc_info=True)
+            return {"success": False, "error": str(e), "function": "cross_exchange_arbitrage_scanner"}
+    
     async def market_inefficiency_scanner(
         self,
         symbols: str,
