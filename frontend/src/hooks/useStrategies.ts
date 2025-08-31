@@ -75,15 +75,29 @@ export const useStrategies = () => {
     }
   };
 
-  // Fetch available strategy functions
+  // Fetch available strategies from unified marketplace
   const fetchAvailableStrategies = async () => {
     try {
-      const response = await apiClient.get('/strategies/available');
+      const response = await apiClient.get('/strategies/marketplace');
       if (response.data.success) {
-        setAvailableStrategies(response.data.available_strategies);
+        // Transform marketplace data to legacy format for compatibility
+        const strategies: Record<string, AvailableStrategy> = {};
+        
+        response.data.strategies.forEach((strategy: any) => {
+          strategies[strategy.strategy_id] = {
+            name: strategy.name,
+            category: strategy.category,
+            description: strategy.description,
+            risk_level: strategy.risk_level,
+            min_capital: strategy.min_capital_usd,
+            parameters: strategy.timeframes || []
+          };
+        });
+        
+        setAvailableStrategies(strategies);
       }
     } catch (err: any) {
-      console.warn('Failed to fetch available strategies:', err);
+      console.warn('Failed to fetch marketplace strategies:', err);
     }
   };
 
