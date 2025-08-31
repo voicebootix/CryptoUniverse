@@ -33,7 +33,7 @@ class BackgroundServiceManager(LoggerMixin):
             "health_monitor": 60,        # 1 minute
             "metrics_collector": 300,    # 5 minutes
             "cleanup_service": 3600,     # 1 hour
-            "autonomous_cycles": 60,     # 1 minute (60 cycles per hour) - more responsive
+            "autonomous_cycles": 60,     # 1 minute base (adaptive based on market conditions)
             "market_data_sync": 60,      # 1 minute
             "balance_sync": 300,         # 5 minutes
             "risk_monitor": 30,          # 30 seconds
@@ -344,7 +344,9 @@ class BackgroundServiceManager(LoggerMixin):
             except Exception as e:
                 self.logger.error("Autonomous cycles error", error=str(e))
             
-            await asyncio.sleep(self.intervals["autonomous_cycles"])
+            # ADAPTIVE CYCLE TIMING based on market conditions
+            next_interval = await self._calculate_adaptive_cycle_interval()
+            await asyncio.sleep(next_interval)
     
     async def _market_data_sync_service(self):
         """Sync market data for configured symbols using real APIs."""
@@ -419,6 +421,37 @@ class BackgroundServiceManager(LoggerMixin):
             self.logger.error("Symbol discovery failed", error=str(e))
             # Emergency fallback
             return ["BTC", "ETH", "SOL"]
+    
+    async def _calculate_adaptive_cycle_interval(self) -> int:
+        """Calculate adaptive cycle interval based on market conditions and activity."""
+        try:
+            from app.services.market_analysis_core import MarketAnalysisService
+            
+            # Get current market volatility
+            market_service = MarketAnalysisService()
+            market_overview = await market_service.get_market_overview()
+            
+            if market_overview.get("success"):
+                volatility = market_overview.get("market_overview", {}).get("volatility_level", "medium")
+                arbitrage_count = market_overview.get("market_overview", {}).get("arbitrage_opportunities", 0)
+                
+                # Adaptive timing based on market conditions
+                if volatility == "high" or arbitrage_count > 5:
+                    # High volatility or many arbitrage opportunities: faster cycles
+                    return 30  # 30 seconds
+                elif volatility == "low":
+                    # Low volatility: slower cycles to save resources
+                    return 120  # 2 minutes
+                else:
+                    # Medium volatility: standard timing
+                    return 60  # 1 minute
+            else:
+                # Fallback to standard interval
+                return self.intervals["autonomous_cycles"]
+                
+        except Exception as e:
+            self.logger.warning("Failed to calculate adaptive interval", error=str(e))
+            return self.intervals["autonomous_cycles"]
     
     async def _balance_sync_service(self):
         """Sync exchange balances for all users."""

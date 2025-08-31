@@ -584,19 +584,136 @@ class MasterSystemController(LoggerMixin):
             # PHASE 2: Generate Strategy Signals using your sophisticated strategies
             phase_start = time.time()
             
-            # Get market-optimized strategies (no hardcoded limits)
+            # Get USER'S PURCHASED STRATEGIES (no hardcoded strategies!)
             if focus_strategies is None:
-                focus_strategies = timezone_strategy.get("preferred_strategies", ["spot_momentum_strategy"])
+                from app.services.strategy_marketplace_service import strategy_marketplace_service
+                
+                # Get user's purchased strategy portfolio
+                user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+                
+                if user_portfolio.get("success") and user_portfolio.get("active_strategies"):
+                    # Extract strategy function names from user's purchased strategies
+                    focus_strategies = []
+                    for strategy in user_portfolio["active_strategies"]:
+                        strategy_id = strategy["strategy_id"]
+                        if strategy_id.startswith("ai_"):
+                            strategy_func = strategy_id.replace("ai_", "")
+                            focus_strategies.append(strategy_func)
+                    
+                    self.logger.info(f"Using {len(focus_strategies)} purchased strategies for user {user_id}", 
+                                   strategies=focus_strategies)
+                else:
+                    # Fallback to basic free strategies if user has no purchased strategies
+                    focus_strategies = ["spot_momentum_strategy"]
+                    self.logger.warning(f"User {user_id} has no purchased strategies, using free basic strategy")
             
-            # Add market condition-based strategies
+            # ADVANCED MARKET INTELLIGENCE: Filter strategies based on real-time conditions
             market_assessment = market_result.get("market_assessment", {})
-            if market_assessment.get("volatility_level") == "high":
-                focus_strategies.extend(["scalping_strategy", "spot_breakout_strategy"])
-            if market_assessment.get("arbitrage_opportunities", 0) > 0:
-                focus_strategies.append("arbitrage_execution")
+            sentiment = market_assessment.get("sentiment", "neutral")
+            volatility = market_assessment.get("volatility_level", "medium")
+            trend = market_assessment.get("trend", "sideways")
             
-            # Remove duplicates while preserving order
-            focus_strategies = list(dict.fromkeys(focus_strategies))
+            # Get strategy performance data for intelligent selection
+            strategy_performance = {}
+            for strategy in focus_strategies:
+                try:
+                    perf_data = await trading_strategies_service._get_strategy_performance_data(
+                        strategy, "1d", user_id
+                    )
+                    strategy_performance[strategy] = perf_data.get("avg_return", 0)
+                except:
+                    strategy_performance[strategy] = 0
+            
+            # INTELLIGENT STRATEGY SELECTION based on market conditions + performance
+            optimal_strategies = []
+            
+            # Market condition-based filtering from user's purchased strategies
+            if volatility == "low" and trend == "sideways":
+                # Low volatility sideways: market making, mean reversion, grid trading
+                condition_strategies = [s for s in focus_strategies 
+                                      if any(t in s.lower() for t in ["market_making", "mean_reversion", "grid"])]
+            elif volatility == "high" and sentiment == "bullish":
+                # High volatility bull: momentum, breakout, scalping
+                condition_strategies = [s for s in focus_strategies 
+                                      if any(t in s.lower() for t in ["momentum", "breakout", "scalping"])]
+            elif volatility == "high" and sentiment == "bearish":
+                # High volatility bear: short strategies, futures, options
+                condition_strategies = [s for s in focus_strategies 
+                                      if any(t in s.lower() for t in ["short", "futures", "options", "mean_reversion"])]
+            else:
+                # Balanced conditions: use top performing strategies
+                condition_strategies = focus_strategies
+            
+            # If no strategies match conditions, use all purchased strategies
+            if not condition_strategies:
+                condition_strategies = focus_strategies
+            
+            # ADVANCED PERFORMANCE-BASED SORTING using real-time rankings
+            try:
+                # Get user's strategy rankings (auto-updated from real trades)
+                rankings_key = f"strategy_rankings:{user_id}"
+                rankings_data = await self.redis.get(rankings_key)
+                
+                if rankings_data:
+                    strategy_rankings = json.loads(rankings_data)
+                    ranking_scores = {r["strategy"]: r["score"] for r in strategy_rankings}
+                    
+                    # Sort by real performance rankings
+                    performance_sorted = sorted(
+                        condition_strategies,
+                        key=lambda s: ranking_scores.get(s, strategy_performance.get(s, 0)),
+                        reverse=True
+                    )
+                    
+                    self.logger.info(
+                        f"Using real-time performance rankings for {user_id}",
+                        top_performer=performance_sorted[0] if performance_sorted else "none",
+                        ranking_data_available=True
+                    )
+                else:
+                    # Fallback to basic performance data
+                    performance_sorted = sorted(
+                        condition_strategies,
+                        key=lambda s: strategy_performance.get(s, 0),
+                        reverse=True
+                    )
+                    
+                    self.logger.info(f"Using basic performance data for {user_id} - no ranking history yet")
+                    
+            except Exception as e:
+                self.logger.warning("Failed to use performance rankings, using basic sort", error=str(e))
+                performance_sorted = sorted(
+                    condition_strategies,
+                    key=lambda s: strategy_performance.get(s, 0),
+                    reverse=True
+                )
+            
+            # Limit strategies based on risk mode and performance
+            max_strategies = {
+                "conservative": min(2, len(performance_sorted)),
+                "balanced": min(4, len(performance_sorted)), 
+                "aggressive": min(6, len(performance_sorted)),
+                "beast_mode": len(performance_sorted)  # Use all purchased strategies
+            }.get(self.current_mode.value, 4)
+            
+            focus_strategies = performance_sorted[:max_strategies]
+            
+            # Always prioritize arbitrage if available and opportunities exist
+            arbitrage_opportunities = market_assessment.get("arbitrage_opportunities", 0)
+            if arbitrage_opportunities > 0:
+                arbitrage_strategies = [s for s in focus_strategies if "arbitrage" in s.lower()]
+                if arbitrage_strategies:
+                    # Move arbitrage to front
+                    focus_strategies = arbitrage_strategies + [s for s in focus_strategies if s not in arbitrage_strategies]
+            
+            self.logger.info(
+                f"🎯 INTELLIGENT STRATEGY SELECTION for {user_id}",
+                market_conditions=f"{sentiment}/{volatility}/{trend}",
+                total_purchased=len(user_portfolio.get("active_strategies", [])),
+                selected_count=len(focus_strategies),
+                selected_strategies=focus_strategies,
+                arbitrage_opportunities=arbitrage_opportunities
+            )
             
             # Execute ALL strategies in parallel (not limited to 3)
             all_signals = []
@@ -658,17 +775,41 @@ class MasterSystemController(LoggerMixin):
             if not best_signal:
                 raise Exception("No viable trading signals generated")
             
-            # PHASE 3: Position Sizing
+            # PHASE 3: INTELLIGENT CAPITAL ALLOCATION
             phase_start = time.time()
             
-            # Create opportunity data for position sizing
+            # Enhanced opportunity data with strategy performance context
             opportunity_data = {
                 "symbol": best_signal["signal"].get("symbol", "BTC"),
                 "confidence": best_signal["confidence"],
-                "expected_return": best_signal["signal"].get("expected_return", 5.0)
+                "expected_return": best_signal["signal"].get("expected_return", 5.0),
+                "strategy_name": best_signal["strategy"],
+                "strategy_performance": strategy_performance.get(best_signal["strategy"], 0),
+                "market_conditions": {
+                    "sentiment": sentiment,
+                    "volatility": volatility,
+                    "trend": trend
+                },
+                "total_signals": len(best_signals),  # For diversification calculation
+                "signal_rank": 1  # This is the best signal
             }
             
-            # Use your sophisticated PortfolioRiskServiceExtended for position sizing
+            # ADVANCED POSITION SIZING with multi-signal allocation
+            if len(best_signals) > 1:
+                # Multi-strategy allocation: distribute capital intelligently
+                total_confidence = sum(s["confidence"] for s in best_signals)
+                allocation_weight = best_signal["confidence"] / total_confidence if total_confidence > 0 else 1.0
+                opportunity_data["allocation_weight"] = allocation_weight
+                opportunity_data["is_multi_strategy"] = True
+                
+                self.logger.info(
+                    f"Multi-strategy allocation for {user_id}",
+                    total_strategies=len(best_signals),
+                    primary_weight=allocation_weight,
+                    primary_strategy=best_signal["strategy"]
+                )
+            
+            # Use your sophisticated PortfolioRiskServiceExtended for intelligent position sizing
             sizing_result = await portfolio_risk_service.position_sizing(
                 opportunity=json.dumps(opportunity_data),
                 user_id=user_id,
@@ -776,6 +917,21 @@ class MasterSystemController(LoggerMixin):
                     expected_return_pct = signal_data.get("expected_return", 0) / 100
                     potential_profit = executed_quantity * executed_price * expected_return_pct
                     
+                    # REAL-TIME STRATEGY PERFORMANCE TRACKING
+                    await self._update_strategy_performance_metrics(
+                        user_id=user_id,
+                        strategy_name=best_signal["strategy"],
+                        trade_result={
+                            "success": True,
+                            "profit_usd": profit_generated + potential_profit,
+                            "execution_price": executed_price,
+                            "expected_price": expected_price,
+                            "confidence": best_signal["confidence"],
+                            "symbol": signal_data.get("symbol"),
+                            "timestamp": datetime.utcnow()
+                        }
+                    )
+                    
                     # Log real execution details
                     self.logger.info("REAL TRADE EXECUTED", 
                                    symbol=signal_data.get("symbol"),
@@ -783,7 +939,8 @@ class MasterSystemController(LoggerMixin):
                                    quantity=executed_quantity,
                                    price=executed_price,
                                    immediate_profit=profit_generated,
-                                   potential_profit=potential_profit)
+                                   potential_profit=potential_profit,
+                                   strategy=best_signal["strategy"])
                 
                 phases_executed.append({
                     "phase": "trade_execution", 
@@ -1379,9 +1536,26 @@ class MasterSystemController(LoggerMixin):
             # Set trading mode for this user
             self.current_mode = TradingMode(mode)
             
-            # Get current timezone strategy for optimal trading
-            timezone_strategy = self.get_current_timezone_strategy()
-            preferred_strategies = timezone_strategy.get("preferred_strategies", ["spot_momentum_strategy"])
+            # Get USER'S PURCHASED STRATEGIES for autonomous trading
+            from app.services.strategy_marketplace_service import strategy_marketplace_service
+            
+            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+            
+            if user_portfolio.get("success") and user_portfolio.get("active_strategies"):
+                # Use user's purchased strategies
+                preferred_strategies = []
+                for strategy in user_portfolio["active_strategies"]:
+                    strategy_id = strategy["strategy_id"]
+                    if strategy_id.startswith("ai_"):
+                        strategy_func = strategy_id.replace("ai_", "")
+                        preferred_strategies.append(strategy_func)
+                
+                self.logger.info(f"Autonomous using {len(preferred_strategies)} purchased strategies", 
+                               user_id=user_id, strategies=preferred_strategies)
+            else:
+                # Fallback to free basic strategy
+                preferred_strategies = ["spot_momentum_strategy"]
+                self.logger.warning(f"User {user_id} autonomous mode using free strategy - no purchased strategies")
             
             # Determine current trading cycle based on minute
             current_minute = datetime.utcnow().minute
@@ -1634,6 +1808,126 @@ class MasterSystemController(LoggerMixin):
             
         except Exception as e:
             self.logger.error("Failed to send credit notification", error=str(e))
+    
+    async def _update_strategy_performance_metrics(
+        self, 
+        user_id: str, 
+        strategy_name: str, 
+        trade_result: Dict[str, Any]
+    ):
+        """Update real-time strategy performance metrics for continuous optimization."""
+        try:
+            # Store individual trade performance
+            performance_key = f"strategy_performance:{user_id}:{strategy_name}"
+            
+            trade_data = {
+                "timestamp": trade_result["timestamp"].isoformat(),
+                "profit_usd": trade_result["profit_usd"],
+                "success": trade_result["success"],
+                "confidence": trade_result["confidence"],
+                "symbol": trade_result["symbol"],
+                "execution_price": trade_result["execution_price"],
+                "expected_price": trade_result["expected_price"]
+            }
+            
+            # Add to performance history (keep last 100 trades per strategy)
+            await self.redis.lpush(performance_key, json.dumps(trade_data))
+            await self.redis.ltrim(performance_key, 0, 99)  # Keep last 100
+            await self.redis.expire(performance_key, 30 * 24 * 3600)  # 30 days
+            
+            # Update aggregate performance metrics
+            aggregate_key = f"strategy_aggregate:{user_id}:{strategy_name}"
+            
+            # Get current aggregates
+            current_data = await self.redis.hgetall(aggregate_key)
+            
+            total_trades = int(current_data.get(b"total_trades", 0)) + 1
+            total_profit = float(current_data.get(b"total_profit", 0)) + trade_result["profit_usd"]
+            successful_trades = int(current_data.get(b"successful_trades", 0)) + (1 if trade_result["success"] else 0)
+            
+            # Calculate moving averages
+            success_rate = (successful_trades / total_trades) * 100 if total_trades > 0 else 0
+            avg_profit_per_trade = total_profit / total_trades if total_trades > 0 else 0
+            
+            # Update aggregates
+            await self.redis.hset(aggregate_key, mapping={
+                "total_trades": total_trades,
+                "total_profit": total_profit,
+                "successful_trades": successful_trades,
+                "success_rate": success_rate,
+                "avg_profit_per_trade": avg_profit_per_trade,
+                "last_updated": datetime.utcnow().isoformat()
+            })
+            await self.redis.expire(aggregate_key, 30 * 24 * 3600)  # 30 days
+            
+            # AUTO-OPTIMIZATION: Update strategy rankings
+            await self._update_user_strategy_rankings(user_id)
+            
+            self.logger.info(
+                f"Strategy performance updated: {strategy_name}",
+                user_id=user_id,
+                total_trades=total_trades,
+                success_rate=f"{success_rate:.1f}%",
+                avg_profit=f"${avg_profit_per_trade:.2f}",
+                this_trade_profit=f"${trade_result['profit_usd']:.2f}"
+            )
+            
+        except Exception as e:
+            self.logger.error("Failed to update strategy performance", error=str(e))
+    
+    async def _update_user_strategy_rankings(self, user_id: str):
+        """Update user's strategy rankings based on real performance for auto-optimization."""
+        try:
+            # Get all user's strategies
+            from app.services.strategy_marketplace_service import strategy_marketplace_service
+            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+            
+            if not user_portfolio.get("success"):
+                return
+            
+            strategy_rankings = []
+            
+            for strategy in user_portfolio["active_strategies"]:
+                strategy_name = strategy["strategy_id"].replace("ai_", "")
+                aggregate_key = f"strategy_aggregate:{user_id}:{strategy_name}"
+                
+                performance_data = await self.redis.hgetall(aggregate_key)
+                
+                if performance_data:
+                    success_rate = float(performance_data.get(b"success_rate", 0))
+                    avg_profit = float(performance_data.get(b"avg_profit_per_trade", 0))
+                    total_trades = int(performance_data.get(b"total_trades", 0))
+                    
+                    # Calculate composite score (success rate + profit + trade volume)
+                    composite_score = (success_rate * 0.4) + (avg_profit * 0.4) + (min(total_trades, 50) * 0.2)
+                    
+                    strategy_rankings.append({
+                        "strategy": strategy_name,
+                        "score": composite_score,
+                        "success_rate": success_rate,
+                        "avg_profit": avg_profit,
+                        "total_trades": total_trades
+                    })
+            
+            # Sort by composite score
+            strategy_rankings.sort(key=lambda x: x["score"], reverse=True)
+            
+            # Store rankings for future strategy selection optimization
+            rankings_key = f"strategy_rankings:{user_id}"
+            await self.redis.set(
+                rankings_key, 
+                json.dumps(strategy_rankings), 
+                ex=24 * 3600  # 24 hours
+            )
+            
+            self.logger.info(
+                f"Strategy rankings updated for {user_id}",
+                top_strategy=strategy_rankings[0]["strategy"] if strategy_rankings else "none",
+                total_strategies=len(strategy_rankings)
+            )
+            
+        except Exception as e:
+            self.logger.error("Failed to update strategy rankings", error=str(e))
 
     async def emergency_stop(self) -> Dict[str, Any]:
         """Execute emergency stop protocol - LEGACY METHOD."""
