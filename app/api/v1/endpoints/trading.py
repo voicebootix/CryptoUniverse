@@ -1008,6 +1008,200 @@ async def get_market_sentiment(
         )
 
 
+# MISSING MARKET ANALYSIS COMPATIBILITY ENDPOINTS
+@router.post("/market/realtime-prices")
+async def get_market_realtime_prices(
+    request: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """Realtime prices endpoint - Trading namespace compatibility."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:realtime_prices",
+        limit=100,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        symbols = request.get("symbols", ["BTC", "ETH", "SOL"])
+        if isinstance(symbols, list):
+            symbols_str = ",".join(symbols)
+        else:
+            symbols_str = str(symbols)
+        
+        result = await market_analysis.realtime_price_tracking(
+            symbols=symbols_str,
+            exchanges="all",
+            user_id=str(current_user.id)
+        )
+        return result
+        
+    except Exception as e:
+        logger.error("Realtime prices failed", error=str(e), exc_info=True)
+        return {"success": False, "error": str(e), "data": {}}
+
+
+@router.get("/market/trending")
+async def get_market_trending(
+    current_user: User = Depends(get_current_user)
+):
+    """Trending coins endpoint - Trading namespace compatibility."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:trending",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        result = await market_analysis.trending_coins_tracker(
+            timeframe="24h",
+            user_id=str(current_user.id)
+        )
+        return result
+        
+    except Exception as e:
+        logger.error("Trending coins failed", error=str(e), exc_info=True)
+        return {"success": False, "error": str(e), "data": []}
+
+
+@router.get("/market/health")
+async def get_market_health(
+    current_user: User = Depends(get_current_user)
+):
+    """Market health endpoint - Trading namespace compatibility."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:health",
+        limit=30,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        result = await market_analysis.health_check()
+        return result
+        
+    except Exception as e:
+        logger.error("Market health check failed", error=str(e), exc_info=True)
+        return {"success": False, "error": str(e), "data": {}}
+
+
+@router.post("/market/volatility")
+async def get_market_volatility(
+    request: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """Volatility analysis endpoint - Trading namespace compatibility."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:volatility",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        symbols = request.get("symbols", ["BTC", "ETH", "SOL"])
+        if isinstance(symbols, list):
+            symbols_str = ",".join(symbols)
+        else:
+            symbols_str = str(symbols)
+        
+        result = await market_analysis.volatility_analysis(
+            symbols=symbols_str,
+            timeframes="1h,4h,1d",
+            user_id=str(current_user.id)
+        )
+        return result
+        
+    except Exception as e:
+        logger.error("Volatility analysis failed", error=str(e), exc_info=True)
+        return {"success": False, "error": str(e), "data": {}}
+
+
+@router.get("/market/support-resistance/{symbol}")
+async def get_market_support_resistance(
+    symbol: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Support/resistance endpoint - Trading namespace compatibility."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:support_resistance",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        result = await market_analysis.support_resistance_detection(
+            symbols=symbol.upper(),
+            timeframes="1h,4h,1d",
+            user_id=str(current_user.id)
+        )
+        return result
+        
+    except Exception as e:
+        logger.error("Support/resistance analysis failed", error=str(e), exc_info=True)
+        return {"success": False, "error": str(e), "data": {}}
+
+
+@router.get("/market/institutional-flows")
+async def get_market_institutional_flows(
+    current_user: User = Depends(get_current_user)
+):
+    """Institutional flows endpoint - Trading namespace compatibility."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:institutional_flows",
+        limit=30,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        result = await market_analysis.institutional_flow_tracker(
+            symbols="BTC,ETH,SOL,ADA",
+            timeframes="1h,4h,1d",
+            flow_types="whale_tracking,institutional_trades",
+            user_id=str(current_user.id)
+        )
+        return result
+        
+    except Exception as e:
+        logger.error("Institutional flows failed", error=str(e), exc_info=True)
+        return {"success": False, "error": str(e), "data": []}
+
+
+@router.get("/market/alpha-signals")
+async def get_market_alpha_signals(
+    current_user: User = Depends(get_current_user)
+):
+    """Alpha signals endpoint - Trading namespace compatibility."""
+    
+    await rate_limiter.check_rate_limit(
+        key="market:alpha_signals",
+        limit=30,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        result = await market_analysis.alpha_generation_coordinator(
+            symbols="BTC,ETH,SOL,ADA",
+            strategies="momentum,mean_reversion,breakout",
+            user_id=str(current_user.id)
+        )
+        return result
+        
+    except Exception as e:
+        logger.error("Alpha signals failed", error=str(e), exc_info=True)
+        return {"success": False, "error": str(e), "data": []}
+
+
 # Helper Functions
 def calculate_credit_cost(amount: Decimal, symbol: str) -> int:
     """Calculate credit cost for a trade."""
