@@ -91,7 +91,7 @@ const MultiExchangeHub: React.FC = () => {
   const { exchanges, loading, connecting, aggregatedStats, actions } = useExchanges();
   const { 
     opportunities: arbitrageOpportunities, 
-    orderBook: unifiedOrderBook, 
+    orderBook, 
     crossExchangeComparison,
     isLoading: arbitrageLoading,
     error: arbitrageError,
