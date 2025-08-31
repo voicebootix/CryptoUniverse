@@ -1438,11 +1438,11 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
             
             # Get real exchange balances from database
             from sqlalchemy.ext.asyncio import AsyncSession
-            from app.core.database import get_database
+            from app.core.database import AsyncSessionLocal
             from app.models.exchange import ExchangeBalance, ExchangeAccount
             from sqlalchemy import select, and_
             
-            async for db in get_database():
+            async with AsyncSessionLocal() as db:
                 # Get all exchange balances for this user
                 stmt = select(ExchangeBalance).join(ExchangeAccount).where(
                     and_(
@@ -1528,26 +1528,26 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
         """Calculate daily P&L using historical portfolio values."""
         try:
             from datetime import datetime, timedelta
-            from app.models.portfolio import PortfolioSnapshot  # We'll need to create this model
+            from app.models.trading import Portfolio  # Use existing Portfolio model
             
             # Get portfolio value from 24 hours ago
             yesterday = datetime.utcnow() - timedelta(hours=24)
             
-            async for db in get_database():
+            async with AsyncSessionLocal() as db:
                 # Try to get historical portfolio value
-                stmt = select(PortfolioSnapshot).where(
+                stmt = select(Portfolio).where(
                     and_(
-                        PortfolioSnapshot.user_id == user_id,
-                        PortfolioSnapshot.created_at >= yesterday,
-                        PortfolioSnapshot.created_at <= yesterday + timedelta(hours=1)
+                                            Portfolio.user_id == user_id,
+                    Portfolio.created_at >= yesterday,
+                        Portfolio.created_at <= yesterday + timedelta(hours=1)
                     )
-                ).order_by(PortfolioSnapshot.created_at.desc()).limit(1)
+                ).order_by(Portfolio.created_at.desc()).limit(1)
                 
                 result = await db.execute(stmt)
-                snapshot = result.scalar_one_or_none()
+                portfolio = result.scalar_one_or_none()
                 
-                if snapshot:
-                    previous_value = float(snapshot.total_value_usd)
+                if portfolio:
+                    previous_value = float(portfolio.total_value_usd)
                     daily_pnl = current_portfolio_value - previous_value
                     daily_pnl_pct = (daily_pnl / previous_value * 100) if previous_value > 0 else 0.0
                 else:
@@ -1564,7 +1564,7 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
         """Estimate daily P&L based on asset price changes when no historical data exists."""
         try:
             # Get current positions
-            async for db in get_database():
+            async with AsyncSessionLocal() as db:
                 stmt = select(ExchangeBalance).join(ExchangeAccount).where(
                     and_(
                         ExchangeAccount.user_id == user_id,
@@ -1618,7 +1618,7 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
             total_cost_basis = 0.0
             total_current_value = 0.0
             
-            async for db in get_database():
+            async with AsyncSessionLocal() as db:
                 # Get cost basis data from exchange balances (if avg_cost_basis is populated)
                 stmt = select(ExchangeBalance).join(ExchangeAccount).where(
                     and_(
@@ -1657,7 +1657,7 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
         try:
             from datetime import datetime
             
-            async for db in get_database():
+            async with AsyncSessionLocal() as db:
                 # Get the oldest exchange account to estimate how long user has been trading
                 stmt = select(ExchangeAccount).where(
                     ExchangeAccount.user_id == user_id

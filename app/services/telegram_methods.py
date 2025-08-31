@@ -477,9 +477,9 @@ async def _get_chat_id_for_user(self, user_id: str) -> Optional[str]:
     """Get chat ID for specific user - DYNAMIC USER RESOLUTION."""
     try:
         # Real production implementation - get from user database
-        from app.core.database import get_database
+        from app.core.database import AsyncSessionLocal
         
-        db = await get_database()
+        async with AsyncSessionLocal() as db:
         
         # Query user's telegram chat ID from database
         user_chat = await db.execute(

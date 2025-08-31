@@ -589,20 +589,36 @@ class MarketAnalysisService(LoggerMixin):
     # Helper methods (implementation details)
     
     async def _get_symbol_price(self, exchange: str, symbol: str) -> Optional[Dict[str, Any]]:
-        """Get price for symbol from specific exchange."""
+        """Get price for symbol from specific exchange with proper error handling."""
         try:
             if exchange == "binance":
+                # Use price endpoint instead of 24hr ticker for better reliability
                 binance_symbol = symbol.replace("/", "")
-                data = await self.exchange_manager.fetch_from_exchange(
-                    exchange, 
-                    "/api/v3/ticker/24hr",
-                    {"symbol": binance_symbol}
-                )
-                return {
-                    "price": float(data["lastPrice"]),
-                    "volume": float(data["volume"]),
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+                try:
+                    data = await self.exchange_manager.fetch_from_exchange(
+                        exchange, 
+                        "/api/v3/ticker/price",
+                        {"symbol": binance_symbol}
+                    )
+                    if data and "price" in data:
+                        return {
+                            "price": float(data["price"]),
+                            "volume": 0.0,  # Price endpoint doesn't include volume
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                except Exception:
+                    # Fallback to 24hr ticker
+                    data = await self.exchange_manager.fetch_from_exchange(
+                        exchange, 
+                        "/api/v3/ticker/24hr",
+                        {"symbol": binance_symbol}
+                    )
+                    if data and "lastPrice" in data:
+                        return {
+                            "price": float(data["lastPrice"]),
+                            "volume": float(data.get("volume", 0)),
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
             
             elif exchange == "kraken":
                 kraken_symbol = self._convert_to_kraken_symbol(symbol)
@@ -611,13 +627,15 @@ class MarketAnalysisService(LoggerMixin):
                     "/0/public/Ticker",
                     {"pair": kraken_symbol}
                 )
-                if kraken_symbol in data["result"]:
+                # Check if response has result and the symbol exists
+                if data and "result" in data and kraken_symbol in data["result"]:
                     ticker = data["result"][kraken_symbol]
-                    return {
-                        "price": float(ticker["c"][0]),
-                        "volume": float(ticker["v"][1]),
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
+                    if ticker and "c" in ticker and ticker["c"]:
+                        return {
+                            "price": float(ticker["c"][0]),
+                            "volume": float(ticker["v"][1]) if "v" in ticker and ticker["v"] else 0.0,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
             
             elif exchange == "kucoin":
                 kucoin_symbol = symbol.replace("/", "-")
@@ -626,12 +644,16 @@ class MarketAnalysisService(LoggerMixin):
                     "/api/v1/market/stats",
                     {"symbol": kucoin_symbol}
                 )
-                return {
-                    "price": float(data["data"]["last"]),
-                    "volume": float(data["data"]["vol"]),
-                    "change_24h": float(data["data"]["changeRate"]) * 100,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+                if data and "data" in data and data["data"]:
+                    market_data = data["data"]
+                    last_price = market_data.get("last")
+                    if last_price is not None:
+                        return {
+                            "price": float(last_price),
+                            "volume": float(market_data.get("vol", 0)) if market_data.get("vol") is not None else 0.0,
+                            "change_24h": float(market_data.get("changeRate", 0)) * 100 if market_data.get("changeRate") is not None else 0.0,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
             
             elif exchange == "coinbase":
                 coinbase_symbol = symbol.replace("/", "-")
@@ -711,7 +733,7 @@ class MarketAnalysisService(LoggerMixin):
                     }
         
         except Exception as e:
-            self.logger.error(f"Error fetching price for {symbol} from {exchange}: {e}")
+            self.logger.error(f"Error fetching price for {symbol} from {exchange}: {str(e)}")
             return None
     
     def _convert_to_kraken_symbol(self, symbol: str) -> str:

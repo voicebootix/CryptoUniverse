@@ -1102,9 +1102,9 @@ class TelegramCommanderService(LoggerMixin):
         """Get chat ID for recipient type - DYNAMIC RECIPIENT RESOLUTION."""
         try:
             # Real production implementation - get from database/config
-            from app.core.database import get_database
+            from app.core.database import AsyncSessionLocal
             
-            db = await get_database()
+            async with AsyncSessionLocal() as db:
             
             if recipient == RecipientType.OWNER:
                 # Get owner's chat ID from user settings
