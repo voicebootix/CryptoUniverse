@@ -1527,6 +1527,7 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
         """Calculate daily P&L using historical portfolio values."""
         try:
             from datetime import datetime, timedelta
+            from app.core.database import AsyncSessionLocal
             from app.models.trading import Portfolio  # Use existing Portfolio model
             
             # Get portfolio value from 24 hours ago
@@ -1562,6 +1563,7 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
     async def estimate_daily_pnl_from_price_changes(self, user_id: str, current_portfolio_value: float) -> tuple[float, float]:
         """Estimate daily P&L based on asset price changes when no historical data exists."""
         try:
+            from app.core.database import AsyncSessionLocal
             # Get current positions
             async with AsyncSessionLocal() as db:
                 stmt = select(ExchangeBalance).join(ExchangeAccount).where(
@@ -1613,6 +1615,7 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
     async def calculate_total_pnl(self, user_id: str, positions: List[Dict]) -> tuple[float, float]:
         """Calculate total P&L using cost basis if available."""
         try:
+            from app.core.database import AsyncSessionLocal
             total_pnl = 0.0
             total_cost_basis = 0.0
             total_current_value = 0.0
@@ -1655,6 +1658,7 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
         """Estimate total P&L percentage based on account age and market performance."""
         try:
             from datetime import datetime
+            from app.core.database import AsyncSessionLocal
             
             async with AsyncSessionLocal() as db:
                 # Get the oldest exchange account to estimate how long user has been trading
