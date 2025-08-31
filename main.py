@@ -35,6 +35,7 @@ from app.middleware.logging import RequestLoggingMiddleware
 
 # Background services
 from app.services.background import BackgroundServiceManager
+from app.services.production_monitoring import production_monitoring
 
 # Initialize settings and logging
 settings = get_settings()
@@ -250,6 +251,24 @@ async def health_check():
         health_status["checks"]["background_services"] = f"error: {str(e)}"
         health_status["status"] = "unhealthy"
 
+    try:
+        # Get comprehensive production monitoring data
+        production_health = await production_monitoring.get_system_health()
+        health_status["checks"]["production_monitoring"] = {
+            "status": production_health.get("status"),
+            "health_score": production_health.get("health_score"),
+            "uptime_hours": production_health.get("uptime_hours")
+        }
+        
+        # Update overall status based on production monitoring
+        if production_health.get("status") == "critical":
+            health_status["status"] = "unhealthy"
+        elif production_health.get("status") == "warning" and health_status["status"] == "healthy":
+            health_status["status"] = "degraded"
+            
+    except Exception as e:
+        health_status["checks"]["production_monitoring"] = f"error: {str(e)}"
+
     # Add system information
     health_status.update(
         {
@@ -257,6 +276,8 @@ async def health_check():
             "environment": settings.ENVIRONMENT,
             "services": {
                 "trading_engine": "operational",
+                "user_exchange_service": "operational", 
+                "real_market_data": "operational",
                 "ai_consensus": "operational",
                 "copy_trading": "operational",
                 "enterprise_features": "operational",
