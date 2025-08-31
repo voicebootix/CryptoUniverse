@@ -189,13 +189,17 @@ async def get_current_user(
         )
     
     # Check if token is blacklisted
+    # ENTERPRISE REDIS RESILIENCE
     redis = await get_redis_client()
-    blacklisted = await redis.get(f"blacklist:{token}")
-    if blacklisted:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has been revoked"
-        )
+    if redis:
+        blacklisted = await redis.get(f"blacklist:{token}")
+        if blacklisted:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked"
+            )
+    else:
+        logger.warning("Redis unavailable for blacklist check, proceeding without")
     
     result = await db.execute(select(User).filter(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -466,11 +470,14 @@ async def logout(
     
     # Blacklist the access token
     redis = await get_redis_client()
-    await redis.setex(
-        f"blacklist:{token}",
-        int(auth_service.access_token_expire.total_seconds()),
-        "revoked"
-    )
+    if redis:
+        await redis.setex(
+            f"blacklist:{token}",
+            int(auth_service.access_token_expire.total_seconds()),
+            "revoked"
+        )
+    else:
+        logger.warning("Redis unavailable for blacklist, skipping blacklist")
     
     # Remove all user sessions
     await db.execute(delete(UserSession).filter(

@@ -166,7 +166,11 @@ class MarketDataFeeds:
         }
     
     async def async_init(self):
-        self.redis = await get_redis_client()
+        try:
+            self.redis = await get_redis_client()
+        except Exception as e:
+            logger.warning("Redis not available for MarketDataFeeds", error=str(e))
+            self.redis = None
     
     async def _check_rate_limit(self, api_name: str) -> bool:
         """Check if API call is within rate limits."""
@@ -259,11 +263,12 @@ class MarketDataFeeds:
         cache_key = f"{data_type}:{symbol}"
         
         try:
-            # Check cache first
-            cached_data = await self.redis.get(cache_key)
-            if cached_data:
-                import json
-                return json.loads(cached_data)
+            # Check cache first if Redis is available
+            if self.redis:
+                cached_data = await self.redis.get(cache_key)
+                if cached_data:
+                    import json
+                    return json.loads(cached_data)
             
             # Get fallback hierarchy for this data type
             api_hierarchy = self.api_fallbacks.get(data_type, ["coingecko", "coincap"])
@@ -287,13 +292,14 @@ class MarketDataFeeds:
                         continue
                     
                     if result.get("success"):
-                        # Cache successful result
-                        import json
-                        await self.redis.setex(
-                            cache_key,
-                            self.cache_ttl.get(data_type, 60),
-                            json.dumps(result)
-                        )
+                        # Cache successful result if Redis is available
+                        if self.redis:
+                            import json
+                            await self.redis.setex(
+                                cache_key,
+                                self.cache_ttl.get(data_type, 60),
+                                json.dumps(result)
+                            )
                         return result
                         
                 except Exception as e:

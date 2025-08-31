@@ -1446,5 +1446,6 @@ async def get_master_controller() -> MasterSystemController:
     global master_controller
     if master_controller is None:
         master_controller = MasterSystemController()
-        master_controller.redis = await get_redis_client()
+        # ENTERPRISE: Defer Redis initialization to first use
+        # master_controller.redis = await get_redis_client()
     return master_controller

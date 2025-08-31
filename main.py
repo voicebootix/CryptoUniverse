@@ -12,7 +12,7 @@ from typing import AsyncGenerator
 
 import structlog
 import uvicorn
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -35,6 +35,10 @@ from app.middleware.logging import RequestLoggingMiddleware
 
 # Background services
 from app.services.background import BackgroundServiceManager
+
+# Global exception handler
+from fastapi import status
+from fastapi.responses import JSONResponse
 
 # Initialize settings and logging
 settings = get_settings()
@@ -187,36 +191,21 @@ def create_application() -> FastAPI:
             },
         )
 
+    # ENTERPRISE: Add Global Exception Handler for CORS
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
-        """Handle unexpected exceptions."""
-        logger.error(
-            "Unhandled exception",
-            error=str(exc),
-            path=request.url.path,
-            method=request.method,
-            exc_info=True,
+        # Log the full traceback for enterprise debugging
+        logger.error("Unhandled exception", exc_info=True, method=request.method, path=request.url.path)
+        
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "An unexpected server error occurred. Please contact support."},
+            headers={
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, PUT, DELETE',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            }
         )
-
-        if settings.ENVIRONMENT == "development":
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": str(exc),
-                    "type": type(exc).__name__,
-                    "status_code": 500,
-                    "path": request.url.path,
-                },
-            )
-        else:
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": "Internal server error. Please contact support.",
-                    "status_code": 500,
-                    "support": "support@cryptouniverse.com",
-                },
-            )
 
     return app
 

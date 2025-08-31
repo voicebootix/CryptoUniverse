@@ -102,6 +102,7 @@ class UnifiedPriceService(LoggerMixin):
                 
         except Exception as e:
             logger.error("Failed to initialize unified price service", error=str(e))
+            self.redis = None
     
     async def get_usd_price(
         self, 
@@ -110,29 +111,24 @@ class UnifiedPriceService(LoggerMixin):
         max_age_seconds: int = 60,
         use_case: str = "general"
     ) -> Optional[float]:
-        """
-        Get USD price for a single symbol with intelligent source selection.
         
-        Args:
-            symbol: Crypto symbol (e.g., "BTC", "ETH")
-            source: Preferred price source
-            max_age_seconds: Maximum age for cached data
-            use_case: "market_analysis", "portfolio", "general"
+        # ENTERPRISE: Graceful degradation if Redis is unavailable
+        if not self.redis:
+            logger.debug("Redis unavailable for get_usd_price, fetching directly")
+            price_data = await self.fetch_from_api(symbol, source)
+            return price_data.get("price") if price_data else None
             
-        Returns:
-            USD price as float, or None if not available
-        """
-        # Handle stablecoins immediately
-        if symbol.upper() in self.stablecoins:
-            return self.stablecoins[symbol.upper()]
+        cache_key = f"price:{source.value}:{symbol}"
         
-        cache_key = f"unified_price:{symbol.upper()}"
-        
-        # Try cache first unless specifically requesting fresh exchange data
+        # 1. Check cache
         if source != PriceSource.EXCHANGE or max_age_seconds > 0:
             cached_price = await self._get_cached_price(cache_key, max_age_seconds)
             if cached_price is not None:
                 return cached_price
+        
+        # Handle stablecoins immediately
+        if symbol.upper() in self.stablecoins:
+            return self.stablecoins[symbol.upper()]
         
         # Smart source selection
         if source == PriceSource.AUTO:
@@ -308,6 +304,10 @@ class UnifiedPriceService(LoggerMixin):
     async def _get_cached_price(self, cache_key: str, max_age_seconds: int) -> Optional[float]:
         """Get price from Redis cache if not too old."""
         try:
+            # ENTERPRISE: Graceful degradation
+            if not self.redis:
+                return None
+            
             cached_data = await self.redis.hgetall(cache_key)
             if cached_data:
                 timestamp = float(cached_data.get("timestamp", 0))
@@ -321,8 +321,12 @@ class UnifiedPriceService(LoggerMixin):
         return None
     
     async def _cache_price(self, cache_key: str, price: float, source: PriceSource):
-        """Cache price in Redis with appropriate TTL."""
+        """Cache price in Redis."""
         try:
+            # ENTERPRISE: Graceful degradation
+            if not self.redis:
+                return
+                
             ttl = self.cache_ttl.get(source.value, 60)
             
             await self.redis.hset(cache_key, mapping={
