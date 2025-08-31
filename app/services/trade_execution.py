@@ -1117,18 +1117,92 @@ class TradeExecutionService(LoggerMixin):
             return {"success": False, "error": str(e)}
 
     async def _get_current_price(self, symbol: str, exchange: str) -> float:
-        """Get current price for symbol - simulated for now."""
-        # In production, this would call real APIs
-        base_prices = {
-            "BTC": 95000,
-            "ETH": 3500,
-            "ADA": 0.45,
-            "SOL": 210,
-            "DOT": 7.5
-        }
-        import random
-        base_price = base_prices.get(symbol, 50000)
-        return base_price + (random.random() - 0.5) * base_price * 0.02
+        """Get current price for symbol using real exchange APIs."""
+        try:
+            # Use your existing market data feeds service for real prices
+            from app.services.market_data_feeds import market_data_feeds
+            
+            # Get real-time price
+            price_result = await market_data_feeds.get_real_time_price(symbol)
+            
+            if price_result.get("success"):
+                return float(price_result.get("price", 0))
+            
+            # Fallback to exchange-specific API calls
+            if exchange.lower() == "binance":
+                return await self._get_binance_price(symbol)
+            elif exchange.lower() == "kraken":
+                return await self._get_kraken_price(symbol)
+            elif exchange.lower() == "kucoin":
+                return await self._get_kucoin_price(symbol)
+            
+            # Emergency fallback - return 0 to prevent trading with wrong prices
+            self.logger.error(f"Could not get real price for {symbol}")
+            return 0.0
+            
+        except Exception as e:
+            self.logger.error(f"Price fetching failed for {symbol}", error=str(e))
+            return 0.0
+    
+    async def _get_binance_price(self, symbol: str) -> float:
+        """Get current price from Binance API."""
+        try:
+            import aiohttp
+            symbol_pair = f"{symbol}USDT"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://api.binance.com/api/v3/ticker/price?symbol={symbol_pair}",
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return float(data.get("price", 0))
+            return 0.0
+        except Exception:
+            return 0.0
+    
+    async def _get_kraken_price(self, symbol: str) -> float:
+        """Get current price from Kraken API."""
+        try:
+            import aiohttp
+            # Map symbol to Kraken format
+            kraken_symbol = symbol.replace("BTC", "XBT") + "USD"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://api.kraken.com/0/public/Ticker?pair={kraken_symbol}",
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        result = data.get("result", {})
+                        for pair, ticker in result.items():
+                            if "c" in ticker:
+                                return float(ticker["c"][0])
+            return 0.0
+        except Exception:
+            return 0.0
+    
+    async def _get_kucoin_price(self, symbol: str) -> float:
+        """Get current price from KuCoin API."""
+        try:
+            import aiohttp
+            symbol_pair = f"{symbol}-USDT"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={symbol_pair}",
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get("code") == "200000":
+                            ticker_data = data.get("data", {})
+                            return float(ticker_data.get("price", 0))
+            return 0.0
+        except Exception:
+            return 0.0
     
     async def _select_best_exchange(
         self, 

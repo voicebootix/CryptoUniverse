@@ -87,6 +87,34 @@ class StrategyMarketplaceService(LoggerMixin):
         self.ai_strategy_catalog = self._build_ai_strategy_catalog()
         self.performance_cache = {}
         
+        # Strategy pricing in credits (based on performance and sophistication)
+        self.strategy_pricing = {
+            # FREE Basic Strategies (included with any credit purchase)
+            "risk_management": 0,           # Free - essential risk control
+            "portfolio_optimization": 0,   # Free - basic portfolio management  
+            "spot_momentum_strategy": 0,   # Free - basic momentum trading
+            
+            # PAID Premium AI Strategies (Your 25+ functions)
+            "spot_mean_reversion": 25,      # Medium performance
+            "spot_breakout_strategy": 30,   # Good performance
+            "scalping_strategy": 40,        # High frequency, good returns
+            "pairs_trading": 45,            # Sophisticated statistical arbitrage
+            "statistical_arbitrage": 55,   # Advanced mathematical strategies
+            "market_making": 50,            # Steady income generation
+            "funding_arbitrage": 35,        # Cross-exchange opportunities
+            "arbitrage_execution": 30,      # Basic arbitrage
+            "swing_trading": 25,            # Medium-term strategies
+            "futures_trade": 65,            # High-risk, high-reward
+            "options_trade": 85,            # Complex derivatives
+            "complex_strategy": 120,        # Multi-leg derivatives
+            "hedge_position": 70,           # Portfolio hedging
+            "perpetual_trade": 60,          # Perpetual futures
+            "leverage_position": 50,        # Leverage management
+            "margin_status": 20,            # Margin monitoring
+            "algorithmic_trading": 40,      # General algorithmic
+            "position_management": 15,      # Position sizing
+        }
+        
     def _build_ai_strategy_catalog(self) -> Dict[str, Dict[str, Any]]:
         """Build catalog of your 25+ AI strategies with pricing."""
         return {

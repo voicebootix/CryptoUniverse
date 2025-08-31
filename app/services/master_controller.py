@@ -1335,11 +1335,25 @@ class MasterSystemController(LoggerMixin):
             if not config:
                 continue
             
-            # Enhanced: Check if user has sufficient balance and exchange connections
-            # Use your existing portfolio service to validate before running cycle
+            # Enhanced: Check profit potential and exchange connections before trading
             from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
-            portfolio_service = PortfolioRiskServiceExtended()
+            from app.services.profit_sharing_service import profit_sharing_service
             
+            # Check if user has remaining profit potential
+            profit_status = await profit_sharing_service.calculate_profit_potential_usage(
+                user_id=user_id,
+                period_start=datetime.utcnow() - timedelta(days=365),
+                period_end=datetime.utcnow()
+            )
+            
+            if not profit_status.get("success") or profit_status.get("needs_more_credits", False):
+                self.logger.info(f"Skipping cycle for user {user_id} - profit potential exhausted")
+                # Send notification that user needs to buy more credits
+                await self._notify_user_needs_credits(user_id, profit_status)
+                continue
+            
+            # Check portfolio status
+            portfolio_service = PortfolioRiskServiceExtended()
             portfolio_status = await portfolio_service.get_portfolio_status(user_id)
             if not portfolio_status.get("success"):
                 self.logger.warning(f"Skipping cycle for user {user_id} - portfolio unavailable")
@@ -1594,6 +1608,32 @@ class MasterSystemController(LoggerMixin):
         }
         
         return strategy_map.get((sentiment, volatility), ["spot_momentum_strategy"])
+    
+    async def _notify_user_needs_credits(self, user_id: str, profit_status: Dict[str, Any]):
+        """Notify user that they need to purchase more credits to continue trading."""
+        try:
+            from app.services.telegram_core import TelegramService
+            telegram_service = TelegramService()
+            
+            profit_earned = profit_status.get("total_profit_earned", 0)
+            profit_potential = profit_status.get("profit_potential", 0)
+            
+            message = (
+                f"🎉 PROFIT CEILING REACHED!\n\n"
+                f"💰 You've earned ${profit_earned:,.2f}\n"
+                f"🎯 Your profit potential was ${profit_potential:,.2f}\n\n"
+                f"🚀 Buy more credits to continue earning!\n"
+                f"💡 More strategies = Faster profits"
+            )
+            
+            await telegram_service.send_profit_ceiling_notification(
+                user_id=user_id,
+                message=message,
+                profit_earned=profit_earned
+            )
+            
+        except Exception as e:
+            self.logger.error("Failed to send credit notification", error=str(e))
 
     async def emergency_stop(self) -> Dict[str, Any]:
         """Execute emergency stop protocol - LEGACY METHOD."""
