@@ -14,19 +14,9 @@ class ConnectionManager:
         self._market_stream_task: Optional[asyncio.Task] = None
 
     async def connect(self, websocket: WebSocket, user_id: str):
-        """ENTERPRISE: Robust WebSocket connection with proper ASGI handling."""
+        """ENTERPRISE: Add WebSocket to connection pool (websocket should already be accepted)."""
         try:
-            # Check if WebSocket is already in a connected state
-            if websocket.application_state.value == 1:  # CONNECTING state
-                await websocket.accept()
-                logger.info(f"WebSocket accepted for user {user_id}")
-            elif websocket.application_state.value == 2:  # CONNECTED state
-                logger.debug(f"WebSocket already connected for user {user_id}")
-            else:
-                logger.warning(f"WebSocket in unexpected state: {websocket.application_state}")
-                return
-            
-            # Add to active connections
+            # Add to active connections - websocket should already be accepted by the endpoint
             if user_id not in self.active_connections:
                 self.active_connections[user_id] = []
             

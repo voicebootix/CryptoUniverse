@@ -667,7 +667,9 @@ async def websocket_endpoint(
     websocket: WebSocket,
     db: AsyncSession = Depends(get_database)
 ):
-    # ENTERPRISE: Let connection manager handle the accept() call
+    # ENTERPRISE: Simple, robust WebSocket connection pattern
+    await websocket.accept()
+    
     # For now, connect without authentication
     # TODO: Implement WebSocket token authentication via query params
     user_id = "anonymous"  # Temporary
