@@ -31,7 +31,7 @@ from app.models.trading import Trade, Position, Order, TradingStrategy
 from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance
 from app.models.user import User
 from app.models.credit import CreditAccount, CreditTransaction
-from app.services.user_exchange_service import user_exchange_service, ExchangeOrderParams
+# Import will be added for existing exchange functionality
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -724,23 +724,23 @@ class TradeExecutionService(LoggerMixin):
     ) -> Dict[str, Any]:
         """Execute real order using user's exchange credentials."""
         try:
-            # Create standardized order parameters
-            order_params = ExchangeOrderParams(
-                symbol=trade_request["symbol"],
-                side=trade_request["action"].upper(),
-                quantity=Decimal(str(trade_request["quantity"])),
-                order_type=trade_request.get("order_type", "MARKET").upper(),
-                price=Decimal(str(trade_request["price"])) if trade_request.get("price") else None,
-                stop_price=Decimal(str(trade_request["stop_loss"])) if trade_request.get("stop_loss") else None,
-                time_in_force="GTC",
-                reduce_only=False
+            # Get user's exchange credentials for the trade
+            credentials = await self._get_user_exchange_credentials(
+                user_id, 
+                trade_request["symbol"],
+                trade_request.get("exchange")
             )
             
-            # Execute using user's exchange credentials
-            execution_result = await user_exchange_service.execute_user_trade(
-                user_id=user_id,
-                order_params=order_params,
-                preferred_exchange=trade_request.get("exchange")
+            if not credentials:
+                return {
+                    "success": False,
+                    "error": f"No exchange credentials found for user {user_id} to trade {trade_request['symbol']}"
+                }
+            
+            # Execute using existing exchange connector with user credentials
+            execution_result = await self._execute_with_user_credentials(
+                credentials,
+                trade_request
             )
             
             if not execution_result.get("success"):
@@ -806,6 +806,202 @@ class TradeExecutionService(LoggerMixin):
                 "error_type": "EXECUTION_ERROR",
                 "timestamp": datetime.utcnow().isoformat()
             }
+    
+    async def _get_user_exchange_credentials(
+        self,
+        user_id: str,
+        symbol: str,
+        preferred_exchange: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Get user's exchange credentials using existing exchange system."""
+        try:
+            async for db in get_database():
+                from sqlalchemy import select, and_
+                
+                # Get user's active exchange accounts
+                stmt = select(ExchangeAccount, ExchangeApiKey).join(
+                    ExchangeApiKey, ExchangeAccount.id == ExchangeApiKey.account_id
+                ).where(
+                    and_(
+                        ExchangeAccount.user_id == user_id,
+                        ExchangeAccount.status == "active",
+                        ExchangeAccount.trading_enabled == True,
+                        ExchangeApiKey.status == "active",
+                        ExchangeApiKey.is_validated == True
+                    )
+                )
+                
+                result = await db.execute(stmt)
+                exchanges = result.fetchall()
+                
+                if not exchanges:
+                    return None
+                
+                # Use preferred exchange if specified and available
+                if preferred_exchange:
+                    for account, api_key in exchanges:
+                        if account.exchange_name.lower() == preferred_exchange.lower():
+                            return await self._decrypt_credentials(api_key, account)
+                
+                # Otherwise use first available exchange
+                account, api_key = exchanges[0]
+                return await self._decrypt_credentials(api_key, account)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to get user exchange credentials: {e}")
+            return None
+    
+    async def _decrypt_credentials(self, api_key: ExchangeApiKey, account: ExchangeAccount) -> Dict[str, Any]:
+        """Decrypt user's API credentials using existing encryption system."""
+        from app.api.v1.endpoints.exchanges import cipher_suite
+        
+        try:
+            decrypted_api_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
+            decrypted_secret_key = cipher_suite.decrypt(api_key.encrypted_secret_key.encode()).decode()
+            decrypted_passphrase = None
+            
+            if api_key.encrypted_passphrase:
+                decrypted_passphrase = cipher_suite.decrypt(api_key.encrypted_passphrase.encode()).decode()
+            
+            return {
+                "exchange": account.exchange_name,
+                "api_key": decrypted_api_key,
+                "secret_key": decrypted_secret_key,
+                "passphrase": decrypted_passphrase,
+                "is_sandbox": account.is_simulation,
+                "account_id": str(account.id)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to decrypt credentials: {e}")
+            return None
+    
+    async def _execute_with_user_credentials(
+        self,
+        credentials: Dict[str, Any],
+        trade_request: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute trade with user's decrypted credentials."""
+        try:
+            exchange = credentials["exchange"].lower()
+            
+            # Use existing exchange connector but with user credentials
+            if exchange == "binance":
+                return await self._execute_binance_with_user_creds(credentials, trade_request)
+            elif exchange == "kraken":
+                return await self._execute_kraken_with_user_creds(credentials, trade_request)
+            elif exchange == "kucoin":
+                return await self._execute_kucoin_with_user_creds(credentials, trade_request)
+            else:
+                return {"success": False, "error": f"Exchange {exchange} not supported"}
+                
+        except Exception as e:
+            self.logger.error(f"Failed to execute with user credentials: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def _execute_binance_with_user_creds(
+        self,
+        credentials: Dict[str, Any],
+        trade_request: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute Binance order with user's credentials (using existing logic)."""
+        # Reuse the existing Binance execution logic but with user's API keys
+        original_config = ExchangeConfigs.get_config("binance")
+        
+        # Temporarily override with user's credentials
+        user_config = {
+            "base_url": "https://api.binance.com" if not credentials["is_sandbox"] else "https://testnet.binance.vision",
+            "api_key": credentials["api_key"],
+            "secret_key": credentials["secret_key"],
+            "testnet": credentials["is_sandbox"]
+        }
+        
+        # Monkey patch the config temporarily
+        ExchangeConfigs.get_config = lambda x: user_config if x == "binance" else original_config
+        
+        try:
+            # Use existing exchange connector
+            order_params = {
+                "symbol": trade_request["symbol"],
+                "side": trade_request["action"],
+                "quantity": trade_request["quantity"],
+                "type": trade_request.get("order_type", "MARKET"),
+                "exchange": "binance"
+            }
+            
+            result = await self.exchange_connector.execute_binance_order(order_params)
+            return result
+            
+        finally:
+            # Restore original config
+            ExchangeConfigs.get_config = lambda x: original_config
+    
+    async def _execute_kraken_with_user_creds(
+        self,
+        credentials: Dict[str, Any],
+        trade_request: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute Kraken order with user's credentials."""
+        # Similar pattern for Kraken
+        original_config = ExchangeConfigs.get_config("kraken")
+        
+        user_config = {
+            "base_url": "https://api.kraken.com",
+            "api_key": credentials["api_key"],
+            "secret_key": credentials["secret_key"],
+            "testnet": credentials["is_sandbox"]
+        }
+        
+        ExchangeConfigs.get_config = lambda x: user_config if x == "kraken" else original_config
+        
+        try:
+            order_params = {
+                "symbol": trade_request["symbol"],
+                "side": trade_request["action"],
+                "quantity": trade_request["quantity"],
+                "type": trade_request.get("order_type", "MARKET"),
+                "exchange": "kraken"
+            }
+            
+            result = await self.exchange_connector.execute_kraken_order(order_params)
+            return result
+            
+        finally:
+            ExchangeConfigs.get_config = lambda x: original_config
+    
+    async def _execute_kucoin_with_user_creds(
+        self,
+        credentials: Dict[str, Any],
+        trade_request: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute KuCoin order with user's credentials."""
+        # Similar pattern for KuCoin
+        original_config = ExchangeConfigs.get_config("kucoin")
+        
+        user_config = {
+            "base_url": "https://api.kucoin.com",
+            "api_key": credentials["api_key"],
+            "secret_key": credentials["secret_key"],
+            "passphrase": credentials["passphrase"],
+            "testnet": credentials["is_sandbox"]
+        }
+        
+        ExchangeConfigs.get_config = lambda x: user_config if x == "kucoin" else original_config
+        
+        try:
+            order_params = {
+                "symbol": trade_request["symbol"],
+                "side": trade_request["action"],
+                "quantity": trade_request["quantity"],
+                "type": trade_request.get("order_type", "MARKET"),
+                "exchange": "kucoin"
+            }
+            
+            result = await self.exchange_connector.execute_kucoin_order(order_params)
+            return result
+            
+        finally:
+            ExchangeConfigs.get_config = lambda x: original_config
     
     async def _record_trade_execution(
         self,

@@ -928,3 +928,81 @@ def mask_api_key(api_key: str) -> str:
     if len(api_key) <= 8:
         return "*" * len(api_key)
     return api_key[:4] + "*" * (len(api_key) - 8) + api_key[-4:]
+
+
+async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> Dict[str, Any]:
+    """Get user's portfolio data from all connected exchanges using existing balance system."""
+    try:
+        # Get all active exchange accounts for user
+        stmt = select(ExchangeAccount, ExchangeApiKey).join(
+            ExchangeApiKey, ExchangeAccount.id == ExchangeApiKey.account_id
+        ).where(
+            and_(
+                ExchangeAccount.user_id == user_id,
+                ExchangeAccount.status == ExchangeStatus.ACTIVE,
+                ExchangeApiKey.status == ApiKeyStatus.ACTIVE
+            )
+        )
+        
+        result = await db.execute(stmt)
+        user_exchanges = result.fetchall()
+        
+        if not user_exchanges:
+            return {
+                "success": True,
+                "total_value_usd": 0.0,
+                "balances": [],
+                "exchanges": [],
+                "message": "No exchange accounts connected"
+            }
+        
+        # Fetch balances from all exchanges using existing fetch_exchange_balances
+        all_balances = []
+        total_value_usd = 0.0
+        exchange_summaries = []
+        
+        for account, api_key in user_exchanges:
+            try:
+                # Use existing balance fetching function
+                balances = await fetch_exchange_balances(api_key, db)
+                
+                exchange_value = sum(b.get("value_usd", 0) for b in balances)
+                total_value_usd += exchange_value
+                
+                # Add exchange info to each balance
+                for balance in balances:
+                    balance["exchange"] = account.exchange_name
+                
+                all_balances.extend(balances)
+                exchange_summaries.append({
+                    "exchange": account.exchange_name,
+                    "account_id": str(account.id),
+                    "total_value_usd": exchange_value,
+                    "asset_count": len(balances),
+                    "last_updated": datetime.utcnow().isoformat()
+                })
+                
+            except Exception as e:
+                logger.error(
+                    "Failed to fetch balances from exchange",
+                    error=str(e),
+                    exchange=account.exchange_name,
+                    user_id=user_id
+                )
+                continue
+        
+        return {
+            "success": True,
+            "total_value_usd": total_value_usd,
+            "balances": all_balances,
+            "exchanges": exchange_summaries,
+            "last_updated": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(
+            "Failed to get user portfolio from exchanges",
+            error=str(e),
+            user_id=user_id
+        )
+        return {"success": False, "error": str(e)}

@@ -26,7 +26,6 @@ from app.services.trade_execution import TradeExecutionService
 from app.services.master_controller import MasterSystemController
 from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
 from app.services.market_analysis_core import MarketAnalysisService
-from app.services.user_exchange_service import user_exchange_service
 from app.services.real_market_data_service import real_market_data_service
 from app.services.rate_limit import rate_limiter
 from app.services.websocket import manager
@@ -450,8 +449,9 @@ async def get_portfolio_status(
     )
     
     try:
-        # Get real portfolio data from user's connected exchanges
-        portfolio_data = await user_exchange_service.get_user_portfolio_balances(str(current_user.id))
+        # Get real portfolio data using existing exchange balance system
+        from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
+        portfolio_data = await get_user_portfolio_from_exchanges(str(current_user.id), db)
         
         if not portfolio_data.get("success"):
             raise HTTPException(
