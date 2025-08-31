@@ -8,7 +8,7 @@ from fastapi import APIRouter
 import structlog
 
 # Import endpoint routers
-from app.api.v1.endpoints import auth, trading, admin, exchanges
+from app.api.v1.endpoints import auth, trading, admin, exchanges, strategies
 
 logger = structlog.get_logger(__name__)
 
@@ -19,6 +19,7 @@ api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(trading.router, prefix="/trading", tags=["Trading"])
 api_router.include_router(exchanges.router, prefix="/exchanges", tags=["Exchange Management"])
+api_router.include_router(strategies.router, prefix="/strategies", tags=["Trading Strategies"])
 api_router.include_router(admin.router, prefix="/admin", tags=["Administration"])
 
 @api_router.get("/status")
@@ -31,7 +32,8 @@ async def api_status():
         "endpoints": {
             "authentication": "/api/v1/auth",
             "trading": "/api/v1/trading",
-            "exchanges": "/api/v1/exchanges", 
+            "exchanges": "/api/v1/exchanges",
+            "strategies": "/api/v1/strategies", 
             "administration": "/api/v1/admin"
         },
         "features": [

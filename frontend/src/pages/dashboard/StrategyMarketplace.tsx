@@ -44,6 +44,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
 import { LineChart as RechartsLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useStrategies } from '@/hooks/useStrategies';
+import StrategyExecutionModal from '@/components/StrategyExecutionModal';
 
 // Trading Strategies Data based on your backend
 const tradingStrategies = [
@@ -332,6 +334,10 @@ const StrategyMarketplace: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState('winRate');
   const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
+  const [showExecutionModal, setShowExecutionModal] = useState(false);
+  const [strategyToExecute, setStrategyToExecute] = useState<any>(null);
+  
+  const { strategies, availableStrategies, loading, executing, actions } = useStrategies();
 
   const filteredStrategies = tradingStrategies.filter(strategy => {
     const matchesCategory = selectedCategory === 'all' || strategy.category === selectedCategory;
@@ -520,9 +526,18 @@ const StrategyMarketplace: React.FC = () => {
                 </div>
 
                 <div className="flex gap-2">
-                  <Button size="sm" className="flex-1">
+                  <Button 
+                    size="sm" 
+                    className="flex-1"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setStrategyToExecute(strategy);
+                      setShowExecutionModal(true);
+                    }}
+                    disabled={executing}
+                  >
                     <Play className="h-3 w-3 mr-1" />
-                    Activate
+                    {executing ? 'Executing...' : 'Execute'}
                   </Button>
                   <Button size="sm" variant="outline">
                     <Eye className="h-3 w-3" />
@@ -542,7 +557,20 @@ const StrategyMarketplace: React.FC = () => {
         </div>
       )}
 
-      {/* Strategy Detail Modal would go here */}
+      {/* Strategy Execution Modal */}
+      {showExecutionModal && strategyToExecute && (
+        <StrategyExecutionModal
+          isOpen={showExecutionModal}
+          onClose={() => {
+            setShowExecutionModal(false);
+            setStrategyToExecute(null);
+          }}
+          strategy={strategyToExecute}
+          executing={executing}
+        />
+      )}
+
+      {/* Strategy Detail Modal */}
       <AnimatePresence>
         {selectedStrategy && (
           <motion.div
@@ -559,10 +587,10 @@ const StrategyMarketplace: React.FC = () => {
               className="bg-background rounded-lg max-w-4xl w-full max-h-[80vh] overflow-auto"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Strategy detail content would go here */}
+              {/* Strategy detail content */}
               <div className="p-6">
                 <h2 className="text-2xl font-bold mb-4">Strategy Details</h2>
-                <p className="text-muted-foreground">Detailed view coming soon...</p>
+                <p className="text-muted-foreground">Detailed analytics and configuration coming soon...</p>
                 <Button onClick={() => setSelectedStrategy(null)} className="mt-4">
                   Close
                 </Button>
