@@ -581,37 +581,72 @@ class MasterSystemController(LoggerMixin):
             if not market_result.get("success"):
                 raise Exception("Market analysis failed")
             
-            # PHASE 2: Generate Strategy Signals
+            # PHASE 2: Generate Strategy Signals using your sophisticated strategies
             phase_start = time.time()
             
+            # Get market-optimized strategies (no hardcoded limits)
             if focus_strategies is None:
                 focus_strategies = timezone_strategy.get("preferred_strategies", ["spot_momentum_strategy"])
             
-            all_signals = []
-            for strategy in focus_strategies[:3]:  # Limit for performance
-                try:
-                    signal_result = await trading_strategies_service.generate_trading_signal(
-                        strategy_type=strategy,
-                        market_data=market_result,
-                        risk_mode=self.current_mode.value,
-                        user_id=user_id
-                    )
-                    
-                    if signal_result.get("success"):
-                        signal_data = signal_result.get("signal", {})
-                        all_signals.append({
-                            "strategy": strategy,
-                            "signal": signal_data,
-                            "confidence": signal_data.get("confidence", 0)
-                        })
-                        
-                except Exception as e:
-                    self.logger.warning(f"Strategy {strategy} failed", error=str(e))
+            # Add market condition-based strategies
+            market_assessment = market_result.get("market_assessment", {})
+            if market_assessment.get("volatility_level") == "high":
+                focus_strategies.extend(["scalping_strategy", "spot_breakout_strategy"])
+            if market_assessment.get("arbitrage_opportunities", 0) > 0:
+                focus_strategies.append("arbitrage_execution")
             
-            # Select best signal
-            best_signal = None
-            if all_signals:
-                best_signal = max(all_signals, key=lambda x: x["confidence"])
+            # Remove duplicates while preserving order
+            focus_strategies = list(dict.fromkeys(focus_strategies))
+            
+            # Execute ALL strategies in parallel (not limited to 3)
+            all_signals = []
+            strategy_tasks = []
+            
+            for strategy in focus_strategies:
+                task = trading_strategies_service.generate_trading_signal(
+                    strategy_type=strategy,
+                    market_data=market_result,
+                    risk_mode=self.current_mode.value,
+                    user_id=user_id
+                )
+                strategy_tasks.append((strategy, task))
+            
+            # Execute all strategies in parallel
+            strategy_results = await asyncio.gather(
+                *[task for _, task in strategy_tasks], 
+                return_exceptions=True
+            )
+            
+            # Process results
+            for i, result in enumerate(strategy_results):
+                strategy_name = strategy_tasks[i][0]
+                
+                if isinstance(result, Exception):
+                    self.logger.warning(f"Strategy {strategy_name} failed", error=str(result))
+                    continue
+                
+                if result.get("success"):
+                    signal_data = result.get("signal", {})
+                    all_signals.append({
+                        "strategy": strategy_name,
+                        "signal": signal_data,
+                        "confidence": signal_data.get("confidence", 0),
+                        "expected_return": signal_data.get("expected_return", 0)
+                    })
+            
+            # Select best signals (multiple signals allowed for diversification)
+            best_signals = sorted(all_signals, key=lambda x: x["confidence"], reverse=True)
+            
+            # Take top signals based on risk mode
+            max_signals = {
+                "conservative": 1,
+                "balanced": 2, 
+                "aggressive": 3,
+                "beast_mode": 5
+            }.get(self.current_mode.value, 2)
+            
+            best_signals = best_signals[:max_signals]
+            best_signal = best_signals[0] if best_signals else None
             
             phases_executed.append({
                 "phase": "signal_generation",
