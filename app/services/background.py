@@ -33,7 +33,7 @@ class BackgroundServiceManager(LoggerMixin):
             "health_monitor": 60,        # 1 minute
             "metrics_collector": 300,    # 5 minutes
             "cleanup_service": 3600,     # 1 hour
-            "autonomous_cycles": 900,    # 15 minutes (4 cycles per hour)
+            "autonomous_cycles": 60,     # 1 minute (60 cycles per hour) - more responsive
             "market_data_sync": 60,      # 1 minute
             "balance_sync": 300,         # 5 minutes
             "risk_monitor": 30,          # 30 seconds

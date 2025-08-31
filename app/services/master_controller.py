@@ -508,13 +508,19 @@ class MasterSystemController(LoggerMixin):
         profit_generated = 0.0
         
         try:
-            # Import services dynamically to avoid circular imports
-            from app.services.market_analysis import market_analysis_service
+            # Import your existing sophisticated services
+            from app.services.market_analysis_core import MarketAnalysisService
             from app.services.trading_strategies import trading_strategies_service
-            from app.services.portfolio_risk import portfolio_risk_service
-            from app.services.ai_consensus import ai_consensus_service
-            from app.services.trade_execution import trade_execution_service
-            from app.services.telegram_commander import telegram_commander_service
+            from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+            from app.services.ai_consensus_core import ai_consensus_service
+            from app.services.trade_execution import TradeExecutionService
+            from app.services.telegram_core import TelegramService
+            
+            # Initialize service instances
+            market_analysis_service = MarketAnalysisService()
+            portfolio_risk_service = PortfolioRiskServiceExtended()
+            trade_execution_service = TradeExecutionService()
+            telegram_service = TelegramService()
             
             # PHASE 0: Emergency Checks & Timezone Strategy
             phase_start = time.time()
@@ -522,22 +528,28 @@ class MasterSystemController(LoggerMixin):
             # Get current timezone strategy
             timezone_strategy = self.get_current_timezone_strategy()
             
-            # Get REAL portfolio data for comprehensive emergency check
-            portfolio_result = await portfolio_risk_service.get_portfolio(user_id=user_id)
+            # Get REAL portfolio data using your sophisticated PortfolioRiskServiceExtended
+            portfolio_result = await portfolio_risk_service.get_portfolio_status(user_id=user_id)
             emergency_level = EmergencyLevel.NORMAL
             
             if portfolio_result.get("success"):
                 portfolio_data = portfolio_result.get("portfolio", {})
                 
-                # Enhance portfolio data with additional risk metrics
-                risk_assessment = await portfolio_risk_service.assess_risk(user_id=user_id)
+                # Enhance portfolio data with your sophisticated risk analysis
+                risk_assessment = await portfolio_risk_service.risk_analysis(
+                    user_id=user_id,
+                    analysis_type="comprehensive"
+                )
                 if risk_assessment.get("success"):
-                    portfolio_data["risk_metrics"] = risk_assessment.get("risk_metrics", {})
+                    portfolio_data["risk_metrics"] = risk_assessment.get("risk_analysis", {})
                 
-                # Get performance metrics
-                performance_data = await portfolio_risk_service.get_performance_metrics(user_id=user_id)
+                # Get performance metrics using your advanced analytics
+                performance_data = await portfolio_risk_service.portfolio_performance_analysis(
+                    user_id=user_id,
+                    timeframe="daily"
+                )
                 if performance_data.get("success"):
-                    portfolio_data["performance_data"] = performance_data.get("performance_metrics", {})
+                    portfolio_data["performance_data"] = performance_data.get("performance_analysis", {})
                 
                 emergency_level = await self.check_emergency_conditions(portfolio_data)
                 
@@ -551,7 +563,7 @@ class MasterSystemController(LoggerMixin):
                 "execution_time_ms": (time.time() - phase_start) * 1000
             })
             
-            # PHASE 1: Comprehensive Market Analysis
+            # PHASE 1: Comprehensive Market Analysis using your sophisticated service
             phase_start = time.time()
             market_result = await market_analysis_service.complete_market_assessment(
                 symbols="SMART_ADAPTIVE",
@@ -1306,18 +1318,35 @@ class MasterSystemController(LoggerMixin):
             
             self.logger.info(f"🎯 Active cycles for minute {current_minute}: {active_cycles}")
             
-            # Execute each active cycle
+            # INTELLIGENT CYCLE SELECTION - Don't run all cycles every time
+            # Check market conditions first to determine which cycles to run
+            market_conditions = await self._assess_current_market_conditions(user_id)
+            
+            # Select cycles based on market conditions and user intensity
+            selected_cycles = self._select_optimal_cycles(
+                active_cycles, 
+                market_conditions, 
+                config.get("intensity", "balanced")
+            )
+            
+            self.logger.info(
+                f"🎯 Selected {len(selected_cycles)} of {len(active_cycles)} cycles",
+                selected=selected_cycles,
+                market_conditions=market_conditions.get("summary", "unknown")
+            )
+            
+            # Execute selected cycles
             cycle_results = []
             total_profit = 0.0
             total_trades = 0
             
-            for cycle in active_cycles:
+            for cycle in selected_cycles:
                 try:
                     if cycle == TradingCycle.ARBITRAGE_HUNTER.value:
-                        # Fast arbitrage execution
+                        # Fast arbitrage execution using your cross_exchange_arbitrage_scanner
                         result = await self.execute_arbitrage_cycle(user_id)
                     else:
-                        # Full 5-phase execution for other cycles
+                        # Full 5-phase execution using your sophisticated services
                         cycle_enum = TradingCycle(cycle)
                         result = await self.execute_5_phase_flow(
                             cycle_type=cycle_enum,
@@ -1404,6 +1433,102 @@ class MasterSystemController(LoggerMixin):
             
         except Exception as e:
             self.logger.error(f"User autonomous cycle failed for {user_id}", error=str(e))
+    
+    async def _assess_current_market_conditions(self, user_id: str) -> Dict[str, Any]:
+        """Assess current market conditions using your MarketAnalysisService."""
+        try:
+            from app.services.market_analysis_core import MarketAnalysisService
+            market_service = MarketAnalysisService()
+            
+            # Use your sophisticated market sentiment analysis
+            sentiment_result = await market_service.market_sentiment(
+                symbols="BTC,ETH,SOL,ADA",
+                user_id=user_id
+            )
+            
+            if sentiment_result.get("success"):
+                sentiment_data = sentiment_result.get("sentiment_analysis", {})
+                overall_sentiment = sentiment_data.get("overall_market_sentiment", "neutral")
+                volatility = sentiment_data.get("market_volatility", "medium")
+                
+                return {
+                    "summary": f"{overall_sentiment}_{volatility}",
+                    "sentiment": overall_sentiment,
+                    "volatility": volatility,
+                    "should_trade": overall_sentiment != "extremely_bearish",
+                    "preferred_strategies": self._get_strategies_for_conditions(overall_sentiment, volatility)
+                }
+            
+            # Fallback to neutral conditions
+            return {
+                "summary": "neutral_medium",
+                "sentiment": "neutral", 
+                "volatility": "medium",
+                "should_trade": True,
+                "preferred_strategies": ["spot_momentum_strategy"]
+            }
+            
+        except Exception as e:
+            self.logger.error("Market conditions assessment failed", error=str(e))
+            return {"summary": "unknown", "should_trade": False}
+    
+    def _select_optimal_cycles(
+        self, 
+        available_cycles: List[str], 
+        market_conditions: Dict[str, Any],
+        intensity: str
+    ) -> List[str]:
+        """Select optimal cycles based on market conditions and user intensity."""
+        
+        # Don't trade if market conditions are unfavorable
+        if not market_conditions.get("should_trade", True):
+            return []
+        
+        # Intensity-based cycle selection
+        intensity_limits = {
+            "hibernation": 1,    # Only 1 cycle max
+            "conservative": 1,   # 1 cycle
+            "balanced": 2,       # Up to 2 cycles
+            "active": 3,         # Up to 3 cycles  
+            "aggressive": 4,     # Up to 4 cycles
+            "hyperactive": len(available_cycles)  # All cycles
+        }
+        
+        max_cycles = intensity_limits.get(intensity, 2)
+        
+        # Prioritize cycles based on market conditions
+        cycle_priorities = {
+            "arbitrage_hunter": 100,  # Always high priority
+            "momentum_futures": 80 if market_conditions.get("sentiment") == "bullish" else 40,
+            "portfolio_optimization": 60,
+            "deep_analysis": 50
+        }
+        
+        # Sort by priority and take top N
+        sorted_cycles = sorted(
+            available_cycles,
+            key=lambda c: cycle_priorities.get(c, 30),
+            reverse=True
+        )
+        
+        return sorted_cycles[:max_cycles]
+    
+    def _get_strategies_for_conditions(self, sentiment: str, volatility: str) -> List[str]:
+        """Get optimal strategies for market conditions."""
+        
+        strategy_map = {
+            ("bullish", "high"): ["spot_momentum_strategy", "spot_breakout_strategy", "scalping_strategy"],
+            ("bullish", "medium"): ["spot_momentum_strategy", "futures_trade"],
+            ("bullish", "low"): ["spot_momentum_strategy", "market_making"],
+            ("bearish", "high"): ["spot_mean_reversion", "futures_trade"],
+            ("bearish", "medium"): ["spot_mean_reversion", "options_trade"],
+            ("bearish", "low"): ["market_making", "spot_mean_reversion"],
+            ("neutral", "high"): ["scalping_strategy", "arbitrage_execution"],
+            ("neutral", "medium"): ["spot_momentum_strategy", "spot_mean_reversion"],
+            ("neutral", "low"): ["market_making", "grid_trading"]
+        }
+        
+        return strategy_map.get((sentiment, volatility), ["spot_momentum_strategy"])
 
     async def emergency_stop(self) -> Dict[str, Any]:
         """Execute emergency stop protocol - LEGACY METHOD."""
