@@ -32,17 +32,22 @@ target_metadata = Base.metadata
 
 def get_url():
     """Get database URL from environment or config."""
-    # Try to get from environment first (for production/Render)
+    # Try to get from environment first (for production/Render/Supabase)
     url = os.getenv("DATABASE_URL")
     if url:
-        # Render provides DATABASE_URL, but we might need to adjust it
-        # for SQLAlchemy (postgres:// vs postgresql://)
+        # Supabase/Render provides DATABASE_URL, adjust for async SQLAlchemy
         if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql://", 1)
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
         return url
     
-    # Fallback to config file
-    return config.get_main_option("sqlalchemy.url")
+    # Fallback to config file  
+    fallback_url = config.get_main_option("sqlalchemy.url")
+    if fallback_url and not fallback_url.startswith("postgresql+asyncpg://"):
+        if fallback_url.startswith("postgresql://"):
+            fallback_url = fallback_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return fallback_url
 
 
 def run_migrations_offline() -> None:

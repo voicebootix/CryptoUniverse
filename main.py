@@ -116,17 +116,21 @@ def create_application() -> FastAPI:
     )
 
     # CORS FIRST - must be added before other middleware
+    cors_origins = settings.cors_origins
+    
+    # Add localhost for development
+    if settings.ENVIRONMENT == "development":
+        dev_origins = [
+            "http://localhost:3000",
+            "http://localhost:8000", 
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:8000"
+        ]
+        cors_origins.extend(dev_origins)
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "https://cryptouniverse-frontend.onrender.com",
-            "https://cryptouniverse.onrender.com", 
-            "http://localhost:3000",
-            "http://localhost:8000",
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:8000",
-            "*"  # Allow all for debugging CORS issues
-        ],
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

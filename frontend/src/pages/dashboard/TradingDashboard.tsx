@@ -30,56 +30,7 @@ import { formatCurrency, formatPercentage, formatNumber, getColorForChange, getB
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, BarChart, Bar } from 'recharts';
 import { usePortfolioStore } from '@/hooks/usePortfolio';
 
-// Mock data for charts and tables that are not yet connected
-const performanceData = [
-  { time: '00:00', value: 52800 },
-  { time: '04:00', value: 53100 },
-  { time: '08:00', value: 52900 },
-  { time: '12:00', value: 53800 },
-  { time: '16:00', value: 54100 },
-  { time: '20:00', value: 54250 },
-];
-
-const marketData = [
-  { symbol: 'BTC', price: 50000, change: 2.5, volume: '2.1B' },
-  { symbol: 'ETH', price: 2400, change: -1.2, volume: '1.8B' },
-  { symbol: 'SOL', price: 50, change: 5.8, volume: '450M' },
-  { symbol: 'ADA', price: 0.45, change: 3.2, volume: '320M' },
-  { symbol: 'DOT', price: 8.50, change: -0.8, volume: '180M' },
-];
-
-const recentTrades = [
-  {
-    id: 1,
-    symbol: 'BTC',
-    side: 'buy' as const,
-    amount: 0.1,
-    price: 49800,
-    time: '2 min ago',
-    status: 'completed' as const,
-    pnl: 120.50,
-  },
-  {
-    id: 2,
-    symbol: 'ETH',
-    side: 'sell' as const,
-    amount: 2.0,
-    price: 2420,
-    time: '15 min ago',
-    status: 'completed' as const,
-    pnl: -45.20,
-  },
-  {
-    id: 3,
-    symbol: 'SOL',
-    side: 'buy' as const,
-    amount: 50,
-    price: 48.50,
-    time: '1 hour ago',
-    status: 'pending' as const,
-    pnl: 0,
-  },
-];
+// Real data will be fetched from API - no more mock data
 
 const COLORS = ['#22c55e', '#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6'];
 
