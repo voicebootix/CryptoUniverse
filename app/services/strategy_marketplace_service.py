@@ -87,43 +87,80 @@ class StrategyMarketplaceService(LoggerMixin):
         self.ai_strategy_catalog = self._build_ai_strategy_catalog()
         self.performance_cache = {}
         
-        # Strategy pricing in credits (based on performance and sophistication)
-        self.strategy_pricing = {
-            # FREE Basic Strategies (included with any credit purchase)
-            "risk_management": 0,           # Free - essential risk control
-            "portfolio_optimization": 0,   # Free - basic portfolio management  
-            "spot_momentum_strategy": 0,   # Free - basic momentum trading
+        # Strategy pricing will be loaded dynamically from admin settings
+        self.strategy_pricing = None
+    
+    async def ensure_pricing_loaded(self):
+        """Ensure strategy pricing is loaded from admin settings."""
+        if self.strategy_pricing is None:
+            await self._load_dynamic_strategy_pricing()
+    
+    async def _load_dynamic_strategy_pricing(self) -> Dict[str, int]:
+        """Load strategy pricing from admin configuration."""
+        try:
+            from app.core.redis import get_redis_client
+            redis = await get_redis_client()
             
-            # PAID Premium AI Strategies (Your 25+ functions)
-            "spot_mean_reversion": 25,      # Medium performance
-            "spot_breakout_strategy": 30,   # Good performance
-            "scalping_strategy": 40,        # High frequency, good returns
-            "pairs_trading": 45,            # Sophisticated statistical arbitrage
-            "statistical_arbitrage": 55,   # Advanced mathematical strategies
-            "market_making": 50,            # Steady income generation
-            "funding_arbitrage": 35,        # Cross-exchange opportunities
-            "arbitrage_execution": 30,      # Basic arbitrage
-            "swing_trading": 25,            # Medium-term strategies
-            "futures_trade": 65,            # High-risk, high-reward
-            "options_trade": 85,            # Complex derivatives
-            "complex_strategy": 120,        # Multi-leg derivatives
-            "hedge_position": 70,           # Portfolio hedging
-            "perpetual_trade": 60,          # Perpetual futures
-            "leverage_position": 50,        # Leverage management
-            "margin_status": 20,            # Margin monitoring
-            "algorithmic_trading": 40,      # General algorithmic
-            "position_management": 15,      # Position sizing
-        }
-        
+            # Load from admin settings
+            strategy_pricing_data = await redis.hgetall("admin:strategy_pricing")
+            
+            if strategy_pricing_data:
+                strategy_pricing = {}
+                for key, value in strategy_pricing_data.items():
+                    strategy_name = key.decode() if isinstance(key, bytes) else key
+                    credit_cost = int(value.decode()) if isinstance(value, bytes) else int(value)
+                    strategy_pricing[strategy_name] = credit_cost
+                
+                self.strategy_pricing = strategy_pricing
+                return strategy_pricing
+            else:
+                # Set defaults and save for admin
+                default_pricing = {
+                    # FREE Basic Strategies (included with any credit purchase)
+                    "risk_management": 0,           # Free - essential risk control
+                    "portfolio_optimization": 0,   # Free - basic portfolio management  
+                    "spot_momentum_strategy": 0,   # Free - basic momentum trading
+                    
+                    # Premium AI Strategies - Dynamic pricing
+                    "spot_mean_reversion": 20,
+                    "spot_breakout_strategy": 25,
+                    "scalping_strategy": 35,
+                    "pairs_trading": 40,
+                    "statistical_arbitrage": 50,
+                    "market_making": 55,
+                    "futures_trade": 60,
+                    "options_trade": 75,
+                    "complex_strategy": 100,
+                    "funding_arbitrage": 45,
+                    "hedge_position": 65
+                }
+                
+                # Save defaults for admin to modify
+                await redis.hset("admin:strategy_pricing", mapping=default_pricing)
+                
+                self.strategy_pricing = default_pricing
+                return default_pricing
+                
+        except Exception as e:
+            self.logger.error("Failed to load strategy pricing", error=str(e))
+            # Emergency fallback
+            fallback_pricing = {
+                "spot_momentum_strategy": 0,   # Free
+                "spot_mean_reversion": 20,
+                "market_making": 25
+            }
+            self.strategy_pricing = fallback_pricing
+            return fallback_pricing
+            
     def _build_ai_strategy_catalog(self) -> Dict[str, Dict[str, Any]]:
-        """Build catalog of your 25+ AI strategies with pricing."""
+        """Build catalog of your 25+ AI strategies with dynamic pricing."""
         return {
             # Derivatives (High-value, premium pricing)
             "futures_trade": {
                 "name": "AI Futures Trading",
                 "category": "derivatives",
-                "credit_cost_monthly": 75,
-                "credit_cost_per_execution": 5,
+                "credit_cost_monthly": "DYNAMIC",  # Will be loaded from admin settings
+                "credit_cost_per_execution": "DYNAMIC",
                 "risk_level": "high",
                 "min_capital": 5000,
                 "estimated_monthly_return": "45-80%",
@@ -253,8 +290,11 @@ class StrategyMarketplaceService(LoggerMixin):
         include_ai_strategies: bool = True,
         include_community_strategies: bool = True
     ) -> Dict[str, Any]:
-        """Get all available strategies in marketplace with real performance data."""
+        """Get all available strategies in marketplace with dynamic pricing."""
         try:
+            # Ensure dynamic pricing is loaded
+            await self.ensure_pricing_loaded()
+            
             marketplace_items = []
             
             # Add your AI strategies with real performance
@@ -262,6 +302,10 @@ class StrategyMarketplaceService(LoggerMixin):
                 for strategy_func, config in self.ai_strategy_catalog.items():
                     # Get real performance from your database
                     performance_data = await self._get_ai_strategy_performance(strategy_func, user_id)
+                    
+                    # Get dynamic pricing for this strategy
+                    monthly_cost = self.strategy_pricing.get(strategy_func, 25)
+                    execution_cost = max(1, monthly_cost // 30)
                     
                     marketplace_item = StrategyMarketplaceItem(
                         strategy_id=f"ai_{strategy_func}",
@@ -271,8 +315,8 @@ class StrategyMarketplaceService(LoggerMixin):
                         publisher_id=None,  # Platform AI strategy
                         publisher_name="CryptoUniverse AI",
                         is_ai_strategy=True,
-                        credit_cost_monthly=config["credit_cost_monthly"],
-                        credit_cost_per_execution=config["credit_cost_per_execution"],
+                        credit_cost_monthly=monthly_cost,
+                        credit_cost_per_execution=execution_cost,
                         win_rate=performance_data.get("win_rate", 0),
                         avg_return=performance_data.get("avg_return", 0),
                         sharpe_ratio=performance_data.get("sharpe_ratio"),

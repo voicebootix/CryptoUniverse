@@ -37,8 +37,10 @@ class ProfitSharingService(LoggerMixin):
     """
     
     def __init__(self):
-        self.credit_to_profit_ratio = 4.0    # $1 credit = $4 profit potential
-        self.credit_to_dollar_cost = 1.0     # $1 = 1 credit
+        # Dynamic pricing configuration (loaded from admin settings)
+        self.credit_to_profit_ratio = None   # Will be loaded dynamically
+        self.credit_to_dollar_cost = None    # Will be loaded dynamically
+        self.platform_fee_percentage = None # Will be loaded dynamically
         
         # Base package strategies (included free)
         self.base_package_strategies = [
@@ -47,23 +49,171 @@ class ProfitSharingService(LoggerMixin):
             "spot_momentum_strategy"     # Basic momentum trading
         ]
         
-        # Strategy pricing in credits (based on performance and sophistication)
-        self.strategy_pricing = {
-            # AI Strategies (Your 25+ functions)
-            "spot_mean_reversion": 20,
-            "spot_breakout_strategy": 25,
-            "scalping_strategy": 35,
-            "pairs_trading": 40,
-            "statistical_arbitrage": 50,
-            "market_making": 55,
-            "futures_trade": 60,
-            "options_trade": 75,
-            "complex_strategy": 100,
-            "funding_arbitrage": 45,
-            "hedge_position": 65,
+        # Strategy pricing will be loaded dynamically
+        self.strategy_pricing = None
+    
+    async def load_dynamic_pricing_config(self) -> Dict[str, Any]:
+        """Load dynamic pricing configuration from admin settings."""
+        try:
+            from app.core.redis import get_redis_client
+            redis = await get_redis_client()
             
-            # Community strategies will be priced dynamically based on performance
+            # Load admin pricing configuration
+            pricing_config = await redis.hgetall("admin:pricing_config")
+            
+            if pricing_config:
+                # Use admin-configured values
+                self.platform_fee_percentage = float(pricing_config.get(b"platform_fee_percentage", 25)) / 100  # Default 25%
+                self.credit_to_dollar_cost = float(pricing_config.get(b"credit_to_dollar_cost", 1.0))  # Default $1 = 1 credit
+                
+                # Calculate profit ratio: If fee is 25%, then $1 credit gives $4 profit potential
+                self.credit_to_profit_ratio = 1.0 / self.platform_fee_percentage if self.platform_fee_percentage > 0 else 4.0
+                
+                # Load welcome package settings
+                welcome_config = {
+                    "welcome_profit_potential": float(pricing_config.get(b"welcome_profit_potential", 100)),  # $100 default
+                    "welcome_strategies_count": int(pricing_config.get(b"welcome_strategies_count", 3)),  # 3 strategies
+                    "welcome_enabled": pricing_config.get(b"welcome_enabled", b"true").decode() == "true"
+                }
+                
+                self.logger.info(
+                    "Dynamic pricing loaded from admin settings",
+                    platform_fee=f"{self.platform_fee_percentage*100:.1f}%",
+                    credit_to_profit_ratio=f"1:{self.credit_to_profit_ratio:.1f}",
+                    welcome_profit_potential=f"${welcome_config['welcome_profit_potential']:.0f}"
+                )
+                
+                return {
+                    "success": True,
+                    "pricing_config": {
+                        "platform_fee_percentage": self.platform_fee_percentage,
+                        "credit_to_profit_ratio": self.credit_to_profit_ratio,
+                        "credit_to_dollar_cost": self.credit_to_dollar_cost
+                    },
+                    "welcome_config": welcome_config
+                }
+            else:
+                # Set default values if no admin config
+                self.platform_fee_percentage = 0.25  # 25% fee
+                self.credit_to_profit_ratio = 4.0     # $1 credit = $4 profit potential  
+                self.credit_to_dollar_cost = 1.0      # $1 = 1 credit
+                
+                # Save defaults to Redis for admin to modify
+                await self._save_default_pricing_config(redis)
+                
+                self.logger.warning("No admin pricing config found, using defaults")
+                
+                return {
+                    "success": True,
+                    "pricing_config": {
+                        "platform_fee_percentage": self.platform_fee_percentage,
+                        "credit_to_profit_ratio": self.credit_to_profit_ratio,
+                        "credit_to_dollar_cost": self.credit_to_dollar_cost
+                    },
+                    "welcome_config": {
+                        "welcome_profit_potential": 100,
+                        "welcome_strategies_count": 3,
+                        "welcome_enabled": True
+                    },
+                    "using_defaults": True
+                }
+                
+        except Exception as e:
+            self.logger.error("Failed to load dynamic pricing config", error=str(e))
+            
+            # Emergency fallback
+            self.platform_fee_percentage = 0.25
+            self.credit_to_profit_ratio = 4.0
+            self.credit_to_dollar_cost = 1.0
+            
+            return {"success": False, "error": str(e)}
+    
+    async def _save_default_pricing_config(self, redis):
+        """Save default pricing configuration for admin to modify."""
+        await redis.hset("admin:pricing_config", mapping={
+            "platform_fee_percentage": 25,      # 25%
+            "credit_to_dollar_cost": 1.0,       # $1 = 1 credit
+            "welcome_profit_potential": 100,    # $100 profit potential for new users
+            "welcome_strategies_count": 3,      # 3 free strategies
+            "welcome_enabled": "true",          # Welcome package enabled
+            "last_updated": datetime.utcnow().isoformat(),
+            "updated_by": "system_default"
+        })
+    
+    async def get_current_pricing_config(self) -> Dict[str, Any]:
+        """Get current pricing configuration."""
+        if self.credit_to_profit_ratio is None:
+            await self.load_dynamic_pricing_config()
+        
+        return {
+            "platform_fee_percentage": self.platform_fee_percentage * 100,  # Return as percentage
+            "credit_to_profit_ratio": self.credit_to_profit_ratio,
+            "credit_to_dollar_cost": self.credit_to_dollar_cost,
+            "profit_potential_per_dollar": self.credit_to_profit_ratio,
+            "example": {
+                "pay_25_dollars": {
+                    "credits_received": 25,
+                    "profit_potential": 25 * self.credit_to_profit_ratio
+                }
+            }
         }
+    
+    async def _load_dynamic_strategy_pricing(self) -> Dict[str, int]:
+        """Load strategy pricing from admin configuration."""
+        try:
+            from app.core.redis import get_redis_client
+            redis = await get_redis_client()
+            
+            # Load strategy pricing from admin settings
+            strategy_pricing_data = await redis.hgetall("admin:strategy_pricing")
+            
+            if strategy_pricing_data:
+                # Convert bytes to proper format
+                strategy_pricing = {}
+                for key, value in strategy_pricing_data.items():
+                    strategy_name = key.decode() if isinstance(key, bytes) else key
+                    credit_cost = int(value.decode()) if isinstance(value, bytes) else int(value)
+                    strategy_pricing[strategy_name] = credit_cost
+                
+                return strategy_pricing
+            else:
+                # Set default strategy pricing and save to Redis
+                default_pricing = {
+                    # AI Strategies (Your 25+ functions) - Dynamic pricing based on performance
+                    "spot_mean_reversion": 20,
+                    "spot_breakout_strategy": 25,
+                    "scalping_strategy": 35,
+                    "pairs_trading": 40,
+                    "statistical_arbitrage": 50,
+                    "market_making": 55,
+                    "futures_trade": 60,
+                    "options_trade": 75,
+                    "complex_strategy": 100,
+                    "funding_arbitrage": 45,
+                    "hedge_position": 65
+                }
+                
+                # Save defaults for admin to modify
+                await redis.hset("admin:strategy_pricing", mapping=default_pricing)
+                
+                return default_pricing
+                
+        except Exception as e:
+            self.logger.error("Failed to load strategy pricing", error=str(e))
+            # Emergency fallback
+            return {
+                "spot_momentum_strategy": 15,
+                "spot_mean_reversion": 20,
+                "market_making": 25
+            }
+    
+    async def ensure_pricing_loaded(self):
+        """Ensure pricing configuration is loaded."""
+        if self.credit_to_profit_ratio is None:
+            await self.load_dynamic_pricing_config()
+        
+        if self.strategy_pricing is None:
+            self.strategy_pricing = await self._load_dynamic_strategy_pricing()
     
     async def calculate_profit_potential_usage(
         self, 
@@ -73,6 +223,9 @@ class ProfitSharingService(LoggerMixin):
     ) -> Dict[str, Any]:
         """Calculate how much profit potential user has used and remaining."""
         try:
+            # Ensure pricing is loaded
+            await self.ensure_pricing_loaded()
+            
             async for db in get_database():
                 # Get all completed trades in period
                 stmt = select(Trade).where(
@@ -359,6 +512,22 @@ class ProfitSharingService(LoggerMixin):
         This is our customer acquisition strategy.
         """
         try:
+            # Load dynamic pricing configuration
+            pricing_result = await self.load_dynamic_pricing_config()
+            
+            if not pricing_result.get("success"):
+                return {"success": False, "error": "Failed to load pricing configuration"}
+            
+            welcome_config = pricing_result.get("welcome_config", {})
+            
+            # Check if welcome package is enabled
+            if not welcome_config.get("welcome_enabled", True):
+                return {
+                    "success": False,
+                    "error": "Welcome package is currently disabled",
+                    "disabled": True
+                }
+            
             from app.core.database import get_async_session
             from app.models.user import User
             from app.models.credit import CreditTransaction
@@ -381,12 +550,16 @@ class ProfitSharingService(LoggerMixin):
                         "already_claimed": True
                     }
                 
+                # Calculate welcome credits based on admin configuration
+                welcome_profit_potential = welcome_config.get("welcome_profit_potential", 100)
+                welcome_credits = int(welcome_profit_potential * self.platform_fee_percentage)  # 25% of profit potential
+                
                 # Create welcome credit transaction
                 welcome_transaction = CreditTransaction(
                     user_id=user_id,
-                    amount=100,  # $100 profit potential
+                    amount=welcome_credits,  # Dynamic credit amount
                     transaction_type="welcome_bonus",
-                    description="Welcome Package: $100 Free Profit Potential",
+                    description=f"Welcome Package: ${welcome_profit_potential:.0f} Free Profit Potential ({welcome_credits} credits)",
                     status="completed",
                     created_at=datetime.utcnow()
                 )
@@ -394,12 +567,9 @@ class ProfitSharingService(LoggerMixin):
                 db.add(welcome_transaction)
                 await db.commit()
                 
-                # Add 3 basic strategies to user's portfolio
-                basic_strategies = [
-                    "spot_momentum_strategy",
-                    "spot_mean_reversion", 
-                    "market_making"
-                ]
+                # Add strategies based on admin configuration
+                strategies_count = welcome_config.get("welcome_strategies_count", 3)
+                basic_strategies = self.base_package_strategies[:strategies_count]
                 
                 strategy_results = []
                 for strategy in basic_strategies:
@@ -415,12 +585,13 @@ class ProfitSharingService(LoggerMixin):
                         "success": purchase_result.get("success", False)
                     })
                 
-                # Update user's credit balance
-                await self._update_user_credit_balance(user_id, 100, "welcome_bonus")
+                # Update user's credit balance with dynamic amount
+                await self._update_user_credit_balance(user_id, welcome_credits, "welcome_bonus")
                 
                 self.logger.info(
                     f"🎁 Welcome package setup complete for {user_id}",
-                    free_credits=100,
+                    free_credits=welcome_credits,
+                    profit_potential=welcome_profit_potential,
                     free_strategies=len(basic_strategies),
                     strategies_added=len([r for r in strategy_results if r["success"]])
                 )
@@ -428,11 +599,11 @@ class ProfitSharingService(LoggerMixin):
                 return {
                     "success": True,
                     "welcome_package": {
-                        "free_credits": 100,
-                        "profit_potential_usd": 400,  # $100 credits = $400 earning potential
+                        "free_credits": welcome_credits,
+                        "profit_potential_usd": welcome_profit_potential,
                         "free_strategies": basic_strategies,
                         "strategies_activated": len([r for r in strategy_results if r["success"]]),
-                        "message": "Welcome! Start earning up to $400 with 3 free strategies!"
+                        "message": f"Welcome! Start earning up to ${welcome_profit_potential:.0f} with {len(basic_strategies)} free strategies!"
                     },
                     "strategy_results": strategy_results
                 }
