@@ -26,6 +26,8 @@ from app.services.trade_execution import TradeExecutionService
 from app.services.master_controller import MasterSystemController
 from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
 from app.services.market_analysis_core import MarketAnalysisService
+from app.services.user_exchange_service import user_exchange_service
+from app.services.real_market_data_service import real_market_data_service
 from app.services.rate_limit import rate_limiter
 from app.services.websocket import manager
 
@@ -448,29 +450,57 @@ async def get_portfolio_status(
     )
     
     try:
-        # Get portfolio data from risk service
-        portfolio_data = await risk_service.get_portfolio_status(str(current_user.id))
+        # Get real portfolio data from user's connected exchanges
+        portfolio_data = await user_exchange_service.get_user_portfolio_balances(str(current_user.id))
         
         if not portfolio_data.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Portfolio data not found"
+                detail=portfolio_data.get("error", "Portfolio data not found")
             )
         
-        portfolio = portfolio_data.get("portfolio", {})
+        # Get additional portfolio metrics from risk service
+        risk_metrics = await risk_service.get_portfolio_status(str(current_user.id))
+        risk_data = risk_metrics.get("portfolio", {}) if risk_metrics.get("success") else {}
+        
+        # Transform real exchange balances into portfolio positions
+        positions = []
+        total_value_usd = portfolio_data.get("total_value_usd", 0.0)
+        
+        for balance in portfolio_data.get("balances", []):
+            if balance.get("total", 0) > 0:
+                positions.append({
+                    "symbol": balance["asset"],
+                    "name": balance["asset"],
+                    "amount": balance["total"],
+                    "value_usd": balance["value_usd"],
+                    "entry_price": balance["usd_price"],
+                    "current_price": balance["usd_price"],
+                    "change_24h_pct": 0.0,  # Would come from market data service
+                    "unrealized_pnl": 0.0,  # Would be calculated from entry vs current
+                    "side": "long",
+                    "exchange": balance.get("exchange", "unknown")
+                })
+        
+        # Calculate available balance (cash equivalents)
+        stablecoins = ["USDT", "USDC", "BUSD", "DAI", "FDUSD"]
+        available_balance = sum(
+            balance["value_usd"] for balance in portfolio_data.get("balances", [])
+            if balance["asset"] in stablecoins
+        )
         
         return PortfolioResponse(
-            total_value=Decimal(str(portfolio.get("total_value_usd", 0))),
-            available_balance=Decimal(str(portfolio.get("available_balance", 0))),
-            positions=portfolio.get("positions", []),
-            daily_pnl=Decimal(str(portfolio.get("daily_pnl", 0))),
-            daily_pnl_pct=portfolio.get("daily_pnl_pct", 0.0),
-            total_pnl=Decimal(str(portfolio.get("total_pnl", 0))),
-            total_pnl_pct=portfolio.get("total_pnl_pct", 0.0),
-            margin_used=Decimal(str(portfolio.get("margin_used", 0))),
-            margin_available=Decimal(str(portfolio.get("margin_available", 0))),
-            risk_score=portfolio.get("risk_score", 0.0),
-            active_orders=portfolio.get("active_orders", 0)
+            total_value=Decimal(str(total_value_usd)),
+            available_balance=Decimal(str(available_balance)),
+            positions=positions,
+            daily_pnl=Decimal(str(risk_data.get("daily_pnl", 0))),
+            daily_pnl_pct=risk_data.get("daily_pnl_pct", 0.0),
+            total_pnl=Decimal(str(risk_data.get("total_pnl", 0))),
+            total_pnl_pct=risk_data.get("total_pnl_pct", 0.0),
+            margin_used=Decimal(str(risk_data.get("margin_used", 0))),
+            margin_available=Decimal(str(risk_data.get("margin_available", 0))),
+            risk_score=risk_data.get("risk_score", 50.0),
+            active_orders=risk_data.get("active_orders", 0)
         )
         
     except HTTPException:
@@ -531,15 +561,16 @@ async def get_market_overview(
         user_id=str(current_user.id)
     )
     try:
-        # In a real application, this data would come from the MarketAnalysisService
-        mock_market_data = [
-            {"symbol": "BTC", "price": Decimal("50000"), "change": 2.5, "volume": "2.1B"},
-            {"symbol": "ETH", "price": Decimal("2400"), "change": -1.2, "volume": "1.8B"},
-            {"symbol": "SOL", "price": Decimal("50"), "change": 5.8, "volume": "450M"},
-            {"symbol": "ADA", "price": Decimal("0.45"), "change": 3.2, "volume": "320M"},
-            {"symbol": "DOT", "price": Decimal("8.50"), "change": -0.8, "volume": "180M"},
-        ]
-        return MarketOverviewResponse(market_data=mock_market_data)
+        # Get real market data from real market data service
+        market_data_result = await real_market_data_service.get_market_overview()
+        
+        if not market_data_result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Market data service unavailable: {market_data_result.get('error')}"
+            )
+        
+        return MarketOverviewResponse(market_data=market_data_result["market_data"])
     except Exception as e:
         logger.error("Market overview retrieval failed", error=str(e))
         raise HTTPException(
@@ -559,40 +590,46 @@ async def get_recent_trades(
         user_id=str(current_user.id)
     )
     try:
-        # In a real application, this data would come from the database
-        mock_recent_trades = [
-            {
-                "id": 1,
-                "symbol": "BTC",
-                "side": "buy",
-                "amount": Decimal("0.1"),
-                "price": Decimal("49800"),
-                "time": "2 min ago",
-                "status": "completed",
-                "pnl": Decimal("120.50"),
-            },
-            {
-                "id": 2,
-                "symbol": "ETH",
-                "side": "sell",
-                "amount": Decimal("2.0"),
-                "price": Decimal("2420"),
-                "time": "15 min ago",
-                "status": "completed",
-                "pnl": Decimal("-45.20"),
-            },
-            {
-                "id": 3,
-                "symbol": "SOL",
-                "side": "buy",
-                "amount": Decimal("50"),
-                "price": Decimal("48.50"),
-                "time": "1 hour ago",
-                "status": "pending",
-                "pnl": Decimal("0"),
-            },
-        ]
-        return RecentTradesResponse(recent_trades=mock_recent_trades)
+        # Get real recent trades from database
+        from sqlalchemy import select, desc
+        from app.models.trading import Trade, TradeAction
+        
+        # Query recent trades for user
+        stmt = select(Trade).where(
+            Trade.user_id == current_user.id
+        ).order_by(desc(Trade.created_at)).limit(50)
+        
+        result = await db.execute(stmt)
+        trades = result.scalars().all()
+        
+        # Transform to response format
+        recent_trades = []
+        for trade in trades:
+            # Calculate time ago
+            time_diff = datetime.utcnow() - trade.created_at
+            if time_diff.total_seconds() < 3600:
+                time_ago = f"{int(time_diff.total_seconds() / 60)} min ago"
+            elif time_diff.total_seconds() < 86400:
+                time_ago = f"{int(time_diff.total_seconds() / 3600)} hour ago"
+            else:
+                time_ago = f"{int(time_diff.total_seconds() / 86400)} day ago"
+            
+            # Calculate P&L if available
+            pnl = trade.profit_realized_usd or Decimal("0")
+            
+            recent_trades.append({
+                "id": str(trade.id),
+                "symbol": trade.symbol,
+                "side": trade.action.value,
+                "amount": trade.executed_quantity or trade.quantity,
+                "price": trade.executed_price or trade.price or Decimal("0"),
+                "time": time_ago,
+                "status": trade.status.value,
+                "pnl": pnl,
+                "exchange": trade.meta_data.get("exchange", "unknown") if trade.meta_data else "unknown"
+            })
+        
+        return RecentTradesResponse(recent_trades=recent_trades)
     except Exception as e:
         logger.error("Recent trades retrieval failed", error=str(e))
         raise HTTPException(

@@ -31,6 +31,7 @@ from app.models.trading import Trade, Position, Order, TradingStrategy
 from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance
 from app.models.user import User
 from app.models.credit import CreditAccount, CreditTransaction
+from app.services.user_exchange_service import user_exchange_service, ExchangeOrderParams
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -721,62 +722,149 @@ class TradeExecutionService(LoggerMixin):
         trade_request: Dict[str, Any],
         user_id: str
     ) -> Dict[str, Any]:
-        """Execute real order on exchange."""
-        exchange = await self._select_best_exchange(
-            trade_request["symbol"],
-            trade_request["action"],
-            trade_request["quantity"]
-        )
-        
-        order_params = {
-            "symbol": trade_request["symbol"],
-            "side": trade_request["action"],
-            "quantity": trade_request["quantity"],
-            "type": trade_request.get("order_type", "MARKET"),
-            "exchange": exchange
-        }
-        
+        """Execute real order using user's exchange credentials."""
         try:
-            # Execute on specific exchange
-            if exchange == "binance":
-                execution_result = await self.exchange_connector.execute_binance_order(order_params)
-            elif exchange == "kraken":
-                execution_result = await self.exchange_connector.execute_kraken_order(order_params)
-            elif exchange == "kucoin":
-                execution_result = await self.exchange_connector.execute_kucoin_order(order_params)
-            else:
-                raise Exception(f"Unsupported exchange: {exchange}")
+            # Create standardized order parameters
+            order_params = ExchangeOrderParams(
+                symbol=trade_request["symbol"],
+                side=trade_request["action"].upper(),
+                quantity=Decimal(str(trade_request["quantity"])),
+                order_type=trade_request.get("order_type", "MARKET").upper(),
+                price=Decimal(str(trade_request["price"])) if trade_request.get("price") else None,
+                stop_price=Decimal(str(trade_request["stop_loss"])) if trade_request.get("stop_loss") else None,
+                time_in_force="GTC",
+                reduce_only=False
+            )
             
-            self.logger.info(f"✅ TRADE EXECUTED SUCCESSFULLY: {execution_result['order_id']}")
+            # Execute using user's exchange credentials
+            execution_result = await user_exchange_service.execute_user_trade(
+                user_id=user_id,
+                order_params=order_params,
+                preferred_exchange=trade_request.get("exchange")
+            )
             
-            # Log trade for monitoring
+            if not execution_result.get("success"):
+                self.logger.error(
+                    "❌ REAL TRADE EXECUTION FAILED",
+                    error=execution_result.get("error"),
+                    user_id=user_id,
+                    symbol=order_params.symbol
+                )
+                return execution_result
+            
+            self.logger.info(
+                "✅ REAL TRADE EXECUTED SUCCESSFULLY",
+                user_id=user_id,
+                order_id=execution_result.get("order_id"),
+                exchange=execution_result.get("exchange"),
+                symbol=order_params.symbol,
+                side=order_params.side,
+                quantity=str(order_params.quantity),
+                price=execution_result.get("execution_price")
+            )
+            
+            # Log trade for monitoring and compliance
             trade_logger.log_trade_executed(
                 user_id=user_id,
-                symbol=trade_request["symbol"],
-                action=trade_request["action"],
+                symbol=order_params.symbol,
+                action=order_params.side,
                 quantity=execution_result["executed_quantity"],
                 price=execution_result["execution_price"],
-                exchange=exchange,
+                exchange=execution_result["exchange"],
                 order_id=execution_result["order_id"]
+            )
+            
+            # Calculate position value
+            position_value_usd = execution_result["executed_quantity"] * execution_result["execution_price"]
+            
+            # Store trade record in database for audit trail
+            await self._record_trade_execution(
+                user_id=user_id,
+                trade_request=trade_request,
+                execution_result=execution_result,
+                position_value_usd=position_value_usd
             )
             
             return {
                 "success": True,
                 "execution_result": execution_result,
-                "position_value_usd": execution_result["executed_quantity"] * execution_result["execution_price"],
-                "timestamp": datetime.utcnow().isoformat()
+                "position_value_usd": position_value_usd,
+                "timestamp": datetime.utcnow().isoformat(),
+                "trade_id": execution_result.get("order_id")
             }
             
         except Exception as e:
-            self.logger.error("❌ TRADE EXECUTION FAILED", error=str(e))
+            self.logger.error(
+                "❌ REAL TRADE EXECUTION FAILED",
+                error=str(e),
+                user_id=user_id,
+                symbol=trade_request.get("symbol")
+            )
             return {
                 "success": False,
                 "error": str(e),
-                "error_type": "EXCHANGE_ERROR",
-                "order_params": order_params,
-                "exchange": exchange,
+                "error_type": "EXECUTION_ERROR",
                 "timestamp": datetime.utcnow().isoformat()
             }
+    
+    async def _record_trade_execution(
+        self,
+        user_id: str,
+        trade_request: Dict[str, Any],
+        execution_result: Dict[str, Any],
+        position_value_usd: float
+    ) -> None:
+        """Record trade execution in database for audit trail."""
+        try:
+            async for db in get_database():
+                from app.models.trading import Trade, TradeAction, TradeStatus, OrderType
+                from decimal import Decimal
+                
+                # Create trade record
+                trade = Trade(
+                    user_id=user_id,
+                    symbol=trade_request["symbol"],
+                    action=TradeAction.BUY if trade_request["action"].upper() == "BUY" else TradeAction.SELL,
+                    status=TradeStatus.COMPLETED,
+                    quantity=Decimal(str(execution_result["executed_quantity"])),
+                    executed_quantity=Decimal(str(execution_result["executed_quantity"])),
+                    executed_price=Decimal(str(execution_result["execution_price"])),
+                    order_type=OrderType.MARKET if trade_request.get("order_type", "MARKET").upper() == "MARKET" else OrderType.LIMIT,
+                    external_order_id=execution_result.get("order_id"),
+                    total_value=Decimal(str(position_value_usd)),
+                    fees_paid=Decimal(str(execution_result.get("total_fee", 0))),
+                    fee_currency=execution_result.get("fee_asset", "USDT"),
+                    is_simulation=False,
+                    execution_mode="real",
+                    urgency="medium",
+                    market_price_at_execution=Decimal(str(execution_result["execution_price"])),
+                    credits_used=0,  # Will be calculated by credit system
+                    executed_at=datetime.utcnow(),
+                    completed_at=datetime.utcnow(),
+                    meta_data={
+                        "exchange": execution_result.get("exchange"),
+                        "fills": execution_result.get("fills", []),
+                        "raw_response": execution_result.get("raw_response", {})
+                    }
+                )
+                
+                db.add(trade)
+                await db.commit()
+                
+                self.logger.info(
+                    "✅ Trade recorded in database",
+                    user_id=user_id,
+                    trade_id=str(trade.id),
+                    external_order_id=execution_result.get("order_id")
+                )
+                
+        except Exception as e:
+            self.logger.error(
+                "Failed to record trade execution",
+                error=str(e),
+                user_id=user_id,
+                order_id=execution_result.get("order_id")
+            )
     
     async def _get_current_price(self, symbol: str, exchange: str) -> float:
         """Get current price for symbol - simulated for now."""
