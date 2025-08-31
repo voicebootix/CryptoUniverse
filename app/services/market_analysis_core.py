@@ -398,17 +398,7 @@ class MarketAnalysisService(LoggerMixin):
             await self._update_performance_metrics(time.time() - start_time, False, user_id)
             raise e
 
-                    "symbols_scanned": len(symbol_list),
-                    "min_profit_threshold": min_profit_bps,
-                    "exchanges_checked": len(self.exchange_manager.exchange_configs),
-                    "response_time_ms": round(response_time * 1000, 2),
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            }
-            
-        except Exception as e:
-            await self._update_performance_metrics(time.time() - start_time, False, user_id)
-            raise e
+
     
     async def alpha_generation_coordinator(
         self, 

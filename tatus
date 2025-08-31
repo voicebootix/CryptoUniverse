@@ -10,3 +10,8 @@
 [33m1ebf44b1[m Fix syntax error in auth.py - remove duplicate exception handlers
 [33m7fe9fccc[m Merge branch 'fix-oauth-issue' of https://github.com/voicebootix/CryptoUniverse into fix-oauth-issue
 [33m33b785d3[m Merge pull request #8 from voicebootix/fix-oauth-issue
+[33m73acd23c[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Add missing rate_limiters initialization to MarketDataFeeds class
+[33m53b72d92[m Fix MarketDataFeeds initialization order - define apis before rate limiters
+[33m61fca025[m Final fix: Remove all circular imports and define ExchangeConfigurations locally
+[33ma3614ff3[m Resolve merge conflicts - keep deployment fixes for circular imports and TypeScript errors
+[33m49660ad6[m deployment fix
