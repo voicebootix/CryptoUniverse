@@ -74,6 +74,8 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
+import { useTelegram } from '@/hooks/useTelegram';
+import TelegramConnectionModal from '@/components/TelegramConnectionModal';
 
 // Bot Status
 const botStatus = {
@@ -150,6 +152,9 @@ const TelegramCenter: React.FC = () => {
   const [isTyping, setIsTyping] = useState<boolean>(false);
   const [selectedCommand, setSelectedCommand] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [showConnectionModal, setShowConnectionModal] = useState(false);
+  
+  const { connection, loading, connecting, actions } = useTelegram();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -458,6 +463,16 @@ const TelegramCenter: React.FC = () => {
           </Card>
         </div>
       </div>
+      
+      {/* Telegram Connection Modal */}
+      <TelegramConnectionModal
+        isOpen={showConnectionModal}
+        onClose={() => setShowConnectionModal(false)}
+        onConnect={async (config) => {
+          await actions.connectTelegram(config);
+        }}
+        connecting={connecting}
+      />
     </div>
   );
 };
