@@ -195,6 +195,10 @@ const AutonomousAI: React.FC = () => {
           <p className="text-sm text-muted-foreground">
             Real-time event-driven • Multi-strategy execution • Intelligent market adaptation
           </p>
+          <p className="text-xs text-muted-foreground/70 mt-3 border-t border-muted/20 pt-2">
+            ⚠️ Risk Notice: All investments carry risk of loss. Past performance does not guarantee future results. 
+            Consider your financial situation and consult a financial advisor before trading.
+          </p>
         </div>
       </div>
 

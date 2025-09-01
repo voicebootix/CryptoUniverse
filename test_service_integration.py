@@ -41,7 +41,7 @@ async def test_market_analysis_service():
         
         if sentiment_result.get("success"):
             logger.info("✅ market_sentiment working", 
-                       sentiment=sentiment_result.get("sentiment_analysis", {}).get("overall_market_sentiment"))
+                       sentiment=sentiment_result.get("data", {}).get("market_sentiment", {}).get("score"))
         else:
             logger.warning("⚠️ market_sentiment issues", error=sentiment_result.get("error"))
         
@@ -62,12 +62,11 @@ async def test_market_analysis_service():
         logger.info("Testing cross_exchange_arbitrage_scanner...")
         arbitrage_result = await market_service.cross_exchange_arbitrage_scanner(
             symbols="BTC,ETH",
-            exchanges="all",
             user_id="test_user"
         )
         
         if arbitrage_result.get("success"):
-            opportunities = arbitrage_result.get("arbitrage_opportunities", {}).get("opportunities", [])
+            opportunities = arbitrage_result.get("data", {}).get("opportunities", []) or arbitrage_result.get("opportunities", [])
             logger.info("✅ arbitrage_scanner working", opportunities_found=len(opportunities))
         else:
             logger.warning("⚠️ arbitrage_scanner issues", error=arbitrage_result.get("error"))
@@ -212,7 +211,7 @@ async def test_service_coordination():
         logger.info("Phase 2: Strategy Signal Generation")
         signal_result = await trading_strategies_service.generate_trading_signal(
             strategy_type="spot_momentum_strategy",
-            market_data=market_result,
+            market_data=market_result.get("market_data", market_result),
             risk_mode="balanced",
             user_id="test_user"
         )

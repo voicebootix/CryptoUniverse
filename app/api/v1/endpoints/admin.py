@@ -410,6 +410,7 @@ async def update_strategy_pricing(
         from app.services.strategy_marketplace_service import strategy_marketplace_service
         
         profit_sharing_service.strategy_pricing = await profit_sharing_service._load_dynamic_strategy_pricing()
+        strategy_marketplace_service.strategy_pricing = await strategy_marketplace_service._load_dynamic_strategy_pricing()
         
         logger.info(
             "Strategy pricing updated",
