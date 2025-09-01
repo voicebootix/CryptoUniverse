@@ -18,7 +18,7 @@ import hmac
 import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Header
@@ -316,9 +316,9 @@ async def get_profit_potential_status(
 async def _verify_webhook_signature(signature: str, payment_id: str, transaction_hash: str) -> bool:
     """Verify webhook signature for payment confirmation."""
     try:
-        webhook_secret = getattr(settings, 'stripe_webhook_secret', None) or getattr(settings, 'payments_webhook_secret', None)
+        webhook_secret = getattr(settings, 'stripe_webhook_secret', None)
         if not webhook_secret:
-            logger.warning("STRIPE_WEBHOOK_SECRET not configured")
+            logger.warning("Stripe webhook secret not configured")
             return False
         
         # Create expected signature
@@ -415,7 +415,7 @@ async def _generate_crypto_payment(
             raise ValueError(f"Unsupported payment method: {payment_method}")
         
         crypto_amount = amount_usd / crypto_rates[payment_method]
-        crypto_amount = crypto_amount.quantize(Decimal("0.00000001"))  # 8 decimal precision
+        crypto_amount = crypto_amount.quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)  # 8 decimal precision, never round up
         
         # Generate payment address (would be real from payment processor)
         payment_addresses = {
@@ -583,6 +583,13 @@ async def _process_confirmed_payment(
                 # Check if already completed (idempotency check)
                 if transaction.status == "completed":
                     logger.info(f"Payment {payment_id} already completed - skipping")
+                    
+                    # Clean up pending payment key
+                    try:
+                        await redis.delete(f"pending_payment:{payment_id}")
+                    except Exception as e:
+                        logger.warning("Failed to clean up pending payment key", payment_id=payment_id, error=str(e))
+                    
                     return
                 
                 # Update credit account with correct field names

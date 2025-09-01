@@ -330,23 +330,65 @@ class CrossStrategyCoordinator(LoggerMixin):
                     
                     if available_capacity > 0.01:  # At least 1% available
                         modified_signal = coordination.signal.copy()
+                        
+                        # Calculate scaling factor for quantity adjustment
+                        original_position_pct = coordination.signal.get("position_size_pct", 5) / 100
+                        scaling_factor = available_capacity / original_position_pct if original_position_pct > 0 else 1
+                        
+                        # Update both position size and quantity
                         modified_signal["position_size_pct"] = available_capacity * 100
+                        
+                        # Scale quantity proportionally
+                        original_quantity = coordination.signal.get("quantity", 0.01)
+                        new_quantity = original_quantity * scaling_factor
+                        modified_signal["quantity"] = round(new_quantity, 8)  # 8 decimal precision
                         
                         coordination.coordination_action = "modify"
                         coordination.modified_signal = modified_signal
-                        coordination.conflict_resolution = f"Reduced position size to {available_capacity*100:.1f}% due to concentration limits"
+                        coordination.conflict_resolution = f"Reduced position size to {available_capacity*100:.1f}% and quantity to {new_quantity:.6f} due to concentration limits"
                         
                         self.logger.info(
-                            f"📏 Position size reduced for concentration management",
+                            f"📏 Position size and quantity reduced for concentration management",
                             user_id=user_id,
                             strategy=coordination.strategy_name,
                             symbol=coordination.signal.get("symbol"),
                             original_size=f"{coordination.signal.get('position_size_pct', 5):.1f}%",
-                            adjusted_size=f"{available_capacity*100:.1f}%"
+                            adjusted_size=f"{available_capacity*100:.1f}%",
+                            original_quantity=original_quantity,
+                            new_quantity=new_quantity
                         )
                     else:
                         coordination.coordination_action = "skip"
                         coordination.conflict_resolution = "Skipped due to concentration limits"
+                
+                elif conflict["type"] == PositionConflict.CORRELATION_RISK:
+                    # Handle correlation risk with additional scaling
+                    correlation_penalty = 0.7  # 30% reduction for correlation risk
+                    
+                    modified_signal = coordination.signal.copy()
+                    original_quantity = coordination.signal.get("quantity", 0.01)
+                    original_position_pct = coordination.signal.get("position_size_pct", 5)
+                    
+                    # Apply correlation penalty
+                    new_quantity = original_quantity * correlation_penalty
+                    new_position_pct = original_position_pct * correlation_penalty
+                    
+                    modified_signal["quantity"] = round(new_quantity, 8)
+                    modified_signal["position_size_pct"] = new_position_pct
+                    
+                    coordination.coordination_action = "modify"
+                    coordination.modified_signal = modified_signal
+                    coordination.conflict_resolution = f"Applied correlation penalty: reduced to {new_position_pct:.1f}% position and {new_quantity:.6f} quantity"
+                    
+                    self.logger.info(
+                        f"⚠️ Correlation risk mitigation applied",
+                        user_id=user_id,
+                        strategy=coordination.strategy_name,
+                        symbol=coordination.signal.get("symbol"),
+                        penalty_factor=correlation_penalty,
+                        new_quantity=new_quantity,
+                        new_position_pct=new_position_pct
+                    )
         
         return coordination
     
