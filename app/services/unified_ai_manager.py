@@ -426,7 +426,7 @@ class UnifiedAIManager(LoggerMixin):
         
         try:
             # Get user autonomous config
-            autonomous_config = await self.redis.hgetall(f"unified_ai_config:{user_id}")
+            autonomous_config = await self.redis.hgetall(f"unified_ai_config:{user_id}") if self.redis else {}
             
             if not autonomous_config:
                 return {"success": False, "error": "No autonomous configuration found"}
@@ -516,7 +516,7 @@ class UnifiedAIManager(LoggerMixin):
         """Get user configuration and preferences."""
         
         # Get from Redis cache first
-        cached_config = await self.redis.hgetall(f"user_ai_config:{user_id}")
+        cached_config = await self.redis.hgetall(f"user_ai_config:{user_id}") if self.redis else {}
         
         if cached_config:
             return {k.decode() if isinstance(k, bytes) else k: 

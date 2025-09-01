@@ -76,6 +76,20 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor.close()
 
 
+@event.listens_for(engine.sync_engine, "connect")
+def set_postgresql_timeouts(dbapi_connection, connection_record):
+    """Set PostgreSQL connection-level timeouts to avoid per-session overhead."""
+    if "postgresql" in get_async_database_url():
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("SET statement_timeout = '30s'")
+            cursor.execute("SET lock_timeout = '10s'")
+            cursor.close()
+        except Exception:
+            # Silently fail if connection doesn't support these settings
+            pass
+
+
 @event.listens_for(engine.sync_engine, "before_cursor_execute")
 def receive_before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
     """Track query performance for enterprise monitoring."""
@@ -353,10 +367,8 @@ async def get_database() -> AsyncSession:
     """
     async with AsyncSessionLocal() as session:
         try:
-            # ENTERPRISE: Optimize session for read-heavy workloads
-            if "postgresql" in get_async_database_url():
-                await session.execute(text("SET statement_timeout = '30s'"))
-                await session.execute(text("SET lock_timeout = '10s'"))
+            # ENTERPRISE: Connection-level timeouts are now set via event listeners
+            # No need for per-session timeout settings
             
             yield session
             await session.commit()

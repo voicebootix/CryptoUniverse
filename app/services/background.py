@@ -402,10 +402,12 @@ class BackgroundServiceManager(LoggerMixin):
                 # Extract symbols from all exchanges
                 all_symbols = set()
                 for exchange, assets in discovered_assets.items():
-                    if isinstance(assets, list):
+                    if isinstance(assets, dict):
+                        # Extract base assets (individual cryptocurrencies)
+                        base_assets = assets.get("base_assets", [])
+                        all_symbols.update(base_assets)
+                    elif isinstance(assets, list):
                         all_symbols.update(assets)
-                    elif isinstance(assets, dict):
-                        all_symbols.update(assets.keys())
                 
                 # Filter by volume and market cap criteria
                 filtered_symbols = []

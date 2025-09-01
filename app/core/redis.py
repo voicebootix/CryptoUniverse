@@ -8,6 +8,7 @@ for real-time features in the cryptocurrency trading platform.
 import json
 import asyncio
 import time
+import socket
 from typing import Any, Dict, List, Optional, Union
 from contextlib import asynccontextmanager
 import redis.asyncio as redis
@@ -51,7 +52,7 @@ class RedisConnectionManager:
                     retry_on_error=[ConnectionError, TimeoutError],
                     health_check_interval=30,
                     socket_keepalive=True,
-                    socket_keepalive_options={"TCP_KEEPIDLE": 1, "TCP_KEEPINTVL": 3, "TCP_KEEPCNT": 5},
+                    socket_keepalive_options={socket.TCP_KEEPIDLE: 1, socket.TCP_KEEPINTVL: 3, socket.TCP_KEEPCNT: 5},
                     connection_class=redis.Connection,
                     decode_responses=True
                 )

@@ -102,7 +102,7 @@ class StrategyMarketplaceService(LoggerMixin):
             redis = await get_redis_client()
             
             # Load from admin settings
-            strategy_pricing_data = await redis.hgetall("admin:strategy_pricing")
+            strategy_pricing_data = await redis.hgetall("admin:strategy_pricing") if redis else {}
             
             if strategy_pricing_data:
                 strategy_pricing = {}

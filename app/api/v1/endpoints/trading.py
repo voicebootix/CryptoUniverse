@@ -671,8 +671,7 @@ async def get_recent_trades(
 
 @router.websocket("/ws")
 async def websocket_endpoint(
-    websocket: WebSocket,
-    db: AsyncSession = Depends(get_database)
+    websocket: WebSocket
 ):
     # ENTERPRISE: Simple, robust WebSocket connection pattern
     await websocket.accept()
