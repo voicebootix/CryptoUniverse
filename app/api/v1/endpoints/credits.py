@@ -302,8 +302,7 @@ async def get_profit_potential_status(
 async def handle_payment_confirmation(
     payment_id: str,
     transaction_hash: str,
-    background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_database)
+    background_tasks: BackgroundTasks
 ):
     """Handle cryptocurrency payment confirmation webhook."""
     
@@ -317,12 +316,11 @@ async def handle_payment_confirmation(
                 detail="Payment not confirmed on blockchain"
             )
         
-        # Process credit allocation
+        # Process credit allocation (background task opens its own DB session)
         background_tasks.add_task(
             _process_confirmed_payment,
             payment_id,
-            verification_result,
-            db
+            verification_result
         )
         
         return {
@@ -458,13 +456,13 @@ async def _verify_crypto_payment(payment_id: str, transaction_hash: str) -> Dict
 
 async def _process_confirmed_payment(
     payment_id: str,
-    verification_result: Dict[str, Any],
-    db: AsyncSession
+    verification_result: Dict[str, Any]
 ):
     """Process confirmed cryptocurrency payment."""
     try:
         # Get pending payment data
         from app.core.redis import get_redis_client
+        from app.core.database import get_database
         redis = await get_redis_client()
         
         pending_data = await redis.get(f"pending_payment:{payment_id}")

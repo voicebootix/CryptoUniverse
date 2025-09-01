@@ -28,7 +28,7 @@ from app.core.database import get_database
 from app.core.redis import redis_manager
 from app.core.logging import LoggerMixin, trade_logger
 from app.models.trading import Trade, Position, Order, TradingStrategy
-from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance
+from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance, ExchangeStatus, ApiKeyStatus
 from app.models.user import User
 from app.models.credit import CreditAccount, CreditTransaction
 # Import will be added for existing exchange functionality
@@ -824,9 +824,9 @@ class TradeExecutionService(LoggerMixin):
                 ).where(
                     and_(
                         ExchangeAccount.user_id == user_id,
-                        ExchangeAccount.status == "active",
-                        ExchangeAccount.trading_enabled == True,
-                        ExchangeApiKey.status == "active",
+                        ExchangeAccount.status == ExchangeStatus.ACTIVE,
+                        ExchangeAccount.trading_enabled.is_(True),
+                        ExchangeApiKey.status == ApiKeyStatus.ACTIVE,
                         ExchangeApiKey.is_validated == True
                     )
                 )

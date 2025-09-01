@@ -124,7 +124,7 @@ async def validate_service_integrations():
         trade_service = TradeExecutionService()
         
         execution_health = await trade_service.health_check()
-        if execution_health.get("success"):
+        if execution_health.get("healthy"):
             logger.info("✅ Trade Execution Service operational")
         else:
             logger.warning("⚠️ Trade Execution Service issues")
@@ -200,6 +200,12 @@ async def validate_autonomous_system():
         
         # Test master controller
         master_controller = MasterSystemController()
+        master_health = await master_controller.health_check()
+        
+        if master_health.get("status") == "HEALTHY":
+            logger.info("✅ Master Controller operational")
+        else:
+            logger.warning("⚠️ Master Controller issues", health=master_health)
         
         # Test background service manager
         background_manager = BackgroundServiceManager()

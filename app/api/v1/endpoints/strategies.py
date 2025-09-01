@@ -24,7 +24,7 @@ from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user, require_role
 from app.models.user import User, UserRole
 from app.models.trading import TradingStrategy, Trade, Position
-from app.models.exchange import ExchangeAccount
+from app.models.exchange import ExchangeAccount, ExchangeStatus
 from app.models.credit import CreditAccount, CreditTransaction
 from app.services.trading_strategies import trading_strategies_service
 from app.services.trade_execution import TradeExecutionService
@@ -189,8 +189,8 @@ async def execute_strategy(
             stmt = select(ExchangeAccount).where(
                 and_(
                     ExchangeAccount.user_id == current_user.id,
-                    ExchangeAccount.status == "active",
-                    ExchangeAccount.trading_enabled == True
+                    ExchangeAccount.status == ExchangeStatus.ACTIVE,
+                    ExchangeAccount.trading_enabled.is_(True)
                 )
             )
             result = await db.execute(stmt)
@@ -374,8 +374,8 @@ async def activate_strategy(
             exchange_stmt = select(ExchangeAccount).where(
                 and_(
                     ExchangeAccount.user_id == current_user.id,
-                    ExchangeAccount.status == "active",
-                    ExchangeAccount.trading_enabled == True
+                    ExchangeAccount.status == ExchangeStatus.ACTIVE,
+                    ExchangeAccount.trading_enabled.is_(True)
                 )
             )
             exchange_result = await db.execute(exchange_stmt)

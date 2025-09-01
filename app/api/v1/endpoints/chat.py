@@ -315,7 +315,7 @@ async def get_chat_status(
     try:
         # Get service status
         ai_status = await chat_engine.ai_consensus.get_service_status()
-        master_status = await chat_engine.master_controller.get_system_status()
+        master_status = await chat_engine.master_controller.get_system_status(str(current_user.id))
         
         return {
             "success": True,

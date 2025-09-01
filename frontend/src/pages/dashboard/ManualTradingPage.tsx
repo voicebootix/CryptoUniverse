@@ -35,7 +35,7 @@ import { Switch } from '@/components/ui/switch';
 import { useUser } from '@/store/authStore';
 import { useExchanges } from '@/hooks/useExchanges';
 import { useStrategies } from '@/hooks/useStrategies';
-import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 
 interface ManualTradeRequest {
   symbol: string;
@@ -89,6 +89,7 @@ const ManualTradingPage: React.FC = () => {
       const response = await fetch('/api/v1/trading/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           symbol: tradeForm.symbol,
           action: tradeForm.action,
@@ -101,6 +102,11 @@ const ManualTradingPage: React.FC = () => {
           leverage: tradeForm.leverage
         })
       });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Trading API error: ${response.status} ${errorText}`);
+      }
       
       const result = await response.json();
       
@@ -124,6 +130,7 @@ const ManualTradingPage: React.FC = () => {
       const response = await fetch('/api/v1/strategies/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           function: 'market_analysis',
           symbol: aiAssistance.symbol,
@@ -135,6 +142,11 @@ const ManualTradingPage: React.FC = () => {
           simulation_mode: true
         })
       });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`AI analysis API error: ${response.status} ${errorText}`);
+      }
       
       const result = await response.json();
       setAiAnalysis(result);

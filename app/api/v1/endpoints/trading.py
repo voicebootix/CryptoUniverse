@@ -143,7 +143,7 @@ class MarketOverviewResponse(BaseModel):
     market_data: List[MarketDataItem]
 
 class RecentTrade(BaseModel):
-    id: int
+    id: str
     symbol: str
     side: str
     amount: Decimal

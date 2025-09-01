@@ -278,8 +278,8 @@ async def graceful_shutdown():
             redis = await get_redis_client()
             await redis.close()
             logger.info("✅ Redis connections closed")
-        except:
-            pass
+        except Exception as e:
+            logger.exception("Failed to close Redis connection during shutdown", error=str(e))
         
         logger.info("👋 Graceful shutdown completed")
         

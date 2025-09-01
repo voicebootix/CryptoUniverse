@@ -432,9 +432,17 @@ class StrategyTestingService(LoggerMixin):
                     "reason": f"Insufficient data (min {self.min_trades_for_significance} trades required)"
                 }
             
-            # Perform t-test
-            from scipy import stats
-            t_stat, p_value = stats.ttest_ind(returns_a, returns_b)
+            # Perform t-test with scipy dependency check
+            try:
+                from scipy import stats
+                t_stat, p_value = stats.ttest_ind(returns_a, returns_b)
+            except ImportError as e:
+                self.logger.error(
+                    "scipy is required for statistical significance testing",
+                    error=str(e),
+                    remediation="Install scipy: pip install scipy"
+                )
+                raise RuntimeError("scipy dependency missing - install with: pip install scipy") from e
             
             is_significant = p_value < (1 - self.confidence_level)
             
@@ -582,9 +590,17 @@ class StrategyTestingService(LoggerMixin):
             if not returns:
                 return {"significant": False, "reason": "No valid returns data"}
             
-            # T-test against zero (no profit hypothesis)
-            from scipy import stats
-            t_stat, p_value = stats.ttest_1samp(returns, 0)
+            # T-test against zero (no profit hypothesis) with scipy dependency check
+            try:
+                from scipy import stats
+                t_stat, p_value = stats.ttest_1samp(returns, 0)
+            except ImportError as e:
+                self.logger.error(
+                    "scipy is required for statistical significance testing",
+                    error=str(e),
+                    remediation="Install scipy: pip install scipy"
+                )
+                raise RuntimeError("scipy dependency missing - install with: pip install scipy") from e
             
             is_significant = p_value < 0.05  # 95% confidence
             

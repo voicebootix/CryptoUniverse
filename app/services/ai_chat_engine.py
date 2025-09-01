@@ -57,6 +57,7 @@ class ChatIntent(str, Enum):
     PERFORMANCE_REVIEW = "performance_review"
     OPPORTUNITY_DISCOVERY = "opportunity_discovery"
     EMERGENCY_COMMAND = "emergency_command"
+    AUTONOMOUS_CONTROL = "autonomous_control"
 
 
 @dataclass
@@ -366,7 +367,7 @@ How can I help you manage your crypto investments today?""",
                 return await self._handle_strategy_discussion(session, message)
             elif intent == ChatIntent.PERFORMANCE_REVIEW:
                 return await self._handle_performance_review(session, message)
-            elif intent.value == "autonomous_control":
+            elif intent == ChatIntent.AUTONOMOUS_CONTROL:
                 return await self._handle_autonomous_control(session, message)
             else:
                 return await self._handle_general_query(session, message)
