@@ -730,7 +730,20 @@ async def websocket_endpoint(
                 await websocket.send_text(f"Echo: {data}")
                 
     except WebSocketDisconnect:
-        await manager.disconnect(websocket, user_id)
+        # Normal disconnect - don't log as error
+        pass
+    except asyncio.CancelledError:
+        # Re-raise cancellation so it's not swallowed
+        raise
+    except Exception as e:
+        logger.exception("WebSocket error during message processing", user_id=user_id)
+    finally:
+        # Always ensure cleanup regardless of how the coroutine ends
+        try:
+            await manager.disconnect(websocket, user_id)
+            await websocket.close()
+        except Exception as e:
+            logger.debug("Error during WebSocket cleanup", error=str(e))
 
 @router.post("/stop-all")
 async def emergency_stop_all_trading(

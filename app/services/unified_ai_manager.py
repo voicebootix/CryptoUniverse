@@ -91,8 +91,9 @@ class UnifiedAIManager(LoggerMixin):
         self.adapters = chat_adapters
         self.telegram_core = TelegramCore()
         
-        # Redis for state management
-        self.redis = get_redis_client()
+        # Redis for state management - initialize properly for async usage
+        self.redis = None
+        self._redis_initialized = False
         
         # Decision tracking
         self.active_decisions: Dict[str, AIDecision] = {}
@@ -115,6 +116,17 @@ class UnifiedAIManager(LoggerMixin):
         self.master_controller.unified_manager = self
         
         self.logger.info("🧠 Unified AI brain connected to all interfaces")
+    
+    async def _ensure_redis(self):
+        """Ensure Redis client is properly initialized."""
+        if getattr(self, "_redis_initialized", False) is False:
+            try:
+                from app.core.redis import get_redis_client
+                self.redis = await get_redis_client()
+            except Exception:
+                self.redis = None
+            self._redis_initialized = True
+        return self.redis
     
     async def process_user_request(
         self,
@@ -426,7 +438,8 @@ class UnifiedAIManager(LoggerMixin):
         
         try:
             # Get user autonomous config
-            autonomous_config = await self.redis.hgetall(f"unified_ai_config:{user_id}") if self.redis else {}
+            redis_client = await self._ensure_redis()
+            autonomous_config = await redis_client.hgetall(f"unified_ai_config:{user_id}") if redis_client else {}
             
             if not autonomous_config:
                 return {"success": False, "error": "No autonomous configuration found"}
@@ -516,7 +529,8 @@ class UnifiedAIManager(LoggerMixin):
         """Get user configuration and preferences."""
         
         # Get from Redis cache first
-        cached_config = await self.redis.hgetall(f"user_ai_config:{user_id}") if self.redis else {}
+        redis_client = await self._ensure_redis()
+        cached_config = await redis_client.hgetall(f"user_ai_config:{user_id}") if redis_client else {}
         
         if cached_config:
             return {k.decode() if isinstance(k, bytes) else k: 

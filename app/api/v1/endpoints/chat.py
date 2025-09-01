@@ -258,8 +258,11 @@ async def chat_websocket(
     except WebSocketDisconnect:
         await manager.disconnect(websocket, user_id)
         logger.info("Chat WebSocket disconnected", session_id=session_id, user_id=user_id)
+    except asyncio.CancelledError:
+        await manager.disconnect(websocket, user_id)
+        raise  # Re-raise CancelledError so cancellation isn't swallowed
     except Exception as e:
-        logger.error("Chat WebSocket error", error=str(e), session_id=session_id)
+        logger.exception("Chat WebSocket error", session_id=session_id, user_id=user_id)
         await manager.disconnect(websocket, user_id)
 
 

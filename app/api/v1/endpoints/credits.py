@@ -25,7 +25,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Header
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc, func
+from sqlalchemy import select, and_, or_, desc, func
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -140,7 +140,7 @@ async def get_credit_balance(
         profit_stmt = select(func.sum(Trade.profit_realized_usd)).where(
             and_(
                 Trade.user_id == current_user.id,
-                Trade.status == "completed",  # Use string value instead of enum
+                Trade.status == TradeStatus.COMPLETED,
                 Trade.is_simulation.is_(False),
                 Trade.profit_realized_usd > 0
             )
@@ -450,9 +450,12 @@ async def _store_pending_payment(
 ):
     """Store pending payment for confirmation."""
     try:
-        # Create pending transaction
+        # Get user's credit account first
+        credit_account = await get_or_create_credit_account(user_id, db)
+        
+        # Create pending transaction with proper account_id
         transaction = CreditTransaction(
-            user_id=user_id,
+            account_id=credit_account.id,  # Use account_id instead of user_id
             amount=credit_amount,
             transaction_type="credit_purchase",
             description=f"Credit purchase: {credit_amount} credits for ${payment_data['amount_usd']}",
@@ -709,10 +712,17 @@ async def get_credit_transaction_history(
     """Get user's credit transaction history."""
     
     try:
-        stmt = select(CreditTransaction).join(
+        stmt = select(CreditTransaction).outerjoin(
             CreditAccount, CreditTransaction.account_id == CreditAccount.id
         ).where(
-            CreditAccount.user_id == current_user.id
+            # Support both new transactions (with account_id) and legacy transactions (with user_id)
+            or_(
+                CreditAccount.user_id == current_user.id,  # New transactions via account_id
+                and_(
+                    CreditTransaction.account_id.is_(None),  # Legacy transactions
+                    CreditTransaction.user_id == current_user.id  # Use user_id directly for legacy
+                )
+            )
         ).order_by(desc(CreditTransaction.created_at)).limit(limit)
         
         result = await db.execute(stmt)
