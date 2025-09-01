@@ -24,7 +24,7 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, get_database
 from app.core.redis import redis_manager
 from app.core.logging import LoggerMixin, trade_logger
 from app.models.trading import Trade, Position, Order, TradingStrategy
@@ -784,7 +784,8 @@ class TradeExecutionService(LoggerMixin):
                 user_id=user_id,
                 trade_request=trade_request,
                 execution_result=execution_result,
-                position_value_usd=position_value_usd
+                position_value_usd=position_value_usd,
+                exchange_account_id=credentials.get("account_id")
             )
             
             return {
@@ -829,7 +830,7 @@ class TradeExecutionService(LoggerMixin):
                         ExchangeAccount.status == ExchangeStatus.ACTIVE,
                         ExchangeAccount.trading_enabled.is_(True),
                         ExchangeApiKey.status == ApiKeyStatus.ACTIVE,
-                        ExchangeApiKey.is_validated == True
+                        ExchangeApiKey.is_validated.is_(True)
                     )
                 )
                 
@@ -853,7 +854,7 @@ class TradeExecutionService(LoggerMixin):
             self.logger.error(f"Failed to get user exchange credentials: {e}")
             return None
     
-    async def _decrypt_credentials(self, api_key: ExchangeApiKey, account: ExchangeAccount) -> Dict[str, Any]:
+    async def _decrypt_credentials(self, api_key: ExchangeApiKey, account: ExchangeAccount) -> Optional[Dict[str, Any]]:
         """Decrypt user's API credentials using existing encryption system."""
         from app.api.v1.endpoints.exchanges import cipher_suite
         
@@ -1010,7 +1011,8 @@ class TradeExecutionService(LoggerMixin):
         user_id: str,
         trade_request: Dict[str, Any],
         execution_result: Dict[str, Any],
-        position_value_usd: float
+        position_value_usd: float,
+        exchange_account_id: str = None
     ) -> None:
         """Record trade execution in database for audit trail."""
         try:
@@ -1037,6 +1039,7 @@ class TradeExecutionService(LoggerMixin):
                     urgency="medium",
                     market_price_at_execution=Decimal(str(execution_result["execution_price"])),
                     credits_used=0,  # Will be calculated by credit system
+                    exchange_account_id=exchange_account_id,  # Required field
                     executed_at=datetime.utcnow(),
                     completed_at=datetime.utcnow(),
                     meta_data={
@@ -1128,7 +1131,16 @@ class TradeExecutionService(LoggerMixin):
             price_result = await market_data_feeds.get_real_time_price(symbol)
             
             if price_result.get("success"):
-                return float(price_result.get("price", 0))
+                # Safely extract price from payload structure
+                price_data = price_result.get("data") or price_result.get("payload") or price_result
+                price_value = price_data.get("price") if isinstance(price_data, dict) else price_result.get("price")
+                
+                if price_value is not None:
+                    try:
+                        return float(price_value)
+                    except (ValueError, TypeError) as e:
+                        self.logger.warning(f"Invalid price value for {symbol}", price_value=price_value, error=str(e))
+                        # Continue to fallback
             
             # Fallback to exchange-specific API calls
             if exchange.lower() == "binance":

@@ -479,8 +479,8 @@ async def get_portfolio_status(
                     "name": balance["asset"],
                     "amount": balance["total"],
                     "value_usd": balance["value_usd"],
-                    "entry_price": balance["usd_price"],
-                    "current_price": balance["usd_price"],
+                    "entry_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
+                    "current_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
                     "change_24h_pct": 0.0,  # Would come from market data service
                     "unrealized_pnl": 0.0,  # Would be calculated from entry vs current
                     "side": "long",
