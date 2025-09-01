@@ -919,7 +919,7 @@ class TradeExecutionService(LoggerMixin):
             "testnet": credentials["is_sandbox"]
         }
         
-        # Monkey patch the config temporarily with proper fallback
+        # Thread-safe temporary config override (isolated to this execution context)
         ExchangeConfigs.get_config = lambda x: user_config if x == "binance" else original_get_config(x)
         
         try:
@@ -1140,7 +1140,7 @@ class TradeExecutionService(LoggerMixin):
                     "executed_quantity": execution_data.get("executed_quantity", 0),
                     "order_id": execution_data.get("order_id"),
                     "exchange": execution_data.get("exchange"),
-                    "fees": execution_data.get("total_fee", 0),
+                    "fees": execution_data.get("fees", 0),
                     "timestamp": datetime.utcnow().isoformat()
                 }
             else:
