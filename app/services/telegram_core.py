@@ -1123,24 +1123,23 @@ class TelegramCommanderService(LoggerMixin):
             from app.core.database import AsyncSessionLocal
             
             async with AsyncSessionLocal() as db:
-            
-            if recipient == RecipientType.OWNER:
-                # Get owner's chat ID from user settings
-                owner_chat = await db.execute(
-                    "SELECT telegram_chat_id FROM users WHERE is_admin = TRUE AND telegram_chat_id IS NOT NULL LIMIT 1"
-                )
-                result = owner_chat.fetchone()
-                return result[0] if result else await self._get_env_chat_id("OWNER_TELEGRAM_CHAT_ID")
-                
-            elif recipient == RecipientType.ALERTS_CHANNEL:
-                # Get alerts channel ID from system config
-                return await self._get_env_chat_id("ALERTS_TELEGRAM_CHAT_ID")
-                
-            elif recipient == RecipientType.TRADING_GROUP:
-                # Get trading group ID from system config
-                return await self._get_env_chat_id("TRADING_TELEGRAM_CHAT_ID")
-                
-            return None
+                if recipient == RecipientType.OWNER:
+                    # Get owner's chat ID from user settings
+                    owner_chat = await db.execute(
+                        "SELECT telegram_chat_id FROM users WHERE is_admin = TRUE AND telegram_chat_id IS NOT NULL LIMIT 1"
+                    )
+                    result = owner_chat.fetchone()
+                    return result[0] if result else await self._get_env_chat_id("OWNER_TELEGRAM_CHAT_ID")
+                    
+                elif recipient == RecipientType.ALERTS_CHANNEL:
+                    # Get alerts channel ID from system config
+                    return await self._get_env_chat_id("ALERTS_TELEGRAM_CHAT_ID")
+                    
+                elif recipient == RecipientType.TRADING_GROUP:
+                    # Get trading group ID from system config
+                    return await self._get_env_chat_id("TRADING_TELEGRAM_CHAT_ID")
+                    
+                return None
             
         except Exception as e:
             self.logger.error("Failed to resolve chat ID", recipient=recipient, error=str(e))
