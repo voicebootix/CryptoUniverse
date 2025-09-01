@@ -18,6 +18,7 @@ import {
   BarChart3,
   PieChart,
   Activity,
+  Receipt,
   CheckCircle,
   Clock,
   RefreshCw,
