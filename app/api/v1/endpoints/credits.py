@@ -65,8 +65,8 @@ class CreditPurchaseRequest(BaseModel):
 
 class CreditBalanceResponse(BaseModel):
     available_credits: int
-    total_purchased_credits: int
-    total_used_credits: int
+    total_credits: int  # Updated field name
+    used_credits: int   # Updated field name
     profit_potential: Decimal
     profit_earned_to_date: Decimal
     remaining_potential: Decimal
@@ -158,8 +158,8 @@ async def get_credit_balance(
         
         return CreditBalanceResponse(
             available_credits=credit_account.available_credits,
-            total_purchased_credits=credit_account.total_purchased_credits,
-            total_used_credits=credit_account.total_used_credits,
+            total_credits=credit_account.total_credits,
+            used_credits=credit_account.used_credits,
             profit_potential=profit_potential,
             profit_earned_to_date=profit_earned,
             remaining_potential=remaining_potential,
@@ -518,28 +518,58 @@ async def _process_confirmed_payment(
         user_id = payment_info["user_id"]
         credit_amount = payment_info["credit_amount"]
         
-        # Get user's credit account
-        async for db_session in get_database():
-            stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
-            result = await db_session.execute(stmt)
-            credit_account = result.scalar_one_or_none()
+        # Acquire Redis lock for idempotent processing
+        lock_key = f"payment_processing:{payment_id}"
+        
+        try:
+            # Set Redis lock with expiration
+            lock_acquired = await redis.set(lock_key, "processing", ex=300, nx=True)  # 5 min expiry
             
-            if credit_account:
-                # Add credits to account
-                credit_account.available_credits += credit_amount
-                credit_account.total_purchased_credits += credit_amount
+            if not lock_acquired:
+                logger.warning(f"Payment {payment_id} already being processed")
+                return
+            
+            # Process payment with database row locks for idempotency
+            async for db_session in get_database():
+                # Acquire row locks to prevent concurrent processing
+                credit_stmt = select(CreditAccount).where(
+                    CreditAccount.user_id == user_id
+                ).with_for_update()
                 
-                # Update transaction status
+                credit_result = await db_session.execute(credit_stmt)
+                credit_account = credit_result.scalar_one_or_none()
+                
+                if not credit_account:
+                    logger.error(f"Credit account not found for user {user_id}")
+                    return
+                
+                # Check transaction with row lock
                 tx_stmt = select(CreditTransaction).where(
                     CreditTransaction.reference_id == payment_id
-                )
+                ).with_for_update()
+                
                 tx_result = await db_session.execute(tx_stmt)
                 transaction = tx_result.scalar_one_or_none()
                 
-                if transaction:
-                    transaction.status = "completed"
-                    transaction.processed_at = datetime.utcnow()
+                if not transaction:
+                    logger.error(f"Transaction not found for payment {payment_id}")
+                    return
                 
+                # Check if already completed (idempotency check)
+                if transaction.status == "completed":
+                    logger.info(f"Payment {payment_id} already completed - skipping")
+                    return
+                
+                # Update credit account with correct field names
+                credit_account.available_credits += credit_amount
+                credit_account.total_credits += credit_amount  # Use correct field name
+                credit_account.last_purchase_at = datetime.utcnow()
+                
+                # Update transaction status
+                transaction.status = "completed"
+                transaction.processed_at = datetime.utcnow()
+                
+                # Commit all changes in single transaction
                 await db_session.commit()
                 
                 logger.info(
@@ -564,8 +594,19 @@ async def _process_confirmed_payment(
                 except Exception as e:
                     logger.warning("Failed to send credit purchase notification", error=str(e))
         
-    except Exception as e:
-        logger.error("Failed to process confirmed payment", error=str(e))
+        except Exception as e:
+            logger.error("Failed to process confirmed payment", error=str(e))
+        
+        finally:
+            # Always clean up Redis lock to prevent deadlocks
+            try:
+                await redis.delete(lock_key)
+                logger.debug(f"Released payment processing lock for {payment_id}")
+            except Exception as e:
+                logger.error("Failed to release payment processing lock", 
+                           payment_id=payment_id, 
+                           lock_key=lock_key, 
+                           error=str(e))
 
 
 @router.get("/purchase-options")
