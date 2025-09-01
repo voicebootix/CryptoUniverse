@@ -272,7 +272,7 @@ async def get_credit_pricing_config(
         }
         
     except Exception as e:
-        logger.exception("Failed to get credit pricing config", error=str(e))
+        logger.exception("Failed to get credit pricing config: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get pricing config: {str(e)}"
@@ -367,7 +367,7 @@ async def update_credit_pricing_config(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Failed to update credit pricing", error=str(e))
+        logger.exception("Failed to update credit pricing: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update pricing: {str(e)}"
@@ -428,7 +428,7 @@ async def update_strategy_pricing(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Failed to update strategy pricing", error=str(e))
+        logger.exception("Failed to update strategy pricing: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update strategy pricing: {str(e)}"

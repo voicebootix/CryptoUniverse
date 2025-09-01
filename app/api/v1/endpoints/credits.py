@@ -13,12 +13,14 @@ No mock data, no hardcoded values - production-ready credit system.
 
 import asyncio
 import json
+import hmac
+import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Header
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc, func
@@ -119,8 +121,8 @@ async def get_credit_balance(
             credit_account = CreditAccount(
                 user_id=current_user.id,
                 available_credits=0,
-                total_purchased_credits=0,
-                total_used_credits=0
+                total_credits=0,
+                used_credits=0
             )
             db.add(credit_account)
             await db.commit()
@@ -131,7 +133,7 @@ async def get_credit_balance(
         from app.services.profit_sharing_service import profit_sharing_service
         await profit_sharing_service.ensure_pricing_loaded()
         
-        profit_potential = Decimal(str(credit_account.total_purchased_credits * profit_sharing_service.credit_to_profit_ratio))
+        profit_potential = Decimal(str(credit_account.total_credits * profit_sharing_service.credit_to_profit_ratio))
         
         # Get total profit earned to date
         profit_stmt = select(func.sum(Trade.profit_realized_usd)).where(
@@ -216,7 +218,7 @@ async def purchase_credits(
         return CryptoPaymentResponse(
             payment_id=payment_result["payment_id"],
             amount_usd=request.amount_usd,
-            crypto_amount=Decimal(str(payment_result["crypto_amount"])),
+            crypto_amount=payment_result["crypto_amount"],
             crypto_currency=payment_result["crypto_currency"],
             payment_address=payment_result["payment_address"],
             qr_code_url=payment_result["qr_code_url"],
@@ -298,13 +300,45 @@ async def get_profit_potential_status(
         )
 
 
+async def _verify_webhook_signature(signature: str, payment_id: str, transaction_hash: str) -> bool:
+    """Verify webhook signature for payment confirmation."""
+    try:
+        webhook_secret = settings.payments_webhook_secret
+        if not webhook_secret:
+            logger.warning("PAYMENTS_WEBHOOK_SECRET not configured")
+            return False
+        
+        # Create expected signature
+        message = f"{payment_id}:{transaction_hash}"
+        expected_signature = hmac.new(
+            webhook_secret.encode(),
+            message.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        # Compare signatures securely
+        return hmac.compare_digest(signature, expected_signature)
+        
+    except Exception as e:
+        logger.error("Webhook signature verification failed", error=str(e))
+        return False
+
+
 @router.post("/webhook/payment-confirmed")
 async def handle_payment_confirmation(
     payment_id: str,
     transaction_hash: str,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    x_payments_signature: str = Header(alias="X-Payments-Signature")
 ):
     """Handle cryptocurrency payment confirmation webhook."""
+    
+    # Verify webhook signature
+    if not await _verify_webhook_signature(x_payments_signature, payment_id, transaction_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid webhook signature"
+        )
     
     try:
         # Verify payment on blockchain
@@ -356,15 +390,19 @@ async def _generate_crypto_payment(
         
         payment_id = f"credit_{int(datetime.utcnow().timestamp())}_{user_id[:8]}"
         
-        # Mock crypto rates (would be real-time from API)
+        # Crypto rates as Decimal for currency-safe arithmetic
         crypto_rates = {
-            "bitcoin": 95000,    # $95k per BTC
-            "ethereum": 3500,    # $3.5k per ETH
-            "usdc": 1.0,         # $1 per USDC
-            "usdt": 1.0          # $1 per USDT
+            "bitcoin": Decimal("95000"),    # $95k per BTC
+            "ethereum": Decimal("3500"),    # $3.5k per ETH
+            "usdc": Decimal("1.0"),         # $1 per USDC
+            "usdt": Decimal("1.0")          # $1 per USDT
         }
         
-        crypto_amount = float(amount_usd) / crypto_rates.get(payment_method, 1.0)
+        if payment_method not in crypto_rates:
+            raise ValueError(f"Unsupported payment method: {payment_method}")
+        
+        crypto_amount = amount_usd / crypto_rates[payment_method]
+        crypto_amount = crypto_amount.quantize(Decimal("0.00000001"))  # 8 decimal precision
         
         # Generate payment address (would be real from payment processor)
         payment_addresses = {
