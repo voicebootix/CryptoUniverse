@@ -201,8 +201,5 @@ Ready to manage your crypto wealth! 💎
     }
 
 
-# Import the complete Telegram Commander Service implementation
-from app.services.telegram_core import (
-    TelegramAPIConnector, MessageRouter, TelegramCommanderService, 
-    telegram_commander_service
-)
+# Note: Removed circular import - these will be imported as needed within functions
+# to avoid circular dependency with telegram_core.py
