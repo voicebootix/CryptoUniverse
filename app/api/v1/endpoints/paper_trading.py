@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from app.core.auth import get_current_user
+from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
 from app.services.paper_trading_engine import get_paper_trading_engine, PaperTradingEngine
 import structlog
