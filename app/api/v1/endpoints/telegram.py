@@ -29,7 +29,7 @@ from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
 from app.models.telegram_integration import UserTelegramConnection, TelegramMessage
-from app.services.telegram_core import TelegramService
+from app.services.telegram_core import TelegramCommanderService as TelegramService
 from app.services.rate_limit import rate_limiter
 
 settings = get_settings()
