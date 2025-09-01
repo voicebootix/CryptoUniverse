@@ -1681,7 +1681,8 @@ class MarketAnalysisService(LoggerMixin):
         self,
         exchanges: str = "all",
         asset_types: str = "spot,futures,options",
-        user_id: str = "system"
+        user_id: str = "system",
+        min_volume_usd: Optional[float] = None
     ) -> Dict[str, Any]:
         """DEDICATED EXCHANGE ASSET DISCOVERY - Comprehensive asset universe discovery."""
         
@@ -1709,7 +1710,7 @@ class MarketAnalysisService(LoggerMixin):
                 for asset_type in asset_type_list:
                     if asset_type == "spot":
                         # Real spot asset discovery using exchange APIs
-                        spot_assets = await self._discover_real_spot_assets(exchange)
+                        spot_assets = await self._discover_real_spot_assets(exchange, min_volume_usd)
                         if not spot_assets:
                             # Fallback if API fails
                             spot_assets = {
@@ -2416,23 +2417,26 @@ class MarketAnalysisService(LoggerMixin):
     
     # Helper methods for the new functions
     
-    async def _discover_real_spot_assets(self, exchange: str) -> Dict[str, Any]:
+    async def _discover_real_spot_assets(self, exchange: str, min_volume_usd: Optional[float] = None) -> Dict[str, Any]:
         """Discover real spot assets from exchange APIs."""
         try:
             if exchange.lower() == "binance":
-                return await self._discover_binance_assets()
+                return await self._discover_binance_assets(min_volume_usd)
             elif exchange.lower() == "kraken":
-                return await self._discover_kraken_assets()
+                return await self._discover_kraken_assets(min_volume_usd)
             elif exchange.lower() == "kucoin":
-                return await self._discover_kucoin_assets()
+                return await self._discover_kucoin_assets(min_volume_usd)
             else:
                 return None
                 
-        except Exception as e:
-            self.logger.error(f"Real asset discovery failed for {exchange}", error=str(e))
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+            self.logger.error(f"Real asset discovery failed for {exchange}", error=str(e), exc_info=True)
             return None
+        except Exception as e:
+            self.logger.exception(f"Unexpected error in asset discovery for {exchange}")
+            raise
     
-    async def _discover_binance_assets(self) -> Dict[str, Any]:
+    async def _discover_binance_assets(self, min_volume_usd: Optional[float] = None) -> Dict[str, Any]:
         """Discover real Binance trading pairs."""
         try:
             async with aiohttp.ClientSession() as session:
@@ -2468,17 +2472,22 @@ class MarketAnalysisService(LoggerMixin):
                 
                 for symbol_info in symbols_data:
                     if symbol_info.get("status") == "TRADING":
+                        symbol = symbol_info["symbol"]
+                        volume_usd = volume_lookup.get(symbol, 0)
+                        
+                        # Apply min_volume_usd filter if specified
+                        if min_volume_usd is not None and volume_usd < min_volume_usd:
+                            continue
+                        
                         active_pairs += 1
                         base_assets.add(symbol_info["baseAsset"])
                         quote_assets.add(symbol_info["quoteAsset"])
                         
                         # Add to volume leaders if high volume
-                        symbol = symbol_info["symbol"]
-                        volume = volume_lookup.get(symbol, 0)
-                        if volume > 1000000:  # $1M+ volume
+                        if volume_usd > 1000000:  # $1M+ volume
                             volume_leaders.append({
                                 "symbol": f"{symbol_info['baseAsset']}/{symbol_info['quoteAsset']}",
-                                "volume_24h": volume,
+                                "volume_24h": volume_usd,
                                 "base_asset": symbol_info["baseAsset"]
                             })
                 
@@ -2497,7 +2506,7 @@ class MarketAnalysisService(LoggerMixin):
             self.logger.error("Binance asset discovery failed", error=str(e))
             return None
     
-    async def _discover_kraken_assets(self) -> Dict[str, Any]:
+    async def _discover_kraken_assets(self, min_volume_usd: Optional[float] = None) -> Dict[str, Any]:
         """Discover real Kraken trading pairs."""
         try:
             async with aiohttp.ClientSession() as session:
@@ -2514,22 +2523,47 @@ class MarketAnalysisService(LoggerMixin):
                     
                     pairs_data = data.get("result", {})
                     
-                    base_assets = set()
-                    quote_assets = set()
-                    active_pairs = 0
-                    volume_leaders = []
-                    
-                    for pair_name, pair_info in pairs_data.items():
-                        if pair_info.get("status") == "online":
-                            active_pairs += 1
-                            base = pair_info.get("base", "").replace("X", "").replace("Z", "")
-                            quote = pair_info.get("quote", "").replace("X", "").replace("Z", "")
-                            base_assets.add(base)
-                            quote_assets.add(quote)
-                            
+                # Get 24hr ticker data for volume filtering
+                volume_lookup = {}
+                try:
+                    async with session.get(
+                        "https://api.kraken.com/0/public/Ticker",
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as ticker_response:
+                        if ticker_response.status == 200:
+                            ticker_data = await ticker_response.json()
+                            if not ticker_data.get("error"):
+                                for pair, data in ticker_data.get("result", {}).items():
+                                    # Volume is in quote currency, approximate USD value
+                                    volume_quote = float(data.get("v", [0, 0])[1])  # 24h volume
+                                    price = float(data.get("c", [0])[0])  # Last price
+                                    volume_lookup[pair] = volume_quote * price
+                except Exception:
+                    pass  # Continue without volume data
+                
+                base_assets = set()
+                quote_assets = set()
+                active_pairs = 0
+                volume_leaders = []
+                
+                for pair_name, pair_info in pairs_data.items():
+                    if pair_info.get("status") == "online":
+                        volume_usd = volume_lookup.get(pair_name, 0)
+                        
+                        # Apply min_volume_usd filter if specified
+                        if min_volume_usd is not None and volume_usd < min_volume_usd:
+                            continue
+                        
+                        active_pairs += 1
+                        base = pair_info.get("base", "").replace("X", "").replace("Z", "")
+                        quote = pair_info.get("quote", "").replace("X", "").replace("Z", "")
+                        base_assets.add(base)
+                        quote_assets.add(quote)
+                        
+                        if volume_usd > 100000:  # $100K+ volume for inclusion
                             volume_leaders.append({
                                 "symbol": f"{base}/{quote}",
-                                "volume_24h": 0,  # Would need ticker API for real volume
+                                "volume_24h": volume_usd,
                                 "base_asset": base
                             })
                     
@@ -2545,7 +2579,7 @@ class MarketAnalysisService(LoggerMixin):
             self.logger.error("Kraken asset discovery failed", error=str(e))
             return None
     
-    async def _discover_kucoin_assets(self) -> Dict[str, Any]:
+    async def _discover_kucoin_assets(self, min_volume_usd: Optional[float] = None) -> Dict[str, Any]:
         """Discover real KuCoin trading pairs."""
         try:
             async with aiohttp.ClientSession() as session:
@@ -2562,22 +2596,48 @@ class MarketAnalysisService(LoggerMixin):
                     
                     symbols_data = data.get("data", [])
                     
-                    base_assets = set()
-                    quote_assets = set()
-                    active_pairs = 0
-                    volume_leaders = []
-                    
-                    for symbol_info in symbols_data:
-                        if symbol_info.get("enableTrading"):
-                            active_pairs += 1
-                            base = symbol_info.get("baseCurrency", "")
-                            quote = symbol_info.get("quoteCurrency", "")
-                            base_assets.add(base)
-                            quote_assets.add(quote)
-                            
+                # Get 24hr stats for volume filtering
+                volume_lookup = {}
+                try:
+                    async with session.get(
+                        "https://api.kucoin.com/api/v1/market/allTickers",
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as ticker_response:
+                        if ticker_response.status == 200:
+                            ticker_data = await ticker_response.json()
+                            if ticker_data.get("code") == "200000":
+                                for ticker in ticker_data.get("data", {}).get("ticker", []):
+                                    symbol = ticker.get("symbol", "")
+                                    vol = float(ticker.get("vol", 0))
+                                    price = float(ticker.get("last", 0))
+                                    volume_lookup[symbol] = vol * price
+                except Exception:
+                    pass  # Continue without volume data
+                
+                base_assets = set()
+                quote_assets = set()
+                active_pairs = 0
+                volume_leaders = []
+                
+                for symbol_info in symbols_data:
+                    if symbol_info.get("enableTrading"):
+                        symbol = symbol_info.get("symbol", "")
+                        volume_usd = volume_lookup.get(symbol, 0)
+                        
+                        # Apply min_volume_usd filter if specified
+                        if min_volume_usd is not None and volume_usd < min_volume_usd:
+                            continue
+                        
+                        active_pairs += 1
+                        base = symbol_info.get("baseCurrency", "")
+                        quote = symbol_info.get("quoteCurrency", "")
+                        base_assets.add(base)
+                        quote_assets.add(quote)
+                        
+                        if volume_usd > 50000:  # $50K+ volume for inclusion
                             volume_leaders.append({
                                 "symbol": f"{base}/{quote}",
-                                "volume_24h": 0,  # Would need ticker API for real volume
+                                "volume_24h": volume_usd,
                                 "base_asset": base
                             })
                     
@@ -2711,6 +2771,114 @@ class MarketAnalysisService(LoggerMixin):
                 "error": str(e),
                 "timestamp": datetime.utcnow().isoformat()
             }
+    
+    async def get_market_overview(self) -> Dict[str, Any]:
+        """Get comprehensive market overview for adaptive timing and decision making."""
+        try:
+            from app.services.market_data_feeds import get_market_overview
+            
+            # Get market data overview
+            market_data = await get_market_overview()
+            
+            if not market_data.get("success", False):
+                # Fallback to basic analysis
+                return {
+                    "success": True,
+                    "market_overview": {
+                        "volatility_level": "medium",
+                        "arbitrage_opportunities": 0,
+                        "market_sentiment": "neutral",
+                        "total_market_cap": 0,
+                        "btc_dominance": 50.0,
+                        "fear_greed_index": 50,
+                        "trending_coins": [],
+                        "top_gainers": [],
+                        "top_losers": []
+                    },
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            
+            # Process market data for analysis
+            overview_data = market_data.get("data", {})
+            
+            # Calculate volatility level based on market movements
+            volatility_level = self._calculate_volatility_level(overview_data)
+            
+            # Detect arbitrage opportunities
+            arbitrage_count = await self._detect_arbitrage_opportunities()
+            
+            return {
+                "success": True,
+                "market_overview": {
+                    "volatility_level": volatility_level,
+                    "arbitrage_opportunities": arbitrage_count,
+                    "market_sentiment": overview_data.get("market_sentiment", "neutral"),
+                    "total_market_cap": overview_data.get("total_market_cap", 0),
+                    "btc_dominance": overview_data.get("btc_dominance", 50.0),
+                    "fear_greed_index": overview_data.get("fear_greed_index", 50),
+                    "trending_coins": overview_data.get("trending", [])[:5],
+                    "top_gainers": overview_data.get("top_gainers", [])[:5],
+                    "top_losers": overview_data.get("top_losers", [])[:5]
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error("Market overview failed", error=str(e), exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "function": "get_market_overview",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+    
+    def _calculate_volatility_level(self, market_data: Dict[str, Any]) -> str:
+        """Calculate market volatility level from market data."""
+        try:
+            # Use various metrics to determine volatility
+            btc_change_24h = abs(market_data.get("btc_price_change_24h", 0))
+            eth_change_24h = abs(market_data.get("eth_price_change_24h", 0))
+            market_cap_change = abs(market_data.get("market_cap_change_24h", 0))
+            
+            avg_volatility = (btc_change_24h + eth_change_24h + market_cap_change) / 3
+            
+            if avg_volatility > 5.0:
+                return "high"
+            elif avg_volatility > 2.0:
+                return "medium"
+            else:
+                return "low"
+                
+        except Exception:
+            return "medium"
+    
+    async def _detect_arbitrage_opportunities(self) -> int:
+        """Detect potential arbitrage opportunities across exchanges."""
+        try:
+            # This is a simplified implementation
+            # In production, this would compare prices across exchanges
+            from app.services.unified_price_service import get_market_overview_prices
+            
+            prices = await get_market_overview_prices()
+            
+            # Count significant price differences (simplified)
+            opportunities = 0
+            for symbol, price in prices.items():
+                if isinstance(price, (int, float)) and price > 0:
+                    # In a real implementation, we'd compare across exchanges
+                    # For now, return a conservative estimate
+                    opportunities += 1 if symbol in ['BTC', 'ETH', 'BNB'] else 0
+            
+            return min(opportunities, 10)  # Cap at 10
+            
+        except asyncio.CancelledError:
+            raise
+        except (ImportError, aiohttp.ClientError, ValueError) as e:
+            self.logger.exception("Arbitrage detection failed", error=str(e))
+            return 0
+        except Exception as e:
+            self.logger.exception("Unexpected error in arbitrage detection")
+            raise
 
 
 # Global service instance

@@ -128,10 +128,15 @@ class ExchangeAccount(Base):
     orders = relationship("Order", back_populates="exchange_account")
     positions = relationship("Position", back_populates="exchange_account")
     
-    # Constraints
+    # Composite indexes and constraints for performance optimization
     __table_args__ = (
+        # Unique constraint for user + exchange + account name
         UniqueConstraint("user_id", "exchange_name", "account_name", name="unique_user_exchange_account"),
+        # Performance indexes for common query patterns
         Index("idx_exchange_user_status", "user_id", "status"),
+        Index('idx_exchange_accounts_user_exchange_status', 'user_id', 'exchange_name', 'status'),
+        Index('idx_exchange_accounts_status_trading', 'status', 'trading_enabled'),
+        Index('idx_exchange_accounts_user_trading', 'user_id', 'trading_enabled'),
         Index("idx_exchange_name_status", "exchange_name", "status"),
         Index("idx_exchange_default", "is_default"),
     )

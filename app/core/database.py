@@ -40,15 +40,25 @@ engine = create_async_engine(
     future=True,
     # ENTERPRISE: Additional performance settings
     execution_options={
-        "isolation_level": "AUTOCOMMIT"
-    }
+        "isolation_level": "READ_COMMITTED",
+    },
+    # ENTERPRISE: Query optimization settings for PostgreSQL only
+    connect_args={
+        "command_timeout": 30,
+        "server_settings": {
+            "statement_timeout": "30s",  # Move to server_settings for asyncpg
+            "jit": "off",  # Disable JIT for consistent performance
+            "application_name": "crypto_trading_platform",
+        }
+    } if "postgresql" in get_async_database_url() else {}
 )
 
-# Async session factory
+# Async session factory with proper session-level settings
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
-    expire_on_commit=False
+    expire_on_commit=False,
+    autoflush=False  # Move autoflush to sessionmaker where it belongs
 )
 
 # Metadata and Base
@@ -332,3 +342,49 @@ class DatabaseUtils:
 
 # Database utils instance
 db_utils = DatabaseUtils()
+
+
+# ENTERPRISE: Database session dependencies
+async def get_database() -> AsyncSession:
+    """
+    Dependency to get database session.
+    
+    Provides async database session with automatic cleanup and error handling.
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            # ENTERPRISE: Optimize session for read-heavy workloads
+            if "postgresql" in get_async_database_url():
+                await session.execute(text("SET statement_timeout = '30s'"))
+                await session.execute(text("SET lock_timeout = '10s'"))
+            
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+async def get_optimized_database() -> AsyncSession:
+    """
+    Dependency to get optimized database session for heavy queries.
+    
+    Provides async database session optimized for analytical/reporting queries.
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            # ENTERPRISE: Optimize for analytical queries
+            if "postgresql" in get_async_database_url():
+                await session.execute(text("SET work_mem = '256MB'"))
+                await session.execute(text("SET statement_timeout = '60s'"))
+                await session.execute(text("SET random_page_cost = 1.1"))  # SSD optimization
+            
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
