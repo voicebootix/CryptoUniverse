@@ -640,6 +640,9 @@ async def _process_confirmed_payment(
                            payment_id=payment_id, 
                            lock_key=lock_key, 
                            error=str(e))
+    
+    except Exception as e:
+        logger.error("Critical error in payment processing", payment_id=payment_id, error=str(e))
 
 
 @router.get("/purchase-options")
