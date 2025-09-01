@@ -54,7 +54,10 @@ class TelegramAPIConnector(LoggerMixin):
     
     def __init__(self):
         self.bot_token = settings.TELEGRAM_BOT_TOKEN
-        self.api_base_url = TelegramConfig.API_BASE_URL.format(token=self.bot_token)
+        if self.bot_token:
+            self.api_base_url = TelegramConfig.API_BASE_URL.format(token=self.bot_token)
+        else:
+            self.api_base_url = None
         self.rate_limiter = {}
         self.message_queue = asyncio.Queue()
         self.webhook_url = None
@@ -71,6 +74,10 @@ class TelegramAPIConnector(LoggerMixin):
         priority: MessagePriority = MessagePriority.NORMAL
     ) -> Dict[str, Any]:
         """Send message via Telegram Bot API with rate limiting."""
+        
+        # Skip if telegram is not configured
+        if not self.bot_token or not self.api_base_url:
+            return {"success": False, "error": "Telegram not configured"}
         
         try:
             # Check rate limiting

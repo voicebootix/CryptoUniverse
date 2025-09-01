@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = Field(default=None, description="Anthropic API key")
     GOOGLE_AI_API_KEY: Optional[str] = Field(default=None, description="Google AI API key")
     
+    # Telegram settings
+    TELEGRAM_BOT_TOKEN: Optional[str] = Field(default=None, env="TELEGRAM_BOT_TOKEN", description="Telegram bot token")
+    OWNER_TELEGRAM_CHAT_ID: Optional[str] = Field(default=None, env="OWNER_TELEGRAM_CHAT_ID", description="Owner's Telegram chat ID")
+    ALERTS_TELEGRAM_CHAT_ID: Optional[str] = Field(default=None, env="ALERTS_TELEGRAM_CHAT_ID", description="Alerts Telegram chat ID")
+    TRADING_TELEGRAM_CHAT_ID: Optional[str] = Field(default=None, env="TRADING_TELEGRAM_CHAT_ID", description="Trading Telegram chat ID")
+    
     # Market data API keys
     ALPHA_VANTAGE_API_KEY: Optional[str] = Field(default=None, env="ALPHA_VANTAGE_API_KEY", description="Alpha Vantage API key")
     COINGECKO_API_KEY: Optional[str] = Field(default=None, env="COINGECKO_API_KEY", description="CoinGecko API key")
