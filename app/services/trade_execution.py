@@ -2165,3 +2165,7 @@ class TradeExecutionService(LoggerMixin):
         except Exception as e:
             self.logger.error("Live liquidity analysis failed", error=str(e))
             return {"success": False, "error": str(e)}
+
+
+# Create global instance for import
+trade_execution_service = TradeExecutionService()
