@@ -33,20 +33,25 @@ class BackgroundServiceManager(LoggerMixin):
             "health_monitor": 60,        # 1 minute
             "metrics_collector": 300,    # 5 minutes
             "cleanup_service": 3600,     # 1 hour
-            "autonomous_cycles": 900,    # 15 minutes (4 cycles per hour)
+            "autonomous_cycles": 60,     # 1 minute base (adaptive based on market conditions)
             "market_data_sync": 60,      # 1 minute
             "balance_sync": 300,         # 5 minutes
             "risk_monitor": 30,          # 30 seconds
             "rate_limit_cleanup": 1800   # 30 minutes
         }
         
-        # Service configurations
+        # Dynamic service configurations (no hardcoded restrictions)
         self.service_configs = {
-            "market_data_symbols": ["BTC", "ETH", "SOL", "ADA", "DOT", "MATIC", "LINK", "UNI"],
             "risk_thresholds": {
                 "max_daily_loss": 10.0,  # 10%
                 "max_position_size": 20.0,  # 20%
                 "emergency_stop_loss": 15.0  # 15%
+            },
+            "market_data_discovery": {
+                "min_volume_usd_24h": 1000000,  # $1M minimum volume
+                "min_market_cap": 10000000,     # $10M minimum market cap
+                "max_symbols_per_sync": 100,    # Dynamic limit
+                "update_frequency_seconds": 300  # 5 minutes
             }
         }
     
@@ -339,7 +344,9 @@ class BackgroundServiceManager(LoggerMixin):
             except Exception as e:
                 self.logger.error("Autonomous cycles error", error=str(e))
             
-            await asyncio.sleep(self.intervals["autonomous_cycles"])
+            # ADAPTIVE CYCLE TIMING based on market conditions
+            next_interval = await self._calculate_adaptive_cycle_interval()
+            await asyncio.sleep(next_interval)
     
     async def _market_data_sync_service(self):
         """Sync market data for configured symbols using real APIs."""
@@ -347,24 +354,104 @@ class BackgroundServiceManager(LoggerMixin):
         
         while self.running:
             try:
-                symbols = self.service_configs["market_data_symbols"]
+                # Dynamically discover tradeable symbols (no hardcoded lists)
+                symbols = await self._discover_active_trading_symbols()
                 
-                # Import market data feeds
+                # Import your sophisticated market data feeds service
                 from app.services.market_data_feeds import market_data_feeds
                 
                 # Ensure market data feeds is initialized
                 if market_data_feeds.redis is None:
                     await market_data_feeds.async_init()
                 
-                # Sync market data using real APIs
+                # Sync market data for discovered symbols using real APIs
                 await market_data_feeds.sync_market_data_batch(symbols)
                 
-                self.logger.debug(f"Market data sync completed for {len(symbols)} symbols")
+                self.logger.debug(f"Market data sync completed for {len(symbols)} discovered symbols", symbols=symbols[:10])
                 
             except Exception as e:
                 self.logger.error("Market data sync error", error=str(e))
             
             await asyncio.sleep(self.intervals["market_data_sync"])
+    
+    async def _discover_active_trading_symbols(self) -> List[str]:
+        """Dynamically discover active trading symbols across all exchanges."""
+        try:
+            from app.services.market_analysis_core import MarketAnalysisService
+            market_service = MarketAnalysisService()
+            
+            # Use your sophisticated discover_exchange_assets function
+            discovery_result = await market_service.discover_exchange_assets(
+                exchanges="all",
+                min_volume_usd=self.service_configs["market_data_discovery"]["min_volume_usd_24h"],
+                user_id="system"
+            )
+            
+            if discovery_result.get("success"):
+                discovered_assets = discovery_result.get("discovered_assets", {})
+                
+                # Extract symbols from all exchanges
+                all_symbols = set()
+                for exchange, assets in discovered_assets.items():
+                    if isinstance(assets, list):
+                        all_symbols.update(assets)
+                    elif isinstance(assets, dict):
+                        all_symbols.update(assets.keys())
+                
+                # Filter by volume and market cap criteria
+                filtered_symbols = []
+                for symbol in all_symbols:
+                    # Basic filtering - your market analysis service provides sophisticated filtering
+                    if len(symbol) <= 10 and not any(char in symbol for char in ['/', '-', '_']):
+                        filtered_symbols.append(symbol)
+                
+                # Limit to prevent overwhelming the system
+                max_symbols = self.service_configs["market_data_discovery"]["max_symbols_per_sync"]
+                filtered_symbols = filtered_symbols[:max_symbols]
+                
+                self.logger.info(f"🔍 Discovered {len(filtered_symbols)} active trading symbols")
+                return filtered_symbols
+            
+            # Fallback to major cryptocurrencies if discovery fails
+            fallback_symbols = ["BTC", "ETH", "SOL", "ADA", "DOT", "MATIC", "LINK", "UNI", "AVAX", "ATOM"]
+            self.logger.warning("Symbol discovery failed, using fallback symbols")
+            return fallback_symbols
+            
+        except Exception as e:
+            self.logger.error("Symbol discovery failed", error=str(e))
+            # Emergency fallback
+            return ["BTC", "ETH", "SOL"]
+    
+    async def _calculate_adaptive_cycle_interval(self) -> int:
+        """Calculate adaptive cycle interval based on market conditions and activity."""
+        try:
+            from app.services.market_analysis_core import MarketAnalysisService
+            
+            # Get current market volatility
+            market_service = MarketAnalysisService()
+            market_overview = await market_service.get_market_overview()
+            
+            if market_overview.get("success"):
+                volatility = market_overview.get("market_overview", {}).get("volatility_level", "medium")
+                arbitrage_count = market_overview.get("market_overview", {}).get("arbitrage_opportunities", 0)
+                
+                # Adaptive timing based on market conditions
+                if volatility == "high" or arbitrage_count > 5:
+                    # High volatility or many arbitrage opportunities: faster cycles
+                    return 30  # 30 seconds
+                elif volatility == "low":
+                    # Low volatility: slower cycles to save resources
+                    return 120  # 2 minutes
+                else:
+                    # Medium volatility: standard timing
+                    return 60  # 1 minute
+            else:
+                # Fallback to standard interval
+                return self.intervals["autonomous_cycles"]
+                
+        except Exception as e:
+            self.logger.warning("Failed to calculate adaptive interval", error=str(e))
+            return self.intervals["autonomous_cycles"]
     
     async def _balance_sync_service(self):
         """Sync exchange balances for all users."""
@@ -372,8 +459,47 @@ class BackgroundServiceManager(LoggerMixin):
         
         while self.running:
             try:
-                # This would sync balances for all active users
-                self.logger.debug("Syncing user balances...")
+                # Get all users with active exchange accounts
+                from app.core.database import get_database
+                from app.models.exchange import ExchangeAccount
+                from sqlalchemy import select, and_, distinct
+                import json
+                
+                async for db in get_database():
+                    # Find all users with active exchange accounts
+                    stmt = select(distinct(ExchangeAccount.user_id)).where(
+                        and_(
+                            ExchangeAccount.status == "active",
+                            ExchangeAccount.trading_enabled == True
+                        )
+                    )
+                    
+                    result = await db.execute(stmt)
+                    user_ids = [row[0] for row in result.fetchall()]
+                    
+                    self.logger.debug(f"Syncing balances for {len(user_ids)} users with active exchanges")
+                    
+                    # Sync balances for each user using your existing system
+                    for user_id in user_ids:
+                        try:
+                            # Use your existing exchange balance fetching
+                            from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
+                            portfolio_data = await get_user_portfolio_from_exchanges(str(user_id), db)
+                            
+                            if portfolio_data.get("success"):
+                                # Update cached portfolio data in Redis for real-time access
+                                if self.redis:
+                                    await self.redis.setex(
+                                        f"portfolio_cache:{user_id}",
+                                        300,  # 5 minute cache
+                                        json.dumps(portfolio_data, default=str)
+                                    )
+                            
+                        except Exception as e:
+                            self.logger.warning(f"Balance sync failed for user {user_id}", error=str(e))
+                            continue
+                
+                self.logger.debug("Balance sync cycle completed")
                 
             except Exception as e:
                 self.logger.error("Balance sync error", error=str(e))

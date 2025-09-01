@@ -30,7 +30,6 @@ import { formatCurrency, formatPercentage, formatNumber, getColorForChange, getB
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, BarChart, Bar } from 'recharts';
 import { usePortfolioStore } from '@/hooks/usePortfolio';
 
-// All data now comes from real API calls - no more hardcoded data
 
 const COLORS = ['#22c55e', '#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6'];
 

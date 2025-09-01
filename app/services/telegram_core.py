@@ -383,7 +383,28 @@ class MessageRouter(LoggerMixin):
             return {"success": False, "error": "Unknown command"}
     
     async def _route_natural_language(self, chat_id: str, user_id: str, text: str) -> Dict[str, Any]:
-        """Route natural language messages to AI conversation."""
+        """Route natural language messages to unified AI manager."""
+        
+        try:
+            # Check if unified manager is available
+            if hasattr(self, 'unified_manager') and self.unified_manager:
+                # Use unified AI manager for consistent experience
+                result = await self.unified_manager.handle_telegram_request(chat_id, user_id, text)
+                return result
+            else:
+                # Fallback to original implementation
+                return await self._route_natural_language_fallback(chat_id, user_id, text)
+                
+        except Exception as e:
+            self.logger.error("Natural language processing failed", error=str(e))
+            await self.telegram_api.send_message(
+                chat_id,
+                "🤖 Sorry, I encountered an error processing your message. Please try again."
+            )
+            return {"success": False, "error": str(e)}
+    
+    async def _route_natural_language_fallback(self, chat_id: str, user_id: str, text: str) -> Dict[str, Any]:
+        """Fallback natural language processing (original implementation)."""
         
         try:
             # Get conversation context
@@ -411,6 +432,7 @@ class MessageRouter(LoggerMixin):
             }
             
             # Get AI response
+            from app.services.ai_consensus import ai_consensus_service
             ai_response = await ai_consensus_service.analyze_opportunity(
                 json.dumps(ai_request),
                 confidence_threshold=75.0,
@@ -437,11 +459,7 @@ class MessageRouter(LoggerMixin):
             return {"success": True, "response": "AI conversation handled"}
             
         except Exception as e:
-            self.logger.error("Natural language processing failed", error=str(e))
-            await self.telegram_api.send_message(
-                chat_id,
-                "🤖 Sorry, I encountered an error processing your message. Please try again."
-            )
+            self.logger.error("Fallback natural language processing failed", error=str(e))
             return {"success": False, "error": str(e)}
     
     def _parse_command(self, command_text: str) -> Optional[Dict[str, Any]]:
@@ -629,7 +647,7 @@ Need help with something specific? Just ask me naturally! 🤖
                 return {"success": False, "error": "Market data retrieval failed"}
             
             # Format market response
-            market_text = self._format_market_response(symbol, market_result)
+            market_text = await self._format_market_response(symbol, market_result)
             await self.telegram_api.send_message(chat_id, market_text)
             
             return {"success": True, "command": "market"}
@@ -813,7 +831,7 @@ Current settings are optimized for safety and comprehensive analysis. 🛡️
         
         return "\n".join(response_parts)
     
-    def _format_market_response(self, symbol: str, market_result: Dict[str, Any]) -> str:
+    async def _format_market_response(self, symbol: str, market_result: Dict[str, Any]) -> str:
         """Format market data for Telegram display."""
         
         market_data = market_result.get("price_data", {})

@@ -24,13 +24,14 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, get_database
 from app.core.redis import redis_manager
 from app.core.logging import LoggerMixin, trade_logger
 from app.models.trading import Trade, Position, Order, TradingStrategy
-from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance
+from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance, ExchangeStatus, ApiKeyStatus
 from app.models.user import User
 from app.models.credit import CreditAccount, CreditTransaction
+# Import will be added for existing exchange functionality
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -723,76 +724,534 @@ class TradeExecutionService(LoggerMixin):
         trade_request: Dict[str, Any],
         user_id: str
     ) -> Dict[str, Any]:
-        """Execute real order on exchange."""
-        exchange = await self._select_best_exchange(
-            trade_request["symbol"],
-            trade_request["action"],
-            trade_request["quantity"]
-        )
-        
-        order_params = {
-            "symbol": trade_request["symbol"],
-            "side": trade_request["action"],
-            "quantity": trade_request["quantity"],
-            "type": trade_request.get("order_type", "MARKET"),
-            "exchange": exchange
-        }
-        
+        """Execute real order using user's exchange credentials."""
         try:
-            # Execute on specific exchange
-            if exchange == "binance":
-                execution_result = await self.exchange_connector.execute_binance_order(order_params)
-            elif exchange == "kraken":
-                execution_result = await self.exchange_connector.execute_kraken_order(order_params)
-            elif exchange == "kucoin":
-                execution_result = await self.exchange_connector.execute_kucoin_order(order_params)
-            else:
-                raise Exception(f"Unsupported exchange: {exchange}")
+            # Get user's exchange credentials for the trade
+            credentials = await self._get_user_exchange_credentials(
+                user_id, 
+                trade_request["symbol"],
+                trade_request.get("exchange")
+            )
             
-            self.logger.info(f"✅ TRADE EXECUTED SUCCESSFULLY: {execution_result['order_id']}")
+            if not credentials:
+                return {
+                    "success": False,
+                    "error": f"No exchange credentials found for user {user_id} to trade {trade_request['symbol']}"
+                }
             
-            # Log trade for monitoring
+            # Execute using existing exchange connector with user credentials
+            execution_result = await self._execute_with_user_credentials(
+                credentials,
+                trade_request
+            )
+            
+            if not execution_result.get("success"):
+                self.logger.error(
+                    "❌ REAL TRADE EXECUTION FAILED",
+                    error=execution_result.get("error"),
+                    user_id=user_id,
+                    symbol=order_params.symbol
+                )
+                return execution_result
+            
+            self.logger.info(
+                "✅ REAL TRADE EXECUTED SUCCESSFULLY",
+                user_id=user_id,
+                order_id=execution_result.get("order_id"),
+                exchange=execution_result.get("exchange"),
+                symbol=order_params.symbol,
+                side=order_params.side,
+                quantity=str(order_params.quantity),
+                price=execution_result.get("execution_price")
+            )
+            
+            # Log trade for monitoring and compliance
             trade_logger.log_trade_executed(
                 user_id=user_id,
-                symbol=trade_request["symbol"],
-                action=trade_request["action"],
+                symbol=order_params.symbol,
+                action=order_params.side,
                 quantity=execution_result["executed_quantity"],
                 price=execution_result["execution_price"],
-                exchange=exchange,
+                exchange=execution_result["exchange"],
                 order_id=execution_result["order_id"]
+            )
+            
+            # Calculate position value
+            position_value_usd = execution_result["executed_quantity"] * execution_result["execution_price"]
+            
+            # Store trade record in database for audit trail
+            await self._record_trade_execution(
+                user_id=user_id,
+                trade_request=trade_request,
+                execution_result=execution_result,
+                position_value_usd=position_value_usd,
+                exchange_account_id=credentials.get("account_id")
             )
             
             return {
                 "success": True,
                 "execution_result": execution_result,
-                "position_value_usd": execution_result["executed_quantity"] * execution_result["execution_price"],
-                "timestamp": datetime.utcnow().isoformat()
+                "position_value_usd": position_value_usd,
+                "timestamp": datetime.utcnow().isoformat(),
+                "trade_id": execution_result.get("order_id")
             }
             
         except Exception as e:
-            self.logger.error("❌ TRADE EXECUTION FAILED", error=str(e))
+            self.logger.error(
+                "❌ REAL TRADE EXECUTION FAILED",
+                error=str(e),
+                user_id=user_id,
+                symbol=trade_request.get("symbol")
+            )
             return {
                 "success": False,
                 "error": str(e),
-                "error_type": "EXCHANGE_ERROR",
-                "order_params": order_params,
-                "exchange": exchange,
+                "error_type": "EXECUTION_ERROR",
                 "timestamp": datetime.utcnow().isoformat()
             }
     
-    async def _get_current_price(self, symbol: str, exchange: str) -> float:
-        """Get current price for symbol - simulated for now."""
-        # In production, this would call real APIs
-        base_prices = {
-            "BTC": 95000,
-            "ETH": 3500,
-            "ADA": 0.45,
-            "SOL": 210,
-            "DOT": 7.5
+    async def _get_user_exchange_credentials(
+        self,
+        user_id: str,
+        symbol: str,
+        preferred_exchange: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Get user's exchange credentials using existing exchange system."""
+        try:
+            async for db in get_database():
+                from sqlalchemy import select, and_
+                
+                # Get user's active exchange accounts
+                stmt = select(ExchangeAccount, ExchangeApiKey).join(
+                    ExchangeApiKey, ExchangeAccount.id == ExchangeApiKey.account_id
+                ).where(
+                    and_(
+                        ExchangeAccount.user_id == user_id,
+                        ExchangeAccount.status == ExchangeStatus.ACTIVE,
+                        ExchangeAccount.trading_enabled.is_(True),
+                        ExchangeApiKey.status == ApiKeyStatus.ACTIVE,
+                        ExchangeApiKey.is_validated.is_(True)
+                    )
+                )
+                
+                result = await db.execute(stmt)
+                exchanges = result.fetchall()
+                
+                if not exchanges:
+                    return None
+                
+                # Use preferred exchange if specified and available
+                if preferred_exchange:
+                    for account, api_key in exchanges:
+                        if account.exchange_name.lower() == preferred_exchange.lower():
+                            return await self._decrypt_credentials(api_key, account)
+                
+                # Otherwise use first available exchange
+                account, api_key = exchanges[0]
+                return await self._decrypt_credentials(api_key, account)
+                
+        except Exception as e:
+            self.logger.error(f"Failed to get user exchange credentials: {e}")
+            return None
+    
+    async def _decrypt_credentials(self, api_key: ExchangeApiKey, account: ExchangeAccount) -> Optional[Dict[str, Any]]:
+        """Decrypt user's API credentials using existing encryption system."""
+        from app.api.v1.endpoints.exchanges import cipher_suite
+        
+        try:
+            decrypted_api_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
+            decrypted_secret_key = cipher_suite.decrypt(api_key.encrypted_secret_key.encode()).decode()
+            decrypted_passphrase = None
+            
+            if api_key.encrypted_passphrase:
+                decrypted_passphrase = cipher_suite.decrypt(api_key.encrypted_passphrase.encode()).decode()
+            
+            return {
+                "exchange": account.exchange_name,
+                "api_key": decrypted_api_key,
+                "secret_key": decrypted_secret_key,
+                "passphrase": decrypted_passphrase,
+                "is_sandbox": account.is_simulation,
+                "account_id": str(account.id)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Failed to decrypt credentials: {e}")
+            return None
+    
+    async def _execute_with_user_credentials(
+        self,
+        credentials: Dict[str, Any],
+        trade_request: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute trade with user's decrypted credentials."""
+        try:
+            exchange = credentials["exchange"].lower()
+            
+            # Use existing exchange connector but with user credentials
+            if exchange == "binance":
+                return await self._execute_binance_with_user_creds(credentials, trade_request)
+            elif exchange == "kraken":
+                return await self._execute_kraken_with_user_creds(credentials, trade_request)
+            elif exchange == "kucoin":
+                return await self._execute_kucoin_with_user_creds(credentials, trade_request)
+            else:
+                return {"success": False, "error": f"Exchange {exchange} not supported"}
+                
+        except Exception as e:
+            self.logger.error(f"Failed to execute with user credentials: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def _execute_binance_with_user_creds(
+        self,
+        credentials: Dict[str, Any],
+        trade_request: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute Binance order with user's credentials (using existing logic)."""
+        # Save original config function for proper restoration
+        original_get_config = ExchangeConfigs.get_config
+        
+        # Temporarily override with user's credentials
+        user_config = {
+            "base_url": "https://api.binance.com" if not credentials["is_sandbox"] else "https://testnet.binance.vision",
+            "api_key": credentials["api_key"],
+            "secret_key": credentials["secret_key"],
+            "testnet": credentials["is_sandbox"]
         }
-        import random
-        base_price = base_prices.get(symbol, 50000)
-        return base_price + (random.random() - 0.5) * base_price * 0.02
+        
+        # Thread-safe temporary config override (isolated to this execution context)
+        ExchangeConfigs.get_config = lambda x: user_config if x == "binance" else original_get_config(x)
+        
+        try:
+            # Use existing exchange connector
+            order_params = {
+                "symbol": trade_request["symbol"],
+                "side": trade_request["action"],
+                "quantity": trade_request["quantity"],
+                "type": trade_request.get("order_type", "MARKET"),
+                "exchange": "binance"
+            }
+            
+            result = await self.exchange_connector.execute_binance_order(order_params)
+            return result
+            
+        finally:
+            # Restore original config function
+            ExchangeConfigs.get_config = original_get_config
+    
+    async def _execute_kraken_with_user_creds(
+        self,
+        credentials: Dict[str, Any],
+        trade_request: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute Kraken order with user's credentials."""
+        # Save original config function for proper restoration
+        original_get_config = ExchangeConfigs.get_config
+        
+        user_config = {
+            "base_url": "https://api.kraken.com",
+            "api_key": credentials["api_key"],
+            "secret_key": credentials["secret_key"],
+            "testnet": credentials["is_sandbox"]
+        }
+        
+        ExchangeConfigs.get_config = lambda x: user_config if x == "kraken" else original_get_config(x)
+        
+        try:
+            order_params = {
+                "symbol": trade_request["symbol"],
+                "side": trade_request["action"],
+                "quantity": trade_request["quantity"],
+                "type": trade_request.get("order_type", "MARKET"),
+                "exchange": "kraken"
+            }
+            
+            result = await self.exchange_connector.execute_kraken_order(order_params)
+            return result
+            
+        finally:
+            ExchangeConfigs.get_config = original_get_config
+    
+    async def _execute_kucoin_with_user_creds(
+        self,
+        credentials: Dict[str, Any],
+        trade_request: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Execute KuCoin order with user's credentials."""
+        # Similar pattern for KuCoin
+        original_config = ExchangeConfigs.get_config("kucoin")
+        
+        user_config = {
+            "base_url": "https://api.kucoin.com",
+            "api_key": credentials["api_key"],
+            "secret_key": credentials["secret_key"],
+            "passphrase": credentials["passphrase"],
+            "testnet": credentials["is_sandbox"]
+        }
+        
+        ExchangeConfigs.get_config = lambda x: user_config if x == "kucoin" else original_config
+        
+        try:
+            order_params = {
+                "symbol": trade_request["symbol"],
+                "side": trade_request["action"],
+                "quantity": trade_request["quantity"],
+                "type": trade_request.get("order_type", "MARKET"),
+                "exchange": "kucoin"
+            }
+            
+            result = await self.exchange_connector.execute_kucoin_order(order_params)
+            return result
+            
+        finally:
+            ExchangeConfigs.get_config = original_get_config
+    
+    async def _record_trade_execution(
+        self,
+        user_id: str,
+        trade_request: Dict[str, Any],
+        execution_result: Dict[str, Any],
+        position_value_usd: float,
+        exchange_account_id: str = None
+    ) -> None:
+        """Record trade execution in database for audit trail."""
+        try:
+            async for db in get_database():
+                from app.models.trading import Trade, TradeAction, TradeStatus, OrderType
+                from decimal import Decimal
+                import uuid
+                
+                # Validate required fields before creating Trade
+                if not exchange_account_id:
+                    self.logger.error("Cannot create Trade record: exchange_account_id is required")
+                    return
+                
+                # Convert IDs to proper UUID format (except external order IDs)
+                try:
+                    user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+                except ValueError as e:
+                    self.logger.error("Invalid user_id UUID format", user_id=user_id, error=str(e))
+                    return
+                
+                try:
+                    account_uuid = uuid.UUID(exchange_account_id) if isinstance(exchange_account_id, str) else exchange_account_id
+                except ValueError as e:
+                    self.logger.error("Invalid exchange_account_id UUID format", account_id=exchange_account_id, error=str(e))
+                    return
+                
+                # Keep external order ID as string (don't convert to UUID)
+                external_order_id = execution_result.get("order_id")
+                
+                # Safe fee extraction with fallback chain
+                fees_paid = execution_result.get("fees") or execution_result.get("total_fee", 0)
+                fee_currency = execution_result.get("fee_asset")
+                
+                # Derive fee currency from fills if not available
+                if not fee_currency and execution_result.get("fills"):
+                    fills = execution_result["fills"]
+                    if fills and isinstance(fills, list) and len(fills) > 0:
+                        fee_currency = fills[0].get("commissionAsset", fills[0].get("fee_asset", "USDT"))
+                
+                if not fee_currency:
+                    fee_currency = "USDT"  # Safe fallback
+                
+                # Create trade record with proper types
+                trade = Trade(
+                    user_id=user_uuid,
+                    symbol=trade_request["symbol"],
+                    action=TradeAction.BUY if trade_request["action"].upper() == "BUY" else TradeAction.SELL,
+                    status=TradeStatus.COMPLETED,
+                    quantity=Decimal(str(execution_result["executed_quantity"])),
+                    executed_quantity=Decimal(str(execution_result["executed_quantity"])),
+                    executed_price=Decimal(str(execution_result["execution_price"])),
+                    order_type=OrderType.MARKET if trade_request.get("order_type", "MARKET").upper() == "MARKET" else OrderType.LIMIT,
+                    external_order_id=external_order_id,
+                    total_value=Decimal(str(position_value_usd)),
+                    fees_paid=Decimal(str(fees_paid)),
+                    fee_currency=fee_currency,
+                    is_simulation=False,
+                    execution_mode="real",
+                    urgency="medium",
+                    market_price_at_execution=Decimal(str(execution_result["execution_price"])),
+                    credits_used=0,  # Will be calculated by credit system
+                    exchange_account_id=account_uuid,
+                    executed_at=datetime.utcnow(),
+                    completed_at=datetime.utcnow(),
+                    meta_data={
+                        "exchange": execution_result.get("exchange"),
+                        "fills": execution_result.get("fills", []),
+                        "raw_response": execution_result.get("raw_response", {})
+                    }
+                )
+                
+                db.add(trade)
+                await db.commit()
+                
+                self.logger.info(
+                    "✅ Trade recorded in database",
+                    user_id=user_id,
+                    trade_id=str(trade.id),
+                    external_order_id=execution_result.get("order_id")
+                )
+                
+        except Exception as e:
+            self.logger.error(
+                "Failed to record trade execution",
+                error=str(e),
+                user_id=user_id,
+                order_id=execution_result.get("order_id")
+            )
+    
+    async def execute_real_trade(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        order_type: str = "market",
+        exchange: str = "auto",
+        user_id: str = "system"
+    ) -> Dict[str, Any]:
+        """
+        Execute real trade for autonomous operations.
+        
+        This is the bridge between autonomous signals and real trade execution
+        using user's exchange credentials.
+        """
+        try:
+            # Create trade request in expected format
+            trade_request = {
+                "symbol": symbol,
+                "action": side.upper(),
+                "quantity": quantity,
+                "order_type": order_type.upper(),
+                "exchange": exchange,
+                "user_id": user_id
+            }
+            
+            # Execute using existing real order execution (now with user credentials)
+            result = await self._execute_real_order(trade_request, user_id)
+            
+            if result.get("success"):
+                execution_data = result.get("execution_result", {})
+                
+                return {
+                    "success": True,
+                    "execution_price": execution_data.get("execution_price", 0),
+                    "executed_quantity": execution_data.get("executed_quantity", 0),
+                    "order_id": execution_data.get("order_id"),
+                    "exchange": execution_data.get("exchange"),
+                    "fees": execution_data.get("fees", 0),
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            else:
+                return result
+                
+        except Exception as e:
+            self.logger.error(
+                "Real trade execution failed",
+                error=str(e),
+                symbol=symbol,
+                side=side,
+                user_id=user_id
+            )
+            return {"success": False, "error": str(e)}
+
+    async def _get_current_price(self, symbol: str, exchange: str) -> float:
+        """Get current price for symbol using real exchange APIs."""
+        try:
+            # Use your existing market data feeds service for real prices
+            from app.services.market_data_feeds import market_data_feeds
+            
+            # Get real-time price
+            price_result = await market_data_feeds.get_real_time_price(symbol)
+            
+            if price_result.get("success"):
+                # Safely extract price from payload structure
+                price_data = price_result.get("data") or price_result.get("payload") or price_result
+                price_value = price_data.get("price") if isinstance(price_data, dict) else price_result.get("price")
+                
+                if price_value is not None:
+                    try:
+                        return float(price_value)
+                    except (ValueError, TypeError) as e:
+                        self.logger.warning(f"Invalid price value for {symbol}", price_value=price_value, error=str(e))
+                        # Continue to fallback
+            
+            # Fallback to exchange-specific API calls
+            if exchange.lower() == "binance":
+                return await self._get_binance_price(symbol)
+            elif exchange.lower() == "kraken":
+                return await self._get_kraken_price(symbol)
+            elif exchange.lower() == "kucoin":
+                return await self._get_kucoin_price(symbol)
+            
+            # Emergency fallback - return 0 to prevent trading with wrong prices
+            self.logger.error(f"Could not get real price for {symbol}")
+            return 0.0
+            
+        except Exception as e:
+            self.logger.error(f"Price fetching failed for {symbol}", error=str(e))
+            return 0.0
+    
+    async def _get_binance_price(self, symbol: str) -> float:
+        """Get current price from Binance API."""
+        try:
+            import aiohttp
+            symbol_pair = f"{symbol}USDT"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://api.binance.com/api/v3/ticker/price?symbol={symbol_pair}",
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return float(data.get("price", 0))
+            return 0.0
+        except Exception:
+            return 0.0
+    
+    async def _get_kraken_price(self, symbol: str) -> float:
+        """Get current price from Kraken API."""
+        try:
+            import aiohttp
+            # Map symbol to Kraken format
+            kraken_symbol = symbol.replace("BTC", "XBT") + "USD"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://api.kraken.com/0/public/Ticker?pair={kraken_symbol}",
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        result = data.get("result", {})
+                        for pair, ticker in result.items():
+                            if "c" in ticker:
+                                return float(ticker["c"][0])
+            return 0.0
+        except Exception:
+            return 0.0
+    
+    async def _get_kucoin_price(self, symbol: str) -> float:
+        """Get current price from KuCoin API."""
+        try:
+            import aiohttp
+            symbol_pair = f"{symbol}-USDT"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={symbol_pair}",
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get("code") == "200000":
+                            ticker_data = data.get("data", {})
+                            return float(ticker_data.get("price", 0))
+            return 0.0
+        except Exception:
+            return 0.0
     
     async def _select_best_exchange(
         self, 

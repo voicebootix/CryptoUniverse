@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # Server settings
     HOST: str = Field(default="0.0.0.0", description="Server host")
     PORT: int = Field(default=8000, description="Server port")
-    BASE_URL: str = Field(default="http://localhost:8000", description="Base URL for the application")
+    BASE_URL: str = Field(default="https://cryptouniverse.onrender.com", description="Base URL for the application")
     FRONTEND_URL: str = Field(default="https://cryptouniverse-frontend.onrender.com", description="Frontend URL for redirects")
     ALLOWED_HOSTS: List[str] = Field(default=[], description="Allowed hosts for the application")
     
@@ -100,7 +100,7 @@ class Settings(BaseSettings):
     # OAuth settings
     GOOGLE_CLIENT_ID: Optional[str] = Field(default=None, description="Google OAuth client ID")
     GOOGLE_CLIENT_SECRET: Optional[str] = Field(default=None, description="Google OAuth client secret")
-    OAUTH_REDIRECT_URL: str = Field(default="https://cryptouniverse.onrender.com/auth/callback", description="OAuth redirect URL")
+    OAUTH_REDIRECT_URL: str = Field(default="https://cryptouniverse-frontend.onrender.com/auth/callback", description="OAuth redirect URL")
     API_V1_PREFIX: str = Field(default="https://cryptouniverse.onrender.com/api/v1", description="API v1 prefix URL")
     
     class Config:

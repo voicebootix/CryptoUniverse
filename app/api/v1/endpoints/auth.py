@@ -382,6 +382,26 @@ async def register(
     
     logger.info("User registered", user_id=str(user.id), email=user.email)
     
+    # 🎁 SETUP WELCOME PACKAGE: $100 FREE CREDITS + 3 BASIC STRATEGIES
+    try:
+        from app.services.profit_sharing_service import profit_sharing_service
+        
+        welcome_result = await profit_sharing_service.setup_new_user_welcome_package(str(user.id))
+        
+        if welcome_result.get("success"):
+            logger.info(
+                "🎁 Welcome package activated for new user",
+                user_id=str(user.id),
+                free_credits=100,
+                free_strategies=3,
+                profit_potential="$400"
+            )
+        else:
+            logger.warning("Welcome package setup failed", user_id=str(user.id), error=welcome_result.get("error"))
+    
+    except Exception as e:
+        logger.error("Welcome package setup failed", user_id=str(user.id), error=str(e))
+    
     return UserResponse(
         id=str(user.id),
         email=user.email,

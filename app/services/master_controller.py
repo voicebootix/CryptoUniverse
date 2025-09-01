@@ -526,13 +526,19 @@ class MasterSystemController(LoggerMixin):
         profit_generated = 0.0
         
         try:
-            # Import services dynamically to avoid circular imports
-            from app.services.market_analysis import market_analysis_service
+            # Import your existing sophisticated services
+            from app.services.market_analysis_core import MarketAnalysisService
             from app.services.trading_strategies import trading_strategies_service
-            from app.services.portfolio_risk import portfolio_risk_service
-            from app.services.ai_consensus import ai_consensus_service
-            from app.services.trade_execution import trade_execution_service
-            from app.services.telegram_commander import telegram_commander_service
+            from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+            from app.services.ai_consensus_core import ai_consensus_service
+            from app.services.trade_execution import TradeExecutionService
+            from app.services.telegram_core import TelegramService
+            
+            # Initialize service instances
+            market_analysis_service = MarketAnalysisService()
+            portfolio_risk_service = PortfolioRiskServiceExtended()
+            trade_execution_service = TradeExecutionService()
+            telegram_service = TelegramService()
             
             # PHASE 0: Emergency Checks & Timezone Strategy
             phase_start = time.time()
@@ -540,22 +546,28 @@ class MasterSystemController(LoggerMixin):
             # Get current timezone strategy
             timezone_strategy = self.get_current_timezone_strategy()
             
-            # Get REAL portfolio data for comprehensive emergency check
-            portfolio_result = await portfolio_risk_service.get_portfolio(user_id=user_id)
+            # Get REAL portfolio data using your sophisticated PortfolioRiskServiceExtended
+            portfolio_result = await portfolio_risk_service.get_portfolio_status(user_id=user_id)
             emergency_level = EmergencyLevel.NORMAL
             
             if portfolio_result.get("success"):
                 portfolio_data = portfolio_result.get("portfolio", {})
                 
-                # Enhance portfolio data with additional risk metrics
-                risk_assessment = await portfolio_risk_service.assess_risk(user_id=user_id)
+                # Enhance portfolio data with your sophisticated risk analysis
+                risk_assessment = await portfolio_risk_service.risk_analysis(
+                    user_id=user_id,
+                    analysis_type="comprehensive"
+                )
                 if risk_assessment.get("success"):
-                    portfolio_data["risk_metrics"] = risk_assessment.get("risk_metrics", {})
+                    portfolio_data["risk_metrics"] = risk_assessment.get("risk_analysis", {})
                 
-                # Get performance metrics
-                performance_data = await portfolio_risk_service.get_performance_metrics(user_id=user_id)
+                # Get performance metrics using your advanced analytics
+                performance_data = await portfolio_risk_service.portfolio_performance_analysis(
+                    user_id=user_id,
+                    timeframe="daily"
+                )
                 if performance_data.get("success"):
-                    portfolio_data["performance_data"] = performance_data.get("performance_metrics", {})
+                    portfolio_data["performance_data"] = performance_data.get("performance_analysis", {})
                 
                 emergency_level = await self.check_emergency_conditions(portfolio_data)
                 
@@ -569,7 +581,7 @@ class MasterSystemController(LoggerMixin):
                 "execution_time_ms": (time.time() - phase_start) * 1000
             })
             
-            # PHASE 1: Comprehensive Market Analysis
+            # PHASE 1: Comprehensive Market Analysis using your sophisticated service
             phase_start = time.time()
             market_result = await market_analysis_service.complete_market_assessment(
                 symbols="SMART_ADAPTIVE",
@@ -587,37 +599,238 @@ class MasterSystemController(LoggerMixin):
             if not market_result.get("success"):
                 raise Exception("Market analysis failed")
             
-            # PHASE 2: Generate Strategy Signals
+            # PHASE 2: Generate Strategy Signals using your sophisticated strategies
             phase_start = time.time()
             
+            # Get USER'S PURCHASED STRATEGIES (no hardcoded strategies!)
             if focus_strategies is None:
-                focus_strategies = timezone_strategy.get("preferred_strategies", ["spot_momentum_strategy"])
+                from app.services.strategy_marketplace_service import strategy_marketplace_service
+                
+                # Get user's purchased strategy portfolio
+                user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+                
+                if user_portfolio.get("success") and user_portfolio.get("active_strategies"):
+                    # Extract strategy function names from user's purchased strategies
+                    focus_strategies = []
+                    for strategy in user_portfolio["active_strategies"]:
+                        strategy_id = strategy["strategy_id"]
+                        if strategy_id.startswith("ai_"):
+                            strategy_func = strategy_id.replace("ai_", "")
+                            focus_strategies.append(strategy_func)
+                    
+                    self.logger.info(f"Using {len(focus_strategies)} purchased strategies for user {user_id}", 
+                                   strategies=focus_strategies)
+                else:
+                    # Fallback to basic free strategies if user has no purchased strategies
+                    focus_strategies = ["spot_momentum_strategy"]
+                    self.logger.warning(f"User {user_id} has no purchased strategies, using free basic strategy")
             
-            all_signals = []
-            for strategy in focus_strategies[:3]:  # Limit for performance
+            # ADVANCED MARKET INTELLIGENCE: Filter strategies based on real-time conditions
+            market_assessment = market_result.get("market_assessment", {})
+            sentiment = market_assessment.get("sentiment", "neutral")
+            volatility = market_assessment.get("volatility_level", "medium")
+            trend = market_assessment.get("trend", "sideways")
+            
+            # Get strategy performance data for intelligent selection
+            strategy_performance = {}
+            for strategy in focus_strategies:
                 try:
-                    signal_result = await trading_strategies_service.generate_trading_signal(
-                        strategy_type=strategy,
-                        market_data=market_result,
-                        risk_mode=self.current_mode.value,
-                        user_id=user_id
+                    perf_data = await trading_strategies_service._get_strategy_performance_data(
+                        strategy, "1d", user_id
+                    )
+                    strategy_performance[strategy] = perf_data.get("avg_return", 0)
+                except:
+                    strategy_performance[strategy] = 0
+            
+            # INTELLIGENT STRATEGY SELECTION based on market conditions + performance
+            optimal_strategies = []
+            
+            # Market condition-based filtering from user's purchased strategies
+            if volatility == "low" and trend == "sideways":
+                # Low volatility sideways: market making, mean reversion, grid trading
+                condition_strategies = [s for s in focus_strategies 
+                                      if any(t in s.lower() for t in ["market_making", "mean_reversion", "grid"])]
+            elif volatility == "high" and sentiment == "bullish":
+                # High volatility bull: momentum, breakout, scalping
+                condition_strategies = [s for s in focus_strategies 
+                                      if any(t in s.lower() for t in ["momentum", "breakout", "scalping"])]
+            elif volatility == "high" and sentiment == "bearish":
+                # High volatility bear: short strategies, futures, options
+                condition_strategies = [s for s in focus_strategies 
+                                      if any(t in s.lower() for t in ["short", "futures", "options", "mean_reversion"])]
+            else:
+                # Balanced conditions: use top performing strategies
+                condition_strategies = focus_strategies
+            
+            # If no strategies match conditions, use all purchased strategies
+            if not condition_strategies:
+                condition_strategies = focus_strategies
+            
+            # ADVANCED PERFORMANCE-BASED SORTING using real-time rankings
+            try:
+                # Get user's strategy rankings (auto-updated from real trades)
+                rankings_key = f"strategy_rankings:{user_id}"
+                rankings_data = await self.redis.get(rankings_key)
+                
+                if rankings_data:
+                    strategy_rankings = json.loads(rankings_data)
+                    ranking_scores = {r["strategy"]: r["score"] for r in strategy_rankings}
+                    
+                    # Sort by real performance rankings
+                    performance_sorted = sorted(
+                        condition_strategies,
+                        key=lambda s: ranking_scores.get(s, strategy_performance.get(s, 0)),
+                        reverse=True
                     )
                     
-                    if signal_result.get("success"):
-                        signal_data = signal_result.get("signal", {})
-                        all_signals.append({
-                            "strategy": strategy,
-                            "signal": signal_data,
-                            "confidence": signal_data.get("confidence", 0)
-                        })
-                        
-                except Exception as e:
-                    self.logger.warning(f"Strategy {strategy} failed", error=str(e))
+                    self.logger.info(
+                        f"Using real-time performance rankings for {user_id}",
+                        top_performer=performance_sorted[0] if performance_sorted else "none",
+                        ranking_data_available=True
+                    )
+                else:
+                    # Fallback to basic performance data
+                    performance_sorted = sorted(
+                        condition_strategies,
+                        key=lambda s: strategy_performance.get(s, 0),
+                        reverse=True
+                    )
+                    
+                    self.logger.info(f"Using basic performance data for {user_id} - no ranking history yet")
+                    
+            except Exception as e:
+                self.logger.warning("Failed to use performance rankings, using basic sort", error=str(e))
+                performance_sorted = sorted(
+                    condition_strategies,
+                    key=lambda s: strategy_performance.get(s, 0),
+                    reverse=True
+                )
             
-            # Select best signal
-            best_signal = None
-            if all_signals:
-                best_signal = max(all_signals, key=lambda x: x["confidence"])
+            # Limit strategies based on risk mode and performance
+            max_strategies = {
+                "conservative": min(2, len(performance_sorted)),
+                "balanced": min(4, len(performance_sorted)), 
+                "aggressive": min(6, len(performance_sorted)),
+                "beast_mode": len(performance_sorted)  # Use all purchased strategies
+            }.get(self.current_mode.value, 4)
+            
+            focus_strategies = performance_sorted[:max_strategies]
+            
+            # Always prioritize arbitrage if available and opportunities exist
+            arbitrage_opportunities = market_assessment.get("arbitrage_opportunities", 0)
+            if arbitrage_opportunities > 0:
+                arbitrage_strategies = [s for s in focus_strategies if "arbitrage" in s.lower()]
+                if arbitrage_strategies:
+                    # Move arbitrage to front
+                    focus_strategies = arbitrage_strategies + [s for s in focus_strategies if s not in arbitrage_strategies]
+            
+            self.logger.info(
+                f"🎯 INTELLIGENT STRATEGY SELECTION for {user_id}",
+                market_conditions=f"{sentiment}/{volatility}/{trend}",
+                total_purchased=len(user_portfolio.get("active_strategies", [])),
+                selected_count=len(focus_strategies),
+                selected_strategies=focus_strategies,
+                arbitrage_opportunities=arbitrage_opportunities
+            )
+            
+            # 🚀 EXECUTE ALL STRATEGIES WITH CROSS-COORDINATION
+            all_signals = []
+            strategy_tasks = []
+            
+            # Enhanced strategy execution with sentiment integration
+            for strategy in focus_strategies:
+                # Get sentiment-optimized symbols for this strategy
+                optimal_symbols = await self._get_sentiment_optimized_symbols(strategy, sentiment_result)
+                
+                # Enhance market data with sentiment-optimized symbols
+                enhanced_market_data = market_result.copy()
+                if optimal_symbols:
+                    # Add preferred symbols to market data for strategy to use
+                    enhanced_market_data["preferred_symbols"] = optimal_symbols
+                
+                task = trading_strategies_service.generate_trading_signal(
+                    strategy_type=strategy,
+                    market_data=enhanced_market_data,
+                    risk_mode=self.current_mode.value,
+                    user_id=user_id
+                )
+                strategy_tasks.append((strategy, task))
+            
+            # Execute all strategies in parallel
+            strategy_results = await asyncio.gather(
+                *[task for _, task in strategy_tasks], 
+                return_exceptions=True
+            )
+            
+            # Process results
+            for i, result in enumerate(strategy_results):
+                strategy_name = strategy_tasks[i][0]
+                
+                if isinstance(result, Exception):
+                    self.logger.warning(f"Strategy {strategy_name} failed", error=str(result))
+                    continue
+                
+                if result.get("success"):
+                    signal_data = result.get("signal", {})
+                    all_signals.append({
+                        "strategy": strategy_name,
+                        "signal": signal_data,
+                        "confidence": signal_data.get("confidence", 0),
+                        "expected_return": signal_data.get("expected_return", 0)
+                    })
+            
+            # 🎼 COORDINATE SIGNALS TO AVOID CONFLICTS
+            from app.services.cross_strategy_coordinator import cross_strategy_coordinator
+            
+            coordination_result = await cross_strategy_coordinator.coordinate_strategy_signals(
+                all_signals, user_id
+            )
+            
+            if coordination_result.get("success"):
+                coordinated_signals = coordination_result["coordinated_signals"]
+                
+                # Filter for signals approved for execution
+                executable_signals = [
+                    s for s in coordinated_signals 
+                    if s["coordination_action"] in ["execute", "modify"]
+                ]
+                
+                # Sort by priority score (confidence + coordination adjustments)
+                best_signals = sorted(executable_signals, key=lambda x: x["priority_score"], reverse=True)
+                
+                # Apply risk mode limits to coordinated signals
+                max_signals = {
+                    "conservative": 1,
+                    "balanced": 2, 
+                    "aggressive": 3,
+                    "beast_mode": 5
+                }.get(self.current_mode.value, 2)
+                
+                best_signals = best_signals[:max_signals]
+                best_signal = best_signals[0] if best_signals else None
+                
+                self.logger.info(
+                    f"🎼 Signal coordination complete",
+                    user_id=user_id,
+                    original_signals=len(all_signals),
+                    coordinated_signals=len(executable_signals),
+                    final_signals=len(best_signals),
+                    coordination_summary=coordination_result.get("coordination_summary", {})
+                )
+            else:
+                # Fallback to original logic if coordination fails
+                best_signals = sorted(all_signals, key=lambda x: x["confidence"], reverse=True)
+                max_signals = {
+                    "conservative": 1,
+                    "balanced": 2, 
+                    "aggressive": 3,
+                    "beast_mode": 5
+                }.get(self.current_mode.value, 2)
+                
+                best_signals = best_signals[:max_signals]
+                best_signal = best_signals[0] if best_signals else None
+                
+                self.logger.warning("Signal coordination failed, using fallback selection")
             
             phases_executed.append({
                 "phase": "signal_generation",
@@ -629,16 +842,63 @@ class MasterSystemController(LoggerMixin):
             if not best_signal:
                 raise Exception("No viable trading signals generated")
             
-            # PHASE 3: Position Sizing
+            # PHASE 3: INTELLIGENT CAPITAL ALLOCATION
             phase_start = time.time()
             
-            # Create opportunity data for position sizing
+            # Enhanced opportunity data with strategy performance context
             opportunity_data = {
                 "symbol": best_signal["signal"].get("symbol", "BTC"),
                 "confidence": best_signal["confidence"],
-                "expected_return": best_signal["signal"].get("expected_return", 5.0)
+                "expected_return": best_signal["signal"].get("expected_return", 5.0),
+                "strategy_name": best_signal["strategy"],
+                "strategy_performance": strategy_performance.get(best_signal["strategy"], 0),
+                "market_conditions": {
+                    "sentiment": sentiment,
+                    "volatility": volatility,
+                    "trend": trend
+                },
+                "total_signals": len(best_signals),  # For diversification calculation
+                "signal_rank": 1  # This is the best signal
             }
             
+            # ADVANCED POSITION SIZING with multi-signal allocation
+            if len(best_signals) > 1:
+                # Multi-strategy allocation: distribute capital intelligently
+                total_confidence = sum(s["confidence"] for s in best_signals)
+                allocation_weight = best_signal["confidence"] / total_confidence if total_confidence > 0 else 1.0
+                opportunity_data["allocation_weight"] = allocation_weight
+                opportunity_data["is_multi_strategy"] = True
+                
+                self.logger.info(
+                    f"Multi-strategy allocation for {user_id}",
+                    total_strategies=len(best_signals),
+                    primary_weight=allocation_weight,
+                    primary_strategy=best_signal["strategy"]
+                )
+            
+            # 🛡️ DYNAMIC RISK MANAGEMENT INTEGRATION
+            from app.services.dynamic_risk_management import dynamic_risk_management
+            
+            # Calculate dynamic risk parameters first
+            dynamic_risk_result = await dynamic_risk_management.calculate_dynamic_risk_parameters(
+                symbol=best_signal["signal"].get("symbol", "BTC"),
+                entry_price=best_signal["signal"].get("entry_price", 0),
+                position_side="buy",  # Assuming long positions for now
+                risk_mode=self.current_mode.value,
+                user_id=user_id
+            )
+            
+            # Enhance opportunity data with dynamic risk parameters
+            if dynamic_risk_result.get("success"):
+                risk_params = dynamic_risk_result["risk_parameters"]
+                opportunity_data.update({
+                    "dynamic_stop_loss": risk_params["volatility_adjusted_stop"],
+                    "dynamic_profit_target": risk_params["volatility_adjusted_target"],
+                    "position_size_multiplier": risk_params["position_size_multiplier"],
+                    "market_volatility": dynamic_risk_result["market_volatility"]
+                })
+            
+            # Use your sophisticated PortfolioRiskServiceExtended with enhanced data
             sizing_result = await portfolio_risk_service.position_sizing(
                 opportunity=json.dumps(opportunity_data),
                 user_id=user_id,
@@ -667,10 +927,11 @@ class MasterSystemController(LoggerMixin):
             
             mode_config = self.mode_configs[self.current_mode]
             
+            # Use your sophisticated AI consensus service for validation
             validation_result = await ai_consensus_service.validate_trade(
                 analysis_request=json.dumps(validation_data),
                 confidence_threshold=mode_config.validation_threshold,
-                ai_models="cost_optimized",
+                ai_models="all",  # Use all AI models for maximum consensus
                 user_id=user_id
             )
             
@@ -745,6 +1006,21 @@ class MasterSystemController(LoggerMixin):
                     expected_return_pct = signal_data.get("expected_return", 0) / 100
                     potential_profit = executed_quantity * executed_price * expected_return_pct
                     
+                    # REAL-TIME STRATEGY PERFORMANCE TRACKING
+                    await self._update_strategy_performance_metrics(
+                        user_id=user_id,
+                        strategy_name=best_signal["strategy"],
+                        trade_result={
+                            "success": True,
+                            "profit_usd": profit_generated + potential_profit,
+                            "execution_price": executed_price,
+                            "expected_price": expected_price,
+                            "confidence": best_signal["confidence"],
+                            "symbol": signal_data.get("symbol"),
+                            "timestamp": datetime.utcnow()
+                        }
+                    )
+                    
                     # Log real execution details
                     self.logger.info("REAL TRADE EXECUTED", 
                                    symbol=signal_data.get("symbol"),
@@ -752,7 +1028,8 @@ class MasterSystemController(LoggerMixin):
                                    quantity=executed_quantity,
                                    price=executed_price,
                                    immediate_profit=profit_generated,
-                                   potential_profit=potential_profit)
+                                   potential_profit=potential_profit,
+                                   strategy=best_signal["strategy"])
                 
                 phases_executed.append({
                     "phase": "trade_execution", 
@@ -788,68 +1065,183 @@ class MasterSystemController(LoggerMixin):
             }
     
     async def execute_arbitrage_cycle(self, user_id: str = "system") -> Dict[str, Any]:
-        """Execute arbitrage hunter cycle (bypasses 5-phase for speed)."""
+        """
+        EXECUTE MULTI-EXCHANGE ARBITRAGE COORDINATION CYCLE
+        
+        Coordinates arbitrage across ALL user's connected exchanges simultaneously
+        for maximum profit extraction!
+        """
         
         start_time = time.time()
         
         try:
-            from app.services.market_analysis import market_analysis_service
-            from app.services.trade_execution import trade_execution_service
-            from app.services.telegram_commander import telegram_commander_service
+            from app.services.market_analysis_core import MarketAnalysisService
+            from app.services.trade_execution import TradeExecutionService
+            from app.services.telegram_core import TelegramService
+            # Initialize services
+            market_service = MarketAnalysisService()
+            trade_service = TradeExecutionService()
+            telegram_service = TelegramService()
             
-            # Rapid Arbitrage Scan
-            arbitrage_result = await market_analysis_service.cross_exchange_arbitrage_scanner(
-                min_profit_bps=5,
+            # Get user's connected exchanges for coordinated arbitrage
+            from app.core.database import get_async_session
+            from app.models.exchange import ExchangeAccount
+            from sqlalchemy import select
+            
+            async with get_async_session() as db:
+                # Get user's exchange accounts
+                result = await db.execute(
+                    select(ExchangeAccount).where(
+                        ExchangeAccount.user_id == user_id,
+                        ExchangeAccount.is_active == True
+                    )
+                )
+                exchange_accounts = result.scalars().all()
+                
+                user_exchanges = {
+                    "success": True,
+                    "accounts": [
+                        {"exchange": acc.exchange, "is_active": acc.is_active}
+                        for acc in exchange_accounts
+                    ]
+                }
+            
+            if not user_exchanges.get("success") or len(user_exchanges.get("accounts", [])) < 2:
+                return {
+                    "success": False,
+                    "reason": "Multi-exchange arbitrage requires at least 2 connected exchanges",
+                    "user_exchanges": len(user_exchanges.get("accounts", [])),
+                    "cycle_type": TradingCycle.ARBITRAGE_HUNTER.value
+                }
+            
+            connected_exchanges = [acc["exchange"] for acc in user_exchanges["accounts"]]
+            
+            self.logger.info(
+                f"🔄 Multi-exchange arbitrage scan starting",
+                user_id=user_id,
+                connected_exchanges=connected_exchanges
+            )
+            
+            # Enhanced arbitrage scanning across user's specific exchanges
+            arbitrage_result = await market_service.cross_exchange_arbitrage_scanner(
+                symbols="SMART_ADAPTIVE",  # Dynamic symbol selection
+                exchanges=connected_exchanges,  # Only user's exchanges
+                min_profit_bps=3,  # More aggressive (0.03% minimum)
                 user_id=user_id
             )
             
             trades_executed = 0
             profit_generated = 0.0
+            coordinated_executions = []
             
-            # Execute Profitable Opportunities
+            # 🚀 COORDINATED MULTI-EXCHANGE EXECUTION
             if arbitrage_result.get("success") and arbitrage_result.get("opportunities"):
                 opportunities = arbitrage_result.get("opportunities", [])
                 
-                for opp in opportunities[:3]:  # Limit to top 3 for speed
-                    if opp.get("profit_percentage", 0) > 0.1:  # Min 0.1% profit
-                        # Execute REAL arbitrage trade (time-sensitive)
-                        execution_result = await trade_execution_service.execute_real_trade(
-                            symbol=opp.get("symbol", "BTC"),
+                # Group opportunities by symbol for coordinated execution
+                symbol_opportunities = {}
+                for opp in opportunities:
+                    symbol = opp.get("symbol", "BTC")
+                    if symbol not in symbol_opportunities:
+                        symbol_opportunities[symbol] = []
+                    symbol_opportunities[symbol].append(opp)
+                
+                # Execute coordinated arbitrage for each symbol
+                for symbol, symbol_ops in symbol_opportunities.items():
+                    if len(symbol_ops) < 2:  # Need at least 2 exchanges for arbitrage
+                        continue
+                    
+                    # Sort by profit potential
+                    symbol_ops.sort(key=lambda x: x.get("profit_percentage", 0), reverse=True)
+                    best_opportunity = symbol_ops[0]
+                    
+                    if best_opportunity.get("profit_percentage", 0) > 0.03:  # Min 0.03% profit
+                        
+                        # 🎯 COORDINATED EXECUTION: Buy on cheap exchange, sell on expensive exchange
+                        buy_exchange = best_opportunity.get("buy_exchange")
+                        sell_exchange = best_opportunity.get("sell_exchange")
+                        optimal_quantity = best_opportunity.get("optimal_quantity", 0.01)
+                        
+                        # Execute buy and sell simultaneously
+                        buy_task = trade_service.execute_real_trade(
+                            symbol=symbol,
                             side="buy",
-                            quantity=opp.get("optimal_quantity", 0.01),
+                            quantity=optimal_quantity,
                             order_type="market",
-                            exchange=opp.get("buy_exchange", "binance"),
+                            exchange=buy_exchange,
                             user_id=user_id
                         )
                         
-                        if execution_result.get("success"):
-                            trades_executed += 1
-                            # Calculate REAL arbitrage profit
-                            executed_price = execution_result.get("execution_price", 0)
-                            executed_quantity = execution_result.get("executed_quantity", 0)
-                            expected_sell_price = opp.get("sell_price", executed_price)
+                        sell_task = trade_service.execute_real_trade(
+                            symbol=symbol,
+                            side="sell", 
+                            quantity=optimal_quantity,
+                            order_type="market",
+                            exchange=sell_exchange,
+                            user_id=user_id
+                        )
+                        
+                        # Execute both legs simultaneously
+                        buy_result, sell_result = await asyncio.gather(
+                            buy_task, sell_task, return_exceptions=True
+                        )
+                        
+                        # Process coordinated execution results
+                        if (not isinstance(buy_result, Exception) and buy_result.get("success") and
+                            not isinstance(sell_result, Exception) and sell_result.get("success")):
                             
-                            # Real arbitrage profit = (sell_price - buy_price) * quantity - fees
-                            gross_profit = (expected_sell_price - executed_price) * executed_quantity
-                            trading_fees = execution_result.get("fees_paid_usd", 0)
-                            net_profit = gross_profit - trading_fees
+                            trades_executed += 2  # Both legs
                             
-                            profit_generated += net_profit
+                            # Calculate REAL coordinated arbitrage profit
+                            buy_price = buy_result.get("execution_price", 0)
+                            sell_price = sell_result.get("execution_price", 0)
+                            executed_qty = min(
+                                buy_result.get("executed_quantity", 0),
+                                sell_result.get("executed_quantity", 0)
+                            )
                             
-                            self.logger.info("REAL ARBITRAGE EXECUTED", 
-                                           symbol=opp.get("symbol"),
-                                           buy_price=executed_price,
-                                           sell_price=expected_sell_price,
-                                           quantity=executed_quantity,
-                                           gross_profit=gross_profit,
-                                           fees=trading_fees,
-                                           net_profit=net_profit)
+                            # Net arbitrage profit
+                            gross_profit = (sell_price - buy_price) * executed_qty
+                            total_fees = (buy_result.get("fees_paid_usd", 0) + 
+                                        sell_result.get("fees_paid_usd", 0))
+                            net_arbitrage_profit = gross_profit - total_fees
+                            
+                            profit_generated += net_arbitrage_profit
+                            
+                            coordinated_executions.append({
+                                "symbol": symbol,
+                                "buy_exchange": buy_exchange,
+                                "sell_exchange": sell_exchange,
+                                "buy_price": buy_price,
+                                "sell_price": sell_price,
+                                "quantity": executed_qty,
+                                "gross_profit": gross_profit,
+                                "fees": total_fees,
+                                "net_profit": net_arbitrage_profit,
+                                "profit_percentage": (net_arbitrage_profit / (buy_price * executed_qty)) * 100
+                            })
+                            
+                            self.logger.info(
+                                "🎯 COORDINATED ARBITRAGE SUCCESS",
+                                symbol=symbol,
+                                buy_exchange=buy_exchange,
+                                sell_exchange=sell_exchange,
+                                net_profit=f"${net_arbitrage_profit:.4f}",
+                                profit_pct=f"{((net_arbitrage_profit / (buy_price * executed_qty)) * 100):.3f}%"
+                            )
+                        else:
+                            self.logger.warning(
+                                "Coordinated arbitrage failed",
+                                symbol=symbol,
+                                buy_success=buy_result.get("success") if not isinstance(buy_result, Exception) else False,
+                                sell_success=sell_result.get("success") if not isinstance(sell_result, Exception) else False
+                            )
             
-            # Notification
+            # Enhanced notification with coordination details
             if trades_executed > 0:
                 await telegram_commander_service.send_message(
-                    message_content=f"🚀 Arbitrage Hunter: {trades_executed} trades, ${profit_generated:.2f} profit",
-                    message_type="trade",
+                    message_content=f"🚀 Multi-Exchange Arbitrage: {len(coordinated_executions)} coordinated trades, ${profit_generated:.4f} profit across {len(connected_exchanges)} exchanges",
+                    message_type="arbitrage",
                     priority="normal"
                 )
             
@@ -861,11 +1253,13 @@ class MasterSystemController(LoggerMixin):
                 "trades_executed": trades_executed,
                 "profit_generated_usd": profit_generated,
                 "opportunities_found": len(arbitrage_result.get("opportunities", [])),
+                "coordinated_executions": coordinated_executions,
+                "connected_exchanges": connected_exchanges,
                 "emergency_level": EmergencyLevel.NORMAL.value
             }
             
         except Exception as e:
-            self.logger.error("Arbitrage cycle failed", error=str(e))
+            self.logger.error("Multi-exchange arbitrage cycle failed", error=str(e))
             return {
                 "success": False,
                 "cycle_type": TradingCycle.ARBITRAGE_HUNTER.value,
@@ -948,13 +1342,18 @@ class MasterSystemController(LoggerMixin):
         """Comprehensive system health check."""
         
         try:
-            # Import services dynamically
+            # Use your existing service instances (no duplication)
             from app.services.market_analysis import market_analysis_service
             from app.services.trading_strategies import trading_strategies_service
-            from app.services.portfolio_risk import portfolio_risk_service
-            from app.services.ai_consensus import ai_consensus_service
-            from app.services.trade_execution import trade_execution_service
-            from app.services.telegram_commander import telegram_commander_service
+            from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+            from app.services.ai_consensus_core import ai_consensus_service
+            from app.services.trade_execution import TradeExecutionService
+            from app.services.telegram_core import TelegramService
+            
+            # Initialize only if needed (some are already global instances)
+            portfolio_risk_service = PortfolioRiskServiceExtended()
+            trade_execution_service = TradeExecutionService()
+            telegram_service = TelegramService()
             
             # Check all services in parallel
             health_checks = await asyncio.gather(
@@ -1310,31 +1709,604 @@ class MasterSystemController(LoggerMixin):
                 config = await self.redis.hgetall(f"autonomous_config:{user_id}")
                 if not config:
                     continue
+            
+                # Enhanced: Check profit potential and exchange connections before trading
+                from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+                from app.services.profit_sharing_service import profit_sharing_service
                 
-                # Run trading cycle for this user
+                # Check if user has remaining profit potential
+                profit_status = await profit_sharing_service.calculate_profit_potential_usage(
+                    user_id=user_id,
+                    period_start=datetime.utcnow() - timedelta(days=365),
+                    period_end=datetime.utcnow()
+                )
+                
+                if not profit_status.get("success") or profit_status.get("needs_more_credits", False):
+                    self.logger.info(f"Skipping cycle for user {user_id} - profit potential exhausted")
+                    # Send notification that user needs to buy more credits
+                    await self._notify_user_needs_credits(user_id, profit_status)
+                    continue
+                
+                # Check portfolio status
+                portfolio_service = PortfolioRiskServiceExtended()
+                portfolio_status = await portfolio_service.get_portfolio_status(user_id)
+                if not portfolio_status.get("success"):
+                    self.logger.warning(f"Skipping cycle for user {user_id} - portfolio unavailable")
+                    continue
+                
+                portfolio_data = portfolio_status.get("portfolio", {})
+                if portfolio_data.get("total_value_usd", 0) < 100:  # Minimum $100 to trade
+                    self.logger.debug(f"Skipping cycle for user {user_id} - insufficient balance")
+                    continue
+                
+                # Run enhanced trading cycle for this user
                 await self._run_user_autonomous_cycle(user_id, config)
                 
         except Exception as e:
             self.logger.error("Global autonomous cycle failed", error=str(e))
     
     async def _run_user_autonomous_cycle(self, user_id: str, config: Dict):
-        """Run autonomous cycle for specific user."""
+        """Run complete autonomous trading cycle for specific user - THE MONEY MAKING MACHINE with AI Chat Integration."""
         try:
             mode = config.get("mode", "balanced")
-            self.logger.debug(f"Running autonomous cycle for user {user_id}", mode=mode)
+            self.logger.info(f"🤖 AUTONOMOUS CYCLE STARTING for user {user_id}", mode=mode)
             
-            # This would contain the actual trading logic
-            # For now, just log the cycle
+            # Set trading mode for this user
+            self.current_mode = TradingMode(mode)
             
-            # Update last cycle time
+            # Check if unified AI manager is available for enhanced decision making
+            if hasattr(self, 'unified_manager') and self.unified_manager:
+                # Use unified AI manager for autonomous decisions
+                market_context = {
+                    "current_mode": mode,
+                    "cycle_type": "autonomous_trading",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                
+                # Let the unified AI manager make autonomous decisions
+                try:
+                    result = await self.unified_manager.handle_autonomous_decision(user_id, market_context)
+                    
+                    if result.get("success"):
+                        self.logger.info("Autonomous AI decision executed", 
+                                       user_id=user_id, 
+                                       action=result.get("action"))
+                except Exception as e:
+                    self.logger.warning("Unified AI manager failed, continuing with standard cycle", error=str(e))
+            
+            # Get USER'S PURCHASED STRATEGIES for autonomous trading
+            from app.services.strategy_marketplace_service import strategy_marketplace_service
+            
+            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+            
+            if user_portfolio.get("success") and user_portfolio.get("active_strategies"):
+                # Use user's purchased strategies
+                preferred_strategies = []
+                for strategy in user_portfolio["active_strategies"]:
+                    strategy_id = strategy["strategy_id"]
+                    if strategy_id.startswith("ai_"):
+                        strategy_func = strategy_id.replace("ai_", "")
+                        preferred_strategies.append(strategy_func)
+                
+                self.logger.info(f"Autonomous using {len(preferred_strategies)} purchased strategies", 
+                               user_id=user_id, strategies=preferred_strategies)
+            else:
+                # Fallback to free basic strategy
+                preferred_strategies = ["spot_momentum_strategy"]
+                self.logger.warning(f"User {user_id} autonomous mode using free strategy - no purchased strategies")
+            
+            # 🚀 PURE MARKET-CONDITION-BASED CYCLE SELECTION (NO TIME LIMITS!)
+            # Get comprehensive market intelligence
+            market_conditions = await self._assess_current_market_conditions(user_id)
+            
+            # Get predictive intelligence for optimal timing
+            from app.services.predictive_market_intelligence import predictive_intelligence
+            prediction_result = await predictive_intelligence.should_trade_now(user_id)
+            
+            # Get real-time sentiment analysis
+            from app.services.realtime_sentiment_engine import realtime_sentiment_engine
+            sentiment_result = await realtime_sentiment_engine.get_sentiment_for_strategy_optimization(
+                symbols=["BTC", "ETH", "SOL", "BNB"], 
+                user_id=user_id
+            )
+            
+            # INTELLIGENT CYCLE SELECTION based on MARKET CONDITIONS ONLY
+            available_cycles = [
+                TradingCycle.ARBITRAGE_HUNTER.value,
+                TradingCycle.MOMENTUM_FUTURES.value,
+                TradingCycle.PORTFOLIO_OPTIMIZATION.value,
+                TradingCycle.DEEP_ANALYSIS.value
+            ]
+            
+            selected_cycles = await self._select_cycles_by_market_intelligence(
+                available_cycles,
+                market_conditions,
+                prediction_result,
+                sentiment_result,
+                config.get("intensity", "balanced")
+            )
+            
+            self.logger.info(
+                f"🎯 Selected {len(selected_cycles)} of {len(active_cycles)} cycles",
+                selected=selected_cycles,
+                market_conditions=market_conditions.get("summary", "unknown")
+            )
+            
+            # Execute selected cycles
+            cycle_results = []
+            total_profit = 0.0
+            total_trades = 0
+            
+            for cycle in selected_cycles:
+                try:
+                    if cycle == TradingCycle.ARBITRAGE_HUNTER.value:
+                        # Fast arbitrage execution using your cross_exchange_arbitrage_scanner
+                        result = await self.execute_arbitrage_cycle(user_id)
+                    else:
+                        # Full 5-phase execution using your sophisticated services
+                        cycle_enum = TradingCycle(cycle)
+                        result = await self.execute_5_phase_flow(
+                            cycle_type=cycle_enum,
+                            focus_strategies=preferred_strategies,
+                            user_id=user_id
+                        )
+                    
+                    cycle_results.append(result)
+                    
+                    if result.get("success"):
+                        total_trades += result.get("trades_executed", 0)
+                        total_profit += result.get("profit_generated_usd", 0.0)
+                        
+                        self.logger.info(
+                            f"✅ CYCLE COMPLETED: {cycle}",
+                            user_id=user_id,
+                            trades=result.get("trades_executed", 0),
+                            profit=result.get("profit_generated_usd", 0.0)
+                        )
+                    else:
+                        self.logger.warning(
+                            f"⚠️ CYCLE FAILED: {cycle}",
+                            user_id=user_id,
+                            error=result.get("error")
+                        )
+                        
+                except Exception as e:
+                    self.logger.error(f"Cycle {cycle} failed for user {user_id}", error=str(e))
+                    continue
+            
+            # Update performance metrics
+            self.performance_metrics["cycles_executed"] += len(cycle_results)
+            self.performance_metrics["trades_executed"] += total_trades
+            self.performance_metrics["total_profit_usd"] += total_profit
+            
+            if total_trades > 0:
+                if total_profit > 0:
+                    self.performance_metrics["consecutive_wins"] += 1
+                    self.performance_metrics["consecutive_losses"] = 0
+                else:
+                    self.performance_metrics["consecutive_losses"] += 1
+                    self.performance_metrics["consecutive_wins"] = 0
+            
+            # Calculate success rate
+            total_cycles = self.performance_metrics["cycles_executed"]
+            successful_cycles = sum(1 for result in cycle_results if result.get("success"))
+            if total_cycles > 0:
+                self.performance_metrics["success_rate"] = (successful_cycles / total_cycles) * 100
+            
+            # Send Telegram update if significant activity
+            if total_trades > 0 or total_profit != 0:
+                try:
+                    from app.services.telegram_commander import telegram_commander_service
+                    await telegram_commander_service.send_autonomous_update(
+                        user_id=user_id,
+                        cycles_run=len(active_cycles),
+                        trades_executed=total_trades,
+                        profit_generated=total_profit,
+                        mode=mode
+                    )
+                except Exception as e:
+                    self.logger.warning("Failed to send Telegram update", error=str(e))
+            
+            # Update last cycle time and metrics
             await self.redis.hset(
                 f"autonomous_config:{user_id}",
                 "last_cycle",
                 datetime.utcnow().isoformat()
             )
             
+            await self.redis.hset(
+                f"autonomous_metrics:{user_id}",
+                "total_profit_today",
+                str(total_profit)
+            )
+            
+            self.logger.info(
+                f"🎉 AUTONOMOUS CYCLE COMPLETED for user {user_id}",
+                cycles_run=len(active_cycles),
+                trades_executed=total_trades,
+                profit_generated=total_profit,
+                mode=mode
+            )
+            
         except Exception as e:
             self.logger.error(f"User autonomous cycle failed for {user_id}", error=str(e))
+    
+    async def _assess_current_market_conditions(self, user_id: str) -> Dict[str, Any]:
+        """Assess current market conditions using your MarketAnalysisService."""
+        try:
+            from app.services.market_analysis_core import MarketAnalysisService
+            market_service = MarketAnalysisService()
+            
+            # Use your sophisticated market sentiment analysis
+            sentiment_result = await market_service.market_sentiment(
+                symbols="BTC,ETH,SOL,ADA",
+                user_id=user_id
+            )
+            
+            if sentiment_result.get("success"):
+                sentiment_data = sentiment_result.get("sentiment_analysis", {})
+                overall_sentiment = sentiment_data.get("overall_market_sentiment", "neutral")
+                volatility = sentiment_data.get("market_volatility", "medium")
+                
+                return {
+                    "summary": f"{overall_sentiment}_{volatility}",
+                    "sentiment": overall_sentiment,
+                    "volatility": volatility,
+                    "should_trade": overall_sentiment != "extremely_bearish",
+                    "preferred_strategies": self._get_strategies_for_conditions(overall_sentiment, volatility)
+                }
+            
+            # Fallback to neutral conditions
+            return {
+                "summary": "neutral_medium",
+                "sentiment": "neutral", 
+                "volatility": "medium",
+                "should_trade": True,
+                "preferred_strategies": ["spot_momentum_strategy"]
+            }
+            
+        except Exception as e:
+            self.logger.error("Market conditions assessment failed", error=str(e))
+            return {"summary": "unknown", "should_trade": False}
+    
+    def _select_optimal_cycles(
+        self, 
+        available_cycles: List[str], 
+        market_conditions: Dict[str, Any],
+        intensity: str
+    ) -> List[str]:
+        """Select optimal cycles based on market conditions and user intensity."""
+        
+        # Don't trade if market conditions are unfavorable
+        if not market_conditions.get("should_trade", True):
+            return []
+        
+        # Intensity-based cycle selection
+        intensity_limits = {
+            "hibernation": 1,    # Only 1 cycle max
+            "conservative": 1,   # 1 cycle
+            "balanced": 2,       # Up to 2 cycles
+            "active": 3,         # Up to 3 cycles  
+            "aggressive": 4,     # Up to 4 cycles
+            "hyperactive": len(available_cycles)  # All cycles
+        }
+        
+        max_cycles = intensity_limits.get(intensity, 2)
+        
+        # Prioritize cycles based on market conditions
+        cycle_priorities = {
+            "arbitrage_hunter": 100,  # Always high priority
+            "momentum_futures": 80 if market_conditions.get("sentiment") == "bullish" else 40,
+            "portfolio_optimization": 60,
+            "deep_analysis": 50
+        }
+        
+        # Sort by priority and take top N
+        sorted_cycles = sorted(
+            available_cycles,
+            key=lambda c: cycle_priorities.get(c, 30),
+            reverse=True
+        )
+        
+        return sorted_cycles[:max_cycles]
+    
+    def _get_strategies_for_conditions(self, sentiment: str, volatility: str) -> List[str]:
+        """Get optimal strategies for market conditions."""
+        
+        strategy_map = {
+            ("bullish", "high"): ["spot_momentum_strategy", "spot_breakout_strategy", "scalping_strategy"],
+            ("bullish", "medium"): ["spot_momentum_strategy", "futures_trade"],
+            ("bullish", "low"): ["spot_momentum_strategy", "market_making"],
+            ("bearish", "high"): ["spot_mean_reversion", "futures_trade"],
+            ("bearish", "medium"): ["spot_mean_reversion", "options_trade"],
+            ("bearish", "low"): ["market_making", "spot_mean_reversion"],
+            ("neutral", "high"): ["scalping_strategy", "arbitrage_execution"],
+            ("neutral", "medium"): ["spot_momentum_strategy", "spot_mean_reversion"],
+            ("neutral", "low"): ["market_making", "grid_trading"]
+        }
+        
+        return strategy_map.get((sentiment, volatility), ["spot_momentum_strategy"])
+    
+    async def _notify_user_needs_credits(self, user_id: str, profit_status: Dict[str, Any]):
+        """Notify user that they need to purchase more credits to continue trading."""
+        try:
+            from app.services.telegram_core import TelegramService
+            telegram_service = TelegramService()
+            
+            profit_earned = profit_status.get("total_profit_earned", 0)
+            profit_potential = profit_status.get("profit_potential", 0)
+            
+            message = (
+                f"🎉 PROFIT CEILING REACHED!\n\n"
+                f"💰 You've earned ${profit_earned:,.2f}\n"
+                f"🎯 Your profit potential was ${profit_potential:,.2f}\n\n"
+                f"🚀 Buy more credits to continue earning!\n"
+                f"💡 More strategies = Faster profits"
+            )
+            
+            await telegram_service.send_profit_ceiling_notification(
+                user_id=user_id,
+                message=message,
+                profit_earned=profit_earned
+            )
+            
+        except Exception as e:
+            self.logger.error("Failed to send credit notification", error=str(e))
+    
+    async def _update_strategy_performance_metrics(
+        self, 
+        user_id: str, 
+        strategy_name: str, 
+        trade_result: Dict[str, Any]
+    ):
+        """Update real-time strategy performance metrics for continuous optimization."""
+        try:
+            # Store individual trade performance
+            performance_key = f"strategy_performance:{user_id}:{strategy_name}"
+            
+            trade_data = {
+                "timestamp": trade_result["timestamp"].isoformat(),
+                "profit_usd": trade_result["profit_usd"],
+                "success": trade_result["success"],
+                "confidence": trade_result["confidence"],
+                "symbol": trade_result["symbol"],
+                "execution_price": trade_result["execution_price"],
+                "expected_price": trade_result["expected_price"]
+            }
+            
+            # Add to performance history (keep last 100 trades per strategy)
+            await self.redis.lpush(performance_key, json.dumps(trade_data))
+            await self.redis.ltrim(performance_key, 0, 99)  # Keep last 100
+            await self.redis.expire(performance_key, 30 * 24 * 3600)  # 30 days
+            
+            # Update aggregate performance metrics
+            aggregate_key = f"strategy_aggregate:{user_id}:{strategy_name}"
+            
+            # Get current aggregates
+            current_data = await self.redis.hgetall(aggregate_key)
+            
+            total_trades = int(current_data.get(b"total_trades", 0)) + 1
+            total_profit = float(current_data.get(b"total_profit", 0)) + trade_result["profit_usd"]
+            successful_trades = int(current_data.get(b"successful_trades", 0)) + (1 if trade_result["success"] else 0)
+            
+            # Calculate moving averages
+            success_rate = (successful_trades / total_trades) * 100 if total_trades > 0 else 0
+            avg_profit_per_trade = total_profit / total_trades if total_trades > 0 else 0
+            
+            # Update aggregates
+            await self.redis.hset(aggregate_key, mapping={
+                "total_trades": total_trades,
+                "total_profit": total_profit,
+                "successful_trades": successful_trades,
+                "success_rate": success_rate,
+                "avg_profit_per_trade": avg_profit_per_trade,
+                "last_updated": datetime.utcnow().isoformat()
+            })
+            await self.redis.expire(aggregate_key, 30 * 24 * 3600)  # 30 days
+            
+            # AUTO-OPTIMIZATION: Update strategy rankings
+            await self._update_user_strategy_rankings(user_id)
+            
+            self.logger.info(
+                f"Strategy performance updated: {strategy_name}",
+                user_id=user_id,
+                total_trades=total_trades,
+                success_rate=f"{success_rate:.1f}%",
+                avg_profit=f"${avg_profit_per_trade:.2f}",
+                this_trade_profit=f"${trade_result['profit_usd']:.2f}"
+            )
+            
+        except Exception as e:
+            self.logger.error("Failed to update strategy performance", error=str(e))
+    
+    async def _update_user_strategy_rankings(self, user_id: str):
+        """Update user's strategy rankings based on real performance for auto-optimization."""
+        try:
+            # Get all user's strategies
+            from app.services.strategy_marketplace_service import strategy_marketplace_service
+            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+            
+            if not user_portfolio.get("success"):
+                return
+            
+            strategy_rankings = []
+            
+            for strategy in user_portfolio["active_strategies"]:
+                strategy_name = strategy["strategy_id"].replace("ai_", "")
+                aggregate_key = f"strategy_aggregate:{user_id}:{strategy_name}"
+                
+                performance_data = await self.redis.hgetall(aggregate_key)
+                
+                if performance_data:
+                    success_rate = float(performance_data.get(b"success_rate", 0))
+                    avg_profit = float(performance_data.get(b"avg_profit_per_trade", 0))
+                    total_trades = int(performance_data.get(b"total_trades", 0))
+                    
+                    # Calculate composite score (success rate + profit + trade volume)
+                    composite_score = (success_rate * 0.4) + (avg_profit * 0.4) + (min(total_trades, 50) * 0.2)
+                    
+                    strategy_rankings.append({
+                        "strategy": strategy_name,
+                        "score": composite_score,
+                        "success_rate": success_rate,
+                        "avg_profit": avg_profit,
+                        "total_trades": total_trades
+                    })
+            
+            # Sort by composite score
+            strategy_rankings.sort(key=lambda x: x["score"], reverse=True)
+            
+            # Store rankings for future strategy selection optimization
+            rankings_key = f"strategy_rankings:{user_id}"
+            await self.redis.set(
+                rankings_key, 
+                json.dumps(strategy_rankings), 
+                ex=24 * 3600  # 24 hours
+            )
+            
+            self.logger.info(
+                f"Strategy rankings updated for {user_id}",
+                top_strategy=strategy_rankings[0]["strategy"] if strategy_rankings else "none",
+                total_strategies=len(strategy_rankings)
+            )
+            
+        except Exception as e:
+            self.logger.error("Failed to update strategy rankings", error=str(e))
+    
+    async def _select_cycles_by_market_intelligence(
+        self,
+        available_cycles: List[str],
+        market_conditions: Dict[str, Any],
+        prediction_result: Dict[str, Any],
+        sentiment_result: Dict[str, Any],
+        intensity: str
+    ) -> List[str]:
+        """
+        INTELLIGENT CYCLE SELECTION BASED ON PURE MARKET CONDITIONS
+        
+        No more arbitrary time schedules - pure market intelligence!
+        """
+        
+        selected_cycles = []
+        
+        # Check if we should trade at all
+        if not prediction_result.get("should_trade", True):
+            self.logger.info("🚫 Predictive intelligence says wait for better opportunity")
+            return []
+        
+        if not market_conditions.get("should_trade", True):
+            self.logger.info("🚫 Market conditions unfavorable for trading")
+            return []
+        
+        # Get market intelligence data
+        volatility = market_conditions.get("volatility_level", "medium")
+        sentiment = market_conditions.get("sentiment", "neutral")
+        arbitrage_opportunities = market_conditions.get("arbitrage_opportunities", 0)
+        
+        sentiment_data = sentiment_result.get("optimization_data", {}) if sentiment_result.get("success") else {}
+        
+        # 1. ARBITRAGE HUNTER - Always prioritize if opportunities exist
+        if arbitrage_opportunities > 0:
+            selected_cycles.append(TradingCycle.ARBITRAGE_HUNTER.value)
+            self.logger.info(f"🎯 Arbitrage cycle selected - {arbitrage_opportunities} opportunities detected")
+        
+        # 2. MOMENTUM FUTURES - High volatility + bullish sentiment
+        if (volatility in ["high", "extreme"] and 
+            sentiment in ["bullish", "strongly_bullish"] and
+            len(sentiment_data.get("momentum_signals", [])) > 0):
+            selected_cycles.append(TradingCycle.MOMENTUM_FUTURES.value)
+            self.logger.info("🚀 Momentum cycle selected - high volatility + bullish sentiment")
+        
+        # 3. DEEP ANALYSIS - High sentiment volume or conflicting signals
+        if (len(sentiment_data.get("scalping_opportunities", [])) > 3 or
+            (sentiment == "neutral" and volatility == "high")):
+            selected_cycles.append(TradingCycle.DEEP_ANALYSIS.value)
+            self.logger.info("🧠 Deep analysis cycle selected - complex market conditions")
+        
+        # 4. PORTFOLIO OPTIMIZATION - Always run for risk management
+        if len(selected_cycles) > 0 or market_conditions.get("portfolio_rebalance_needed", False):
+            selected_cycles.append(TradingCycle.PORTFOLIO_OPTIMIZATION.value)
+            self.logger.info("⚖️ Portfolio optimization cycle selected - risk management")
+        
+        # Apply intensity limits
+        intensity_limits = {
+            "hibernation": 1,
+            "conservative": 1,
+            "balanced": 2,
+            "active": 3,
+            "aggressive": 4,
+            "hyperactive": len(available_cycles)
+        }
+        
+        max_cycles = intensity_limits.get(intensity, 2)
+        
+        # Prioritize cycles by market impact potential
+        cycle_priorities = {
+            TradingCycle.ARBITRAGE_HUNTER.value: 100,  # Risk-free profit
+            TradingCycle.MOMENTUM_FUTURES.value: 90,   # High profit potential
+            TradingCycle.DEEP_ANALYSIS.value: 80,      # Complex opportunities
+            TradingCycle.PORTFOLIO_OPTIMIZATION.value: 70  # Risk management
+        }
+        
+        # Sort by priority and limit
+        selected_cycles.sort(key=lambda c: cycle_priorities.get(c, 50), reverse=True)
+        selected_cycles = selected_cycles[:max_cycles]
+        
+        # Log intelligent selection reasoning
+        self.logger.info(
+            "🎯 MARKET-INTELLIGENT CYCLE SELECTION",
+            volatility=volatility,
+            sentiment=sentiment,
+            arbitrage_ops=arbitrage_opportunities,
+            momentum_signals=len(sentiment_data.get("momentum_signals", [])),
+            selected_cycles=selected_cycles,
+            intensity=intensity
+        )
+        
+        return selected_cycles
+    
+    async def _get_sentiment_optimized_symbols(
+        self, 
+        strategy: str, 
+        sentiment_result: Dict[str, Any]
+    ) -> List[str]:
+        """Get sentiment-optimized symbols for strategy execution."""
+        
+        try:
+            if not sentiment_result.get("success"):
+                return ["BTC", "ETH", "SOL"]  # Fallback
+            
+            sentiment_data = sentiment_result.get("optimization_data", {})
+            
+            # Strategy-specific symbol optimization
+            if "momentum" in strategy.lower():
+                # Momentum strategies prefer bullish sentiment
+                momentum_symbols = [s["symbol"] for s in sentiment_data.get("momentum_signals", [])]
+                return momentum_symbols[:5] if momentum_symbols else ["BTC", "ETH"]
+            
+            elif "mean_reversion" in strategy.lower():
+                # Mean reversion prefers extreme sentiment (oversold/overbought)
+                reversion_symbols = [s["symbol"] for s in sentiment_data.get("mean_reversion_signals", [])]
+                return reversion_symbols[:5] if reversion_symbols else ["BTC", "ETH"]
+            
+            elif "scalping" in strategy.lower():
+                # Scalping prefers high volume sentiment
+                scalping_symbols = [s["symbol"] for s in sentiment_data.get("scalping_opportunities", [])]
+                return scalping_symbols[:5] if scalping_symbols else ["BTC", "ETH"]
+            
+            elif "arbitrage" in strategy.lower():
+                # Arbitrage doesn't depend on sentiment, use high volume symbols
+                high_volume_symbols = sentiment_result.get("trading_recommendations", {}).get("high_volume_symbols", [])
+                return high_volume_symbols[:5] if high_volume_symbols else ["BTC", "ETH", "SOL"]
+            
+            else:
+                # Default: use top bullish opportunities
+                bullish_opportunities = sentiment_result.get("trading_recommendations", {}).get("top_bullish_opportunities", [])
+                return [s["symbol"] for s in bullish_opportunities[:5]] or ["BTC", "ETH", "SOL"]
+                
+        except Exception as e:
+            self.logger.warning("Sentiment symbol optimization failed", error=str(e))
+            return ["BTC", "ETH", "SOL"]
 
     async def emergency_stop(self) -> Dict[str, Any]:
         """Execute emergency stop protocol - LEGACY METHOD."""

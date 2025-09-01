@@ -424,37 +424,46 @@ class DerivativesEngine(LoggerMixin):
             
             # Generate realistic strike ranges based on real price
             strikes = [current_price * (1 + i * 0.05) for i in range(-5, 6)]
-        
-        options_chain = {
-            "symbol": symbol,
-            "expiry_date": expiry_date,
-            "current_price": current_price,
-            "options": []
-        }
-        
-        for strike in strikes:
-            options_chain["options"].extend([
-                {
-                    "contract_symbol": f"{symbol}{expiry_date}C{int(strike)}",
-                    "strike_price": strike,
-                    "option_type": "CALL",
-                    "bid_price": max(current_price - strike + 100, 10),
-                    "ask_price": max(current_price - strike + 120, 15),
-                    "volume": np.random.randint(10, 1000),
-                    "open_interest": np.random.randint(100, 10000)
-                },
-                {
-                    "contract_symbol": f"{symbol}{expiry_date}P{int(strike)}",
-                    "strike_price": strike,
-                    "option_type": "PUT", 
-                    "bid_price": max(strike - current_price + 100, 10),
-                    "ask_price": max(strike - current_price + 120, 15),
-                    "volume": np.random.randint(10, 1000),
-                    "open_interest": np.random.randint(100, 10000)
-                }
-            ])
-        
-        return options_chain
+            
+            options_chain = {
+                "symbol": symbol,
+                "expiry_date": expiry_date,
+                "current_price": current_price,
+                "options": []
+            }
+            
+            for strike in strikes:
+                options_chain["options"].extend([
+                    {
+                        "contract_symbol": f"{symbol}{expiry_date}C{int(strike)}",
+                        "strike_price": strike,
+                        "option_type": "CALL",
+                        "bid_price": max(current_price - strike + 100, 10),
+                        "ask_price": max(current_price - strike + 120, 15),
+                        "volume": np.random.randint(10, 1000),
+                        "open_interest": np.random.randint(100, 10000)
+                    },
+                    {
+                        "contract_symbol": f"{symbol}{expiry_date}P{int(strike)}",
+                        "strike_price": strike,
+                        "option_type": "PUT", 
+                        "bid_price": max(strike - current_price + 100, 10),
+                        "ask_price": max(strike - current_price + 120, 15),
+                        "volume": np.random.randint(10, 1000),
+                        "open_interest": np.random.randint(100, 10000)
+                    }
+                ])
+            
+            return options_chain
+            
+        except Exception as e:
+            self.logger.error(f"Options chain failed for {symbol}", error=str(e))
+            return {
+                "symbol": symbol,
+                "expiry_date": expiry_date,
+                "current_price": 0,
+                "options": []
+            }
     
     async def _find_option_contract(
         self,
@@ -856,9 +865,17 @@ class SpotAlgorithms(LoggerMixin):
                 current_price = float(price_data.get("price", 0)) if price_data else 0
                 
                 if current_price <= 0:
-                    continue  # Skip this symbol if price unavailable
-            except Exception:
-                continue  # Skip this symbol if price lookup fails
+                    return {
+                        "success": False,
+                        "error": "Price unavailable for symbol",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Price lookup failed: {str(e)}",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
             resistance_levels = symbol_data.get("resistance_levels", [])
             support_levels = symbol_data.get("support_levels", [])
             
@@ -3711,6 +3728,172 @@ class TradingStrategiesService(LoggerMixin):
     def _generate_request_id(self) -> str:
         """Generate unique request ID."""
         return f"TSS_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+
+    async def generate_trading_signal(
+        self,
+        strategy_type: str,
+        market_data: Dict[str, Any],
+        risk_mode: str = "balanced",
+        user_id: str = "system"
+    ) -> Dict[str, Any]:
+        """
+        Generate trading signal using specified strategy and market data.
+        
+        This is the core method that connects market analysis to strategy execution
+        for autonomous trading operations.
+        """
+        try:
+            self.logger.info(
+                f"🎯 Generating trading signal",
+                strategy=strategy_type,
+                risk_mode=risk_mode,
+                user_id=user_id
+            )
+            
+            # Extract market context
+            market_assessment = market_data.get("market_assessment", {})
+            symbol_analysis = market_data.get("symbol_analysis", {})
+            
+            # Dynamic symbol selection based on market analysis (no hardcoded defaults)
+            target_symbol = None
+            if symbol_analysis:
+                # Get best opportunity from market analysis
+                best_symbol = max(
+                    symbol_analysis.keys(),
+                    key=lambda s: symbol_analysis[s].get("opportunity_score", 0),
+                    default=None
+                )
+                target_symbol = best_symbol
+            
+            # If no symbol from analysis, dynamically discover high-volume symbols
+            if not target_symbol:
+                from app.services.market_analysis_core import MarketAnalysisService
+                market_service = MarketAnalysisService()
+                
+                # Use your existing asset discovery to find active symbols
+                discovery_result = await market_service.discover_exchange_assets(
+                    exchanges="binance",  # Start with Binance for speed
+                    asset_types="spot",
+                    user_id=user_id
+                )
+                
+                if discovery_result.get("success"):
+                    discovered_assets = discovery_result.get("asset_discovery", {}).get("detailed_results", {})
+                    binance_data = discovered_assets.get("binance", {})
+                    spot_data = binance_data.get("asset_types", {}).get("spot", {})
+                    volume_leaders = spot_data.get("volume_leaders", [])
+                    
+                    if volume_leaders:
+                        # Use highest volume symbol
+                        target_symbol = volume_leaders[0].get("base_asset", "BTC")
+                    else:
+                        target_symbol = "BTC"  # Emergency fallback only
+                else:
+                    target_symbol = "BTC"  # Emergency fallback only
+            
+            # Execute the specific strategy to generate signal
+            if strategy_type == "spot_momentum_strategy":
+                strategy_result = await self.spot_momentum_strategy(
+                    symbol=target_symbol,
+                    timeframe="1h",
+                    user_id=user_id
+                )
+            elif strategy_type == "spot_mean_reversion":
+                strategy_result = await self.spot_mean_reversion(
+                    symbol=target_symbol,
+                    timeframe="1h", 
+                    user_id=user_id
+                )
+            elif strategy_type == "spot_breakout_strategy":
+                strategy_result = await self.spot_breakout_strategy(
+                    symbol=target_symbol,
+                    timeframe="1h",
+                    user_id=user_id
+                )
+            elif strategy_type == "scalping_strategy":
+                strategy_result = await self.scalping_strategy(
+                    symbol=target_symbol,
+                    timeframe="1m",
+                    user_id=user_id
+                )
+            elif strategy_type == "pairs_trading":
+                strategy_result = await self.pairs_trading(
+                    symbols=f"{target_symbol},ETH",
+                    user_id=user_id
+                )
+            elif strategy_type == "statistical_arbitrage":
+                strategy_result = await self.statistical_arbitrage(
+                    symbols=f"{target_symbol},ETH,SOL",
+                    user_id=user_id
+                )
+            else:
+                # Default to momentum strategy
+                strategy_result = await self.spot_momentum_strategy(
+                    symbol=target_symbol,
+                    timeframe="1h",
+                    user_id=user_id
+                )
+            
+            if not strategy_result.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Strategy {strategy_type} execution failed: {strategy_result.get('error')}"
+                }
+            
+            # Extract signal from strategy result
+            strategy_data = strategy_result.get("strategy_result", {})
+            signals = strategy_data.get("signals", [])
+            
+            if not signals:
+                return {
+                    "success": False,
+                    "error": f"No trading signals generated by {strategy_type}"
+                }
+            
+            # Get best signal
+            best_signal = max(signals, key=lambda s: s.get("confidence", 0))
+            
+            # Enhance signal with risk mode adjustments
+            risk_multipliers = {
+                "conservative": 0.5,
+                "balanced": 1.0,
+                "aggressive": 1.5,
+                "beast_mode": 2.0
+            }
+            
+            risk_multiplier = risk_multipliers.get(risk_mode, 1.0)
+            
+            # Adjust signal based on risk mode
+            enhanced_signal = {
+                "symbol": best_signal.get("symbol", target_symbol),
+                "action": best_signal.get("action", "buy"),
+                "confidence": best_signal.get("confidence", 70) * risk_multiplier,
+                "entry_price": best_signal.get("entry_price", 0),
+                "expected_return": best_signal.get("expected_return", 5.0) * risk_multiplier,
+                "stop_loss": best_signal.get("stop_loss", 0),
+                "take_profit": best_signal.get("take_profit", 0),
+                "timeframe": best_signal.get("timeframe", "1h"),
+                "strategy_used": strategy_type,
+                "risk_mode": risk_mode,
+                "market_context": market_assessment.get("overall_sentiment", "neutral"),
+                "generated_at": datetime.utcnow().isoformat()
+            }
+            
+            return {
+                "success": True,
+                "signal": enhanced_signal,
+                "strategy_type": strategy_type,
+                "market_data_used": market_data,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(
+                f"Signal generation failed for {strategy_type}",
+                error=str(e),
+                user_id=user_id
+            )
+            return {"success": False, "error": str(e)}
 
     async def health_check(self) -> Dict[str, Any]:
         """Health check for trading strategies service."""

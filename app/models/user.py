@@ -118,6 +118,7 @@ class User(Base):
     positions = relationship("Position", back_populates="user", cascade="all, delete-orphan")
     orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")
     trading_strategies = relationship("TradingStrategy", back_populates="user", cascade="all, delete-orphan")
+    telegram_connections = relationship("UserTelegramConnection", back_populates="user", cascade="all, delete-orphan")
     
     # Self-referential relationship for referrals
     referred_users = relationship("User", backref="referrer", remote_side=[id])

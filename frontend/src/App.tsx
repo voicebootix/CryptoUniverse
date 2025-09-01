@@ -17,10 +17,12 @@ import OAuthCallbackPage from '@/pages/auth/OAuthCallbackPage';
 // Dashboard Pages
 import TradingDashboard from '@/pages/dashboard/TradingDashboard';
 import AICommandCenter from '@/pages/dashboard/AICommandCenter';
+import AIChatPage from '@/pages/dashboard/AIChatPage';
 import BeastModeDashboard from '@/pages/dashboard/BeastModeDashboard';
 import StrategyMarketplace from '@/pages/dashboard/StrategyMarketplace';
 import MultiExchangeHub from '@/pages/dashboard/MultiExchangeHub';
 import CreditBillingCenter from '@/pages/dashboard/CreditBillingCenter';
+import ProfitSharingCenter from '@/pages/dashboard/ProfitSharingCenter';
 import CopyTradingNetwork from '@/pages/dashboard/CopyTradingNetwork';
 import TelegramCenter from '@/pages/dashboard/TelegramCenter';
 import AdvancedAnalytics from '@/pages/dashboard/AdvancedAnalytics';
@@ -124,6 +126,9 @@ const App: React.FC = () => {
               {/* AI Command Center */}
               <Route path="ai-command" element={<AICommandCenter />} />
               
+              {/* AI Chat Manager */}
+              <Route path="ai-chat" element={<AIChatPage />} />
+              
               {/* Beast Mode Dashboard */}
               <Route path="beast-mode" element={<BeastModeDashboard />} />
               
@@ -134,7 +139,8 @@ const App: React.FC = () => {
             <Route path="exchanges-hub" element={<MultiExchangeHub />} />
             
             {/* Credit & Billing */}
-            <Route path="billing" element={<CreditBillingCenter />} />
+            <Route path="billing" element={<ProfitSharingCenter />} />
+            <Route path="credits" element={<ProfitSharingCenter />} />
             
             {/* Copy Trading Network */}
             <Route path="copy-trading" element={<CopyTradingNetwork />} />

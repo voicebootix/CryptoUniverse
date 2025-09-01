@@ -76,13 +76,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await background_manager.start_all()
         logger.info("✅ Background services started")
 
-        # Start enhanced system monitoring
-        try:
-            from app.services.system_monitoring import system_monitoring_service
-            await system_monitoring_service.start_monitoring(interval_seconds=30)
-            logger.info("✅ Enhanced system monitoring started")
-        except Exception as e:
-            logger.warning("⚠️ System monitoring failed to start", error=str(e))
 
         logger.info(
             "🎉 CryptoUniverse Enterprise is ready!",
@@ -111,6 +104,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await background_manager.stop_all()
         logger.info("✅ Background services stopped")
 
+        # Shutdown Unified AI Manager System
+        try:
+            from app.services.ai_manager_startup import shutdown_ai_manager
+            await shutdown_ai_manager()
+            logger.info("🧠 Unified AI Manager shutdown complete")
+        except Exception as e:
+            logger.warning("⚠️ AI Manager shutdown failed", error=str(e))
+
         # Disconnect from database
         await db_manager.disconnect()
         logger.info("✅ Database disconnected")
@@ -136,17 +137,21 @@ def create_application() -> FastAPI:
     )
 
     # CORS FIRST - must be added before other middleware
+    cors_origins = settings.cors_origins
+    
+    # Add localhost for development
+    if settings.ENVIRONMENT == "development":
+        dev_origins = [
+            "http://localhost:3000",
+            "http://localhost:8000", 
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:8000"
+        ]
+        cors_origins.extend(dev_origins)
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "https://cryptouniverse-frontend.onrender.com",
-            "https://cryptouniverse.onrender.com", 
-            "http://localhost:3000",
-            "http://localhost:8000",
-            "http://127.0.0.1:3000",
-            "http://127.0.0.1:8000",
-            "*"  # Allow all for debugging CORS issues
-        ],
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -251,6 +256,24 @@ async def health_check():
         health_status["checks"]["background_services"] = f"error: {str(e)}"
         health_status["status"] = "unhealthy"
 
+    try:
+        # Use your existing debug insight generator for system health
+        from app.services.debug_insight_generator import EnhancedDebugInsightGenerator
+        debug_service = EnhancedDebugInsightGenerator()
+        
+        # Get system health from your existing service
+        system_health = await debug_service.get_system_health()
+        health_status["checks"]["system_health"] = system_health
+        
+        # Update status based on your existing health monitoring
+        if system_health.get("status") == "critical":
+            health_status["status"] = "unhealthy"
+        elif system_health.get("status") == "warning" and health_status["status"] == "healthy":
+            health_status["status"] = "degraded"
+            
+    except Exception as e:
+        health_status["checks"]["system_health"] = f"error: {str(e)}"
+
     # Add system information
     health_status.update(
         {
@@ -258,6 +281,8 @@ async def health_check():
             "environment": settings.ENVIRONMENT,
             "services": {
                 "trading_engine": "operational",
+                "user_exchange_service": "operational", 
+                "real_market_data": "operational",
                 "ai_consensus": "operational",
                 "copy_trading": "operational",
                 "enterprise_features": "operational",

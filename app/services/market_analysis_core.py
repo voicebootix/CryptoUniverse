@@ -1708,18 +1708,17 @@ class MarketAnalysisService(LoggerMixin):
                 
                 for asset_type in asset_type_list:
                     if asset_type == "spot":
-                        # Mock spot asset discovery
-                        spot_assets = {
-                            "total_pairs": 500 + exchange_list.index(exchange) * 100,
-                            "base_assets": ["BTC", "ETH", "BNB", "ADA", "SOL", "MATIC", "DOT", "AVAX", "LINK", "UNI"],
-                            "quote_assets": ["USDT", "BUSD", "BTC", "ETH", "USD"],
-                            "new_listings_24h": ["NEWCOIN/USDT", "TESTTOKEN/BTC"] if exchange == "binance" else [],
-                            "volume_leaders": [
-                                {"symbol": "BTC/USDT", "volume_24h": 1000000000},
-                                {"symbol": "ETH/USDT", "volume_24h": 800000000},
-                                {"symbol": "BNB/USDT", "volume_24h": 300000000}
-                            ]
-                        }
+                        # Real spot asset discovery using exchange APIs
+                        spot_assets = await self._discover_real_spot_assets(exchange)
+                        if not spot_assets:
+                            # Fallback if API fails
+                            spot_assets = {
+                                "total_pairs": 0,
+                                "base_assets": [],
+                                "quote_assets": [],
+                                "new_listings_24h": [],
+                                "volume_leaders": []
+                            }
                         exchange_assets["asset_types"]["spot"] = spot_assets
                         exchange_assets["total_assets"] += spot_assets["total_pairs"]
                     
@@ -2417,15 +2416,207 @@ class MarketAnalysisService(LoggerMixin):
     
     # Helper methods for the new functions
     
+    async def _discover_real_spot_assets(self, exchange: str) -> Dict[str, Any]:
+        """Discover real spot assets from exchange APIs."""
+        try:
+            if exchange.lower() == "binance":
+                return await self._discover_binance_assets()
+            elif exchange.lower() == "kraken":
+                return await self._discover_kraken_assets()
+            elif exchange.lower() == "kucoin":
+                return await self._discover_kucoin_assets()
+            else:
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Real asset discovery failed for {exchange}", error=str(e))
+            return None
+    
+    async def _discover_binance_assets(self) -> Dict[str, Any]:
+        """Discover real Binance trading pairs."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                # Get exchange info
+                async with session.get(
+                    "https://api.binance.com/api/v3/exchangeInfo",
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status != 200:
+                        return None
+                    
+                    data = await response.json()
+                    symbols_data = data.get("symbols", [])
+                    
+                    # Get 24hr ticker for volume data
+                    async with session.get(
+                        "https://api.binance.com/api/v3/ticker/24hr",
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as ticker_response:
+                        if ticker_response.status != 200:
+                            ticker_data = []
+                        else:
+                            ticker_data = await ticker_response.json()
+                
+                # Process real data
+                base_assets = set()
+                quote_assets = set()
+                volume_leaders = []
+                active_pairs = 0
+                
+                # Create volume lookup
+                volume_lookup = {ticker["symbol"]: float(ticker["quoteVolume"]) for ticker in ticker_data}
+                
+                for symbol_info in symbols_data:
+                    if symbol_info.get("status") == "TRADING":
+                        active_pairs += 1
+                        base_assets.add(symbol_info["baseAsset"])
+                        quote_assets.add(symbol_info["quoteAsset"])
+                        
+                        # Add to volume leaders if high volume
+                        symbol = symbol_info["symbol"]
+                        volume = volume_lookup.get(symbol, 0)
+                        if volume > 1000000:  # $1M+ volume
+                            volume_leaders.append({
+                                "symbol": f"{symbol_info['baseAsset']}/{symbol_info['quoteAsset']}",
+                                "volume_24h": volume,
+                                "base_asset": symbol_info["baseAsset"]
+                            })
+                
+                # Sort volume leaders
+                volume_leaders.sort(key=lambda x: x["volume_24h"], reverse=True)
+                
+                return {
+                    "total_pairs": active_pairs,
+                    "base_assets": list(base_assets),
+                    "quote_assets": list(quote_assets),
+                    "new_listings_24h": [],  # Would need additional API call
+                    "volume_leaders": volume_leaders[:50]  # Top 50
+                }
+                
+        except Exception as e:
+            self.logger.error("Binance asset discovery failed", error=str(e))
+            return None
+    
+    async def _discover_kraken_assets(self) -> Dict[str, Any]:
+        """Discover real Kraken trading pairs."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.kraken.com/0/public/AssetPairs",
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status != 200:
+                        return None
+                    
+                    data = await response.json()
+                    if data.get("error"):
+                        return None
+                    
+                    pairs_data = data.get("result", {})
+                    
+                    base_assets = set()
+                    quote_assets = set()
+                    active_pairs = 0
+                    volume_leaders = []
+                    
+                    for pair_name, pair_info in pairs_data.items():
+                        if pair_info.get("status") == "online":
+                            active_pairs += 1
+                            base = pair_info.get("base", "").replace("X", "").replace("Z", "")
+                            quote = pair_info.get("quote", "").replace("X", "").replace("Z", "")
+                            base_assets.add(base)
+                            quote_assets.add(quote)
+                            
+                            volume_leaders.append({
+                                "symbol": f"{base}/{quote}",
+                                "volume_24h": 0,  # Would need ticker API for real volume
+                                "base_asset": base
+                            })
+                    
+                    return {
+                        "total_pairs": active_pairs,
+                        "base_assets": list(base_assets),
+                        "quote_assets": list(quote_assets),
+                        "new_listings_24h": [],
+                        "volume_leaders": volume_leaders[:50]
+                    }
+                    
+        except Exception as e:
+            self.logger.error("Kraken asset discovery failed", error=str(e))
+            return None
+    
+    async def _discover_kucoin_assets(self) -> Dict[str, Any]:
+        """Discover real KuCoin trading pairs."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.kucoin.com/api/v1/symbols",
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status != 200:
+                        return None
+                    
+                    data = await response.json()
+                    if data.get("code") != "200000":
+                        return None
+                    
+                    symbols_data = data.get("data", [])
+                    
+                    base_assets = set()
+                    quote_assets = set()
+                    active_pairs = 0
+                    volume_leaders = []
+                    
+                    for symbol_info in symbols_data:
+                        if symbol_info.get("enableTrading"):
+                            active_pairs += 1
+                            base = symbol_info.get("baseCurrency", "")
+                            quote = symbol_info.get("quoteCurrency", "")
+                            base_assets.add(base)
+                            quote_assets.add(quote)
+                            
+                            volume_leaders.append({
+                                "symbol": f"{base}/{quote}",
+                                "volume_24h": 0,  # Would need ticker API for real volume
+                                "base_asset": base
+                            })
+                    
+                    return {
+                        "total_pairs": active_pairs,
+                        "base_assets": list(base_assets),
+                        "quote_assets": list(quote_assets),
+                        "new_listings_24h": [],
+                        "volume_leaders": volume_leaders[:50]
+                    }
+                    
+        except Exception as e:
+            self.logger.error("KuCoin asset discovery failed", error=str(e))
+            return None
+
     def _calculate_asset_overlap(self, discovery_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Calculate asset overlap across exchanges."""
+        """Calculate asset overlap across exchanges using real data."""
+        all_base_assets = set()
+        exchange_assets = {}
+        
+        for exchange, data in discovery_results.items():
+            spot_data = data.get("asset_types", {}).get("spot", {})
+            base_assets = set(spot_data.get("base_assets", []))
+            all_base_assets.update(base_assets)
+            exchange_assets[exchange] = base_assets
+        
+        # Find common assets
+        common_assets = set.intersection(*exchange_assets.values()) if exchange_assets else set()
+        
+        # Calculate unique assets per exchange
+        unique_per_exchange = {}
+        for exchange, assets in exchange_assets.items():
+            unique_assets = assets - common_assets
+            unique_per_exchange[exchange] = len(unique_assets)
+        
         return {
-            "common_assets": ["BTC", "ETH", "BNB", "ADA", "SOL"],
-            "unique_assets_per_exchange": {
-                exchange: 50 + len(exchange) * 10 
-                for exchange in discovery_results.keys()
-            },
-            "total_unique_assets": 500
+            "common_assets": list(common_assets),
+            "unique_assets_per_exchange": unique_per_exchange,
+            "total_unique_assets": len(all_base_assets)
         }
     
     async def _scan_spread_inefficiencies(self, symbol: str, exchanges: List[str]) -> Dict[str, Any]:
