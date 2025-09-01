@@ -9,7 +9,7 @@ import asyncio
 import time
 import psutil
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import structlog
 from app.core.logging import LoggerMixin
 from app.core.config import get_settings
