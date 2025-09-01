@@ -13,11 +13,12 @@ from typing import Dict, List, Optional, Any
 import structlog
 
 from app.core.config import get_settings
-from app.services.portfolio_risk import PortfolioRiskService
-from app.services.market_analysis import MarketAnalysisService
+from app.services.market_analysis_core import MarketAnalysisService
 from app.services.trade_execution import TradeExecutionService
 from app.services.trading_strategies import TradingStrategiesService
-from app.services.ai_consensus import AIConsensusService
+from app.services.portfolio_risk_core import PortfolioRiskService
+from app.services.ai_consensus_core import AIConsensusService
+from app.services.master_controller import MasterSystemController
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
