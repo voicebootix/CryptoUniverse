@@ -64,6 +64,20 @@ class StrategyTestingService(LoggerMixin):
                 initial_capital=float(initial_capital)
             )
             
+            # Validate minimum backtest window
+            if isinstance(start_date, str):
+                start_date = datetime.fromisoformat(start_date)
+            if isinstance(end_date, str):
+                end_date = datetime.fromisoformat(end_date)
+            
+            backtest_window_days = (end_date - start_date).days
+            
+            if backtest_window_days < self.min_backtest_days:
+                return {
+                    "success": False, 
+                    "error": f"Backtest window must be at least {self.min_backtest_days} days, got {backtest_window_days} days"
+                }
+            
             # Get historical market data
             historical_data = await self._get_historical_market_data(symbol, start_date, end_date)
             
@@ -119,6 +133,9 @@ class StrategyTestingService(LoggerMixin):
                     
                     # Update daily metrics
                     self._update_daily_metrics(day_data, backtest_state)
+                    
+                    # End-of-day position settlement for realized P&L
+                    self._settle_end_of_day_positions(day_data, backtest_state)
                     
                 except Exception as e:
                     self.logger.warning(f"Backtest day failed", error=str(e))
@@ -392,15 +409,51 @@ class StrategyTestingService(LoggerMixin):
         variant_a: Dict[str, Any],
         variant_b: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Compare performance between two strategy variants."""
+        """Compare performance between two strategy variants with safe validation."""
         try:
+            # Validate inputs first
+            if variant_a.get("error") or variant_b.get("error"):
+                return {
+                    "winner": "inconclusive",
+                    "error": "One or both variants contain errors"
+                }
+            
+            if "performance_metrics" not in variant_a or "performance_metrics" not in variant_b:
+                return {
+                    "winner": "inconclusive", 
+                    "error": "Missing performance_metrics in one or both variants"
+                }
+            
             a_metrics = variant_a["performance_metrics"]
             b_metrics = variant_b["performance_metrics"]
             
-            # Performance comparison
-            return_improvement = b_metrics["total_return_percent"] - a_metrics["total_return_percent"]
-            winrate_improvement = b_metrics["win_rate_percent"] - a_metrics["win_rate_percent"]
-            sharpe_improvement = b_metrics["sharpe_ratio"] - a_metrics["sharpe_ratio"]
+            # Validate required numeric fields
+            required_fields = ["total_return_percent", "win_rate_percent", "sharpe_ratio"]
+            
+            for field in required_fields:
+                if field not in a_metrics or field not in b_metrics:
+                    return {
+                        "winner": "inconclusive",
+                        "error": f"Missing required field: {field}"
+                    }
+                
+                if not isinstance(a_metrics[field], (int, float)) or not isinstance(b_metrics[field], (int, float)):
+                    return {
+                        "winner": "inconclusive",
+                        "error": f"Non-numeric value in field: {field}"
+                    }
+            
+            # Safe performance comparison with zero-division protection
+            a_return = a_metrics["total_return_percent"]
+            b_return = b_metrics["total_return_percent"]
+            a_winrate = a_metrics["win_rate_percent"]
+            b_winrate = b_metrics["win_rate_percent"]
+            a_sharpe = a_metrics["sharpe_ratio"]
+            b_sharpe = b_metrics["sharpe_ratio"]
+            
+            return_improvement = b_return - a_return
+            winrate_improvement = b_winrate - a_winrate
+            sharpe_improvement = b_sharpe - a_sharpe
             
             # Determine winner
             winner = "variant_b" if return_improvement > 0 else "variant_a"
@@ -634,6 +687,60 @@ class StrategyTestingService(LoggerMixin):
             
         except Exception:
             return {"lower_bound": 0, "upper_bound": 0}
+    
+    def _settle_end_of_day_positions(self, day_data: Dict[str, Any], backtest_state: Dict[str, Any]):
+        """Settle all open positions at end of day for realized P&L."""
+        try:
+            if not backtest_state["positions"]:
+                return
+            
+            close_price = float(day_data["close"])
+            settled_positions = []
+            
+            for position in backtest_state["positions"]:
+                try:
+                    entry_price = position["entry_price"]
+                    quantity = position["quantity"]
+                    action = position["action"]
+                    
+                    # Calculate realized P&L
+                    if action.lower() == "buy":
+                        pnl = (close_price - entry_price) * quantity
+                    else:  # sell/short
+                        pnl = (entry_price - close_price) * quantity
+                    
+                    # Create closed trade record
+                    closed_trade = {
+                        "entry_price": entry_price,
+                        "exit_price": close_price,
+                        "quantity": quantity,
+                        "action": action,
+                        "pnl": pnl,
+                        "entry_time": position.get("entry_time"),
+                        "exit_time": day_data.get("timestamp"),
+                        "holding_period_days": 1  # End-of-day settlement
+                    }
+                    
+                    # Add to trades and update capital
+                    backtest_state["trades"].append(closed_trade)
+                    backtest_state["current_capital"] = Decimal(str(backtest_state["current_capital"])) + Decimal(str(pnl))
+                    
+                    settled_positions.append(position)
+                    
+                except Exception as e:
+                    self.logger.warning("Failed to settle position", position=position, error=str(e))
+                    continue
+            
+            # Clear settled positions
+            backtest_state["positions"] = []
+            
+            if settled_positions:
+                self.logger.debug(f"Settled {len(settled_positions)} positions at EOD", 
+                                close_price=close_price, 
+                                capital=float(backtest_state["current_capital"]))
+                
+        except Exception as e:
+            self.logger.error("End-of-day settlement failed", error=str(e))
 
 
 # Global service instance

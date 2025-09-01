@@ -99,12 +99,35 @@ class AIChatEngine(LoggerMixin):
     - Performance review
     """
     
-    def __init__(self):
+    def __init__(
+        self, 
+        portfolio_risk: Optional['PortfolioRiskServiceExtended'] = None,
+        market_analysis: Optional['MarketAnalysisService'] = None
+    ):
         self.sessions: Dict[str, ChatSession] = {}
         self.ai_consensus = AIConsensusService()
         self.master_controller = MasterSystemController()
         self.trade_executor = TradeExecutionService()
         self.unified_manager = None  # Will be set by unified manager
+        
+        # Initialize portfolio and market analysis services
+        if portfolio_risk is not None:
+            self.portfolio_risk = portfolio_risk
+        else:
+            try:
+                from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+                self.portfolio_risk = PortfolioRiskServiceExtended()
+            except ImportError:
+                self.portfolio_risk = None
+        
+        if market_analysis is not None:
+            self.market_analysis = market_analysis
+        else:
+            try:
+                from app.services.market_analysis_core import MarketAnalysisService
+                self.market_analysis = MarketAnalysisService()
+            except ImportError:
+                self.market_analysis = None
         
         # Intent classification patterns
         self.intent_patterns = {
