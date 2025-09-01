@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSoc
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app.core.auth import get_current_user
+from app.api.v1.endpoints.auth import get_current_user
 from app.core.database import get_db
 from app.models.user import User
 from app.services.ai_chat_engine import chat_engine, ChatMessageType
