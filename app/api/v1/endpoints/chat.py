@@ -198,14 +198,12 @@ async def chat_websocket(
     - Live trading notifications
     - Market alerts and opportunities
     """
-    await websocket.accept()
-    
     try:
         # TODO: Implement WebSocket authentication via token
         # For now, we'll use a placeholder user_id
         user_id = "websocket_user"  # This should be extracted from authenticated token
         
-        # Connect to WebSocket manager
+        # Connect to WebSocket manager (this handles websocket.accept())
         await manager.connect(websocket, user_id)
         
         logger.info("Chat WebSocket connected", session_id=session_id, user_id=user_id)

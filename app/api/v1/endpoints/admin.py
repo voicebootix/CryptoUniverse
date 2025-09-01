@@ -246,7 +246,7 @@ async def configure_system(
 
 @router.get("/credit-pricing")
 async def get_credit_pricing_config(
-    current_user: User = Depends(require_role(UserRole.ADMIN))
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
     """Get current credit pricing configuration."""
     
@@ -272,17 +272,17 @@ async def get_credit_pricing_config(
         }
         
     except Exception as e:
-        logger.error("Failed to get credit pricing config", error=str(e))
+        logger.exception("Failed to get credit pricing config", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get pricing config: {str(e)}"
-        )
+        ) from e
 
 
 @router.put("/credit-pricing")
 async def update_credit_pricing_config(
     request: CreditPricingConfigRequest,
-    current_user: User = Depends(require_role(UserRole.ADMIN))
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
     """Update credit pricing configuration."""
     
@@ -367,17 +367,17 @@ async def update_credit_pricing_config(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to update credit pricing", error=str(e))
+        logger.exception("Failed to update credit pricing", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update pricing: {str(e)}"
-        )
+        ) from e
 
 
 @router.put("/strategy-pricing")
 async def update_strategy_pricing(
     request: StrategyPricingRequest,
-    current_user: User = Depends(require_role(UserRole.ADMIN))
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
 ):
     """Update strategy pricing configuration."""
     
@@ -427,11 +427,11 @@ async def update_strategy_pricing(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to update strategy pricing", error=str(e))
+        logger.exception("Failed to update strategy pricing", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update strategy pricing: {str(e)}"
-        )
+        ) from e
 
 
 @router.get("/users", response_model=UserListResponse)

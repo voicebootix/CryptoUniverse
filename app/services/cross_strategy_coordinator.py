@@ -122,9 +122,25 @@ class CrossStrategyCoordinator(LoggerMixin):
     async def _get_current_positions(self, user_id: str) -> Dict[str, Any]:
         """Get current portfolio positions for conflict analysis."""
         try:
-            from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+            # Wrap import in try/except to handle missing dependency
+            try:
+                from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+                portfolio_service = PortfolioRiskServiceExtended()
+            except ImportError as import_error:
+                self.logger.error(
+                    "PortfolioRiskServiceExtended dependency missing",
+                    error=str(import_error),
+                    remediation="Ensure app.services.portfolio_risk_core module is available"
+                )
+                raise RuntimeError("Portfolio risk service dependency is missing - cannot analyze position conflicts") from import_error
+            except Exception as init_error:
+                self.logger.error(
+                    "Failed to initialize PortfolioRiskServiceExtended",
+                    error=str(init_error),
+                    remediation="Check portfolio risk service configuration"
+                )
+                raise RuntimeError("Portfolio risk service initialization failed") from init_error
             
-            portfolio_service = PortfolioRiskServiceExtended()
             portfolio_result = await portfolio_service.get_portfolio_status(user_id)
             
             if portfolio_result.get("success"):
@@ -132,6 +148,9 @@ class CrossStrategyCoordinator(LoggerMixin):
             else:
                 return {}
                 
+        except RuntimeError:
+            # Re-raise runtime errors (dependency issues)
+            raise
         except Exception as e:
             self.logger.error("Failed to get current positions", error=str(e))
             return {}
@@ -535,55 +554,7 @@ class CrossStrategyCoordinator(LoggerMixin):
             self.logger.error("Coordinated execution failed", error=str(e))
             return {"success": False, "error": str(e)}
     
-    async def _resolve_conflicts(
-        self,
-        coordination: StrategyCoordination,
-        conflicts: List[Dict[str, Any]],
-        user_id: str
-    ) -> StrategyCoordination:
-        """Resolve conflicts through intelligent coordination."""
-        
-        # Prioritize conflict resolution by severity
-        high_severity = [c for c in conflicts if c["severity"] == "high"]
-        
-        if high_severity:
-            # High severity conflicts: skip or major modification
-            conflict = high_severity[0]
-            
-            if conflict["type"] == PositionConflict.OPPOSING_DIRECTIONS:
-                coordination.coordination_action = "skip"
-                coordination.conflict_resolution = f"Skipped: {conflict['description']}"
-            
-        else:
-            # Medium severity: modify signal
-            for conflict in conflicts:
-                if conflict["type"] == PositionConflict.OVER_CONCENTRATION:
-                    # Reduce position size
-                    max_allowed = self.coordination_rules["max_symbol_exposure"]
-                    current_exposure = conflict.get("current_exposure", 0)
-                    available_capacity = max_allowed - current_exposure
-                    
-                    if available_capacity > 0.01:  # At least 1%
-                        modified_signal = coordination.signal.copy()
-                        modified_signal["position_size_pct"] = available_capacity * 100
-                        
-                        coordination.coordination_action = "modify"
-                        coordination.modified_signal = modified_signal
-                        coordination.conflict_resolution = f"Reduced position size due to concentration limits"
-                    else:
-                        coordination.coordination_action = "skip"
-                        coordination.conflict_resolution = "Skipped: No capacity available"
-                
-                elif conflict["type"] == PositionConflict.CORRELATION_RISK:
-                    # Reduce position size for correlation management
-                    modified_signal = coordination.signal.copy()
-                    modified_signal["position_size_pct"] = modified_signal.get("position_size_pct", 5) * 0.5
-                    
-                    coordination.coordination_action = "modify"
-                    coordination.modified_signal = modified_signal
-                    coordination.conflict_resolution = "Reduced position size due to correlation risk"
-        
-        return coordination
+
 
 
 # Global service instance

@@ -18,14 +18,18 @@ class ConnectionManager:
                 self.active_connections[user_id] = []
             self.active_connections[user_id].append(websocket)
             logger.info("WebSocket connected", user_id=user_id)
-        except Exception as e:
+        except (ConnectionError, OSError) as e:
             # Connection might already be accepted or closed
             logger.warning("WebSocket connection error", error=str(e), user_id=user_id)
-            # Still add to connections if not already there
+            # Still add to connections if not already there for recovery
             if user_id not in self.active_connections:
                 self.active_connections[user_id] = []
             if websocket not in self.active_connections[user_id]:
                 self.active_connections[user_id].append(websocket)
+        except Exception as e:
+            # Unexpected error - log full traceback and re-raise
+            logger.exception("Unexpected WebSocket connection error", error=str(e), user_id=user_id)
+            raise
 
     def disconnect(self, websocket: WebSocket, user_id: str):
         if user_id in self.active_connections:

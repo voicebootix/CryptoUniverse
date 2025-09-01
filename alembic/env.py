@@ -31,22 +31,26 @@ target_metadata = Base.metadata
 
 
 def get_url():
-    """Get database URL from environment or config."""
+    """Get database URL from environment or config - SYNC VERSION FOR ALEMBIC."""
     # Try to get from environment first (for production/Render/Supabase)
     url = os.getenv("DATABASE_URL")
     if url:
-        # Supabase/Render provides DATABASE_URL, adjust for async SQLAlchemy
+        # Normalize to synchronous dialect for Alembic
         if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
-        elif url.startswith("postgresql://"):
-            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            url = url.replace("postgres://", "postgresql://", 1)
+        elif url.startswith("postgresql+asyncpg://"):
+            url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        # postgresql:// is already correct for sync
         return url
     
     # Fallback to config file  
     fallback_url = config.get_main_option("sqlalchemy.url")
-    if fallback_url and not fallback_url.startswith("postgresql+asyncpg://"):
-        if fallback_url.startswith("postgresql://"):
-            fallback_url = fallback_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    if fallback_url:
+        # Normalize fallback to sync dialect
+        if fallback_url.startswith("postgres://"):
+            fallback_url = fallback_url.replace("postgres://", "postgresql://", 1)
+        elif fallback_url.startswith("postgresql+asyncpg://"):
+            fallback_url = fallback_url.replace("postgresql+asyncpg://", "postgresql://", 1)
     return fallback_url
 
 

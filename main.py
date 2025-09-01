@@ -271,8 +271,8 @@ async def health_check():
 
     try:
         # Use your existing debug insight generator for system health
-        from app.services.debug_insight_generator import DebugInsightGeneratorService
-        debug_service = DebugInsightGeneratorService()
+        from app.services.debug_insight_generator import EnhancedDebugInsightGenerator
+        debug_service = EnhancedDebugInsightGenerator()
         
         # Get system health from your existing service
         system_health = await debug_service.get_system_health()

@@ -12,6 +12,7 @@ No mock data, no hardcoded values - production-ready credit system.
 """
 
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
@@ -27,7 +28,7 @@ from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
 from app.models.credit import CreditAccount, CreditTransaction
-from app.models.trading import Trade
+from app.models.trading import Trade, TradeStatus
 from app.services.profit_sharing_service import profit_sharing_service
 from app.services.rate_limit import rate_limiter
 
@@ -126,14 +127,18 @@ async def get_credit_balance(
             await db.refresh(credit_account)
         
         # Calculate profit potential and usage
-        profit_potential = Decimal(str(credit_account.total_purchased_credits * 4))  # 4x multiplier
+        # Calculate profit potential using dynamic pricing configuration
+        from app.services.profit_sharing_service import profit_sharing_service
+        await profit_sharing_service.ensure_pricing_loaded()
+        
+        profit_potential = Decimal(str(credit_account.total_purchased_credits * profit_sharing_service.credit_to_profit_ratio))
         
         # Get total profit earned to date
         profit_stmt = select(func.sum(Trade.profit_realized_usd)).where(
             and_(
                 Trade.user_id == current_user.id,
-                Trade.status == "completed",
-                Trade.is_simulation == False,
+                Trade.status == TradeStatus.COMPLETED,
+                Trade.is_simulation.is_(False),
                 Trade.profit_realized_usd > 0
             )
         )

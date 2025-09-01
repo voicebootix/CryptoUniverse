@@ -933,6 +933,9 @@ def mask_api_key(api_key: str) -> str:
 async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> Dict[str, Any]:
     """Get user's portfolio data from all connected exchanges using existing balance system."""
     try:
+        # Import SQLAlchemy helpers locally
+        from sqlalchemy import select, and_
+        
         # Get all active exchange accounts for user
         stmt = select(ExchangeAccount, ExchangeApiKey).join(
             ExchangeApiKey, ExchangeAccount.id == ExchangeApiKey.account_id
