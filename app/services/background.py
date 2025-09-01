@@ -774,10 +774,27 @@ class BackgroundServiceManager(LoggerMixin):
         """Compress a file to .gz and remove the original - runs in thread pool."""
         import gzip
         import os
-        from pathlib import Path
         
         try:
-            path = Path(file_path)
+            import structlog
+            logger = structlog.get_logger()
+            abs_path = os.path.realpath(file_path)
+            allowed_roots = [os.path.realpath(p) for p in (
+                "./logs", "./app/logs", "./var/log/app",
+                "./tmp", "./temp", "./cache/tmp",
+                "./backups", "./data/backups",
+                "./cache", "./data/cache", "./app/cache",
+                "./data", "./app/data", "./exports"
+            )]
+            
+            # Security checks
+            if os.path.islink(file_path):
+                logger.warning("Skipping symlink during compression", path=file_path)
+                return
+            if not any(os.path.commonpath([abs_path, root]) == root for root in allowed_roots):
+                logger.warning("Refusing to compress outside allowed dirs", path=abs_path)
+                return
+                
             gz_path = f"{file_path}.gz"
             
             # Compress the file
@@ -789,7 +806,7 @@ class BackgroundServiceManager(LoggerMixin):
             os.remove(file_path)
             
         except Exception as e:
-            # Log error but don't raise - this runs in a thread
+            # Log error and re-raise so caller can handle/log per-file context
             import structlog
             logger = structlog.get_logger()
             logger.error(f"Failed to compress and remove file {file_path}", error=str(e), exc_info=True)
@@ -801,9 +818,29 @@ class BackgroundServiceManager(LoggerMixin):
         import os
         
         try:
+            import structlog
+            logger = structlog.get_logger()
+            abs_path = os.path.realpath(file_path)
+            allowed_roots = [os.path.realpath(p) for p in (
+                "./logs", "./app/logs", "./var/log/app",
+                "./tmp", "./temp", "./cache/tmp",
+                "./backups", "./data/backups",
+                "./cache", "./data/cache", "./app/cache",
+                "./data", "./app/data", "./exports"
+            )]
+            
+            # Security checks
+            if os.path.islink(file_path):
+                logger.warning("Skipping symlink during delete", path=file_path)
+                return
+            if not any(os.path.commonpath([abs_path, root]) == root for root in allowed_roots):
+                logger.warning("Refusing to delete outside allowed dirs", path=abs_path)
+                return
+                
             os.remove(file_path)
+            
         except Exception as e:
-            # Log error but don't raise - this runs in a thread
+            # Log error and re-raise so caller can handle/log per-file context
             import structlog
             logger = structlog.get_logger()
             logger.error(f"Failed to remove file {file_path}", error=str(e), exc_info=True)

@@ -8,6 +8,7 @@ Create Date: 2025-01-01 00:00:00.000000
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, OperationalError, ProgrammingError
 
 # revision identifiers, used by Alembic.
 revision = '002'
@@ -38,34 +39,23 @@ def upgrade():
             # Log duplicates found
             print(f"Found {len(duplicates)} duplicate exchange account combinations")
             
-            # Resolve duplicates by keeping the most recent record
-            for dup in duplicates:
-                user_id, exchange_name, account_name = dup[0], dup[1], dup[2]
-                
-                resolve_duplicates = text("""
-                    DELETE FROM exchange_accounts 
-                    WHERE id NOT IN (
-                        SELECT id FROM (
-                            SELECT id, ROW_NUMBER() OVER (
-                                PARTITION BY user_id, exchange_name, account_name 
-                                ORDER BY created_at DESC, id DESC
-                            ) as rn
-                            FROM exchange_accounts 
-                            WHERE user_id = :user_id 
-                            AND exchange_name = :exchange_name 
-                            AND account_name = :account_name
-                        ) ranked WHERE rn = 1
-                    )
-                    AND user_id = :user_id 
-                    AND exchange_name = :exchange_name 
-                    AND account_name = :account_name
-                """)
-                
-                connection.execute(resolve_duplicates, {
-                    'user_id': user_id,
-                    'exchange_name': exchange_name, 
-                    'account_name': account_name
-                })
+            # Resolve ALL duplicates in a single set-based DELETE using CTE
+            resolve_all_duplicates = text("""
+                WITH ranked_accounts AS (
+                    SELECT id, ROW_NUMBER() OVER (
+                        PARTITION BY user_id, exchange_name, account_name 
+                        ORDER BY created_at DESC, id DESC
+                    ) as rn
+                    FROM exchange_accounts
+                )
+                DELETE FROM exchange_accounts 
+                WHERE id IN (
+                    SELECT id FROM ranked_accounts WHERE rn > 1
+                )
+            """)
+            
+            result = connection.execute(resolve_all_duplicates)
+            print(f"Removed {result.rowcount} duplicate records in single operation")
         
         # Create performance indexes concurrently
         op.create_index(
@@ -130,14 +120,27 @@ def upgrade():
 
     # Add the constraint using the unique index (in transaction)
     try:
-        op.execute(text("""
+        alter_statement = """
             ALTER TABLE exchange_accounts 
             ADD CONSTRAINT unique_user_exchange_account 
             UNIQUE USING INDEX uq_user_exchange_account_idx
-        """))
-    except Exception:
-        # Constraint might already exist, continue
-        pass
+        """
+        op.execute(text(alter_statement))
+    except (DBAPIError, OperationalError, ProgrammingError) as e:
+        # Expected: constraint already exists or index doesn't exist
+        import logging
+        logger = logging.getLogger('alembic.runtime.migration')
+        logger.warning(
+            f"Constraint creation failed (likely already exists): {e}. "
+            f"Statement: {alter_statement.strip()}"
+        )
+        # Continue - this is expected for idempotent migrations
+    except Exception as e:
+        # Unexpected error - re-raise to surface real issues
+        import logging
+        logger = logging.getLogger('alembic.runtime.migration')
+        logger.error(f"Unexpected error creating constraint: {e}")
+        raise
 
 
 def downgrade():
@@ -147,8 +150,17 @@ def downgrade():
         # Drop constraint first
         try:
             op.drop_constraint('unique_user_exchange_account', 'exchange_accounts')
-        except Exception:
-            pass
+        except (DBAPIError, OperationalError, ProgrammingError) as e:
+            # Expected: constraint doesn't exist
+            import logging
+            logger = logging.getLogger('alembic.runtime.migration')
+            logger.warning(f"Constraint drop failed (likely doesn't exist): {e}")
+        except Exception as e:
+            # Unexpected error - log but continue with index cleanup
+            import logging
+            logger = logging.getLogger('alembic.runtime.migration')
+            logger.error(f"Unexpected error dropping constraint: {e}")
+            # Don't raise - continue with index cleanup
         
         # Drop indexes concurrently
         indexes_to_drop = [
@@ -168,6 +180,14 @@ def downgrade():
                     table_name='exchange_accounts',
                     postgresql_concurrently=True
                 )
-            except Exception:
-                # Index might not exist, continue
-                pass
+            except (DBAPIError, OperationalError, ProgrammingError) as e:
+                # Expected: index doesn't exist
+                import logging
+                logger = logging.getLogger('alembic.runtime.migration')
+                logger.warning(f"Index drop failed for {index_name} (likely doesn't exist): {e}")
+            except Exception as e:
+                # Unexpected error - log but continue with other indexes
+                import logging
+                logger = logging.getLogger('alembic.runtime.migration')
+                logger.error(f"Unexpected error dropping index {index_name}: {e}")
+                # Don't raise - continue with other indexes
