@@ -1090,14 +1090,14 @@ async def fetch_kraken_balances(api_key: str, api_secret: str) -> List[Dict[str,
         
         base_url = "https://api.kraken.com"
         endpoint = "/0/private/Balance"
-        nonce = kraken_nonce_manager.get_nonce()  # ENTERPRISE NONCE MANAGEMENT
+        nonce = await kraken_nonce_manager.get_nonce()  # ENTERPRISE NONCE MANAGEMENT
         
         # Prepare POST data
-        post_data = urllib.parse.urlencode({"nonce": nonce})
+        post_data = urllib.parse.urlencode({"nonce": str(nonce)})
         
         # Create signature for Kraken API
         encoded_endpoint = endpoint.encode()
-        encoded_nonce_postdata = (nonce + post_data).encode()
+        encoded_nonce_postdata = (str(nonce) + post_data).encode()
         sha256_hash = hashlib.sha256(encoded_nonce_postdata).digest()
         signature_data = encoded_endpoint + sha256_hash
         

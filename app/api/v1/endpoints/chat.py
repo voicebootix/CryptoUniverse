@@ -256,11 +256,11 @@ async def chat_websocket(
             await asyncio.sleep(0.1)
             
     except WebSocketDisconnect:
-        manager.disconnect(websocket, user_id)
+        await manager.disconnect(websocket, user_id)
         logger.info("Chat WebSocket disconnected", session_id=session_id, user_id=user_id)
     except Exception as e:
         logger.error("Chat WebSocket error", error=str(e), session_id=session_id)
-        manager.disconnect(websocket, user_id)
+        await manager.disconnect(websocket, user_id)
 
 
 @router.post("/command/execute")

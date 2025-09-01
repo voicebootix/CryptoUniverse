@@ -140,7 +140,7 @@ async def get_credit_balance(
         profit_stmt = select(func.sum(Trade.profit_realized_usd)).where(
             and_(
                 Trade.user_id == current_user.id,
-                Trade.status == TradeStatus.COMPLETED,
+                Trade.status == "completed",  # Use string value instead of enum
                 Trade.is_simulation.is_(False),
                 Trade.profit_realized_usd > 0
             )
@@ -709,8 +709,10 @@ async def get_credit_transaction_history(
     """Get user's credit transaction history."""
     
     try:
-        stmt = select(CreditTransaction).where(
-            CreditTransaction.user_id == current_user.id
+        stmt = select(CreditTransaction).join(
+            CreditAccount, CreditTransaction.account_id == CreditAccount.id
+        ).where(
+            CreditAccount.user_id == current_user.id
         ).order_by(desc(CreditTransaction.created_at)).limit(limit)
         
         result = await db.execute(stmt)
