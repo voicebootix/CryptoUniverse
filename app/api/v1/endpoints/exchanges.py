@@ -613,7 +613,7 @@ async def get_exchange_balances(
             )
         
         # Get fresh balances from exchange
-        balances = await fetch_exchange_balances(exchange, api_key, db)
+        balances = await fetch_exchange_balances(exchange, api_key)
         
         # Calculate total USD value
         total_value_usd = sum(
@@ -1070,7 +1070,7 @@ async def get_kucoin_prices(currencies: List[str]) -> Dict[str, float]:
         return {}
 
 
-async def fetch_exchange_balances(exchange: str, api_key: ExchangeApiKey, db: AsyncSession) -> List[Dict[str, Any]]:
+async def fetch_exchange_balances(exchange: str, api_key: ExchangeApiKey) -> List[Dict[str, Any]]:
     """Dispatch to appropriate exchange balance fetcher."""
     try:
         # Decrypt API credentials
