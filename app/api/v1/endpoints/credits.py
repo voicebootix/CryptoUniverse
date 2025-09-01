@@ -17,7 +17,7 @@ import hmac
 import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Header
@@ -133,7 +133,11 @@ async def get_credit_balance(
         from app.services.profit_sharing_service import profit_sharing_service
         await profit_sharing_service.ensure_pricing_loaded()
         
-        profit_potential = Decimal(str(credit_account.total_credits * profit_sharing_service.credit_to_profit_ratio))
+        # Convert ratio to Decimal for currency-safe arithmetic
+        credit_to_profit_ratio_decimal = Decimal(str(profit_sharing_service.credit_to_profit_ratio))
+        total_credits_decimal = Decimal(str(credit_account.total_credits))
+        
+        profit_potential = total_credits_decimal * credit_to_profit_ratio_decimal
         
         # Get total profit earned to date
         profit_stmt = select(func.sum(Trade.profit_realized_usd)).where(
@@ -211,7 +215,8 @@ async def purchase_credits(
         await _store_pending_payment(
             user_id=str(current_user.id),
             payment_data=payment_result,
-            credit_amount=int(request.amount_usd),  # 1:1 ratio
+            # Proper Decimal rounding for credit calculation
+            credit_amount=int(Decimal(str(request.amount_usd)).quantize(Decimal('1'), rounding=ROUND_HALF_UP)),
             db=db
         )
         

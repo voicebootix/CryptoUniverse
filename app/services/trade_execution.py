@@ -1019,10 +1019,38 @@ class TradeExecutionService(LoggerMixin):
             async for db in get_database():
                 from app.models.trading import Trade, TradeAction, TradeStatus, OrderType
                 from decimal import Decimal
+                import uuid
                 
-                # Create trade record
+                # Validate required fields before creating Trade
+                if not exchange_account_id:
+                    self.logger.error("Cannot create Trade record: exchange_account_id is required")
+                    return
+                
+                # Convert IDs to proper UUID format
+                try:
+                    user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+                    account_uuid = uuid.UUID(exchange_account_id) if isinstance(exchange_account_id, str) else exchange_account_id
+                    external_order_uuid = uuid.UUID(execution_result["order_id"]) if execution_result.get("order_id") else None
+                except ValueError as e:
+                    self.logger.error("Invalid UUID format for Trade creation", error=str(e))
+                    return
+                
+                # Safe fee extraction with fallback chain
+                fees_paid = execution_result.get("fees") or execution_result.get("total_fee", 0)
+                fee_currency = execution_result.get("fee_asset")
+                
+                # Derive fee currency from fills if not available
+                if not fee_currency and execution_result.get("fills"):
+                    fills = execution_result["fills"]
+                    if fills and isinstance(fills, list) and len(fills) > 0:
+                        fee_currency = fills[0].get("fee_asset", "USDT")
+                
+                if not fee_currency:
+                    fee_currency = "USDT"  # Safe fallback
+                
+                # Create trade record with proper types
                 trade = Trade(
-                    user_id=user_id,
+                    user_id=user_uuid,
                     symbol=trade_request["symbol"],
                     action=TradeAction.BUY if trade_request["action"].upper() == "BUY" else TradeAction.SELL,
                     status=TradeStatus.COMPLETED,
@@ -1030,16 +1058,16 @@ class TradeExecutionService(LoggerMixin):
                     executed_quantity=Decimal(str(execution_result["executed_quantity"])),
                     executed_price=Decimal(str(execution_result["execution_price"])),
                     order_type=OrderType.MARKET if trade_request.get("order_type", "MARKET").upper() == "MARKET" else OrderType.LIMIT,
-                    external_order_id=execution_result.get("order_id"),
+                    external_order_id=external_order_uuid,
                     total_value=Decimal(str(position_value_usd)),
-                    fees_paid=Decimal(str(execution_result.get("total_fee", 0))),
-                    fee_currency=execution_result.get("fee_asset", "USDT"),
+                    fees_paid=Decimal(str(fees_paid)),
+                    fee_currency=fee_currency,
                     is_simulation=False,
                     execution_mode="real",
                     urgency="medium",
                     market_price_at_execution=Decimal(str(execution_result["execution_price"])),
                     credits_used=0,  # Will be calculated by credit system
-                    exchange_account_id=exchange_account_id,  # Required field
+                    exchange_account_id=account_uuid,
                     executed_at=datetime.utcnow(),
                     completed_at=datetime.utcnow(),
                     meta_data={
