@@ -348,7 +348,7 @@ async def list_exchange_connections(
         connections = []
         for api_key in api_keys:
             try:
-                # Decrypt for display (masked)  
+            # Decrypt for display (masked)
                 decrypted_api_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
                 
                 # Get exchange account info
@@ -359,26 +359,26 @@ async def list_exchange_connections(
                 
                 if not account:
                     continue  # Skip if account not found
-                
-                # Get daily volume usage
+            
+            # Get daily volume usage
                 daily_volume = await get_daily_volume_usage(current_user.id, account.exchange_name)
-                
-                connection = ExchangeApiKeyResponse(
-                    id=str(api_key.id),
+            
+            connection = ExchangeApiKeyResponse(
+                id=str(api_key.id),
                     exchange=account.exchange_name,
                     nickname=api_key.key_name,  # Use key_name as nickname
-                    api_key_masked=mask_api_key(decrypted_api_key),
+                api_key_masked=mask_api_key(decrypted_api_key),
                     is_active=account.status == ExchangeStatus.ACTIVE,
                     trading_enabled=account.trading_enabled,
                     sandbox=account.is_simulation,  # Use is_simulation as sandbox
-                    created_at=api_key.created_at,
+                created_at=api_key.created_at,
                     last_used=api_key.last_used_at,
-                    permissions=api_key.permissions or [],
+                permissions=api_key.permissions or [],
                     connection_status="connected" if api_key.status == ApiKeyStatus.ACTIVE else "inactive",
                     daily_volume_limit=None,  # Set to None for now
-                    daily_volume_used=daily_volume
-                )
-                connections.append(connection)
+                daily_volume_used=daily_volume
+            )
+            connections.append(connection)
                 
             except Exception as e:
                 logger.error(
@@ -443,7 +443,7 @@ async def update_exchange_connection(
             select(ExchangeApiKey)
             .join(ExchangeAccount, ExchangeApiKey.account_id == ExchangeAccount.id)
             .filter(
-                ExchangeApiKey.id == api_key_id,
+            ExchangeApiKey.id == api_key_id,
                 ExchangeAccount.user_id == current_user.id
             )
         )
@@ -503,7 +503,7 @@ async def test_exchange_connection_endpoint(
             select(ExchangeApiKey)
             .join(ExchangeAccount, ExchangeApiKey.account_id == ExchangeAccount.id)
             .filter(
-                ExchangeApiKey.id == api_key_id,
+            ExchangeApiKey.id == api_key_id,
                 ExchangeAccount.user_id == current_user.id
             )
         )
@@ -660,8 +660,8 @@ async def disconnect_exchange(
         from sqlalchemy import select
         result = await db.execute(
             select(ExchangeApiKey).filter(
-                ExchangeApiKey.id == api_key_id,
-                ExchangeApiKey.user_id == current_user.id
+            ExchangeApiKey.id == api_key_id,
+            ExchangeApiKey.user_id == current_user.id
             )
         )
         api_key = result.scalar_one_or_none()
@@ -683,7 +683,7 @@ async def disconnect_exchange(
         db.delete(api_key)
         
         # Remove exchange account if no other API keys
-        if exchange_account:
+            if exchange_account:
             # Check if this was the only API key for this account
             from sqlalchemy import select, func
             count_result = await db.execute(
@@ -1144,7 +1144,7 @@ async def fetch_kraken_balances(api_key: str, api_secret: str) -> List[Dict[str,
                 balances.append({
                     "asset": normalized_currency,
                     "free": balance_float,  # Kraken doesn't separate free/locked in balance endpoint
-                    "locked": 0.0,
+                "locked": 0.0,
                     "total": balance_float,
                     "value_usd": round(value_usd, 2)
                 })
@@ -1228,7 +1228,7 @@ async def get_kraken_prices(currencies: List[str]) -> Dict[str, float]:
                         continue
                 
                 return prices
-                
+        
     except Exception as e:
         logger.error(f"Failed to fetch Kraken prices: {str(e)}")
         return {"USD": 1.0}
