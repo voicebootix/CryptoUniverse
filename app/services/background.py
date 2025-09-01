@@ -28,6 +28,11 @@ class BackgroundServiceManager(LoggerMixin):
         self.tasks = {}
         self.start_time = None
         self.redis = None
+        
+        # Disk cleanup concurrency control
+        self._cleanup_lock = asyncio.Lock()
+        self._last_cleanup: float = 0
+        self._cleanup_cooldown = 300  # 5 minutes cooldown
         # Configurable service intervals (seconds)
         self.intervals = {
             "health_monitor": 60,        # 1 minute
@@ -240,9 +245,9 @@ class BackgroundServiceManager(LoggerMixin):
                 if disk_percent > 80:
                     alerts.append(f"High disk usage: {disk_percent}%")
                     
-                    # Trigger automated cleanup if disk usage is critical
+                    # Trigger automated cleanup if disk usage is critical (non-blocking)
                     if disk_percent > 85:
-                        await self._automated_disk_cleanup()
+                        asyncio.create_task(self._run_cleanup_if_allowed())
                 
                 # Check Redis connection
                 if self.redis:
@@ -685,3 +690,29 @@ class BackgroundServiceManager(LoggerMixin):
             
         except Exception as e:
             self.logger.error("Automated disk cleanup failed", error=str(e))
+    
+    async def _run_cleanup_if_allowed(self):
+        """Run disk cleanup with cooldown and single-flight protection."""
+        current_time = time.time()
+        
+        # Check cooldown
+        if current_time - self._last_cleanup < self._cleanup_cooldown:
+            self.logger.debug(f"Disk cleanup skipped - cooldown active ({self._cleanup_cooldown - (current_time - self._last_cleanup):.0f}s remaining)")
+            return
+        
+        # Single-flight protection
+        if self._cleanup_lock.locked():
+            self.logger.debug("Disk cleanup already in progress - skipping")
+            return
+        
+        async with self._cleanup_lock:
+            try:
+                self._last_cleanup = current_time
+                self.logger.info("Starting non-blocking disk cleanup")
+                await self._automated_disk_cleanup()
+                self.logger.info("Non-blocking disk cleanup completed successfully")
+            except Exception as e:
+                self.logger.error("Non-blocking disk cleanup failed", error=str(e), exc_info=True)
+            finally:
+                # Update last cleanup time even on failure to prevent spam
+                self._last_cleanup = time.time()

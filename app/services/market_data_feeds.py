@@ -667,7 +667,9 @@ class MarketDataFeeds:
                         await asyncio.sleep(delay)
                         continue
                     else:
-                        raise e
+                        # On final attempt, return error instead of raising
+                        logger.error(f"CoinGecko request failed for {symbol} after {max_retries} attempts: {e}")
+                        return {"success": False, "error": str(e), "final_attempt": True}
             
             return {"success": False, "error": "Max retries exceeded"}
                     

@@ -41,25 +41,24 @@ engine = create_async_engine(
     # ENTERPRISE: Additional performance settings
     execution_options={
         "isolation_level": "READ_COMMITTED",
-        "compiled_cache": {},  # Enable statement caching
-        "autoflush": False,    # Manual flush control for better performance
     },
-    # ENTERPRISE: Query optimization settings
+    # ENTERPRISE: Query optimization settings for PostgreSQL only
     connect_args={
-        "statement_timeout": "30000",  # 30 second timeout for queries
         "command_timeout": 30,
         "server_settings": {
+            "statement_timeout": "30s",  # Move to server_settings for asyncpg
             "jit": "off",  # Disable JIT for consistent performance
             "application_name": "crypto_trading_platform",
         }
     } if "postgresql" in get_async_database_url() else {}
 )
 
-# Async session factory
+# Async session factory with proper session-level settings
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
-    expire_on_commit=False
+    expire_on_commit=False,
+    autoflush=False  # Move autoflush to sessionmaker where it belongs
 )
 
 # Metadata and Base

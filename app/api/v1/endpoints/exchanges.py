@@ -16,7 +16,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -613,7 +613,7 @@ async def get_exchange_balances(
             )
         
         # Get fresh balances from exchange
-        balances = await fetch_exchange_balances(exchange, api_key)
+        balances = await fetch_exchange_balances(api_key, db)
         
         # Calculate total USD value
         total_value_usd = sum(
@@ -783,6 +783,7 @@ async def fetch_exchange_balances(api_key: ExchangeApiKey, db: AsyncSession) -> 
         exchange_name = account.exchange_name.lower()
         
         # Decrypt API credentials
+        cipher_suite = Fernet(get_encryption_key())
         decrypted_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
         decrypted_secret = cipher_suite.decrypt(api_key.encrypted_secret_key.encode()).decode()
         
@@ -801,9 +802,15 @@ async def fetch_exchange_balances(api_key: ExchangeApiKey, db: AsyncSession) -> 
             # Return empty list for unsupported exchanges
             return []
         
-    except Exception as e:
-        logger.error(f"Failed to fetch balances for API key {api_key.id}", error=str(e))
+    except InvalidToken as e:
+        logger.error(f"Failed to decrypt API credentials for key {api_key.id}", error=str(e))
         return []
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        logger.error(f"Network error fetching balances for API key {api_key.id}", error=str(e))
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error fetching balances for API key {api_key.id}", error=str(e), exc_info=True)
+        raise
 
 
 async def fetch_binance_balances(api_key: str, api_secret: str) -> List[Dict[str, Any]]:
@@ -1069,36 +1076,6 @@ async def get_kucoin_prices(currencies: List[str]) -> Dict[str, float]:
         logger.error(f"Failed to fetch KuCoin prices: {str(e)}")
         return {}
 
-
-async def fetch_exchange_balances(exchange: str, api_key: ExchangeApiKey) -> List[Dict[str, Any]]:
-    """Dispatch to appropriate exchange balance fetcher."""
-    try:
-        # Decrypt API credentials
-        cipher_suite = Fernet(get_encryption_key())
-        decrypted_key = cipher_suite.decrypt(api_key.encrypted_key.encode()).decode()
-        decrypted_secret = cipher_suite.decrypt(api_key.encrypted_secret.encode()).decode()
-        
-        # Get passphrase if needed (KuCoin)
-        passphrase = None
-        if api_key.encrypted_passphrase:
-            passphrase = cipher_suite.decrypt(api_key.encrypted_passphrase.encode()).decode()
-        
-        # Dispatch to exchange-specific function
-        if exchange.lower() == "binance":
-            return await fetch_binance_balances(decrypted_key, decrypted_secret)
-        elif exchange.lower() == "kraken":
-            return await fetch_kraken_balances(decrypted_key, decrypted_secret)
-        elif exchange.lower() == "kucoin":
-            return await fetch_kucoin_balances(decrypted_key, decrypted_secret, passphrase)
-        elif exchange.lower() == "coinbase":
-            return await fetch_coinbase_balances(decrypted_key, decrypted_secret)
-        else:
-            logger.error(f"Unsupported exchange for balance fetching: {exchange}")
-            return []
-            
-    except Exception as e:
-        logger.error(f"Failed to fetch {exchange} balances: {e}")
-        return []
 
 
 async def fetch_kraken_balances(api_key: str, api_secret: str) -> List[Dict[str, Any]]:

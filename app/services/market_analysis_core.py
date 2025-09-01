@@ -2429,9 +2429,12 @@ class MarketAnalysisService(LoggerMixin):
             else:
                 return None
                 
-        except Exception as e:
-            self.logger.error(f"Real asset discovery failed for {exchange}", error=str(e))
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+            self.logger.error(f"Real asset discovery failed for {exchange}", error=str(e), exc_info=True)
             return None
+        except Exception as e:
+            self.logger.exception(f"Unexpected error in asset discovery for {exchange}")
+            raise
     
     async def _discover_binance_assets(self, min_volume_usd: Optional[float] = None) -> Dict[str, Any]:
         """Discover real Binance trading pairs."""
@@ -2469,17 +2472,22 @@ class MarketAnalysisService(LoggerMixin):
                 
                 for symbol_info in symbols_data:
                     if symbol_info.get("status") == "TRADING":
+                        symbol = symbol_info["symbol"]
+                        volume_usd = volume_lookup.get(symbol, 0)
+                        
+                        # Apply min_volume_usd filter if specified
+                        if min_volume_usd is not None and volume_usd < min_volume_usd:
+                            continue
+                        
                         active_pairs += 1
                         base_assets.add(symbol_info["baseAsset"])
                         quote_assets.add(symbol_info["quoteAsset"])
                         
                         # Add to volume leaders if high volume
-                        symbol = symbol_info["symbol"]
-                        volume = volume_lookup.get(symbol, 0)
-                        if volume > 1000000:  # $1M+ volume
+                        if volume_usd > 1000000:  # $1M+ volume
                             volume_leaders.append({
                                 "symbol": f"{symbol_info['baseAsset']}/{symbol_info['quoteAsset']}",
-                                "volume_24h": volume,
+                                "volume_24h": volume_usd,
                                 "base_asset": symbol_info["baseAsset"]
                             })
                 
@@ -2515,22 +2523,47 @@ class MarketAnalysisService(LoggerMixin):
                     
                     pairs_data = data.get("result", {})
                     
-                    base_assets = set()
-                    quote_assets = set()
-                    active_pairs = 0
-                    volume_leaders = []
-                    
-                    for pair_name, pair_info in pairs_data.items():
-                        if pair_info.get("status") == "online":
-                            active_pairs += 1
-                            base = pair_info.get("base", "").replace("X", "").replace("Z", "")
-                            quote = pair_info.get("quote", "").replace("X", "").replace("Z", "")
-                            base_assets.add(base)
-                            quote_assets.add(quote)
-                            
+                # Get 24hr ticker data for volume filtering
+                volume_lookup = {}
+                try:
+                    async with session.get(
+                        "https://api.kraken.com/0/public/Ticker",
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as ticker_response:
+                        if ticker_response.status == 200:
+                            ticker_data = await ticker_response.json()
+                            if not ticker_data.get("error"):
+                                for pair, data in ticker_data.get("result", {}).items():
+                                    # Volume is in quote currency, approximate USD value
+                                    volume_quote = float(data.get("v", [0, 0])[1])  # 24h volume
+                                    price = float(data.get("c", [0])[0])  # Last price
+                                    volume_lookup[pair] = volume_quote * price
+                except Exception:
+                    pass  # Continue without volume data
+                
+                base_assets = set()
+                quote_assets = set()
+                active_pairs = 0
+                volume_leaders = []
+                
+                for pair_name, pair_info in pairs_data.items():
+                    if pair_info.get("status") == "online":
+                        volume_usd = volume_lookup.get(pair_name, 0)
+                        
+                        # Apply min_volume_usd filter if specified
+                        if min_volume_usd is not None and volume_usd < min_volume_usd:
+                            continue
+                        
+                        active_pairs += 1
+                        base = pair_info.get("base", "").replace("X", "").replace("Z", "")
+                        quote = pair_info.get("quote", "").replace("X", "").replace("Z", "")
+                        base_assets.add(base)
+                        quote_assets.add(quote)
+                        
+                        if volume_usd > 100000:  # $100K+ volume for inclusion
                             volume_leaders.append({
                                 "symbol": f"{base}/{quote}",
-                                "volume_24h": 0,  # Would need ticker API for real volume
+                                "volume_24h": volume_usd,
                                 "base_asset": base
                             })
                     
@@ -2563,22 +2596,48 @@ class MarketAnalysisService(LoggerMixin):
                     
                     symbols_data = data.get("data", [])
                     
-                    base_assets = set()
-                    quote_assets = set()
-                    active_pairs = 0
-                    volume_leaders = []
-                    
-                    for symbol_info in symbols_data:
-                        if symbol_info.get("enableTrading"):
-                            active_pairs += 1
-                            base = symbol_info.get("baseCurrency", "")
-                            quote = symbol_info.get("quoteCurrency", "")
-                            base_assets.add(base)
-                            quote_assets.add(quote)
-                            
+                # Get 24hr stats for volume filtering
+                volume_lookup = {}
+                try:
+                    async with session.get(
+                        "https://api.kucoin.com/api/v1/market/allTickers",
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as ticker_response:
+                        if ticker_response.status == 200:
+                            ticker_data = await ticker_response.json()
+                            if ticker_data.get("code") == "200000":
+                                for ticker in ticker_data.get("data", {}).get("ticker", []):
+                                    symbol = ticker.get("symbol", "")
+                                    vol = float(ticker.get("vol", 0))
+                                    price = float(ticker.get("last", 0))
+                                    volume_lookup[symbol] = vol * price
+                except Exception:
+                    pass  # Continue without volume data
+                
+                base_assets = set()
+                quote_assets = set()
+                active_pairs = 0
+                volume_leaders = []
+                
+                for symbol_info in symbols_data:
+                    if symbol_info.get("enableTrading"):
+                        symbol = symbol_info.get("symbol", "")
+                        volume_usd = volume_lookup.get(symbol, 0)
+                        
+                        # Apply min_volume_usd filter if specified
+                        if min_volume_usd is not None and volume_usd < min_volume_usd:
+                            continue
+                        
+                        active_pairs += 1
+                        base = symbol_info.get("baseCurrency", "")
+                        quote = symbol_info.get("quoteCurrency", "")
+                        base_assets.add(base)
+                        quote_assets.add(quote)
+                        
+                        if volume_usd > 50000:  # $50K+ volume for inclusion
                             volume_leaders.append({
                                 "symbol": f"{base}/{quote}",
-                                "volume_24h": 0,  # Would need ticker API for real volume
+                                "volume_24h": volume_usd,
                                 "base_asset": base
                             })
                     
@@ -2812,9 +2871,14 @@ class MarketAnalysisService(LoggerMixin):
             
             return min(opportunities, 10)  # Cap at 10
             
-        except Exception as e:
-            self.logger.debug("Arbitrage detection failed", error=str(e))
+        except asyncio.CancelledError:
+            raise
+        except (ImportError, aiohttp.ClientError, ValueError) as e:
+            self.logger.exception("Arbitrage detection failed", error=str(e))
             return 0
+        except Exception as e:
+            self.logger.exception("Unexpected error in arbitrage detection")
+            raise
 
 
 # Global service instance
