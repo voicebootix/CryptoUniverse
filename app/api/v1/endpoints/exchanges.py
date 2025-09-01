@@ -683,7 +683,7 @@ async def disconnect_exchange(
         db.delete(api_key)
         
         # Remove exchange account if no other API keys
-            if exchange_account:
+        if exchange_account:
             # Check if this was the only API key for this account
             from sqlalchemy import select, func
             count_result = await db.execute(
