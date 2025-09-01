@@ -41,7 +41,7 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.database import get_database
+from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_manager
 from app.core.logging import LoggerMixin
 from app.models.ai import AIModel, AIConsensus, AISignal

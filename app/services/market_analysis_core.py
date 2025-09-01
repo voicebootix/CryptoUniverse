@@ -38,6 +38,10 @@ import structlog
 
 from app.core.logging import LoggerMixin
 # Avoid circular import - define configurations locally
+
+logger = structlog.get_logger(__name__)
+
+
 class ExchangeConfigurations:
     """Exchange API configurations for market data."""
     
@@ -47,26 +51,108 @@ class ExchangeConfigurations:
             "ticker": "/api/v3/ticker/24hr",
             "price": "/api/v3/ticker/price"
         },
-        "rate_limit": 1200
+        "rate_limit": 1200,
+        "weight_limits": {
+            "ticker": 1,
+            "price": 1
+        }
     }
     
     KRAKEN = {
-        "base_url": "https://api.kraken.com", 
+        "base_url": "https://api.kraken.com",
         "endpoints": {
-            "ticker": "/0/public/Ticker"
+            "ticker": "/0/public/Ticker",
+            "depth": "/0/public/Depth"
         },
-        "rate_limit": 60
+        "rate_limit": 60,
+        "counter_limit": 15
     }
     
     KUCOIN = {
         "base_url": "https://api.kucoin.com",
         "endpoints": {
+            "ticker": "/api/v1/market/allTickers",
             "stats": "/api/v1/market/stats"
         },
-        "rate_limit": 1800
+        "rate_limit": 1800,
+        "weight_limits": {
+            "ticker": 1,
+            "stats": 1
+        }
     }
+    
+    @classmethod
+    def get_all_exchanges(cls) -> list[str]:
+        """Get list of all supported exchanges."""
+        return ["binance", "kraken", "kucoin"]
+    
+    @classmethod
+    def get_config(cls, exchange: str) -> dict:
+        """Get configuration for specific exchange."""
+        configs = {
+            "binance": cls.BINANCE,
+            "kraken": cls.KRAKEN, 
+            "kucoin": cls.KUCOIN
+        }
+        return configs.get(exchange.lower(), {})
 
-logger = structlog.get_logger(__name__)
+
+class DynamicExchangeManager(LoggerMixin):
+    """Dynamic Exchange Manager - handles multi-exchange connectivity."""
+    
+    def __init__(self):
+        self.exchange_configs = {
+            "binance": ExchangeConfigurations.BINANCE,
+            "kraken": ExchangeConfigurations.KRAKEN,
+            "kucoin": ExchangeConfigurations.KUCOIN
+        }
+        self.rate_limiters = {}
+        self.circuit_breakers = {}
+        
+        # Initialize rate limiters for each exchange
+        for exchange in self.exchange_configs:
+            self.rate_limiters[exchange] = {
+                "requests": 0,
+                "window_start": time.time(),
+                "max_requests": self.exchange_configs[exchange]["rate_limit"]
+            }
+            self.circuit_breakers[exchange] = {
+                "state": "CLOSED",
+                "failure_count": 0,
+                "last_failure": None,
+                "success_count": 0
+            }
+    
+    async def fetch_from_exchange(
+        self, 
+        exchange: str, 
+        endpoint: str, 
+        params: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """Fetch data from specific exchange with rate limiting."""
+        config = self.exchange_configs[exchange]
+        url = config["base_url"] + endpoint
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    raise Exception(f"{exchange} API error: {response.status}")
+                return await response.json()
+    
+    async def get_exchange_health(self) -> Dict[str, Any]:
+        """Get health status of all exchanges."""
+        health_report = {}
+        
+        for exchange in self.exchange_configs:
+            breaker = self.circuit_breakers[exchange]
+            health_report[exchange] = {
+                "circuit_breaker_state": breaker["state"],
+                "failure_count": breaker["failure_count"],
+                "success_count": breaker["success_count"],
+                "health_status": "HEALTHY" if breaker["state"] == "CLOSED" else "DEGRADED"
+            }
+        
+        return health_report
 
 
 class DynamicExchangeManager(LoggerMixin):
@@ -311,68 +397,8 @@ class MarketAnalysisService(LoggerMixin):
         except Exception as e:
             await self._update_performance_metrics(time.time() - start_time, False, user_id)
             raise e
-    
-    async def cross_exchange_arbitrage_scanner(
-        self, 
-        symbols: Optional[str] = None,
-        min_profit_bps: int = 5,
-        max_opportunities: int = 10,
-        user_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Cross-exchange arbitrage opportunity scanner."""
-        start_time = time.time()
-        
-        try:
-            if symbols:
-                symbol_list = [s.strip() for s in symbols.split(",")]
-            else:
-                symbol_list = ["BTC/USDT", "ETH/USDT", "ADA/USDT", "SOL/USDT", "DOT/USDT"]
-            
-            # Simple arbitrage opportunities
-            simple_arbitrage = await self._scan_simple_arbitrage(symbol_list, min_profit_bps)
-            
-            # Triangular arbitrage opportunities  
-            triangular_arbitrage = await self._scan_triangular_arbitrage()
-            
-            # Combine and rank all opportunities
-            all_opportunities = simple_arbitrage + triangular_arbitrage
-            all_opportunities.sort(key=lambda x: x.get("net_profit_bps", 0), reverse=True)
-            
-            # Risk analysis for top opportunities
-            risk_analyzed = []
-            for opp in all_opportunities[:max_opportunities]:
-                risk_score = await self._calculate_arbitrage_risk(opp)
-                opp["risk_analysis"] = risk_score
-                risk_analyzed.append(opp)
-            
-            response_time = time.time() - start_time
-            await self._update_performance_metrics(response_time, True, user_id)
-            
-            return {
-                "success": True,
-                "function": "cross_exchange_arbitrage_scanner",
-                "data": {
-                    "opportunities": risk_analyzed,
-                    "summary": {
-                        "total_opportunities": len(risk_analyzed),
-                        "simple_arbitrage_count": len(simple_arbitrage),
-                        "triangular_arbitrage_count": len(triangular_arbitrage),
-                        "avg_profit_bps": round(np.mean([o.get("net_profit_bps", 0) for o in risk_analyzed]), 2) if risk_analyzed else 0,
-                        "max_profit_bps": max([o.get("net_profit_bps", 0) for o in risk_analyzed]) if risk_analyzed else 0
-                    }
-                },
-                "metadata": {
-                    "symbols_scanned": len(symbol_list),
-                    "min_profit_threshold": min_profit_bps,
-                    "exchanges_checked": len(self.exchange_manager.exchange_configs),
-                    "response_time_ms": round(response_time * 1000, 2),
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            }
-            
-        except Exception as e:
-            await self._update_performance_metrics(time.time() - start_time, False, user_id)
-            raise e
+
+
     
     async def alpha_generation_coordinator(
         self, 
@@ -503,20 +529,42 @@ class MarketAnalysisService(LoggerMixin):
     # Helper methods (implementation details)
     
     async def _get_symbol_price(self, exchange: str, symbol: str) -> Optional[Dict[str, Any]]:
-        """Get price for symbol from specific exchange."""
+        """Get price for symbol from specific exchange with proper error handling."""
         try:
             if exchange == "binance":
-                binance_symbol = symbol.replace("/", "")
-                data = await self.exchange_manager.fetch_from_exchange(
-                    exchange, 
-                    "/api/v3/ticker/24hr",
-                    {"symbol": binance_symbol}
-                )
-                return {
-                    "price": float(data["lastPrice"]),
-                    "volume": float(data["volume"]),
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+                # Convert single symbols to USDT trading pairs for Binance
+                binance_symbol = self._convert_to_binance_symbol(symbol)
+                if not binance_symbol:
+                    return None
+                    
+                try:
+                    data = await self.exchange_manager.fetch_from_exchange(
+                        exchange, 
+                        "/api/v3/ticker/price",
+                        {"symbol": binance_symbol}
+                    )
+                    if data and "price" in data:
+                        return {
+                            "price": float(data["price"]),
+                            "volume": 0.0,  # Price endpoint doesn't include volume
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                except Exception:
+                    # Fallback to 24hr ticker
+                    try:
+                        data = await self.exchange_manager.fetch_from_exchange(
+                            exchange, 
+                            "/api/v3/ticker/24hr",
+                            {"symbol": binance_symbol}
+                        )
+                        if data and "lastPrice" in data:
+                            return {
+                                "price": float(data["lastPrice"]),
+                                "volume": float(data.get("volume", 0)),
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                    except Exception:
+                        pass
             
             elif exchange == "kraken":
                 kraken_symbol = self._convert_to_kraken_symbol(symbol)
@@ -525,13 +573,15 @@ class MarketAnalysisService(LoggerMixin):
                     "/0/public/Ticker",
                     {"pair": kraken_symbol}
                 )
-                if kraken_symbol in data["result"]:
+                # Check if response has result and the symbol exists
+                if data and "result" in data and kraken_symbol in data["result"]:
                     ticker = data["result"][kraken_symbol]
-                    return {
-                        "price": float(ticker["c"][0]),
-                        "volume": float(ticker["v"][1]),
-                        "timestamp": datetime.utcnow().isoformat()
-                    }
+                    if ticker and "c" in ticker and ticker["c"]:
+                        return {
+                            "price": float(ticker["c"][0]),
+                            "volume": float(ticker["v"][1]) if "v" in ticker and ticker["v"] else 0.0,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
             
             elif exchange == "kucoin":
                 kucoin_symbol = symbol.replace("/", "-")
@@ -540,15 +590,117 @@ class MarketAnalysisService(LoggerMixin):
                     "/api/v1/market/stats",
                     {"symbol": kucoin_symbol}
                 )
+                if data and "data" in data and data["data"]:
+                    market_data = data["data"]
+                    last_price = market_data.get("last")
+                    if last_price is not None:
+                        return {
+                            "price": float(last_price),
+                            "volume": float(market_data.get("vol", 0)) if market_data.get("vol") is not None else 0.0,
+                            "change_24h": float(market_data.get("changeRate", 0)) * 100 if market_data.get("changeRate") is not None else 0.0,
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+            
+            elif exchange == "coinbase":
+                coinbase_symbol = symbol.replace("/", "-")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    f"/products/{coinbase_symbol}/ticker"
+                )
                 return {
-                    "price": float(data["data"]["last"]),
-                    "volume": float(data["data"]["vol"]),
+                    "price": float(data["price"]),
+                    "volume": float(data["volume"]),
+                    "change_24h": 0,  # Calculate from price and open
                     "timestamp": datetime.utcnow().isoformat()
                 }
+            
+            elif exchange == "bybit":
+                bybit_symbol = symbol.replace("/", "")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    "/v5/market/tickers",
+                    {"category": "spot", "symbol": bybit_symbol}
+                )
+                if data.get("result", {}).get("list"):
+                    ticker = data["result"]["list"][0]
+                    return {
+                        "price": float(ticker["lastPrice"]),
+                        "volume": float(ticker["volume24h"]),
+                        "change_24h": float(ticker["price24hPcnt"]) * 100,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            
+            elif exchange == "okx":
+                okx_symbol = symbol.replace("/", "-")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    "/api/v5/market/ticker",
+                    {"instId": okx_symbol}
+                )
+                if data.get("data"):
+                    ticker = data["data"][0]
+                    return {
+                        "price": float(ticker["last"]),
+                        "volume": float(ticker["vol24h"]),
+                        "change_24h": float(ticker["chgPct"]) * 100,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            
+            elif exchange == "bitget":
+                bitget_symbol = symbol.replace("/", "")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    "/api/spot/v1/market/ticker",
+                    {"symbol": bitget_symbol}
+                )
+                if data.get("data"):
+                    ticker = data["data"]
+                    return {
+                        "price": float(ticker["close"]),
+                        "volume": float(ticker["baseVol"]),
+                        "change_24h": float(ticker["chgRate"]) * 100,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            
+            elif exchange == "gateio":
+                gateio_symbol = symbol.replace("/", "_")
+                data = await self.exchange_manager.fetch_from_exchange(
+                    exchange,
+                    "/api/v4/spot/tickers",
+                    {"currency_pair": gateio_symbol}
+                )
+                if isinstance(data, list) and data:
+                    ticker = data[0]
+                    return {
+                        "price": float(ticker["last"]),
+                        "volume": float(ticker["base_volume"]),
+                        "change_24h": float(ticker["change_percentage"]),
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
         
         except Exception as e:
-            self.logger.error(f"Error fetching price for {symbol} from {exchange}: {e}")
+            self.logger.error(f"Error fetching price for {symbol} from {exchange}: {str(e)}")
             return None
+    
+    def _convert_to_binance_symbol(self, symbol: str) -> str:
+        """Convert standard symbol format to Binance trading pair format."""
+        # Handle both single symbols and trading pairs
+        if "/" in symbol:
+            # Already a trading pair, remove slash
+            return symbol.replace("/", "")
+        else:
+            # Single symbol, convert to USDT pair
+            symbol_mappings = {
+                "BTC": "BTCUSDT",
+                "ETH": "ETHUSDT", 
+                "SOL": "SOLUSDT",
+                "ADA": "ADAUSDT",
+                "DOT": "DOTUSDT",
+                "MATIC": "MATICUSDT",
+                "LINK": "LINKUSDT",
+                "UNI": "UNIUSDT"
+            }
+            return symbol_mappings.get(symbol, f"{symbol}USDT")
     
     def _convert_to_kraken_symbol(self, symbol: str) -> str:
         """Convert standard symbol format to Kraken format."""
@@ -1654,6 +1806,125 @@ class MarketAnalysisService(LoggerMixin):
         except Exception as e:
             self.logger.error("Exchange asset discovery failed", error=str(e), exc_info=True)
             return {"success": False, "error": str(e), "function": "discover_exchange_assets"}
+    
+    async def cross_exchange_arbitrage_scanner(
+        self,
+        symbols: str = "BTC,ETH,SOL,ADA",
+        exchanges: str = "binance,kraken,kucoin",
+        min_profit_bps: int = 5,
+        user_id: str = "system"
+    ) -> Dict[str, Any]:
+        """ENTERPRISE CROSS-EXCHANGE ARBITRAGE SCANNER - Identify profitable arbitrage opportunities."""
+        
+        start_time = time.time()
+        
+        try:
+            await self._update_performance_metrics(time.time() - start_time, True, user_id)
+            
+            symbol_list = [s.strip().upper() for s in symbols.split(",")]
+            exchange_list = [e.strip().lower() for e in exchanges.split(",")]
+            
+            opportunities = []
+            total_scanned = 0
+            
+            # Scan each symbol across all exchanges
+            for symbol in symbol_list:
+                prices = {}
+                
+                # Get prices from all exchanges
+                for exchange in exchange_list:
+                    try:
+                        price_data = await self._get_symbol_price(exchange, symbol)
+                        if price_data and price_data.get("price"):
+                            prices[exchange] = {
+                                "price": float(price_data["price"]),
+                                "volume": float(price_data.get("volume", 0)),
+                                "timestamp": price_data.get("timestamp", datetime.utcnow().isoformat())
+                            }
+                    except Exception as e:
+                        self.logger.debug(f"Failed to get {symbol} price from {exchange}: {str(e)}")
+                        continue
+                
+                total_scanned += len(exchange_list)
+                
+                # Find arbitrage opportunities
+                if len(prices) >= 2:
+                    price_items = list(prices.items())
+                    
+                    for i in range(len(price_items)):
+                        for j in range(i + 1, len(price_items)):
+                            buy_exchange, buy_data = price_items[i]
+                            sell_exchange, sell_data = price_items[j]
+                            
+                            # Calculate profit for both directions
+                            profit_direction_1 = (sell_data["price"] - buy_data["price"]) / buy_data["price"] * 10000
+                            profit_direction_2 = (buy_data["price"] - sell_data["price"]) / sell_data["price"] * 10000
+                            
+                            # Check if profit exceeds minimum threshold
+                            if profit_direction_1 >= min_profit_bps:
+                                opportunities.append({
+                                    "id": f"{symbol}_{buy_exchange}_{sell_exchange}_{int(time.time())}",
+                                    "symbol": symbol,
+                                    "buy_exchange": buy_exchange,
+                                    "sell_exchange": sell_exchange,
+                                    "buy_price": buy_data["price"],
+                                    "sell_price": sell_data["price"],
+                                    "profit_bps": round(profit_direction_1, 2),
+                                    "profit_percentage": round(profit_direction_1 / 100, 4),
+                                    "min_volume": min(buy_data["volume"], sell_data["volume"]),
+                                    "confidence": min(85.0, 60.0 + (profit_direction_1 / 10)),
+                                    "risk_score": max(1, 10 - (profit_direction_1 / 2)),
+                                    "timestamp": datetime.utcnow().isoformat()
+                                })
+                            
+                            elif profit_direction_2 >= min_profit_bps:
+                                opportunities.append({
+                                    "id": f"{symbol}_{sell_exchange}_{buy_exchange}_{int(time.time())}",
+                                    "symbol": symbol,
+                                    "buy_exchange": sell_exchange,
+                                    "sell_exchange": buy_exchange,
+                                    "buy_price": sell_data["price"],
+                                    "sell_price": buy_data["price"],
+                                    "profit_bps": round(profit_direction_2, 2),
+                                    "profit_percentage": round(profit_direction_2 / 100, 4),
+                                    "min_volume": min(buy_data["volume"], sell_data["volume"]),
+                                    "confidence": min(85.0, 60.0 + (profit_direction_2 / 10)),
+                                    "risk_score": max(1, 10 - (profit_direction_2 / 2)),
+                                    "timestamp": datetime.utcnow().isoformat()
+                                })
+            
+            # Sort opportunities by profit (descending)
+            opportunities.sort(key=lambda x: x["profit_bps"], reverse=True)
+            
+            response_time = time.time() - start_time
+            await self._update_performance_metrics(response_time, True, user_id)
+            
+            return {
+                "success": True,
+                "data": {
+                    "opportunities": opportunities,
+                    "summary": {
+                        "total_opportunities": len(opportunities),
+                        "symbols_scanned": len(symbol_list),
+                        "exchanges_scanned": len(exchange_list),
+                        "pairs_analyzed": total_scanned,
+                        "min_profit_threshold": min_profit_bps,
+                        "max_profit_found": max([opp["profit_bps"] for opp in opportunities]) if opportunities else 0,
+                        "avg_confidence": round(sum([opp["confidence"] for opp in opportunities]) / len(opportunities), 2) if opportunities else 0
+                    },
+                    "metadata": {
+                        "scan_timestamp": datetime.utcnow().isoformat(),
+                        "response_time_ms": round(response_time * 1000, 2),
+                        "user_id": user_id,
+                        "scan_type": "cross_exchange_arbitrage"
+                    }
+                }
+            }
+            
+        except Exception as e:
+            await self._update_performance_metrics(time.time() - start_time, False, user_id)
+            self.logger.error("Cross-exchange arbitrage scan failed", error=str(e), exc_info=True)
+            return {"success": False, "error": str(e), "function": "cross_exchange_arbitrage_scanner"}
     
     async def market_inefficiency_scanner(
         self,

@@ -24,7 +24,7 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.database import get_database
+from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_manager
 from app.core.logging import LoggerMixin, trade_logger
 from app.models.trading import Trade, Position, Order, TradingStrategy
@@ -481,7 +481,9 @@ class ExchangeConnector(LoggerMixin):
         if not config.get("api_key") or not config.get("secret_key"):
             raise Exception("Kraken API credentials not configured")
         
-        nonce = str(int(time.time() * 1000000))
+        # ENTERPRISE KRAKEN NONCE MANAGEMENT - Import and use global nonce manager
+        from app.api.v1.endpoints.exchanges import kraken_nonce_manager
+        nonce = kraken_nonce_manager.get_nonce()
         params = {
             "nonce": nonce,
             "pair": order_params["symbol"].replace("/", ""),

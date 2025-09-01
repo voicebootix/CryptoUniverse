@@ -99,7 +99,25 @@ class MasterSystemController(LoggerMixin):
             "last_emergency_level": EmergencyLevel.NORMAL.value
         }
         self.start_time = datetime.utcnow()
-        self.redis = None
+        self.redis = None  # Will be initialized lazily
+        self._redis_initialized = False
+    
+    async def _ensure_redis(self) -> Optional[Any]:
+        """ENTERPRISE: Ensure Redis client is available with graceful degradation."""
+        if not self._redis_initialized:
+            try:
+                from app.core.redis import get_redis_client
+                self.redis = await get_redis_client()
+                self._redis_initialized = True
+                if self.redis:
+                    self.logger.info("Redis client initialized for Master Controller")
+                else:
+                    self.logger.warning("Redis unavailable - operating in degraded mode")
+            except Exception as e:
+                self.logger.error("Failed to initialize Redis client", error=str(e))
+                self.redis = None
+                self._redis_initialized = True
+        return self.redis
         
         # Trading mode configurations
         self.mode_configs = {
@@ -1478,12 +1496,26 @@ class MasterSystemController(LoggerMixin):
     async def get_system_status(self, user_id: str) -> Dict[str, Any]:
         """Get system status for a specific user."""
         try:
+            # ENTERPRISE REDIS RESILIENCE
+            redis_client = await self._ensure_redis()
+            if not redis_client:
+                # Graceful degradation when Redis is unavailable
+                return {
+                    "success": True,
+                    "user_id": user_id,
+                    "mode": "standalone",
+                    "autonomous_active": False,
+                    "system_health": "unknown",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "warning": "Operating in degraded mode (Redis unavailable)"
+                }
+            
             # Check if autonomous mode is active
-            autonomous_active = await self.redis.get(f"autonomous_active:{user_id}")
-            autonomous_config = await self.redis.hgetall(f"autonomous_config:{user_id}") if autonomous_active else {}
+            autonomous_active = await redis_client.get(f"autonomous_active:{user_id}")
+            autonomous_config = await redis_client.hgetall(f"autonomous_config:{user_id}") if autonomous_active else {}
             
             # Get system health
-            system_health = await self.redis.get("system_health")
+            system_health = await redis_client.get("system_health")
             health_status = "normal"
             if system_health:
                 try:
@@ -1654,8 +1686,14 @@ class MasterSystemController(LoggerMixin):
     async def run_global_autonomous_cycle(self):
         """Run autonomous trading cycle for all active users."""
         try:
+            # ENTERPRISE REDIS RESILIENCE
+            redis_client = await self._ensure_redis()
+            if not redis_client:
+                self.logger.warning("Global autonomous cycle skipped - Redis unavailable")
+                return
+            
             # Get all active autonomous sessions
-            autonomous_keys = await self.redis.keys("autonomous_active:*")
+            autonomous_keys = await redis_client.keys("autonomous_active:*")
             
             self.logger.info(f"🤖 Running autonomous cycle for {len(autonomous_keys)} users")
             
@@ -2380,5 +2418,6 @@ async def get_master_controller() -> MasterSystemController:
     global master_controller
     if master_controller is None:
         master_controller = MasterSystemController()
-        master_controller.redis = await get_redis_client()
+        # ENTERPRISE: Defer Redis initialization to first use
+        # master_controller.redis = await get_redis_client()
     return master_controller

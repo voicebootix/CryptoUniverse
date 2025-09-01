@@ -35,11 +35,13 @@ class RateLimitService:
             "admin": {"limit": 50, "window": 60}       # 50 per minute
         }
         
-        # Exchange-specific rate limits (conservative to avoid bans)
+        # ENTERPRISE Exchange-specific rate limits (conservative to avoid bans)
         self.exchange_limits = {
             "binance": {
-                "spot": {"limit": 1200, "window": 60},    # 1200/min (actual limit 2400)
+                "spot": {"limit": 1200, "window": 60},     # 1200/min (actual limit 2400)
                 "futures": {"limit": 2400, "window": 60},  # 2400/min (actual limit 4800)
+                "private": {"limit": 200, "window": 60},   # ENTERPRISE: Private API endpoints
+                "public": {"limit": 1200, "window": 60},   # ENTERPRISE: Public API endpoints
                 "api_key": {"limit": 100, "window": 60}    # Per API key
             },
             "kraken": {
@@ -51,11 +53,29 @@ class RateLimitService:
                 "public": {"limit": 100, "window": 10},    # 100/10sec
                 "private": {"limit": 45, "window": 10},    # 45/10sec
                 "api_key": {"limit": 100, "window": 60}
+            },
+            "coinbase": {
+                "public": {"limit": 100, "window": 60},    # ENTERPRISE: Coinbase public
+                "private": {"limit": 50, "window": 60},    # ENTERPRISE: Coinbase private
+                "api_key": {"limit": 50, "window": 60}
+            },
+            "bybit": {
+                "public": {"limit": 120, "window": 60},    # ENTERPRISE: Bybit public
+                "private": {"limit": 60, "window": 60},    # ENTERPRISE: Bybit private
+                "api_key": {"limit": 60, "window": 60}
             }
         }
     
     async def async_init(self):
-        self.redis = await get_redis_client()
+        try:
+            self.redis = await get_redis_client()
+            if self.redis:
+                logger.info("Rate limiter initialized with Redis backend")
+            else:
+                logger.warning("Rate limiter initialized WITHOUT Redis - will fail open")
+        except Exception as e:
+            logger.warning("Rate limiter Redis initialization failed", error=str(e))
+            self.redis = None
     
     async def check_rate_limit(
         self,
@@ -85,6 +105,11 @@ class RateLimitService:
             redis_key = f"rate_limit:user:{user_id}:{key}"
         
         try:
+            # ENTERPRISE REDIS RESILIENCE - Fail open if Redis unavailable
+            if not self.redis:
+                logger.debug("Rate limit check bypassed - Redis unavailable", key=key)
+                return True
+            
             # Use Redis pipeline for atomic operations
             pipe = self.redis.pipeline()
             
@@ -185,6 +210,14 @@ class RateLimitService:
             redis_key = f"rate_limit:user:{user_id}:{key}"
         
         try:
+            # ENTERPRISE REDIS RESILIENCE
+            if not self.redis:
+                return {
+                    "key": key,
+                    "error": "Redis unavailable",
+                    "status": "degraded_mode"
+                }
+            
             now = time.time()
             window = 60  # Default window
             
@@ -218,6 +251,11 @@ class RateLimitService:
             redis_key = f"rate_limit:user:{user_id}:{key}"
         
         try:
+            # ENTERPRISE REDIS RESILIENCE
+            if not self.redis:
+                logger.warning("Rate limit reset skipped - Redis unavailable", key=key)
+                return False
+            
             await self.redis.delete(redis_key)
             logger.info("Rate limit reset", key=key, user_id=user_id)
             return True
@@ -239,6 +277,11 @@ class RateLimitService:
             config_key = f"rate_limit_config:user:{user_id}:{key}"
         
         try:
+            # ENTERPRISE REDIS RESILIENCE
+            if not self.redis:
+                logger.warning("Custom rate limit set skipped - Redis unavailable", key=key)
+                return False
+            
             config = {"limit": limit, "window": window, "set_at": time.time()}
             await self.redis.setex(
                 config_key,
@@ -255,6 +298,10 @@ class RateLimitService:
         """Get status of all exchange rate limits."""
         
         status = {}
+        
+        # ENTERPRISE REDIS RESILIENCE
+        if not self.redis:
+            return {"error": "Redis unavailable", "status": "degraded_mode"}
         
         for exchange, config in self.exchange_limits.items():
             exchange_status = {}
@@ -288,6 +335,11 @@ class RateLimitService:
         now = time.time()
         
         try:
+            # ENTERPRISE REDIS RESILIENCE
+            if not self.redis:
+                logger.debug("Rate limit cleanup skipped - Redis unavailable")
+                return 0
+            
             # Get all rate limit keys
             keys = await self.redis.keys("rate_limit:*")
             
