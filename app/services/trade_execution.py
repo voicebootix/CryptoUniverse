@@ -908,8 +908,8 @@ class TradeExecutionService(LoggerMixin):
         trade_request: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Execute Binance order with user's credentials (using existing logic)."""
-        # Reuse the existing Binance execution logic but with user's API keys
-        original_config = ExchangeConfigs.get_config("binance")
+        # Save original config function for proper restoration
+        original_get_config = ExchangeConfigs.get_config
         
         # Temporarily override with user's credentials
         user_config = {
@@ -919,8 +919,8 @@ class TradeExecutionService(LoggerMixin):
             "testnet": credentials["is_sandbox"]
         }
         
-        # Monkey patch the config temporarily
-        ExchangeConfigs.get_config = lambda x: user_config if x == "binance" else original_config
+        # Monkey patch the config temporarily with proper fallback
+        ExchangeConfigs.get_config = lambda x: user_config if x == "binance" else original_get_config(x)
         
         try:
             # Use existing exchange connector
@@ -936,8 +936,8 @@ class TradeExecutionService(LoggerMixin):
             return result
             
         finally:
-            # Restore original config
-            ExchangeConfigs.get_config = lambda x: original_config
+            # Restore original config function
+            ExchangeConfigs.get_config = original_get_config
     
     async def _execute_kraken_with_user_creds(
         self,
@@ -945,8 +945,8 @@ class TradeExecutionService(LoggerMixin):
         trade_request: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Execute Kraken order with user's credentials."""
-        # Similar pattern for Kraken
-        original_config = ExchangeConfigs.get_config("kraken")
+        # Save original config function for proper restoration
+        original_get_config = ExchangeConfigs.get_config
         
         user_config = {
             "base_url": "https://api.kraken.com",
@@ -955,7 +955,7 @@ class TradeExecutionService(LoggerMixin):
             "testnet": credentials["is_sandbox"]
         }
         
-        ExchangeConfigs.get_config = lambda x: user_config if x == "kraken" else original_config
+        ExchangeConfigs.get_config = lambda x: user_config if x == "kraken" else original_get_config(x)
         
         try:
             order_params = {
@@ -970,7 +970,7 @@ class TradeExecutionService(LoggerMixin):
             return result
             
         finally:
-            ExchangeConfigs.get_config = lambda x: original_config
+            ExchangeConfigs.get_config = original_get_config
     
     async def _execute_kucoin_with_user_creds(
         self,
@@ -1004,7 +1004,7 @@ class TradeExecutionService(LoggerMixin):
             return result
             
         finally:
-            ExchangeConfigs.get_config = lambda x: original_config
+            ExchangeConfigs.get_config = original_get_config
     
     async def _record_trade_execution(
         self,

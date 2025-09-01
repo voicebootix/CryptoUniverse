@@ -2,11 +2,12 @@
 Credits API Endpoints - Enterprise Grade
 
 Implements the revolutionary credit-based profit potential system where:
-- Users pay for profit potential (not subscriptions)
-- $1 = 1 credit = $4 profit potential
+- Users pay for profit potential (not subscriptions)  
+- Credits-to-profit conversion is configurable (default: 25% platform fee)
 - More strategies = faster profit generation
 - Crypto payments for credits
 - Real-time profit potential tracking
+- Admin-configurable pricing model
 
 No mock data, no hardcoded values - production-ready credit system.
 """
@@ -527,6 +528,10 @@ async def _process_confirmed_payment(
         from app.core.redis import get_redis_client
         from app.core.database import get_database
         redis = await get_redis_client()
+        
+        if redis is None:
+            logger.error("Redis client unavailable during payment processing", payment_id=payment_id)
+            return
         
         pending_data = await redis.get(f"pending_payment:{payment_id}")
         if not pending_data:
