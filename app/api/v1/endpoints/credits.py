@@ -128,16 +128,11 @@ async def get_credit_balance(
             await db.commit()
             await db.refresh(credit_account)
         
-        # Calculate profit potential and usage
-        # Calculate profit potential using dynamic pricing configuration
+        # Calculate profit potential using domain model method
         from app.services.profit_sharing_service import profit_sharing_service
-        await profit_sharing_service.ensure_pricing_loaded()
+        await profit_sharing_service.ensure_pricing_loaded()  # Ensure pricing loaded if needed by model
         
-        # Convert ratio to Decimal for currency-safe arithmetic
-        credit_to_profit_ratio_decimal = Decimal(str(profit_sharing_service.credit_to_profit_ratio))
-        total_credits_decimal = Decimal(str(credit_account.total_credits))
-        
-        profit_potential = total_credits_decimal * credit_to_profit_ratio_decimal
+        profit_potential = credit_account.calculate_profit_potential()
         
         # Get total profit earned to date
         profit_stmt = select(func.sum(Trade.profit_realized_usd)).where(
@@ -308,9 +303,9 @@ async def get_profit_potential_status(
 async def _verify_webhook_signature(signature: str, payment_id: str, transaction_hash: str) -> bool:
     """Verify webhook signature for payment confirmation."""
     try:
-        webhook_secret = settings.payments_webhook_secret
+        webhook_secret = getattr(settings, 'stripe_webhook_secret', None) or getattr(settings, 'payments_webhook_secret', None)
         if not webhook_secret:
-            logger.warning("PAYMENTS_WEBHOOK_SECRET not configured")
+            logger.warning("STRIPE_WEBHOOK_SECRET not configured")
             return False
         
         # Create expected signature
@@ -457,13 +452,26 @@ async def _store_pending_payment(
         from app.core.redis import get_redis_client
         redis = await get_redis_client()
         
+        if redis is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Redis service unavailable"
+            )
+        
         await redis.setex(
             f"pending_payment:{payment_data['payment_id']}",
             3600,  # 1 hour expiry
             json.dumps({
                 "user_id": user_id,
                 "credit_amount": credit_amount,
-                "payment_data": payment_data
+                "payment_data": {
+                    "payment_id": payment_data["payment_id"],
+                    "crypto_currency": payment_data["crypto_currency"],
+                    "crypto_amount": str(payment_data["crypto_amount"]),  # Convert Decimal to string
+                    "payment_address": payment_data["payment_address"],
+                    "qr_code_url": payment_data["qr_code_url"],
+                    "expires_at": payment_data["expires_at"]
+                }
             })
         )
         

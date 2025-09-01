@@ -1026,14 +1026,21 @@ class TradeExecutionService(LoggerMixin):
                     self.logger.error("Cannot create Trade record: exchange_account_id is required")
                     return
                 
-                # Convert IDs to proper UUID format
+                # Convert IDs to proper UUID format (except external order IDs)
                 try:
                     user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
-                    account_uuid = uuid.UUID(exchange_account_id) if isinstance(exchange_account_id, str) else exchange_account_id
-                    external_order_uuid = uuid.UUID(execution_result["order_id"]) if execution_result.get("order_id") else None
                 except ValueError as e:
-                    self.logger.error("Invalid UUID format for Trade creation", error=str(e))
+                    self.logger.error("Invalid user_id UUID format", user_id=user_id, error=str(e))
                     return
+                
+                try:
+                    account_uuid = uuid.UUID(exchange_account_id) if isinstance(exchange_account_id, str) else exchange_account_id
+                except ValueError as e:
+                    self.logger.error("Invalid exchange_account_id UUID format", account_id=exchange_account_id, error=str(e))
+                    return
+                
+                # Keep external order ID as string (don't convert to UUID)
+                external_order_id = execution_result.get("order_id")
                 
                 # Safe fee extraction with fallback chain
                 fees_paid = execution_result.get("fees") or execution_result.get("total_fee", 0)
@@ -1043,7 +1050,7 @@ class TradeExecutionService(LoggerMixin):
                 if not fee_currency and execution_result.get("fills"):
                     fills = execution_result["fills"]
                     if fills and isinstance(fills, list) and len(fills) > 0:
-                        fee_currency = fills[0].get("fee_asset", "USDT")
+                        fee_currency = fills[0].get("commissionAsset", fills[0].get("fee_asset", "USDT"))
                 
                 if not fee_currency:
                     fee_currency = "USDT"  # Safe fallback
@@ -1058,7 +1065,7 @@ class TradeExecutionService(LoggerMixin):
                     executed_quantity=Decimal(str(execution_result["executed_quantity"])),
                     executed_price=Decimal(str(execution_result["execution_price"])),
                     order_type=OrderType.MARKET if trade_request.get("order_type", "MARKET").upper() == "MARKET" else OrderType.LIMIT,
-                    external_order_id=external_order_uuid,
+                    external_order_id=external_order_id,
                     total_value=Decimal(str(position_value_usd)),
                     fees_paid=Decimal(str(fees_paid)),
                     fee_currency=fee_currency,
