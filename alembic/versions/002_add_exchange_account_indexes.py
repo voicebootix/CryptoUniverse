@@ -113,7 +113,7 @@ def upgrade():
             'idx_exchange_default_true',
             'exchange_accounts',
             ['user_id'],
-            postgresql_where='is_default = true',
+            postgresql_where=sa.text('is_default = true'),
             postgresql_concurrently=True,
             if_not_exists=True
         )

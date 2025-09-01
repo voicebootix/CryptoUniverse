@@ -588,100 +588,152 @@ class BackgroundServiceManager(LoggerMixin):
             self.logger.error("Session cleanup failed", error=str(e))
     
     async def _automated_disk_cleanup(self):
-        """Automated disk cleanup for enterprise production environment."""
+        """Automated disk cleanup for enterprise production environment - application-owned files only."""
         try:
             self.logger.info("🧹 Starting automated disk cleanup")
             cleanup_actions = []
             
-            # 1. Clean up old log files (older than 7 days)
+            # 1. Clean up old application log files (older than 7 days)
             import os
             import glob
             from pathlib import Path
             
-            log_dirs = ["/var/log", "./logs", "/tmp"]
-            for log_dir in log_dirs:
-                if os.path.exists(log_dir):
-                    # Remove old log files
-                    old_logs = glob.glob(f"{log_dir}/*.log.*")
-                    old_logs.extend(glob.glob(f"{log_dir}/*-*.log"))
-                    
-                    for log_file in old_logs:
-                        try:
-                            file_path = Path(log_file)
-                            if file_path.stat().st_mtime < (time.time() - 7 * 24 * 3600):  # 7 days
-                                os.remove(log_file)
-                                cleanup_actions.append(f"Removed old log: {log_file}")
-                        except Exception:
-                            continue
+            # Only clean application-owned directories
+            app_log_dirs = ["./logs", "./app/logs", "./var/log/app"]
+            app_prefixes = ["crypto_", "trading_", "app_", "background_", "market_"]
             
-            # 2. Clean up temporary files
-            temp_dirs = ["/tmp", "/var/tmp", "./tmp"]
-            for temp_dir in temp_dirs:
-                if os.path.exists(temp_dir):
-                    temp_files = glob.glob(f"{temp_dir}/tmp*")
-                    temp_files.extend(glob.glob(f"{temp_dir}/*.tmp"))
+            for log_dir in app_log_dirs:
+                if not os.path.exists(log_dir):
+                    continue
                     
-                    for temp_file in temp_files:
-                        try:
-                            file_path = Path(temp_file)
-                            if file_path.stat().st_mtime < (time.time() - 24 * 3600):  # 1 day
-                                os.remove(temp_file)
-                                cleanup_actions.append(f"Removed temp file: {temp_file}")
-                        except Exception:
-                            continue
+                try:
+                    # Only clean files with our application prefixes or in our directories
+                    for prefix in app_prefixes:
+                        old_logs = glob.glob(f"{log_dir}/{prefix}*.log.*")
+                        old_logs.extend(glob.glob(f"{log_dir}/{prefix}*-*.log"))
+                        
+                        for log_file in old_logs:
+                            try:
+                                file_path = Path(log_file)
+                                if file_path.stat().st_mtime < (time.time() - 7 * 24 * 3600):  # 7 days
+                                    # Verify it's our file by checking name pattern
+                                    if any(file_path.name.startswith(p) for p in app_prefixes):
+                                        await self._safe_remove_file(log_file)
+                                        cleanup_actions.append(f"Removed old log: {log_file}")
+                            except Exception as e:
+                                self.logger.error(f"Failed to remove log file {log_file}", error=str(e), exc_info=True)
+                except Exception as e:
+                    self.logger.error(f"Failed to clean log directory {log_dir}", error=str(e), exc_info=True)
             
-            # 3. Clean up old database backups (keep last 3)
-            backup_dirs = ["./backups", "/var/backups"]
-            for backup_dir in backup_dirs:
-                if os.path.exists(backup_dir):
-                    backup_files = glob.glob(f"{backup_dir}/*.sql")
-                    backup_files.extend(glob.glob(f"{backup_dir}/*.dump"))
+            # 2. Clean up application temporary files
+            app_temp_dirs = ["./tmp", "./temp", "./cache/tmp"]
+            for temp_dir in app_temp_dirs:
+                if not os.path.exists(temp_dir):
+                    continue
+                    
+                try:
+                    # Only clean files with our application prefixes
+                    for prefix in app_prefixes:
+                        temp_files = glob.glob(f"{temp_dir}/{prefix}*")
+                        temp_files.extend(glob.glob(f"{temp_dir}/*_{prefix}*"))
+                        
+                        for temp_file in temp_files:
+                            try:
+                                file_path = Path(temp_file)
+                                if file_path.stat().st_mtime < (time.time() - 24 * 3600):  # 1 day
+                                    # Verify it's our file
+                                    if any(file_path.name.startswith(p) or f"_{p}" in file_path.name for p in app_prefixes):
+                                        await self._safe_remove_file(temp_file)
+                                        cleanup_actions.append(f"Removed temp file: {temp_file}")
+                            except Exception as e:
+                                self.logger.error(f"Failed to remove temp file {temp_file}", error=str(e), exc_info=True)
+                except Exception as e:
+                    self.logger.error(f"Failed to clean temp directory {temp_dir}", error=str(e), exc_info=True)
+            
+            # 3. Clean up old application database backups (keep last 3)
+            app_backup_dirs = ["./backups", "./data/backups"]
+            for backup_dir in app_backup_dirs:
+                if not os.path.exists(backup_dir):
+                    continue
+                    
+                try:
+                    # Only clean files with our application prefixes
+                    backup_files = []
+                    for prefix in app_prefixes:
+                        backup_files.extend(glob.glob(f"{backup_dir}/{prefix}*.sql"))
+                        backup_files.extend(glob.glob(f"{backup_dir}/{prefix}*.dump"))
+                        backup_files.extend(glob.glob(f"{backup_dir}/backup_{prefix}*"))
                     
                     # Sort by modification time and keep only the 3 most recent
                     backup_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
                     for old_backup in backup_files[3:]:
                         try:
-                            os.remove(old_backup)
-                            cleanup_actions.append(f"Removed old backup: {old_backup}")
-                        except Exception:
-                            continue
+                            # Verify it's our backup file
+                            backup_path = Path(old_backup)
+                            if any(backup_path.name.startswith(p) or f"_{p}" in backup_path.name for p in app_prefixes):
+                                await self._safe_remove_file(old_backup)
+                                cleanup_actions.append(f"Removed old backup: {old_backup}")
+                        except Exception as e:
+                            self.logger.error(f"Failed to remove backup file {old_backup}", error=str(e), exc_info=True)
+                except Exception as e:
+                    self.logger.error(f"Failed to clean backup directory {backup_dir}", error=str(e), exc_info=True)
             
-            # 4. Clean up old market data cache files
-            cache_dirs = ["./cache", "/var/cache"]
-            for cache_dir in cache_dirs:
-                if os.path.exists(cache_dir):
-                    cache_files = glob.glob(f"{cache_dir}/*.cache")
-                    cache_files.extend(glob.glob(f"{cache_dir}/market_data_*"))
+            # 4. Clean up old application cache files
+            app_cache_dirs = ["./cache", "./data/cache", "./app/cache"]
+            for cache_dir in app_cache_dirs:
+                if not os.path.exists(cache_dir):
+                    continue
+                    
+                try:
+                    # Only clean files with our application prefixes or specific patterns
+                    cache_patterns = ["market_data_*", "trading_*", "crypto_*", "*.cache"]
+                    cache_files = []
+                    
+                    for pattern in cache_patterns:
+                        cache_files.extend(glob.glob(f"{cache_dir}/{pattern}"))
                     
                     for cache_file in cache_files:
                         try:
                             file_path = Path(cache_file)
                             if file_path.stat().st_mtime < (time.time() - 3 * 24 * 3600):  # 3 days
-                                os.remove(cache_file)
-                                cleanup_actions.append(f"Removed old cache: {cache_file}")
-                        except Exception:
-                            continue
+                                # Verify it's our cache file
+                                if (any(file_path.name.startswith(p) for p in app_prefixes) or 
+                                    file_path.name.startswith(("market_data_", "trading_", "crypto_")) or
+                                    file_path.suffix == ".cache"):
+                                    await self._safe_remove_file(cache_file)
+                                    cleanup_actions.append(f"Removed old cache: {cache_file}")
+                        except Exception as e:
+                            self.logger.error(f"Failed to remove cache file {cache_file}", error=str(e), exc_info=True)
+                except Exception as e:
+                    self.logger.error(f"Failed to clean cache directory {cache_dir}", error=str(e), exc_info=True)
             
-            # 5. Archive old trading data (compress files older than 30 days)
-            data_dirs = ["./data", "/var/data"]
-            for data_dir in data_dirs:
-                if os.path.exists(data_dir):
-                    data_files = glob.glob(f"{data_dir}/*.json")
-                    data_files.extend(glob.glob(f"{data_dir}/*.csv"))
+            # 5. Archive old application trading data (compress files older than 30 days)
+            app_data_dirs = ["./data", "./app/data", "./exports"]
+            for data_dir in app_data_dirs:
+                if not os.path.exists(data_dir):
+                    continue
+                    
+                try:
+                    # Only process files with our application prefixes
+                    data_files = []
+                    for prefix in app_prefixes:
+                        data_files.extend(glob.glob(f"{data_dir}/{prefix}*.json"))
+                        data_files.extend(glob.glob(f"{data_dir}/{prefix}*.csv"))
+                        data_files.extend(glob.glob(f"{data_dir}/export_{prefix}*"))
                     
                     for data_file in data_files:
                         try:
                             file_path = Path(data_file)
                             if file_path.stat().st_mtime < (time.time() - 30 * 24 * 3600):  # 30 days
-                                # Compress the file instead of deleting
-                                import gzip
-                                with open(data_file, 'rb') as f_in:
-                                    with gzip.open(f"{data_file}.gz", 'wb') as f_out:
-                                        f_out.writelines(f_in)
-                                os.remove(data_file)
-                                cleanup_actions.append(f"Compressed old data: {data_file}")
-                        except Exception:
-                            continue
+                                # Verify it's our data file
+                                if any(file_path.name.startswith(p) or f"_{p}" in file_path.name for p in app_prefixes):
+                                    # Compress and remove using async helper
+                                    await self._compress_then_remove(data_file)
+                                    cleanup_actions.append(f"Compressed old data: {data_file}")
+                        except Exception as e:
+                            self.logger.error(f"Failed to compress data file {data_file}", error=str(e), exc_info=True)
+                except Exception as e:
+                    self.logger.error(f"Failed to clean data directory {data_dir}", error=str(e), exc_info=True)
             
             if cleanup_actions:
                 self.logger.info(f"🧹 Disk cleanup completed: {len(cleanup_actions)} actions taken", actions=cleanup_actions[:5])  # Log first 5
@@ -716,3 +768,53 @@ class BackgroundServiceManager(LoggerMixin):
             finally:
                 # Update last cleanup time even on failure to prevent spam
                 self._last_cleanup = time.time()
+    
+    @staticmethod
+    def _compress_then_remove_sync(file_path: str) -> None:
+        """Compress a file to .gz and remove the original - runs in thread pool."""
+        import gzip
+        import os
+        from pathlib import Path
+        
+        try:
+            path = Path(file_path)
+            gz_path = f"{file_path}.gz"
+            
+            # Compress the file
+            with open(file_path, 'rb') as f_in:
+                with gzip.open(gz_path, 'wb') as f_out:
+                    f_out.writelines(f_in)
+            
+            # Remove original file
+            os.remove(file_path)
+            
+        except Exception as e:
+            # Log error but don't raise - this runs in a thread
+            import structlog
+            logger = structlog.get_logger()
+            logger.error(f"Failed to compress and remove file {file_path}", error=str(e), exc_info=True)
+            raise
+    
+    @staticmethod
+    def _safe_remove_file_sync(file_path: str) -> None:
+        """Safely remove a file - runs in thread pool."""
+        import os
+        
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            # Log error but don't raise - this runs in a thread
+            import structlog
+            logger = structlog.get_logger()
+            logger.error(f"Failed to remove file {file_path}", error=str(e), exc_info=True)
+            raise
+    
+    async def _safe_remove_file(self, file_path: str) -> None:
+        """Async wrapper for safe file removal."""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._safe_remove_file_sync, file_path)
+    
+    async def _compress_then_remove(self, file_path: str) -> None:
+        """Async wrapper for compress and remove operation."""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._compress_then_remove_sync, file_path)
