@@ -604,36 +604,72 @@ class MarketDataFeeds:
                 "developer_data": "false"
             }
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        market_data = data.get("market_data", {})
+            # Enterprise-grade retry logic with exponential backoff
+            max_retries = 3
+            base_delay = 1.0
+            
+            for attempt in range(max_retries):
+                try:
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                        async with session.get(url, params=params) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                market_data = data.get("market_data", {})
+                                
+                                return {
+                                    "success": True,
+                                    "data": {
+                                        "symbol": symbol,
+                                        "name": data.get("name", ""),
+                                        "price": market_data.get("current_price", {}).get("usd", 0),
+                                        "market_cap": market_data.get("market_cap", {}).get("usd", 0),
+                                        "volume_24h": market_data.get("total_volume", {}).get("usd", 0),
+                                        "change_24h": market_data.get("price_change_percentage_24h", 0),
+                                        "change_7d": market_data.get("price_change_percentage_7d", 0),
+                                        "change_30d": market_data.get("price_change_percentage_30d", 0),
+                                        "high_24h": market_data.get("high_24h", {}).get("usd", 0),
+                                        "low_24h": market_data.get("low_24h", {}).get("usd", 0),
+                                        "ath": market_data.get("ath", {}).get("usd", 0),
+                                        "atl": market_data.get("atl", {}).get("usd", 0),
+                                        "circulating_supply": market_data.get("circulating_supply", 0),
+                                        "total_supply": market_data.get("total_supply", 0),
+                                        "max_supply": market_data.get("max_supply", 0),
+                                        "timestamp": datetime.utcnow().isoformat(),
+                                        "source": "coingecko"
+                                    }
+                                }
+                            elif response.status == 429:
+                                # Rate limit exceeded - implement exponential backoff
+                                if attempt < max_retries - 1:
+                                    delay = base_delay * (2 ** attempt) + (time.time() % 1)  # Add jitter
+                                    logger.warning(f"CoinGecko rate limit hit for {symbol}, retrying in {delay:.2f}s (attempt {attempt + 1}/{max_retries})")
+                                    await asyncio.sleep(delay)
+                                    continue
+                                else:
+                                    logger.error(f"CoinGecko rate limit exceeded for {symbol} after {max_retries} attempts")
+                                    return {"success": False, "error": "Rate limit exceeded", "status_code": 429}
+                            else:
+                                return {"success": False, "error": f"API error: {response.status}", "status_code": response.status}
+                                
+                except asyncio.TimeoutError:
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"CoinGecko timeout for {symbol}, retrying in {delay:.2f}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        return {"success": False, "error": "Request timeout"}
                         
-                        return {
-                            "success": True,
-                            "data": {
-                                "symbol": symbol,
-                                "name": data.get("name", ""),
-                                "price": market_data.get("current_price", {}).get("usd", 0),
-                                "market_cap": market_data.get("market_cap", {}).get("usd", 0),
-                                "volume_24h": market_data.get("total_volume", {}).get("usd", 0),
-                                "change_24h": market_data.get("price_change_percentage_24h", 0),
-                                "change_7d": market_data.get("price_change_percentage_7d", 0),
-                                "change_30d": market_data.get("price_change_percentage_30d", 0),
-                                "high_24h": market_data.get("high_24h", {}).get("usd", 0),
-                                "low_24h": market_data.get("low_24h", {}).get("usd", 0),
-                                "ath": market_data.get("ath", {}).get("usd", 0),
-                                "atl": market_data.get("atl", {}).get("usd", 0),
-                                "circulating_supply": market_data.get("circulating_supply", 0),
-                                "total_supply": market_data.get("total_supply", 0),
-                                "max_supply": market_data.get("max_supply", 0),
-                                "timestamp": datetime.utcnow().isoformat(),
-                                "source": "coingecko"
-                            }
-                        }
-                    
-                    return {"success": False, "error": f"API error: {response.status}"}
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"CoinGecko request failed for {symbol}: {e}, retrying in {delay:.2f}s")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        raise e
+            
+            return {"success": False, "error": "Max retries exceeded"}
                     
         except Exception as e:
             return {"success": False, "error": str(e)}

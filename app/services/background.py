@@ -239,6 +239,10 @@ class BackgroundServiceManager(LoggerMixin):
                     alerts.append(f"High memory usage: {memory_percent}%")
                 if disk_percent > 80:
                     alerts.append(f"High disk usage: {disk_percent}%")
+                    
+                    # Trigger automated cleanup if disk usage is critical
+                    if disk_percent > 85:
+                        await self._automated_disk_cleanup()
                 
                 # Check Redis connection
                 if self.redis:
@@ -577,3 +581,107 @@ class BackgroundServiceManager(LoggerMixin):
             pass
         except Exception as e:
             self.logger.error("Session cleanup failed", error=str(e))
+    
+    async def _automated_disk_cleanup(self):
+        """Automated disk cleanup for enterprise production environment."""
+        try:
+            self.logger.info("🧹 Starting automated disk cleanup")
+            cleanup_actions = []
+            
+            # 1. Clean up old log files (older than 7 days)
+            import os
+            import glob
+            from pathlib import Path
+            
+            log_dirs = ["/var/log", "./logs", "/tmp"]
+            for log_dir in log_dirs:
+                if os.path.exists(log_dir):
+                    # Remove old log files
+                    old_logs = glob.glob(f"{log_dir}/*.log.*")
+                    old_logs.extend(glob.glob(f"{log_dir}/*-*.log"))
+                    
+                    for log_file in old_logs:
+                        try:
+                            file_path = Path(log_file)
+                            if file_path.stat().st_mtime < (time.time() - 7 * 24 * 3600):  # 7 days
+                                os.remove(log_file)
+                                cleanup_actions.append(f"Removed old log: {log_file}")
+                        except Exception:
+                            continue
+            
+            # 2. Clean up temporary files
+            temp_dirs = ["/tmp", "/var/tmp", "./tmp"]
+            for temp_dir in temp_dirs:
+                if os.path.exists(temp_dir):
+                    temp_files = glob.glob(f"{temp_dir}/tmp*")
+                    temp_files.extend(glob.glob(f"{temp_dir}/*.tmp"))
+                    
+                    for temp_file in temp_files:
+                        try:
+                            file_path = Path(temp_file)
+                            if file_path.stat().st_mtime < (time.time() - 24 * 3600):  # 1 day
+                                os.remove(temp_file)
+                                cleanup_actions.append(f"Removed temp file: {temp_file}")
+                        except Exception:
+                            continue
+            
+            # 3. Clean up old database backups (keep last 3)
+            backup_dirs = ["./backups", "/var/backups"]
+            for backup_dir in backup_dirs:
+                if os.path.exists(backup_dir):
+                    backup_files = glob.glob(f"{backup_dir}/*.sql")
+                    backup_files.extend(glob.glob(f"{backup_dir}/*.dump"))
+                    
+                    # Sort by modification time and keep only the 3 most recent
+                    backup_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                    for old_backup in backup_files[3:]:
+                        try:
+                            os.remove(old_backup)
+                            cleanup_actions.append(f"Removed old backup: {old_backup}")
+                        except Exception:
+                            continue
+            
+            # 4. Clean up old market data cache files
+            cache_dirs = ["./cache", "/var/cache"]
+            for cache_dir in cache_dirs:
+                if os.path.exists(cache_dir):
+                    cache_files = glob.glob(f"{cache_dir}/*.cache")
+                    cache_files.extend(glob.glob(f"{cache_dir}/market_data_*"))
+                    
+                    for cache_file in cache_files:
+                        try:
+                            file_path = Path(cache_file)
+                            if file_path.stat().st_mtime < (time.time() - 3 * 24 * 3600):  # 3 days
+                                os.remove(cache_file)
+                                cleanup_actions.append(f"Removed old cache: {cache_file}")
+                        except Exception:
+                            continue
+            
+            # 5. Archive old trading data (compress files older than 30 days)
+            data_dirs = ["./data", "/var/data"]
+            for data_dir in data_dirs:
+                if os.path.exists(data_dir):
+                    data_files = glob.glob(f"{data_dir}/*.json")
+                    data_files.extend(glob.glob(f"{data_dir}/*.csv"))
+                    
+                    for data_file in data_files:
+                        try:
+                            file_path = Path(data_file)
+                            if file_path.stat().st_mtime < (time.time() - 30 * 24 * 3600):  # 30 days
+                                # Compress the file instead of deleting
+                                import gzip
+                                with open(data_file, 'rb') as f_in:
+                                    with gzip.open(f"{data_file}.gz", 'wb') as f_out:
+                                        f_out.writelines(f_in)
+                                os.remove(data_file)
+                                cleanup_actions.append(f"Compressed old data: {data_file}")
+                        except Exception:
+                            continue
+            
+            if cleanup_actions:
+                self.logger.info(f"🧹 Disk cleanup completed: {len(cleanup_actions)} actions taken", actions=cleanup_actions[:5])  # Log first 5
+            else:
+                self.logger.info("🧹 Disk cleanup completed: No cleanup needed")
+            
+        except Exception as e:
+            self.logger.error("Automated disk cleanup failed", error=str(e))

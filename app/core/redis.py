@@ -105,21 +105,39 @@ class RedisConnectionManager:
             return
         
         try:
-            # ENTERPRISE: Simple robust ping - avoid timeout complexity 
+            # ENTERPRISE: Enhanced ping with parser error handling
             if self.client:
-                ping_result = await self.client.ping()
-                
-                # Validate ping response properly
-                if ping_result == True or ping_result == "PONG" or ping_result == b"PONG":
-                    self.is_healthy = True
-                    self.connection_failures = 0
-                    if self.circuit_breaker_open_until > 0:
-                        logger.info("Redis circuit breaker CLOSED - connection restored")
-                        self.circuit_breaker_open_until = 0
-                else:
-                    logger.warning("Redis ping returned unexpected result", result=ping_result)
+                try:
+                    # Use asyncio timeout for the ping to avoid hanging
+                    ping_result = await asyncio.wait_for(self.client.ping(), timeout=5.0)
+                    
+                    # Validate ping response properly
+                    if ping_result == True or ping_result == "PONG" or ping_result == b"PONG":
+                        self.is_healthy = True
+                        self.connection_failures = 0
+                        if self.circuit_breaker_open_until > 0:
+                            logger.info("Redis circuit breaker CLOSED - connection restored")
+                            self.circuit_breaker_open_until = 0
+                    else:
+                        logger.warning("Redis ping returned unexpected result", result=ping_result)
+                        self.is_healthy = False
+                        await self._handle_connection_failure()
+                        
+                except asyncio.TimeoutError:
+                    logger.warning("Redis ping timeout - connection may be stale")
                     self.is_healthy = False
-                    await self._handle_connection_failure()
+                    await self._recreate_client_on_error()
+                    
+                except Exception as ping_error:
+                    # Handle specific Redis parser errors
+                    error_str = str(ping_error)
+                    if "_AsyncRESP2Parser" in error_str or "_connected" in error_str:
+                        logger.warning("Redis parser connection state error - recreating client")
+                        await self._recreate_client_on_error()
+                    else:
+                        logger.warning("Redis ping failed", error=error_str)
+                        self.is_healthy = False
+                        await self._handle_connection_failure()
             else:
                 self.is_healthy = False
                 await self._handle_connection_failure()
@@ -128,6 +146,46 @@ class RedisConnectionManager:
             self.is_healthy = False
             await self._handle_connection_failure()
     
+    async def _recreate_client_on_error(self):
+        """Recreate Redis client when parser errors occur."""
+        try:
+            # Close current client safely
+            if self.client:
+                try:
+                    await self.client.aclose()
+                except Exception:
+                    pass
+                self.client = None
+            
+            # Reset connection pool to force fresh connections
+            if self.pool:
+                try:
+                    await self.pool.disconnect()
+                except Exception:
+                    pass
+                self.pool = None
+            
+            # Create new client
+            await self._create_client()
+            
+            # Perform immediate health check
+            if self.client:
+                try:
+                    ping_result = await asyncio.wait_for(self.client.ping(), timeout=3.0)
+                    if ping_result == True or ping_result == "PONG" or ping_result == b"PONG":
+                        self.is_healthy = True
+                        logger.info("Redis client successfully recreated")
+                        return
+                except Exception:
+                    pass
+            
+            # If recreation failed, handle as connection failure
+            await self._handle_connection_failure()
+            
+        except Exception as e:
+            logger.error("Failed to recreate Redis client", error=str(e))
+            await self._handle_connection_failure()
+
     async def _handle_connection_failure(self):
         """Handle connection failures with circuit breaker pattern."""
         self.connection_failures += 1
