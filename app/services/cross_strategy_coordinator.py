@@ -521,9 +521,25 @@ class CrossStrategyCoordinator(LoggerMixin):
         """Execute trades according to coordination plan."""
         
         try:
-            from app.services.trade_execution import TradeExecutionService
-            
-            trade_service = TradeExecutionService()
+            # Hardened import with proper error handling
+            try:
+                from app.services.trade_execution import TradeExecutionService
+                trade_service = TradeExecutionService()
+            except ImportError as e:
+                self.logger.exception(
+                    "TradeExecutionService import failed",
+                    error=str(e),
+                    user_id=user_id,
+                    remediation="Ensure app.services.trade_execution module is available"
+                )
+                return {"success": False, "error": "Trade execution service unavailable"}
+            except Exception as e:
+                self.logger.exception(
+                    "TradeExecutionService initialization failed",
+                    error=str(e),
+                    user_id=user_id
+                )
+                return {"success": False, "error": "Trade execution service initialization failed"}
             execution_results = []
             
             for batch in execution_plan.get("execution_batches", []):
@@ -542,7 +558,7 @@ class CrossStrategyCoordinator(LoggerMixin):
                         side=signal.get("action", "buy").lower(),
                         quantity=signal.get("quantity", 0.001),
                         order_type="market",
-                        exchange="binance",
+                        exchange=signal.get("exchange", "auto"),  # Use signal's exchange or auto
                         user_id=user_id
                     )
                     batch_tasks.append((coordination.strategy_name, task))

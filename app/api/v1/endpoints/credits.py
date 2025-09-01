@@ -16,6 +16,7 @@ import asyncio
 import json
 import hmac
 import hashlib
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
@@ -401,7 +402,7 @@ async def _generate_crypto_payment(
         # - NOWPayments
         # - CoinGate
         
-        payment_id = f"credit_{int(datetime.utcnow().timestamp())}_{user_id[:8]}"
+        payment_id = f"credit_{uuid.uuid4().hex}"
         
         # Crypto rates as Decimal for currency-safe arithmetic
         crypto_rates = {
