@@ -348,7 +348,7 @@ async def list_exchange_connections(
         connections = []
         for api_key in api_keys:
             try:
-            # Decrypt for display (masked)
+                # Decrypt for display (masked)
                 decrypted_api_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
                 
                 # Get exchange account info
@@ -359,26 +359,26 @@ async def list_exchange_connections(
                 
                 if not account:
                     continue  # Skip if account not found
-            
-            # Get daily volume usage
+                
+                # Get daily volume usage
                 daily_volume = await get_daily_volume_usage(current_user.id, account.exchange_name)
-            
-            connection = ExchangeApiKeyResponse(
-                id=str(api_key.id),
+                
+                connection = ExchangeApiKeyResponse(
+                    id=str(api_key.id),
                     exchange=account.exchange_name,
                     nickname=api_key.key_name,  # Use key_name as nickname
-                api_key_masked=mask_api_key(decrypted_api_key),
+                    api_key_masked=mask_api_key(decrypted_api_key),
                     is_active=account.status == ExchangeStatus.ACTIVE,
                     trading_enabled=account.trading_enabled,
                     sandbox=account.is_simulation,  # Use is_simulation as sandbox
-                created_at=api_key.created_at,
+                    created_at=api_key.created_at,
                     last_used=api_key.last_used_at,
-                permissions=api_key.permissions or [],
+                    permissions=api_key.permissions or [],
                     connection_status="connected" if api_key.status == ApiKeyStatus.ACTIVE else "inactive",
                     daily_volume_limit=None,  # Set to None for now
-                daily_volume_used=daily_volume
-            )
-            connections.append(connection)
+                    daily_volume_used=daily_volume
+                )
+                connections.append(connection)
                 
             except Exception as e:
                 logger.error(
