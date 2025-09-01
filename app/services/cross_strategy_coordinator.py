@@ -251,7 +251,8 @@ class CrossStrategyCoordinator(LoggerMixin):
     def _calculate_symbol_exposure(self, symbol: str, positions: Dict[str, Any]) -> float:
         """Calculate current exposure to a symbol."""
         try:
-            holdings = positions.get("holdings", [])
+            # Use correct portfolio structure key (positions, not holdings)
+            holdings = positions.get("positions", [])
             total_value = positions.get("total_value_usd", 1)
             
             symbol_value = 0
@@ -261,7 +262,8 @@ class CrossStrategyCoordinator(LoggerMixin):
             
             return symbol_value / total_value if total_value > 0 else 0
             
-        except Exception:
+        except Exception as e:
+            self.logger.warning("Symbol exposure calculation failed", symbol=symbol, error=str(e))
             return 0
     
     async def _get_highly_correlated_symbols(self, symbol: str) -> List[str]:

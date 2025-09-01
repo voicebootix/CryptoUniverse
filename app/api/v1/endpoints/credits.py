@@ -260,8 +260,20 @@ async def get_profit_potential_status(
         # Get user's active strategies to calculate earning velocity
         from app.core.redis import get_redis_client
         redis = await get_redis_client()
-        active_strategies = await redis.smembers(f"user_strategies:{current_user.id}")
-        active_strategy_count = len(active_strategies)
+        
+        active_strategy_count = 0  # Safe default
+        
+        if redis is not None:
+            try:
+                active_strategies = await redis.smembers(f"user_strategies:{current_user.id}")
+                active_strategy_count = len(active_strategies)
+            except Exception as e:
+                logger.warning("Failed to get active strategies from Redis", 
+                             user_id=str(current_user.id), 
+                             error=str(e))
+                active_strategy_count = 0  # Fallback to safe default
+        else:
+            logger.warning("Redis client unavailable, using default strategy count")
         
         # Calculate earning velocity
         earning_velocity = "slow"
