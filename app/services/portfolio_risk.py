@@ -1031,6 +1031,3 @@ class PortfolioOptimizationEngine(LoggerMixin):
 
 # Note: Removed circular import to portfolio_risk_core
 # These classes should be imported directly where needed to avoid circular dependencies
-
-# Re-export the main service instance for backward compatibility
-from app.services.portfolio_risk_core import portfolio_risk_service

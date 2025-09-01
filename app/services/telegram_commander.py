@@ -69,7 +69,7 @@ from app.services.market_analysis import market_analysis_service
 from app.services.trade_execution import trade_execution_service
 from app.services.trading_strategies import trading_strategies_service
 from app.services.ai_consensus import ai_consensus_service
-from app.services.portfolio_risk import portfolio_risk_service
+from app.services.portfolio_risk_core import portfolio_risk_service
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
