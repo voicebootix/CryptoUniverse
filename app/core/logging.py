@@ -13,6 +13,8 @@ import structlog
 from structlog.processors import JSONRenderer
 from structlog.stdlib import add_log_level, add_logger_name
 
+import logging.handlers
+
 
 def configure_logging(log_level: str = "INFO", environment: str = "development") -> None:
     """
@@ -66,6 +68,22 @@ def configure_logging(log_level: str = "INFO", environment: str = "development")
     logging.getLogger("asyncpg").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("ccxt").setLevel(logging.WARNING)
+
+    # Production log rotation
+    if settings.ENV == 'production':
+        rotating_handler = logging.handlers.RotatingFileHandler(
+            'cryptouniverse.log',
+            maxBytes=100 * 1024 * 1024,  # 100MB
+            backupCount=5
+        )
+        rotating_handler.setLevel(logging.WARNING)
+        rotating_handler.setFormatter(structlog.stdlib.ProcessorFormatter(
+            processor=structlog.dev.ConsoleRenderer()
+        ))
+        logger.addHandler(rotating_handler)
+        
+        # Set root level to WARNING
+        logging.getLogger().setLevel(logging.WARNING)
 
 
 class LoggerMixin:

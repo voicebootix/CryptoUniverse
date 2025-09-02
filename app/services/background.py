@@ -402,12 +402,12 @@ class BackgroundServiceManager(LoggerMixin):
             
             for strategy in discovery_strategies:
                 try:
-                    discovery_result = await market_service.discover_exchange_assets(
-                        exchanges="all",
-                        user_id="system"
-                    )
-                    
-                    if discovery_result.get("success"):
+            discovery_result = await market_service.discover_exchange_assets(
+                exchanges="all",
+                user_id="system"
+            )
+            
+            if discovery_result.get("success"):
                         # ENTERPRISE: Try both response formats for compatibility
                         discovered_assets = (
                             discovery_result.get("asset_discovery", {}).get("detailed_results", {}) or
@@ -419,7 +419,7 @@ class BackgroundServiceManager(LoggerMixin):
                         
                         # Handle both old and new response formats
                         if discovered_assets:
-                            for exchange, assets in discovered_assets.items():
+                for exchange, assets in discovered_assets.items():
                                 if isinstance(assets, dict):
                                     # New format: extract base assets from structured data
                                     base_assets = assets.get("base_assets", [])
@@ -455,8 +455,8 @@ class BackgroundServiceManager(LoggerMixin):
                         if len(all_discovered_symbols) >= 200:
                             self.logger.info(f"Early termination - sufficient symbols discovered: {len(all_discovered_symbols)}")
                             break
-                            
-                except Exception as e:
+            
+        except Exception as e:
                     self.logger.exception(f"Discovery strategy failed: {strategy['description']}")
                     continue
             
@@ -740,6 +740,38 @@ class BackgroundServiceManager(LoggerMixin):
         
         while self.running:
             try:
+                redis = await get_redis_client()
+                cache_key = "active_trading_users"
+                
+                # Check cache first
+                cached_users = await redis.get(cache_key)
+                if cached_users:
+                    user_ids = json.loads(cached_users)
+                    self.logger.debug(f"Using cached active users: {len(user_ids)}")
+                else:
+                    # Query DB if not cached
+                    from app.core.database import get_database
+                    from app.models.exchange import ExchangeAccount
+                    from sqlalchemy import select, and_, distinct
+                    import json
+                    
+                    async for db in get_database():
+                        stmt = select(distinct(ExchangeAccount.user_id)).where(
+                            and_(
+                                ExchangeAccount.status == "active",
+                                ExchangeAccount.trading_enabled == True
+                            )
+                        )
+                        
+                        result = await db.execute(stmt)
+                        user_ids = [row[0] for row in result.fetchall()]
+                        
+                        # Cache for 5 minutes
+                        await redis.setex(cache_key, 300, json.dumps(user_ids))
+                        self.logger.debug(f"Cached {len(user_ids)} active users")
+                
+                # Proceed with sync...
+                
                 # Get all users with active exchange accounts
                 from app.core.database import get_database
                 from app.models.exchange import ExchangeAccount

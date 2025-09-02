@@ -256,74 +256,81 @@ async def login(
     
     logger.info("Login attempt", email=request.email, ip=client_ip)
     
-    # Find user
-    result = await db.execute(select(User).filter(User.email == request.email))
-    user = result.scalar_one_or_none()
-    if not user:
-        await asyncio.sleep(1)  # Prevent timing attacks
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials"
+    try:
+        # Find user
+        result = await db.execute(select(User).filter(User.email == request.email))
+        user = result.scalar_one_or_none()
+        if not user:
+            await asyncio.sleep(1)  # Prevent timing attacks
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials"
+            )
+        
+        # Verify password
+        if not auth_service.verify_password(request.password, user.hashed_password):
+            await asyncio.sleep(1)  # Prevent timing attacks
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials"
+            )
+        
+        # Check user status
+        if user.status != UserStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is not active"
+            )
+        
+        # Handle MFA if enabled
+        if user.two_factor_enabled and not request.mfa_code:
+            raise HTTPException(
+                status_code=status.HTTP_202_ACCEPTED,
+                detail="MFA code required",
+                headers={"X-MFA-Required": "true"}
+            )
+        
+        # Verify MFA code if provided
+        if user.two_factor_enabled and request.mfa_code:
+            # TODO: Implement TOTP verification
+            pass
+        
+        # Create tokens
+        access_token = auth_service.create_access_token(user)
+        refresh_token = auth_service.create_refresh_token(user)
+        
+        # Create session record
+        session = UserSession(
+            user_id=user.id,
+            refresh_token=refresh_token,
+            ip_address=client_ip,
+            user_agent=client_request.headers.get("user-agent", ""),
+            expires_at=datetime.utcnow() + auth_service.refresh_token_expire
         )
-    
-    # Verify password
-    if not auth_service.verify_password(request.password, user.hashed_password):
-        await asyncio.sleep(1)  # Prevent timing attacks
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials"
+        db.add(session)
+        
+        # Update last login
+        user.last_login = datetime.utcnow()
+        await db.commit()
+        
+        logger.info("Login successful", user_id=str(user.id), email=user.email)
+        
+        return TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            expires_in=int(auth_service.access_token_expire.total_seconds()),
+            user_id=str(user.id),
+            role=user.role.value,
+            tenant_id=str(user.tenant_id) if user.tenant_id else "",
+            permissions=get_user_permissions(user.role)
         )
-    
-    # Check user status
-    if user.status != UserStatus.ACTIVE:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is not active"
-        )
-    
-    # Handle MFA if enabled
-    if user.two_factor_enabled and not request.mfa_code:
-        raise HTTPException(
-            status_code=status.HTTP_202_ACCEPTED,
-            detail="MFA code required",
-            headers={"X-MFA-Required": "true"}
-        )
-    
-    # Verify MFA code if provided
-    if user.two_factor_enabled and request.mfa_code:
-        # TODO: Implement TOTP verification
-        pass
-    
-    # Create tokens
-    access_token = auth_service.create_access_token(user)
-    refresh_token = auth_service.create_refresh_token(user)
-    
-    # Create session record
-    session = UserSession(
-        user_id=user.id,
-        refresh_token=refresh_token,
-        ip_address=client_ip,
-        user_agent=client_request.headers.get("user-agent", ""),
-        expires_at=datetime.utcnow() + auth_service.refresh_token_expire
-    )
-    db.add(session)
-    
-    # Update last login
-    user.last_login = datetime.utcnow()
-    await db.commit()
-    
-    logger.info("Login successful", user_id=str(user.id), email=user.email)
-    
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
-        expires_in=int(auth_service.access_token_expire.total_seconds()),
-        user_id=str(user.id),
-        role=user.role.value,
-        tenant_id=str(user.tenant_id) if user.tenant_id else "",
-        permissions=get_user_permissions(user.role)
-    )
+    except InvalidTokenError as je:
+        logger.exception("JWT error during login")
+        raise HTTPException(500, detail="Authentication service error")
+    except Exception as e:
+        logger.exception("Unexpected login error")
+        raise HTTPException(500, detail="Service unavailable - try again later")
 
 
 @router.post("/register", response_model=UserResponse)
