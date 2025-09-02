@@ -164,23 +164,50 @@ async def create_new_session(
     current_user: User = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
-    Create a new chat session.
+    Create a new chat session with comprehensive error handling.
     """
     try:
+        # Ensure chat engine is available
+        if not hasattr(chat_engine, 'start_chat_session'):
+            logger.error("Chat engine not properly initialized")
+            return {
+                "success": False,
+                "session_id": None,
+                "message": "Chat engine not available",
+                "error": "Service initialization issue"
+            }
+        
         session_id = await chat_engine.start_chat_session(str(current_user.id))
+        
+        if not session_id:
+            logger.error("Chat engine returned empty session ID")
+            return {
+                "success": False,
+                "session_id": None,
+                "message": "Failed to generate session ID",
+                "error": "Session creation failed"
+            }
+        
+        logger.info("Chat session created successfully", session_id=session_id, user_id=current_user.id)
         
         return {
             "success": True,
             "session_id": session_id,
-            "message": "New chat session created successfully"
+            "message": "New chat session created successfully",
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
-        logger.error("Failed to create chat session", error=str(e), user_id=current_user.id)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create chat session"
-        )
+        logger.error("Failed to create chat session", error=str(e), user_id=current_user.id, exc_info=True)
+        
+        # ALWAYS return valid JSON, never raise HTTPException for frontend stability
+        return {
+            "success": False,
+            "session_id": None,
+            "message": "Chat session creation failed",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 
 @router.websocket("/ws/{session_id}")
