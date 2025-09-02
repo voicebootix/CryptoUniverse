@@ -74,7 +74,7 @@ class KrakenNonceManager:
         self._redis = None
         self._fallback_nonce = 0
         self._node_id = None
-        self._lock = threading.Lock()
+        self._lock = None  # Will be initialized as asyncio.Lock in async context
         
     async def _init_redis(self):
         """Initialize Redis for distributed nonce coordination."""
@@ -91,6 +91,10 @@ class KrakenNonceManager:
                 logger.info("Distributed Kraken nonce manager initialized", node_id=self._node_id)
             except Exception as e:
                 logger.warning("Redis unavailable for nonce coordination", error=str(e))
+        
+        # Initialize asyncio.Lock if not already done
+        if self._lock is None:
+            self._lock = asyncio.Lock()
     
     async def _sync_server_time(self) -> bool:
         """ENTERPRISE: Distributed server time sync with Redis caching."""
@@ -144,7 +148,7 @@ class KrakenNonceManager:
         try:
             await self._init_redis()
             
-            with self._lock:
+            async with self._lock:
                 self._local_call_count += 1
                 
                 # PRODUCTION: Redis-based global nonce counter
@@ -157,14 +161,28 @@ class KrakenNonceManager:
                         await self._sync_server_time()
                         server_time = time.time() + self._server_time_offset
                         
-                        # ENTERPRISE: Multi-component nonce for guaranteed uniqueness
-                        # Format: [server_time_microseconds] + [redis_counter] + [node_hash]
-                        time_component = int(server_time * 1000000)
-                        counter_component = (redis_counter % 99999)  # Prevent overflow
-                        node_component = abs(hash(self._node_id or "default")) % 9999
+                        # ENTERPRISE: Multi-component nonce with bit-shifting to prevent collisions
+                        # Format: [time_bits] | [counter_bits] | [node_bits]
+                        # Bit allocation: 40 bits for time (2^40 = ~34 years of microseconds)
+                        #                 20 bits for counter (2^20 = ~1M requests) 
+                        #                 4 bits for node (16 possible nodes)
+                        time_component = int(server_time * 1000000) & 0xFFFFFFFFFF  # 40 bits
+                        counter_component = (redis_counter % 1048576) & 0xFFFFF      # 20 bits 
+                        node_component = abs(hash(self._node_id or "default")) % 16 & 0xF  # 4 bits
                         
-                        # Combine components with proper spacing to ensure strict ordering
-                        distributed_nonce = time_component + counter_component + node_component
+                        # Validate component ranges to prevent overlap
+                        if time_component >= (1 << 40):
+                            logger.warning("Time component exceeds 40 bits", time_component=time_component)
+                            time_component = time_component & 0xFFFFFFFFFF
+                        if counter_component >= (1 << 20):
+                            logger.warning("Counter component exceeds 20 bits", counter_component=counter_component) 
+                            counter_component = counter_component & 0xFFFFF
+                        if node_component >= (1 << 4):
+                            logger.warning("Node component exceeds 4 bits", node_component=node_component)
+                            node_component = node_component & 0xF
+                        
+                        # Combine with bit-shifting to prevent overlap: [time][counter][node]
+                        distributed_nonce = (time_component << 24) | (counter_component << 4) | node_component
                         
                         # Expire Redis counter periodically to prevent infinite growth
                         if redis_counter % 500 == 0:

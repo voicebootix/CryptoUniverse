@@ -395,12 +395,11 @@ class BackgroundServiceManager(LoggerMixin):
                 try:
                     discovery_result = await market_service.discover_exchange_assets(
                         exchanges="all",
-                        min_volume_usd=strategy["min_volume_usd"],
                         user_id="system"
                     )
                     
                     if discovery_result.get("success"):
-                        discovered_assets = discovery_result.get("discovered_assets", {})
+                        discovered_assets = discovery_result.get("asset_discovery", {}).get("detailed_results", {})
                         
                         # Extract ALL symbols from ALL exchanges without limits
                         strategy_symbols = set()

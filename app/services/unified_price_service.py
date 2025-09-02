@@ -295,45 +295,68 @@ class UnifiedPriceService(LoggerMixin):
         except Exception as e:
             self.logger.warning("Market data enterprise fallback failed", symbol=symbol, error=str(e))
         
-        # 3. ENTERPRISE: Direct Exchange API calls
+        # 3. ENTERPRISE: Direct Exchange API calls via initialized clients
         try:
-            from app.api.v1.endpoints.exchanges import get_binance_price, get_kucoin_prices
-            
-            # Binance ticker API
-            binance_price = await get_binance_price(symbol)
-            if binance_price and binance_price > 0:
-                sources_attempted.append("binance_direct")
-                self.logger.info(f"Binance direct fallback successful", symbol=symbol, price=binance_price)
-                return float(binance_price)
+            if self.exchange_apis:
+                # Try Binance exchange API
+                if "binance" in self.exchange_apis:
+                    try:
+                        binance_result = await self.exchange_apis["binance"]([symbol])
+                        if binance_result and binance_result.get(symbol) and binance_result[symbol] > 0:
+                            binance_price = float(binance_result[symbol])
+                            sources_attempted.append("binance_direct")
+                            self.logger.info("Binance direct fallback successful", symbol=symbol, price=binance_price)
+                            return binance_price
+                    except Exception as binance_error:
+                        self.logger.warning("Binance exchange API failed", symbol=symbol, error=str(binance_error))
                 
-            # KuCoin ticker API
-            kucoin_data = await get_kucoin_prices([symbol])
-            if kucoin_data.get(symbol) and kucoin_data[symbol] > 0:
-                sources_attempted.append("kucoin_direct")
-                price = kucoin_data[symbol]
-                self.logger.info(f"KuCoin direct fallback successful", symbol=symbol, price=price)
-                return float(price)
-                
+                # Try KuCoin exchange API  
+                if "kucoin" in self.exchange_apis:
+                    try:
+                        kucoin_result = await self.exchange_apis["kucoin"]([symbol])
+                        if kucoin_result and kucoin_result.get(symbol) and kucoin_result[symbol] > 0:
+                            kucoin_price = float(kucoin_result[symbol])
+                            sources_attempted.append("kucoin_direct")
+                            self.logger.info("KuCoin direct fallback successful", symbol=symbol, price=kucoin_price)
+                            return kucoin_price
+                    except Exception as kucoin_error:
+                        self.logger.warning("KuCoin exchange API failed", symbol=symbol, error=str(kucoin_error))
+                        
         except Exception as e:
-            self.logger.warning("Exchange direct fallback failed", symbol=symbol, error=str(e))
+            self.logger.warning("Exchange API clients fallback failed", symbol=symbol, error=str(e))
         
-        # 4. ENTERPRISE: Additional free APIs (no limits)
+        # 4. ENTERPRISE: CoinGecko API with proper symbol-to-ID mapping
         try:
-            # CoinGecko simple API (no key required)
-            import aiohttp
-            async with aiohttp.ClientSession() as session:
-                url = f"https://api.coingecko.com/api/v3/simple/price"
-                params = {"ids": symbol.lower(), "vs_currencies": "usd"}
-                async with session.get(url, params=params, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data.get(symbol.lower(), {}).get("usd"):
-                            price = float(data[symbol.lower()]["usd"])
-                            sources_attempted.append("coingecko_simple")
-                            self.logger.info(f"CoinGecko simple fallback successful", symbol=symbol, price=price)
-                            return price
+            # CoinGecko requires specific asset IDs, not symbols
+            coingecko_symbol_map = {
+                "BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", 
+                "ADA": "cardano", "DOT": "polkadot", "MATIC": "polygon",
+                "LINK": "chainlink", "UNI": "uniswap", "AVAX": "avalanche-2",
+                "ATOM": "cosmos", "NEAR": "near", "ALGO": "algorand",
+                "XTZ": "tezos", "EGLD": "elrond-erd-2", "FTM": "fantom",
+                "LUNA": "terra-luna-2", "ROSE": "oasis-network", "KAVA": "kava",
+                "RUNE": "thorchain", "OSMO": "osmosis", "JUNO": "juno-network"
+            }
+            
+            coingecko_id = coingecko_symbol_map.get(symbol.upper())
+            if coingecko_id:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    url = "https://api.coingecko.com/api/v3/simple/price"
+                    params = {"ids": coingecko_id, "vs_currencies": "usd"}
+                    async with session.get(url, params=params, timeout=10) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            if data.get(coingecko_id, {}).get("usd"):
+                                price = float(data[coingecko_id]["usd"])
+                                sources_attempted.append("coingecko_simple")
+                                self.logger.info("CoinGecko fallback successful", symbol=symbol, coingecko_id=coingecko_id, price=price)
+                                return price
+            else:
+                self.logger.debug("No CoinGecko ID mapping available", symbol=symbol)
+                                
         except Exception as e:
-            self.logger.warning("CoinGecko simple fallback failed", symbol=symbol, error=str(e))
+            self.logger.warning("CoinGecko fallback failed", symbol=symbol, error=str(e))
         
         try:
             # CoinCap API (completely free)
@@ -363,44 +386,85 @@ class UnifiedPriceService(LoggerMixin):
             if self.redis:
                 cache_patterns = [
                     f"price:*:{symbol}*",
-                    f"price:{symbol}*",
+                    f"price:{symbol}*", 
                     f"market_data:{symbol}*",
                     f"*{symbol}*price*"
                 ]
                 
                 for pattern in cache_patterns:
-                    keys = await self.redis.keys(pattern)
-                    for key in keys:
-                        try:
-                            cached_data = await self.redis.hgetall(key)
-                            if not cached_data:
-                                # Try as simple string
-                                cached_val = await self.redis.get(key)
-                                if cached_val:
-                                    try:
-                                        import json
-                                        cached_data = json.loads(cached_val)
-                                    except:
-                                        if cached_val.replace('.', '').replace('-', '').isdigit():
-                                            price = float(cached_val)
-                                            if price > 0:
-                                                sources_attempted.append("stale_cache_string")
-                                                self.logger.warning(f"Using stale cached price (string)", symbol=symbol, price=price, age="unknown")
-                                                return price
-                            
-                            if cached_data:
-                                price_val = None
-                                if isinstance(cached_data, dict):
-                                    price_val = cached_data.get("price") or cached_data.get("data", {}).get("price")
+                    # PRODUCTION: Use scan_iter to avoid blocking Redis (O(N) keys() is dangerous)
+                    try:
+                        # Try scan_iter first (preferred method)
+                        async for key in self.redis.scan_iter(match=pattern):
+                            try:
+                                cached_data = await self.redis.hgetall(key)
+                                if not cached_data:
+                                    # Try as simple string
+                                    cached_val = await self.redis.get(key)
+                                    if cached_val:
+                                        try:
+                                            import json
+                                            cached_data = json.loads(cached_val)
+                                        except:
+                                            if cached_val.replace('.', '').replace('-', '').isdigit():
+                                                price = float(cached_val)
+                                                if price > 0:
+                                                    sources_attempted.append("stale_cache_string")
+                                                    self.logger.warning("Using stale cached price (string)", symbol=symbol, price=price, age="unknown")
+                                                    return price
                                 
-                                if price_val:
-                                    price = float(price_val)
-                                    if price > 0:
-                                        sources_attempted.append("stale_cache")
-                                        self.logger.warning(f"Using stale cached price", symbol=symbol, price=price, key=key)
-                                        return price
-                        except Exception:
-                            continue
+                                if cached_data:
+                                    price_val = None
+                                    if isinstance(cached_data, dict):
+                                        price_val = cached_data.get("price") or cached_data.get("data", {}).get("price")
+                                    
+                                    if price_val:
+                                        price = float(price_val)
+                                        if price > 0:
+                                            sources_attempted.append("stale_cache")
+                                            self.logger.warning("Using stale cached price", symbol=symbol, price=price, key=key)
+                                            return price
+                            except Exception:
+                                continue
+                                
+                    except AttributeError:
+                        # Fallback to manual SCAN with cursor if scan_iter unavailable
+                        cursor = 0
+                        while True:
+                            cursor, keys = await self.redis.scan(cursor, match=pattern, count=100)
+                            for key in keys:
+                                try:
+                                    cached_data = await self.redis.hgetall(key)
+                                    if not cached_data:
+                                        cached_val = await self.redis.get(key)
+                                        if cached_val:
+                                            try:
+                                                import json
+                                                cached_data = json.loads(cached_val)
+                                            except:
+                                                if cached_val.replace('.', '').replace('-', '').isdigit():
+                                                    price = float(cached_val)
+                                                    if price > 0:
+                                                        sources_attempted.append("stale_cache_string_scan")
+                                                        self.logger.warning("Using stale cached price (SCAN)", symbol=symbol, price=price)
+                                                        return price
+                                    
+                                    if cached_data:
+                                        price_val = None
+                                        if isinstance(cached_data, dict):
+                                            price_val = cached_data.get("price") or cached_data.get("data", {}).get("price")
+                                        
+                                        if price_val:
+                                            price = float(price_val)
+                                            if price > 0:
+                                                sources_attempted.append("stale_cache_scan")
+                                                self.logger.warning("Using stale cached price (SCAN)", symbol=symbol, price=price, key=key)
+                                                return price
+                                except Exception:
+                                    continue
+                            if cursor == 0:  # Scan complete
+                                break
+                                
         except Exception as e:
             self.logger.warning("Stale cache rescue failed", symbol=symbol, error=str(e))
         

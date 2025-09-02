@@ -16,12 +16,13 @@ from urllib.parse import quote
 from fastapi.responses import RedirectResponse
 import bcrypt
 import jwt
+from jwt import JWTError
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -527,19 +528,36 @@ async def logout(
         
         # Blacklist the token if we have one (regardless of validity)
         redis = None
+        token_blacklisted = False
         try:
             redis = await get_redis_client()
             if redis and token:
+                # SECURITY: Hash token before using as Redis key (never store raw JWT)
+                import hashlib
+                token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+                
                 # Use longer TTL for blacklist to be safe
                 blacklist_ttl = max(3600, int(auth_service.access_token_expire.total_seconds()))
-                await redis.setex(
-                    f"blacklist:{token}",
+                
+                # Capture Redis operation result
+                redis_result = await redis.setex(
+                    f"blacklist:{token_hash}",
                     blacklist_ttl,
                     "revoked_during_logout"
                 )
-                logger.debug("Token blacklisted successfully")
+                
+                # Verify blacklist write succeeded
+                token_blacklisted = bool(redis_result)
+                
+                if token_blacklisted:
+                    logger.debug("Token blacklisted successfully", token_hash=token_hash[:16])
+                else:
+                    logger.error("Token blacklist write failed", token_hash=token_hash[:16], redis_result=redis_result)
+                    
         except Exception as redis_error:
-            logger.warning("Redis blacklisting failed - non-critical", error=str(redis_error))
+            logger.error("Redis blacklisting failed - critical security issue", 
+                        token_hash=token_hash[:16] if 'token_hash' in locals() else "unknown", 
+                        error=str(redis_error))
         
         # Clean up user sessions if we have a user ID
         if user_id:
@@ -585,7 +603,7 @@ async def logout(
             "message": "Successfully logged out",
             "user_id": user_id or "anonymous",
             "sessions_cleaned": sessions_cleaned,
-            "token_blacklisted": bool(token),
+            "token_blacklisted": token_blacklisted,
             "redis_available": redis is not None
         }
         
