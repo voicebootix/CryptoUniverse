@@ -534,7 +534,7 @@ class BackgroundServiceManager(LoggerMixin):
             {
                 "name": "KuCoin", 
                 "url": "https://api.kucoin.com/api/v1/symbols",
-                "parser": lambda data: [s.get("baseCurrency") for s in data.get("data", [])]
+                "parser": lambda data: [s.get("baseCurrency") for s in data.get("data", []) if s.get("enableTrading") is True]
             },
             {
                 "name": "CoinGecko_Top250",
@@ -553,26 +553,52 @@ class BackgroundServiceManager(LoggerMixin):
             }
         ]
         
+        # ENTERPRISE: Concurrent API calls for optimal performance (avoid >1min latency)
+        async def fetch_api_symbols(session, api_config):
+            """Fetch symbols from a single API concurrently."""
+            try:
+                headers = {"User-Agent": "CryptoUniverse-Trading-Platform/1.0"}
+                async with session.get(
+                    api_config["url"], 
+                    timeout=10,  # Reduced timeout for concurrent calls
+                    headers=headers
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        symbols = api_config["parser"](data)
+                        valid_symbols = {s for s in symbols if s and isinstance(s, str) and len(s) >= 2}
+                        self.logger.info(f"Concurrent API {api_config['name']} found {len(valid_symbols)} symbols")
+                        return valid_symbols
+                    else:
+                        self.logger.warning(f"Concurrent API {api_config['name']} returned {response.status}")
+                        return set()
+            except Exception as e:
+                self.logger.warning(f"Concurrent API {api_config['name']} failed", api_name=api_config['name'], error=str(e))
+                return set()
+        
         try:
             import aiohttp
             async with aiohttp.ClientSession() as session:
-                for api_config in apis_to_try:
-                    try:
-                        async with session.get(api_config["url"], timeout=15) as response:
-                            if response.status == 200:
-                                data = await response.json()
-                                symbols = api_config["parser"](data)
-                                valid_symbols = {s for s in symbols if s and isinstance(s, str) and len(s) >= 2}
-                                all_symbols.update(valid_symbols)
-                                self.logger.info(f"Direct API {api_config['name']} found {len(valid_symbols)} symbols")
-                            else:
-                                self.logger.warning(f"Direct API {api_config['name']} returned {response.status}")
-                    except Exception as e:
-                        self.logger.warning(f"Direct API {api_config['name']} failed", error=str(e))
-                        continue
+                # Execute all API calls concurrently
+                tasks = [fetch_api_symbols(session, api_config) for api_config in apis_to_try]
+                api_results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Combine results from all APIs
+                total_from_apis = 0
+                for i, result in enumerate(api_results):
+                    if isinstance(result, set):
+                        all_symbols.update(result)
+                        total_from_apis += len(result)
+                    elif isinstance(result, Exception):
+                        self.logger.warning(f"API task {apis_to_try[i]['name']} returned exception", error=str(result))
+                
+                self.logger.info(f"Concurrent API discovery completed", 
+                               total_apis=len(apis_to_try), 
+                               total_symbols=total_from_apis,
+                               unique_symbols=len(all_symbols))
                         
         except Exception as e:
-            self.logger.exception("Direct API symbol discovery completely failed")
+            self.logger.exception("Concurrent API symbol discovery completely failed")
         
         return all_symbols
     
@@ -581,7 +607,7 @@ class BackgroundServiceManager(LoggerMixin):
         return {
             # Layer 1 Blockchains & Protocols
             "BTC", "ETH", "SOL", "ADA", "DOT", "AVAX", "ATOM", "NEAR", "ALGO", "XTZ", "EGLD", "FTM", "LUNA", "ROSE",
-            "KAVA", "RUNE", "OSMO", "JUNO", "SCRT", "BAND", "AKASH", "IRIS", "REGEN", "LIKE", "IOV", "SIFCHAIN",
+            "KAVA", "RUNE", "OSMO", "JUNO", "SCRT", "BAND", "AKT", "IRIS", "REGEN", "LIKE", "IOV", "SIFCHAIN",
             
             # Layer 2 & Scaling Solutions  
             "MATIC", "OP", "ARB", "LRC", "IMX", "MINA", "CELO", "SKALE", "POKT",
@@ -600,7 +626,7 @@ class BackgroundServiceManager(LoggerMixin):
             "XMR", "ZEC", "DASH", "TORN", "NYM", "DERO",
             
             # Enterprise & Institutional
-            "XRP", "XLM", "HBAR", "VET", "ENJ", "CHZ", "HOT", "WINk", "BTT", "JST", "SUN", "TRX",
+            "XRP", "XLM", "HBAR", "VET", "ENJ", "CHZ", "HOT", "WIN", "BTT", "JST", "SUN", "TRX",
             
             # Gaming & NFT Ecosystem
             "AXS", "SAND", "MANA", "FLOW", "WAX", "GALA", "ILV", "YGG", "GHST", "ALICE", "TLM", "SLP",

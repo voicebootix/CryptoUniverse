@@ -6,6 +6,7 @@ and role-based access control for the trading platform.
 """
 
 import asyncio
+import hashlib
 import secrets
 import time
 from datetime import datetime, timedelta
@@ -193,12 +194,16 @@ async def get_current_user(
     # ENTERPRISE REDIS RESILIENCE
     redis = await get_redis_client()
     if redis:
-        blacklisted = await redis.get(f"blacklist:{token}")
+        # SECURITY: Use same SHA-256 hash as logout writes
+        token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+        blacklisted = await redis.get(f"blacklist:{token_hash}")
         if blacklisted:
+            logger.info("Blacklisted token access blocked", token_hash=token_hash[:16])
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has been revoked"
             )
+        logger.debug("Token blacklist check passed", token_hash=token_hash[:16])
     else:
         logger.warning("Redis unavailable for blacklist check, proceeding without")
     
