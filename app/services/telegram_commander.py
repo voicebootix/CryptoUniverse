@@ -60,7 +60,7 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.database import get_database
+from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_manager
 from app.core.logging import LoggerMixin
 
@@ -69,7 +69,7 @@ from app.services.market_analysis import market_analysis_service
 from app.services.trade_execution import trade_execution_service
 from app.services.trading_strategies import trading_strategies_service
 from app.services.ai_consensus import ai_consensus_service
-from app.services.portfolio_risk import portfolio_risk_service
+from app.services.portfolio_risk_core import portfolio_risk_service
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -201,8 +201,5 @@ Ready to manage your crypto wealth! 💎
     }
 
 
-# Import the complete Telegram Commander Service implementation
-from app.services.telegram_core import (
-    TelegramAPIConnector, MessageRouter, TelegramCommanderService, 
-    telegram_commander_service
-)
+# Note: Removed circular import - these will be imported as needed within functions
+# to avoid circular dependency with telegram_core.py

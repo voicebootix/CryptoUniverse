@@ -28,19 +28,37 @@ def get_async_database_url() -> str:
         return db_url.replace("sqlite://", "sqlite+aiosqlite://")
     return db_url
 
-# SQLAlchemy async engine
+# ENTERPRISE SQLAlchemy async engine with optimized connection pooling
 engine = create_async_engine(
     get_async_database_url(),
-    poolclass=NullPool,  # Use NullPool for async engines
+    poolclass=QueuePool,  # ENTERPRISE: Use proper connection pooling
+    pool_size=20,         # ENTERPRISE: Base connection pool size
+    max_overflow=30,      # ENTERPRISE: Additional connections during peak
+    pool_pre_ping=True,   # ENTERPRISE: Health check connections
+    pool_recycle=3600,    # ENTERPRISE: Recycle connections every hour
     echo=getattr(settings, 'DATABASE_ECHO', False),
-    future=True
+    future=True,
+    # ENTERPRISE: Additional performance settings
+    execution_options={
+        "isolation_level": "READ_COMMITTED",
+    },
+    # ENTERPRISE: Query optimization settings for PostgreSQL only
+    connect_args={
+        "command_timeout": 30,
+        "server_settings": {
+            "statement_timeout": "30s",  # Move to server_settings for asyncpg
+            "jit": "off",  # Disable JIT for consistent performance
+            "application_name": "crypto_trading_platform",
+        }
+    } if "postgresql" in get_async_database_url() else {}
 )
 
-# Async session factory
+# Async session factory with proper session-level settings
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
-    expire_on_commit=False
+    expire_on_commit=False,
+    autoflush=False  # Move autoflush to sessionmaker where it belongs
 )
 
 # Metadata and Base
@@ -60,26 +78,45 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
 
 @event.listens_for(engine.sync_engine, "before_cursor_execute")
 def receive_before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
-    """Log slow queries in development."""
-    if getattr(settings, 'ENVIRONMENT', 'production') == "development":
-        import time
-        context._query_start_time = time.time()
+    """Track query performance for enterprise monitoring."""
+    import time
+    context._query_start_time = time.time()
 
 
 @event.listens_for(engine.sync_engine, "after_cursor_execute")
 def receive_after_cursor_execute(conn, cursor, statement, parameters, context, executemany):
-    """Log slow queries in development."""
-    if getattr(settings, 'ENVIRONMENT', 'production') == "development":
-        import time
-        total = time.time() - getattr(context, '_query_start_time', time.time())
-        if total > 0.5:  # Log queries taking longer than 500ms
-            import structlog
-            logger = structlog.get_logger()
-            logger.warning(
-                "Slow database query",
-                duration=total,
-                statement=statement[:200] + "..." if len(statement) > 200 else statement
-            )
+    """Log slow queries for enterprise performance monitoring."""
+    import time
+    import structlog
+    
+    total = time.time() - getattr(context, '_query_start_time', time.time())
+    logger = structlog.get_logger()
+    
+    # ENTERPRISE: Log all slow queries regardless of environment
+    if total > 0.2:  # ENTERPRISE STANDARD: Warn on queries >200ms
+        logger.warning(
+            "Slow database query",
+            duration=total,
+            statement=statement[:200] + "..." if len(statement) > 200 else statement
+        )
+    elif total > 0.5:  # ENTERPRISE: Error on queries >500ms
+        logger.error(
+            "Very slow database query",
+            duration=total,
+            statement=statement[:200] + "..." if len(statement) > 200 else statement
+        )
+    
+    # Record metrics for monitoring
+    try:
+        from app.services.system_monitoring import system_monitoring_service
+        system_monitoring_service.metrics_collector.record_metric(
+            "database_query_time_ms", 
+            total * 1000,
+            {"statement_type": statement.split()[0].upper() if statement else "UNKNOWN"}
+        )
+    except Exception:
+        # Don't fail queries if monitoring is unavailable
+        pass
 
 
 class DatabaseManager:
@@ -305,3 +342,49 @@ class DatabaseUtils:
 
 # Database utils instance
 db_utils = DatabaseUtils()
+
+
+# ENTERPRISE: Database session dependencies
+async def get_database() -> AsyncSession:
+    """
+    Dependency to get database session.
+    
+    Provides async database session with automatic cleanup and error handling.
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            # ENTERPRISE: Optimize session for read-heavy workloads
+            if "postgresql" in get_async_database_url():
+                await session.execute(text("SET statement_timeout = '30s'"))
+                await session.execute(text("SET lock_timeout = '10s'"))
+            
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+async def get_optimized_database() -> AsyncSession:
+    """
+    Dependency to get optimized database session for heavy queries.
+    
+    Provides async database session optimized for analytical/reporting queries.
+    """
+    async with AsyncSessionLocal() as session:
+        try:
+            # ENTERPRISE: Optimize for analytical queries
+            if "postgresql" in get_async_database_url():
+                await session.execute(text("SET work_mem = '256MB'"))
+                await session.execute(text("SET statement_timeout = '60s'"))
+                await session.execute(text("SET random_page_cost = 1.1"))  # SSD optimization
+            
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()

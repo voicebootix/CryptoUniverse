@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc
 
 from app.core.config import get_settings
-from app.core.database import get_database
+from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_manager
 from app.core.logging import LoggerMixin
 

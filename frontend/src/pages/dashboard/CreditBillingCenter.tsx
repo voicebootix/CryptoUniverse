@@ -55,6 +55,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell } from 'recharts';
+import { useCredits } from '@/hooks/useCredits';
 
 // Subscription Plans
 const subscriptionPlans = [
@@ -193,6 +194,9 @@ const rewards = [
 const CreditBillingCenter: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [selectedPlan, setSelectedPlan] = useState<string>(currentSubscription.plan.toLowerCase());
+  const [paymentMethod, setPaymentMethod] = useState('usdc');
+  
+  const { balance, profitPotential, purchaseOptions, transactions, loading, purchasing, actions } = useCredits();
   const [showUpgradeModal, setShowUpgradeModal] = useState<boolean>(false);
 
   const creditUsagePercentage = ((currentSubscription.creditsTotal - currentSubscription.creditsRemaining) / currentSubscription.creditsTotal) * 100;

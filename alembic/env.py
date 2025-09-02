@@ -31,18 +31,27 @@ target_metadata = Base.metadata
 
 
 def get_url():
-    """Get database URL from environment or config."""
-    # Try to get from environment first (for production/Render)
+    """Get database URL from environment or config - SYNC VERSION FOR ALEMBIC."""
+    # Try to get from environment first (for production/Render/Supabase)
     url = os.getenv("DATABASE_URL")
     if url:
-        # Render provides DATABASE_URL, but we might need to adjust it
-        # for SQLAlchemy (postgres:// vs postgresql://)
+        # Normalize to synchronous dialect for Alembic
         if url.startswith("postgres://"):
             url = url.replace("postgres://", "postgresql://", 1)
+        elif url.startswith("postgresql+asyncpg://"):
+            url = url.replace("postgresql+asyncpg://", "postgresql://", 1)
+        # postgresql:// is already correct for sync
         return url
     
-    # Fallback to config file
-    return config.get_main_option("sqlalchemy.url")
+    # Fallback to config file  
+    fallback_url = config.get_main_option("sqlalchemy.url")
+    if fallback_url:
+        # Normalize fallback to sync dialect
+        if fallback_url.startswith("postgres://"):
+            fallback_url = fallback_url.replace("postgres://", "postgresql://", 1)
+        elif fallback_url.startswith("postgresql+asyncpg://"):
+            fallback_url = fallback_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+    return fallback_url
 
 
 def run_migrations_offline() -> None:

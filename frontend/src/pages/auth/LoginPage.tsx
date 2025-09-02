@@ -381,6 +381,7 @@ const LoginPage: React.FC = () => {
                           <Input
                             id="email"
                             type="email"
+                            autoComplete="username"
                             placeholder="Enter your email address"
                             className="h-16 bg-white/10 border-white/20 focus:border-blue-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl transition-all duration-300 text-lg px-6"
                             {...register("email")}
@@ -420,6 +421,7 @@ const LoginPage: React.FC = () => {
                           <Input
                             id="password"
                             type={showPassword ? "text" : "password"}
+                            autoComplete="current-password"
                             placeholder="Enter your password"
                             className="h-16 bg-white/10 border-white/20 focus:border-purple-500 focus:bg-white/15 text-white placeholder:text-gray-400 rounded-2xl pr-16 transition-all duration-300 text-lg px-6"
                             {...register("password")}

@@ -9,7 +9,7 @@ import asyncio
 import time
 import psutil
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import structlog
 from app.core.logging import LoggerMixin
 from app.core.config import get_settings
@@ -28,25 +28,35 @@ class BackgroundServiceManager(LoggerMixin):
         self.tasks = {}
         self.start_time = None
         self.redis = None
+        
+        # Disk cleanup concurrency control
+        self._cleanup_lock = asyncio.Lock()
+        self._last_cleanup: float = 0
+        self._cleanup_cooldown = 300  # 5 minutes cooldown
         # Configurable service intervals (seconds)
         self.intervals = {
             "health_monitor": 60,        # 1 minute
             "metrics_collector": 300,    # 5 minutes
             "cleanup_service": 3600,     # 1 hour
-            "autonomous_cycles": 900,    # 15 minutes (4 cycles per hour)
+            "autonomous_cycles": 60,     # 1 minute base (adaptive based on market conditions)
             "market_data_sync": 60,      # 1 minute
             "balance_sync": 300,         # 5 minutes
             "risk_monitor": 30,          # 30 seconds
             "rate_limit_cleanup": 1800   # 30 minutes
         }
         
-        # Service configurations
+        # Dynamic service configurations (no hardcoded restrictions)
         self.service_configs = {
-            "market_data_symbols": ["BTC", "ETH", "SOL", "ADA", "DOT", "MATIC", "LINK", "UNI"],
             "risk_thresholds": {
                 "max_daily_loss": 10.0,  # 10%
                 "max_position_size": 20.0,  # 20%
                 "emergency_stop_loss": 15.0  # 15%
+            },
+            "market_data_discovery": {
+                "min_volume_usd_24h": 1000000,  # $1M minimum volume
+                "min_market_cap": 10000000,     # $10M minimum market cap
+                "max_symbols_per_sync": 100,    # Dynamic limit
+                "update_frequency_seconds": 300  # 5 minutes
             }
         }
     
@@ -234,6 +244,10 @@ class BackgroundServiceManager(LoggerMixin):
                     alerts.append(f"High memory usage: {memory_percent}%")
                 if disk_percent > 80:
                     alerts.append(f"High disk usage: {disk_percent}%")
+                    
+                    # Trigger automated cleanup if disk usage is critical (non-blocking)
+                    if disk_percent > 85:
+                        asyncio.create_task(self._run_cleanup_if_allowed())
                 
                 # Check Redis connection
                 if self.redis:
@@ -339,7 +353,9 @@ class BackgroundServiceManager(LoggerMixin):
             except Exception as e:
                 self.logger.error("Autonomous cycles error", error=str(e))
             
-            await asyncio.sleep(self.intervals["autonomous_cycles"])
+            # ADAPTIVE CYCLE TIMING based on market conditions
+            next_interval = await self._calculate_adaptive_cycle_interval()
+            await asyncio.sleep(next_interval)
     
     async def _market_data_sync_service(self):
         """Sync market data for configured symbols using real APIs."""
@@ -347,24 +363,104 @@ class BackgroundServiceManager(LoggerMixin):
         
         while self.running:
             try:
-                symbols = self.service_configs["market_data_symbols"]
+                # Dynamically discover tradeable symbols (no hardcoded lists)
+                symbols = await self._discover_active_trading_symbols()
                 
-                # Import market data feeds
+                # Import your sophisticated market data feeds service
                 from app.services.market_data_feeds import market_data_feeds
                 
                 # Ensure market data feeds is initialized
                 if market_data_feeds.redis is None:
                     await market_data_feeds.async_init()
                 
-                # Sync market data using real APIs
+                # Sync market data for discovered symbols using real APIs
                 await market_data_feeds.sync_market_data_batch(symbols)
                 
-                self.logger.debug(f"Market data sync completed for {len(symbols)} symbols")
+                self.logger.debug(f"Market data sync completed for {len(symbols)} discovered symbols", symbols=symbols[:10])
                 
             except Exception as e:
                 self.logger.error("Market data sync error", error=str(e))
             
             await asyncio.sleep(self.intervals["market_data_sync"])
+    
+    async def _discover_active_trading_symbols(self) -> List[str]:
+        """Dynamically discover active trading symbols across all exchanges."""
+        try:
+            from app.services.market_analysis_core import MarketAnalysisService
+            market_service = MarketAnalysisService()
+            
+            # Use your sophisticated discover_exchange_assets function
+            discovery_result = await market_service.discover_exchange_assets(
+                exchanges="all",
+                min_volume_usd=self.service_configs["market_data_discovery"]["min_volume_usd_24h"],
+                user_id="system"
+            )
+            
+            if discovery_result.get("success"):
+                discovered_assets = discovery_result.get("discovered_assets", {})
+                
+                # Extract symbols from all exchanges
+                all_symbols = set()
+                for exchange, assets in discovered_assets.items():
+                    if isinstance(assets, list):
+                        all_symbols.update(assets)
+                    elif isinstance(assets, dict):
+                        all_symbols.update(assets.keys())
+                
+                # Filter by volume and market cap criteria
+                filtered_symbols = []
+                for symbol in all_symbols:
+                    # Basic filtering - your market analysis service provides sophisticated filtering
+                    if len(symbol) <= 10 and not any(char in symbol for char in ['/', '-', '_']):
+                        filtered_symbols.append(symbol)
+                
+                # Limit to prevent overwhelming the system
+                max_symbols = self.service_configs["market_data_discovery"]["max_symbols_per_sync"]
+                filtered_symbols = filtered_symbols[:max_symbols]
+                
+                self.logger.info(f"🔍 Discovered {len(filtered_symbols)} active trading symbols")
+                return filtered_symbols
+            
+            # Fallback to major cryptocurrencies if discovery fails
+            fallback_symbols = ["BTC", "ETH", "SOL", "ADA", "DOT", "MATIC", "LINK", "UNI", "AVAX", "ATOM"]
+            self.logger.warning("Symbol discovery failed, using fallback symbols")
+            return fallback_symbols
+            
+        except Exception as e:
+            self.logger.error("Symbol discovery failed", error=str(e))
+            # Emergency fallback
+            return ["BTC", "ETH", "SOL"]
+    
+    async def _calculate_adaptive_cycle_interval(self) -> int:
+        """Calculate adaptive cycle interval based on market conditions and activity."""
+        try:
+            from app.services.market_analysis_core import MarketAnalysisService
+            
+            # Get current market volatility
+            market_service = MarketAnalysisService()
+            market_overview = await market_service.get_market_overview()
+            
+            if market_overview.get("success"):
+                volatility = market_overview.get("market_overview", {}).get("volatility_level", "medium")
+                arbitrage_count = market_overview.get("market_overview", {}).get("arbitrage_opportunities", 0)
+                
+                # Adaptive timing based on market conditions
+                if volatility == "high" or arbitrage_count > 5:
+                    # High volatility or many arbitrage opportunities: faster cycles
+                    return 30  # 30 seconds
+                elif volatility == "low":
+                    # Low volatility: slower cycles to save resources
+                    return 120  # 2 minutes
+                else:
+                    # Medium volatility: standard timing
+                    return 60  # 1 minute
+            else:
+                # Fallback to standard interval
+                return self.intervals["autonomous_cycles"]
+                
+        except Exception as e:
+            self.logger.warning("Failed to calculate adaptive interval", error=str(e))
+            return self.intervals["autonomous_cycles"]
     
     async def _balance_sync_service(self):
         """Sync exchange balances for all users."""
@@ -372,8 +468,47 @@ class BackgroundServiceManager(LoggerMixin):
         
         while self.running:
             try:
-                # This would sync balances for all active users
-                self.logger.debug("Syncing user balances...")
+                # Get all users with active exchange accounts
+                from app.core.database import get_database
+                from app.models.exchange import ExchangeAccount
+                from sqlalchemy import select, and_, distinct
+                import json
+                
+                async for db in get_database():
+                    # Find all users with active exchange accounts
+                    stmt = select(distinct(ExchangeAccount.user_id)).where(
+                        and_(
+                            ExchangeAccount.status == "active",
+                            ExchangeAccount.trading_enabled == True
+                        )
+                    )
+                    
+                    result = await db.execute(stmt)
+                    user_ids = [row[0] for row in result.fetchall()]
+                    
+                    self.logger.debug(f"Syncing balances for {len(user_ids)} users with active exchanges")
+                    
+                    # Sync balances for each user using your existing system
+                    for user_id in user_ids:
+                        try:
+                            # Use your existing exchange balance fetching
+                            from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
+                            portfolio_data = await get_user_portfolio_from_exchanges(str(user_id), db)
+                            
+                            if portfolio_data.get("success"):
+                                # Update cached portfolio data in Redis for real-time access
+                                if self.redis:
+                                    await self.redis.setex(
+                                        f"portfolio_cache:{user_id}",
+                                        300,  # 5 minute cache
+                                        json.dumps(portfolio_data, default=str)
+                                    )
+                            
+                        except Exception as e:
+                            self.logger.warning(f"Balance sync failed for user {user_id}", error=str(e))
+                            continue
+                
+                self.logger.debug("Balance sync cycle completed")
                 
             except Exception as e:
                 self.logger.error("Balance sync error", error=str(e))
@@ -451,3 +586,272 @@ class BackgroundServiceManager(LoggerMixin):
             pass
         except Exception as e:
             self.logger.error("Session cleanup failed", error=str(e))
+    
+    async def _automated_disk_cleanup(self):
+        """Automated disk cleanup for enterprise production environment - application-owned files only."""
+        try:
+            self.logger.info("🧹 Starting automated disk cleanup")
+            cleanup_actions = []
+            
+            # 1. Clean up old application log files (older than 7 days)
+            import os
+            import glob
+            from pathlib import Path
+            
+            # Only clean application-owned directories
+            app_log_dirs = ["./logs", "./app/logs", "./var/log/app"]
+            app_prefixes = ["crypto_", "trading_", "app_", "background_", "market_"]
+            
+            for log_dir in app_log_dirs:
+                if not os.path.exists(log_dir):
+                    continue
+                    
+                try:
+                    # Only clean files with our application prefixes or in our directories
+                    for prefix in app_prefixes:
+                        old_logs = glob.glob(f"{log_dir}/{prefix}*.log.*")
+                        old_logs.extend(glob.glob(f"{log_dir}/{prefix}*-*.log"))
+                        
+                        for log_file in old_logs:
+                            try:
+                                file_path = Path(log_file)
+                                if file_path.stat().st_mtime < (time.time() - 7 * 24 * 3600):  # 7 days
+                                    # Verify it's our file by checking name pattern
+                                    if any(file_path.name.startswith(p) for p in app_prefixes):
+                                        await self._safe_remove_file(log_file)
+                                        cleanup_actions.append(f"Removed old log: {log_file}")
+                            except Exception as e:
+                                self.logger.error(f"Failed to remove log file {log_file}", error=str(e), exc_info=True)
+                except Exception as e:
+                    self.logger.error(f"Failed to clean log directory {log_dir}", error=str(e), exc_info=True)
+            
+            # 2. Clean up application temporary files
+            app_temp_dirs = ["./tmp", "./temp", "./cache/tmp"]
+            for temp_dir in app_temp_dirs:
+                if not os.path.exists(temp_dir):
+                    continue
+                    
+                try:
+                    # Only clean files with our application prefixes
+                    for prefix in app_prefixes:
+                        temp_files = glob.glob(f"{temp_dir}/{prefix}*")
+                        temp_files.extend(glob.glob(f"{temp_dir}/*_{prefix}*"))
+                        
+                        for temp_file in temp_files:
+                            try:
+                                file_path = Path(temp_file)
+                                if file_path.stat().st_mtime < (time.time() - 24 * 3600):  # 1 day
+                                    # Verify it's our file
+                                    if any(file_path.name.startswith(p) or f"_{p}" in file_path.name for p in app_prefixes):
+                                        await self._safe_remove_file(temp_file)
+                                        cleanup_actions.append(f"Removed temp file: {temp_file}")
+                            except Exception as e:
+                                self.logger.error(f"Failed to remove temp file {temp_file}", error=str(e), exc_info=True)
+                except Exception as e:
+                    self.logger.error(f"Failed to clean temp directory {temp_dir}", error=str(e), exc_info=True)
+            
+            # 3. Clean up old application database backups (keep last 3)
+            app_backup_dirs = ["./backups", "./data/backups"]
+            for backup_dir in app_backup_dirs:
+                if not os.path.exists(backup_dir):
+                    continue
+                    
+                try:
+                    # Only clean files with our application prefixes
+                    backup_files = []
+                    for prefix in app_prefixes:
+                        backup_files.extend(glob.glob(f"{backup_dir}/{prefix}*.sql"))
+                        backup_files.extend(glob.glob(f"{backup_dir}/{prefix}*.dump"))
+                        backup_files.extend(glob.glob(f"{backup_dir}/backup_{prefix}*"))
+                    
+                    # Sort by modification time and keep only the 3 most recent
+                    backup_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+                    for old_backup in backup_files[3:]:
+                        try:
+                            # Verify it's our backup file
+                            backup_path = Path(old_backup)
+                            if any(backup_path.name.startswith(p) or f"_{p}" in backup_path.name for p in app_prefixes):
+                                await self._safe_remove_file(old_backup)
+                                cleanup_actions.append(f"Removed old backup: {old_backup}")
+                        except Exception as e:
+                            self.logger.error(f"Failed to remove backup file {old_backup}", error=str(e), exc_info=True)
+                except Exception as e:
+                    self.logger.error(f"Failed to clean backup directory {backup_dir}", error=str(e), exc_info=True)
+            
+            # 4. Clean up old application cache files
+            app_cache_dirs = ["./cache", "./data/cache", "./app/cache"]
+            for cache_dir in app_cache_dirs:
+                if not os.path.exists(cache_dir):
+                    continue
+                    
+                try:
+                    # Only clean files with our application prefixes or specific patterns
+                    cache_patterns = ["market_data_*", "trading_*", "crypto_*", "*.cache"]
+                    cache_files = []
+                    
+                    for pattern in cache_patterns:
+                        cache_files.extend(glob.glob(f"{cache_dir}/{pattern}"))
+                    
+                    for cache_file in cache_files:
+                        try:
+                            file_path = Path(cache_file)
+                            if file_path.stat().st_mtime < (time.time() - 3 * 24 * 3600):  # 3 days
+                                # Verify it's our cache file
+                                if (any(file_path.name.startswith(p) for p in app_prefixes) or 
+                                    file_path.name.startswith(("market_data_", "trading_", "crypto_")) or
+                                    file_path.suffix == ".cache"):
+                                    await self._safe_remove_file(cache_file)
+                                    cleanup_actions.append(f"Removed old cache: {cache_file}")
+                        except Exception as e:
+                            self.logger.error(f"Failed to remove cache file {cache_file}", error=str(e), exc_info=True)
+                except Exception as e:
+                    self.logger.error(f"Failed to clean cache directory {cache_dir}", error=str(e), exc_info=True)
+            
+            # 5. Archive old application trading data (compress files older than 30 days)
+            app_data_dirs = ["./data", "./app/data", "./exports"]
+            for data_dir in app_data_dirs:
+                if not os.path.exists(data_dir):
+                    continue
+                    
+                try:
+                    # Only process files with our application prefixes
+                    data_files = []
+                    for prefix in app_prefixes:
+                        data_files.extend(glob.glob(f"{data_dir}/{prefix}*.json"))
+                        data_files.extend(glob.glob(f"{data_dir}/{prefix}*.csv"))
+                        data_files.extend(glob.glob(f"{data_dir}/export_{prefix}*"))
+                    
+                    for data_file in data_files:
+                        try:
+                            file_path = Path(data_file)
+                            if file_path.stat().st_mtime < (time.time() - 30 * 24 * 3600):  # 30 days
+                                # Verify it's our data file
+                                if any(file_path.name.startswith(p) or f"_{p}" in file_path.name for p in app_prefixes):
+                                    # Compress and remove using async helper
+                                    await self._compress_then_remove(data_file)
+                                    cleanup_actions.append(f"Compressed old data: {data_file}")
+                        except Exception as e:
+                            self.logger.error(f"Failed to compress data file {data_file}", error=str(e), exc_info=True)
+                except Exception as e:
+                    self.logger.error(f"Failed to clean data directory {data_dir}", error=str(e), exc_info=True)
+            
+            if cleanup_actions:
+                self.logger.info(f"🧹 Disk cleanup completed: {len(cleanup_actions)} actions taken", actions=cleanup_actions[:5])  # Log first 5
+            else:
+                self.logger.info("🧹 Disk cleanup completed: No cleanup needed")
+            
+        except Exception as e:
+            self.logger.error("Automated disk cleanup failed", error=str(e))
+    
+    async def _run_cleanup_if_allowed(self):
+        """Run disk cleanup with cooldown and single-flight protection."""
+        current_time = time.time()
+        
+        # Check cooldown
+        if current_time - self._last_cleanup < self._cleanup_cooldown:
+            self.logger.debug(f"Disk cleanup skipped - cooldown active ({self._cleanup_cooldown - (current_time - self._last_cleanup):.0f}s remaining)")
+            return
+        
+        # Single-flight protection
+        if self._cleanup_lock.locked():
+            self.logger.debug("Disk cleanup already in progress - skipping")
+            return
+        
+        async with self._cleanup_lock:
+            try:
+                self._last_cleanup = current_time
+                self.logger.info("Starting non-blocking disk cleanup")
+                await self._automated_disk_cleanup()
+                self.logger.info("Non-blocking disk cleanup completed successfully")
+            except Exception as e:
+                self.logger.error("Non-blocking disk cleanup failed", error=str(e), exc_info=True)
+            finally:
+                # Update last cleanup time even on failure to prevent spam
+                self._last_cleanup = time.time()
+    
+    @staticmethod
+    def _compress_then_remove_sync(file_path: str) -> None:
+        """Compress a file to .gz and remove the original - runs in thread pool."""
+        import gzip
+        import os
+        
+        try:
+            import structlog
+            logger = structlog.get_logger()
+            abs_path = os.path.realpath(file_path)
+            allowed_roots = [os.path.realpath(p) for p in (
+                "./logs", "./app/logs", "./var/log/app",
+                "./tmp", "./temp", "./cache/tmp",
+                "./backups", "./data/backups",
+                "./cache", "./data/cache", "./app/cache",
+                "./data", "./app/data", "./exports"
+            )]
+            
+            # Security checks
+            if os.path.islink(file_path):
+                logger.warning("Skipping symlink during compression", path=file_path)
+                return
+            if not any(os.path.commonpath([abs_path, root]) == root for root in allowed_roots):
+                logger.warning("Refusing to compress outside allowed dirs", path=abs_path)
+                return
+                
+            gz_path = f"{file_path}.gz"
+            
+            # Compress the file
+            with open(file_path, 'rb') as f_in:
+                with gzip.open(gz_path, 'wb') as f_out:
+                    f_out.writelines(f_in)
+            
+            # Remove original file
+            os.remove(file_path)
+            
+        except Exception as e:
+            # Log error and re-raise so caller can handle/log per-file context
+            import structlog
+            logger = structlog.get_logger()
+            logger.error(f"Failed to compress and remove file {file_path}", error=str(e), exc_info=True)
+            raise
+    
+    @staticmethod
+    def _safe_remove_file_sync(file_path: str) -> None:
+        """Safely remove a file - runs in thread pool."""
+        import os
+        
+        try:
+            import structlog
+            logger = structlog.get_logger()
+            abs_path = os.path.realpath(file_path)
+            allowed_roots = [os.path.realpath(p) for p in (
+                "./logs", "./app/logs", "./var/log/app",
+                "./tmp", "./temp", "./cache/tmp",
+                "./backups", "./data/backups",
+                "./cache", "./data/cache", "./app/cache",
+                "./data", "./app/data", "./exports"
+            )]
+            
+            # Security checks
+            if os.path.islink(file_path):
+                logger.warning("Skipping symlink during delete", path=file_path)
+                return
+            if not any(os.path.commonpath([abs_path, root]) == root for root in allowed_roots):
+                logger.warning("Refusing to delete outside allowed dirs", path=abs_path)
+                return
+                
+            os.remove(file_path)
+            
+        except Exception as e:
+            # Log error and re-raise so caller can handle/log per-file context
+            import structlog
+            logger = structlog.get_logger()
+            logger.error(f"Failed to remove file {file_path}", error=str(e), exc_info=True)
+            raise
+    
+    async def _safe_remove_file(self, file_path: str) -> None:
+        """Async wrapper for safe file removal."""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._safe_remove_file_sync, file_path)
+    
+    async def _compress_then_remove(self, file_path: str) -> None:
+        """Async wrapper for compress and remove operation."""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._compress_then_remove_sync, file_path)

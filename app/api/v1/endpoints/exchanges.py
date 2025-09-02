@@ -7,6 +7,8 @@ for the AI money manager platform with encrypted storage and security.
 
 import asyncio
 import base64
+import threading
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 
@@ -14,7 +16,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -54,6 +56,74 @@ def get_encryption_key():
 
 encryption_key = get_encryption_key()
 cipher_suite = Fernet(encryption_key)
+
+
+# ENTERPRISE KRAKEN NONCE MANAGER
+class KrakenNonceManager:
+    """Enterprise-grade Kraken nonce manager to prevent EAPI:Invalid nonce errors."""
+    
+    def __init__(self):
+        self._last_nonce = 0
+        self._lock = threading.Lock()
+        self._nonce_increment = 0
+        self._call_count = 0
+        self._server_time_offset = 0  # Kraken server time offset
+        self._last_time_sync = 0
+    
+    async def _sync_server_time(self) -> bool:
+        """ENTERPRISE: Sync with Kraken server time for accurate nonces."""
+        try:
+            import aiohttp
+            current_time = time.time()
+            
+            # Only sync every 5 minutes to avoid excessive calls
+            if current_time - self._last_time_sync < 300:
+                return True
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://api.kraken.com/0/public/Time", timeout=10) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get("result") and data["result"].get("unixtime"):
+                            server_time = float(data["result"]["unixtime"])
+                            self._server_time_offset = server_time - current_time
+                            self._last_time_sync = current_time
+                            logger.info(f"Kraken server time synced", offset=self._server_time_offset)
+                            return True
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to sync Kraken server time: {e}")
+            return False
+    
+    async def get_nonce(self) -> str:
+        """Generate a unique, strictly increasing nonce using Kraken server time."""
+        with self._lock:
+            self._call_count += 1
+            
+            # ENTERPRISE: Use server-synchronized time
+            await self._sync_server_time()
+            server_time = time.time() + self._server_time_offset
+            current_time_microseconds = int(server_time * 1000000)
+            
+            # ENTERPRISE: Ensure nonce is ALWAYS strictly increasing with large gaps
+            if current_time_microseconds <= self._last_nonce:
+                # If server time hasn't advanced enough, use last nonce + large increment
+                self._last_nonce += 10000  # Very large increment to avoid any collisions
+            else:
+                self._last_nonce = current_time_microseconds
+            
+            # Add unique call identifier to guarantee uniqueness
+            self._nonce_increment = (self._nonce_increment + 1) % 100000  # Very large range
+            final_nonce = self._last_nonce + self._nonce_increment
+            
+            # Log for debugging critical nonce issues
+            logger.info(f"Kraken nonce generated", nonce=final_nonce, call_count=self._call_count, 
+                       server_offset=self._server_time_offset)
+            
+            return str(final_nonce)
+
+# Global nonce manager instance
+kraken_nonce_manager = KrakenNonceManager()
 
 
 # Request/Response Models
@@ -278,7 +348,7 @@ async def list_exchange_connections(
         connections = []
         for api_key in api_keys:
             try:
-                # Decrypt for display (masked)  
+                # Decrypt for display (masked)
                 decrypted_api_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
                 
                 # Get exchange account info
@@ -373,7 +443,7 @@ async def update_exchange_connection(
             select(ExchangeApiKey)
             .join(ExchangeAccount, ExchangeApiKey.account_id == ExchangeAccount.id)
             .filter(
-                ExchangeApiKey.id == api_key_id,
+            ExchangeApiKey.id == api_key_id,
                 ExchangeAccount.user_id == current_user.id
             )
         )
@@ -433,7 +503,7 @@ async def test_exchange_connection_endpoint(
             select(ExchangeApiKey)
             .join(ExchangeAccount, ExchangeApiKey.account_id == ExchangeAccount.id)
             .filter(
-                ExchangeApiKey.id == api_key_id,
+            ExchangeApiKey.id == api_key_id,
                 ExchangeAccount.user_id == current_user.id
             )
         )
@@ -590,8 +660,8 @@ async def disconnect_exchange(
         from sqlalchemy import select
         result = await db.execute(
             select(ExchangeApiKey).filter(
-                ExchangeApiKey.id == api_key_id,
-                ExchangeApiKey.user_id == current_user.id
+            ExchangeApiKey.id == api_key_id,
+            ExchangeApiKey.user_id == current_user.id
             )
         )
         api_key = result.scalar_one_or_none()
@@ -713,11 +783,18 @@ async def fetch_exchange_balances(api_key: ExchangeApiKey, db: AsyncSession) -> 
         exchange_name = account.exchange_name.lower()
         
         # Decrypt API credentials
+        cipher_suite = Fernet(get_encryption_key())
         decrypted_key = cipher_suite.decrypt(api_key.encrypted_api_key.encode()).decode()
         decrypted_secret = cipher_suite.decrypt(api_key.encrypted_secret_key.encode()).decode()
         
         if exchange_name == "binance":
             return await fetch_binance_balances(decrypted_key, decrypted_secret)
+        elif exchange_name == "kucoin":
+            # KuCoin requires passphrase in addition to key/secret
+            decrypted_passphrase = cipher_suite.decrypt(api_key.encrypted_passphrase.encode()).decode() if hasattr(api_key, 'encrypted_passphrase') and api_key.encrypted_passphrase else ""
+            return await fetch_kucoin_balances(decrypted_key, decrypted_secret, decrypted_passphrase)
+        elif exchange_name == "kraken":
+            return await fetch_kraken_balances(decrypted_key, decrypted_secret)
         elif exchange_name == "coinbase":
             return await fetch_coinbase_balances(decrypted_key, decrypted_secret)
         else:
@@ -725,9 +802,15 @@ async def fetch_exchange_balances(api_key: ExchangeApiKey, db: AsyncSession) -> 
             # Return empty list for unsupported exchanges
             return []
         
-    except Exception as e:
-        logger.error(f"Failed to fetch balances for API key {api_key.id}", error=str(e))
+    except InvalidToken as e:
+        logger.error(f"Failed to decrypt API credentials for key {api_key.id}", error=str(e))
         return []
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        logger.error(f"Network error fetching balances for API key {api_key.id}", error=str(e))
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error fetching balances for API key {api_key.id}", error=str(e), exc_info=True)
+        raise
 
 
 async def fetch_binance_balances(api_key: str, api_secret: str) -> List[Dict[str, Any]]:
@@ -762,43 +845,44 @@ async def fetch_binance_balances(api_key: str, api_secret: str) -> List[Dict[str
             "X-MBX-APIKEY": api_key
         }
         
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{base_url}{endpoint}",
-                params=params,
-                headers=headers
-            ) as response:
-                if response.status != 200:
-                    logger.error(f"Binance API error: {response.status}")
-                    return []
+        async def make_binance_request():
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{base_url}{endpoint}",
+                    params=params,
+                    headers=headers
+                ) as response:
+                    await validate_exchange_response(response, "binance")
+                    return await response.json()
+        
+        # Use retry logic for API calls
+        data = await retry_with_backoff(make_binance_request)
+        balances = []
+        
+        # Get current prices for USD conversion
+        prices = await get_binance_prices(list(set([b["asset"] for b in data.get("balances", []) if float(b.get("free", 0)) + float(b.get("locked", 0)) > 0])))
+        
+        # Process balances
+        for balance in data.get("balances", []):
+            free = float(balance.get("free", 0))
+            locked = float(balance.get("locked", 0))
+            total = free + locked
+            
+            # Only include assets with non-zero balance
+            if total > 0:
+                asset = balance.get("asset")
+                usd_price = prices.get(asset, 0.0)
+                value_usd = total * usd_price
                 
-                data = await response.json()
-                balances = []
-                
-                # Get current prices for USD conversion
-                prices = await get_binance_prices(list(set([b["asset"] for b in data.get("balances", []) if float(b.get("free", 0)) + float(b.get("locked", 0)) > 0])))
-                
-                # Process balances
-                for balance in data.get("balances", []):
-                    free = float(balance.get("free", 0))
-                    locked = float(balance.get("locked", 0))
-                    total = free + locked
-                    
-                    # Only include assets with non-zero balance
-                    if total > 0:
-                        asset = balance.get("asset")
-                        usd_price = prices.get(asset, 0.0)
-                        value_usd = total * usd_price
-                        
-                        balances.append({
-                            "asset": asset,
-                            "free": free,
-                            "locked": locked,
-                            "total": total,
-                            "value_usd": round(value_usd, 2)
-                        })
-                
-                return balances
+                balances.append({
+                    "asset": asset,
+                    "free": free,
+                    "locked": locked,
+                    "total": total,
+                    "value_usd": round(value_usd, 2)
+                })
+        
+        return balances
                 
     except Exception as e:
         logger.error(f"Failed to fetch Binance balances: {str(e)}")
@@ -851,11 +935,463 @@ async def get_binance_prices(assets: List[str]) -> Dict[str, float]:
         return {}
 
 
+async def fetch_kucoin_balances(api_key: str, api_secret: str, passphrase: str) -> List[Dict[str, Any]]:
+    """Fetch balances from KuCoin API with proper HMAC authentication."""
+    try:
+        import aiohttp
+        import hmac
+        import hashlib
+        import time
+        import base64
+        
+        base_url = "https://api.kucoin.com"
+        endpoint = "/api/v1/accounts"
+        timestamp = str(int(time.time() * 1000))
+        
+        # Create signature for KuCoin API
+        str_to_sign = timestamp + "GET" + endpoint
+        signature = base64.b64encode(
+            hmac.new(
+                api_secret.encode(),
+                str_to_sign.encode(),
+                hashlib.sha256
+            ).digest()
+        ).decode()
+        
+        # Create passphrase signature
+        passphrase_signature = base64.b64encode(
+            hmac.new(
+                api_secret.encode(),
+                passphrase.encode(),
+                hashlib.sha256
+            ).digest()
+        ).decode()
+        
+        headers = {
+            "KC-API-KEY": api_key,
+            "KC-API-SIGN": signature,
+            "KC-API-TIMESTAMP": timestamp,
+            "KC-API-PASSPHRASE": passphrase_signature,
+            "KC-API-KEY-VERSION": "2",
+            "Content-Type": "application/json"
+        }
+        
+        async def make_kucoin_request():
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{base_url}{endpoint}",
+                    headers=headers
+                ) as response:
+                    await validate_exchange_response(response, "kucoin")
+                    data = await response.json()
+                    if not data.get("code") == "200000":
+                        raise ExchangeAPIError("kucoin", data.get('msg', 'Unknown error'))
+                    return data
+        
+        # Use retry logic for API calls
+        data = await retry_with_backoff(make_kucoin_request)
+        
+        accounts = data.get("data", [])
+        balances = []
+        
+        # Get current prices for USD conversion
+        active_currencies = list(set([acc["currency"] for acc in accounts if float(acc.get("balance", 0)) > 0]))
+        prices = await get_kucoin_prices(active_currencies)
+        
+        # Process balances
+        for account in accounts:
+            balance = float(account.get("balance", 0))
+            available = float(account.get("available", 0))
+            holds = float(account.get("holds", 0))
+            
+            # Only include assets with non-zero balance
+            if balance > 0:
+                currency = account.get("currency")
+                usd_price = prices.get(currency, 0.0)
+                value_usd = balance * usd_price
+                
+                balances.append({
+                    "asset": currency,
+                    "free": available,
+                    "locked": holds,
+                    "total": balance,
+                    "value_usd": round(value_usd, 2)
+                })
+        
+        return balances
+                
+    except Exception as e:
+        logger.error(f"Failed to fetch KuCoin balances: {str(e)}")
+        return []
+
+
+async def get_kucoin_prices(currencies: List[str]) -> Dict[str, float]:
+    """Get current USD prices for currencies from KuCoin."""
+    try:
+        import aiohttp
+        
+        if not currencies:
+            return {}
+        
+        # KuCoin uses USDT as base for most pairs
+        symbols = []
+        for currency in currencies:
+            if currency == "USDT":
+                symbols.append(f"{currency}-USDT")  # Will handle specially
+            else:
+                symbols.append(f"{currency}-USDT")
+        
+        base_url = "https://api.kucoin.com"
+        endpoint = "/api/v1/market/allTickers"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{base_url}{endpoint}") as response:
+                if response.status != 200:
+                    return {}
+                
+                data = await response.json()
+                if not data.get("code") == "200000":
+                    return {}
+                
+                tickers = data.get("data", {}).get("ticker", [])
+                prices = {}
+                
+                # USDT is always $1
+                prices["USDT"] = 1.0
+                
+                # Process tickers
+                for ticker in tickers:
+                    symbol = ticker.get("symbol", "")
+                    if "-USDT" in symbol:
+                        currency = symbol.replace("-USDT", "")
+                        if currency in currencies:
+                            try:
+                                prices[currency] = float(ticker.get("last", 0))
+                            except (ValueError, TypeError):
+                                prices[currency] = 0.0
+                
+                return prices
+                
+    except Exception as e:
+        logger.error(f"Failed to fetch KuCoin prices: {str(e)}")
+        return {}
+
+
+
+async def fetch_kraken_balances(api_key: str, api_secret: str) -> List[Dict[str, Any]]:
+    """Fetch balances from Kraken API with proper signature authentication."""
+    try:
+        import aiohttp
+        import hmac
+        import hashlib
+        import time
+        import base64
+        import urllib.parse
+        
+        base_url = "https://api.kraken.com"
+        endpoint = "/0/private/Balance"
+        nonce = kraken_nonce_manager.get_nonce()  # ENTERPRISE NONCE MANAGEMENT
+        
+        # Prepare POST data
+        post_data = urllib.parse.urlencode({"nonce": nonce})
+        
+        # Create signature for Kraken API
+        encoded_endpoint = endpoint.encode()
+        encoded_nonce_postdata = (nonce + post_data).encode()
+        sha256_hash = hashlib.sha256(encoded_nonce_postdata).digest()
+        signature_data = encoded_endpoint + sha256_hash
+        
+        signature = base64.b64encode(
+            hmac.new(
+                base64.b64decode(api_secret),
+                signature_data,
+                hashlib.sha512
+            ).digest()
+        ).decode()
+        
+        headers = {
+            "API-Key": api_key,
+            "API-Sign": signature,
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        
+        async def make_kraken_request():
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{base_url}{endpoint}",
+                    headers=headers,
+                    data=post_data
+                ) as response:
+                    await validate_exchange_response(response, "kraken")
+                    data = await response.json()
+                    if data.get("error"):
+                        raise ExchangeAPIError("kraken", str(data['error']))
+                    return data
+        
+        # Use retry logic for API calls
+        data = await retry_with_backoff(make_kraken_request)
+        
+        balances_data = data.get("result", {})
+        balances = []
+        
+        # Get current prices for USD conversion
+        active_currencies = [currency for currency, balance in balances_data.items() if float(balance) > 0]
+        prices = await get_kraken_prices(active_currencies)
+        
+        # Process balances
+        for currency, balance in balances_data.items():
+            balance_float = float(balance)
+            
+            # Only include assets with non-zero balance
+            if balance_float > 0:
+                # Kraken uses different currency codes (e.g., XXBT for BTC)
+                normalized_currency = normalize_kraken_currency(currency)
+                usd_price = prices.get(normalized_currency, 0.0)
+                value_usd = balance_float * usd_price
+                
+                balances.append({
+                    "asset": normalized_currency,
+                    "free": balance_float,  # Kraken doesn't separate free/locked in balance endpoint
+                "locked": 0.0,
+                    "total": balance_float,
+                    "value_usd": round(value_usd, 2)
+                })
+        
+        return balances
+                
+    except Exception as e:
+        logger.error(f"Failed to fetch Kraken balances: {str(e)}")
+        return []
+
+
+def normalize_kraken_currency(kraken_currency: str) -> str:
+    """Normalize Kraken currency codes to standard format."""
+    currency_map = {
+        "XXBT": "BTC",
+        "XETH": "ETH",
+        "XLTC": "LTC",
+        "XXRP": "XRP",
+        "XZEC": "ZEC",
+        "ZUSD": "USD",
+        "ZEUR": "EUR",
+        "ZGBP": "GBP",
+        "ZCAD": "CAD",
+        "ZJPY": "JPY"
+    }
+    return currency_map.get(kraken_currency, kraken_currency)
+
+
+async def get_kraken_prices(currencies: List[str]) -> Dict[str, float]:
+    """Get current USD prices for currencies from Kraken."""
+    try:
+        import aiohttp
+        
+        if not currencies:
+            return {}
+        
+        # Build pairs for USD pricing
+        pairs = []
+        for currency in currencies:
+            if currency == "USD":
+                continue  # USD is always $1
+            # Kraken uses different pair formats
+            if currency == "BTC":
+                pairs.append("XBTUSD")
+            elif currency == "ETH":
+                pairs.append("ETHUSD")
+            else:
+                pairs.append(f"{currency}USD")
+        
+        if not pairs:
+            return {"USD": 1.0}
+        
+        base_url = "https://api.kraken.com"
+        endpoint = f"/0/public/Ticker?pair={','.join(pairs)}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{base_url}{endpoint}") as response:
+                if response.status != 200:
+                    return {"USD": 1.0}
+                
+                data = await response.json()
+                if data.get("error"):
+                    return {"USD": 1.0}
+                
+                result = data.get("result", {})
+                prices = {"USD": 1.0}
+                
+                # Process ticker data
+                for pair, ticker_data in result.items():
+                    try:
+                        price = float(ticker_data.get("c", [0])[0])  # Last price
+                        # Extract currency from pair
+                        if pair.startswith("XBTUSD"):
+                            prices["BTC"] = price
+                        elif pair.startswith("ETHUSD"):
+                            prices["ETH"] = price
+                        else:
+                            currency = pair.replace("USD", "")
+                            prices[currency] = price
+                    except (ValueError, TypeError, IndexError):
+                        continue
+                
+                return prices
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch Kraken prices: {str(e)}")
+        return {"USD": 1.0}
+
+
 async def fetch_coinbase_balances(api_key: str, api_secret: str) -> List[Dict[str, Any]]:
-    """Fetch balances from Coinbase API."""
-    # TODO: Implement Coinbase API integration
-    logger.warning("Coinbase balance fetching not yet implemented")
-    return []
+    """Fetch balances from Coinbase Advanced Trade API with proper CB-ACCESS authentication."""
+    try:
+        import aiohttp
+        import hmac
+        import hashlib
+        import time
+        import base64
+        
+        base_url = "https://api.coinbase.com"
+        endpoint = "/api/v3/brokerage/accounts"
+        timestamp = str(int(time.time()))
+        method = "GET"
+        
+        # Create signature for Coinbase Advanced Trade API
+        message = timestamp + method + endpoint
+        signature = hmac.new(
+            base64.b64decode(api_secret),
+            message.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        headers = {
+            "CB-ACCESS-KEY": api_key,
+            "CB-ACCESS-SIGN": signature,
+            "CB-ACCESS-TIMESTAMP": timestamp,
+            "Content-Type": "application/json"
+        }
+        
+        async def make_coinbase_request():
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{base_url}{endpoint}",
+                    headers=headers
+                ) as response:
+                    await validate_exchange_response(response, "coinbase")
+                    return await response.json()
+        
+        # Use retry logic for API calls
+        data = await retry_with_backoff(make_coinbase_request)
+        accounts = data.get("accounts", [])
+        balances = []
+        
+        # Get current prices for USD conversion
+        active_currencies = list(set([acc["currency"] for acc in accounts if float(acc.get("available_balance", {}).get("value", 0)) > 0]))
+        prices = await get_coinbase_prices(active_currencies)
+        
+        # Process balances
+        for account in accounts:
+            available_balance = account.get("available_balance", {})
+            hold_balance = account.get("hold", {})
+            
+            available = float(available_balance.get("value", 0))
+            holds = float(hold_balance.get("value", 0)) if hold_balance else 0.0
+            total = available + holds
+            
+            # Only include assets with non-zero balance
+            if total > 0:
+                currency = available_balance.get("currency", "")
+                usd_price = prices.get(currency, 0.0)
+                value_usd = total * usd_price
+                
+                balances.append({
+                    "asset": currency,
+                    "free": available,
+                    "locked": holds,
+                    "total": total,
+                    "value_usd": round(value_usd, 2)
+                })
+        
+        return balances
+                
+    except Exception as e:
+        logger.error(f"Failed to fetch Coinbase balances: {str(e)}")
+        return []
+
+
+async def get_coinbase_prices(currencies: List[str]) -> Dict[str, float]:
+    """Get current USD prices for currencies from Coinbase."""
+    try:
+        import aiohttp
+        
+        if not currencies:
+            return {}
+        
+        prices = {"USD": 1.0}  # USD is always $1
+        
+        # Coinbase Advanced Trade API for prices
+        base_url = "https://api.coinbase.com"
+        
+        async with aiohttp.ClientSession() as session:
+            for currency in currencies:
+                if currency == "USD":
+                    continue
+                
+                try:
+                    endpoint = f"/api/v3/brokerage/market/products/{currency}-USD/ticker"
+                    async with session.get(f"{base_url}{endpoint}") as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            price = float(data.get("price", 0))
+                            prices[currency] = price
+                        else:
+                            prices[currency] = 0.0
+                except Exception as e:
+                    logger.warning(f"Failed to get price for {currency}: {str(e)}")
+                    prices[currency] = 0.0
+        
+        return prices
+                
+    except Exception as e:
+        logger.error(f"Failed to fetch Coinbase prices: {str(e)}")
+        return {"USD": 1.0}
+
+
+class ExchangeAPIError(Exception):
+    """Custom exception for exchange API errors."""
+    def __init__(self, exchange: str, message: str, status_code: int = None):
+        self.exchange = exchange
+        self.message = message
+        self.status_code = status_code
+        super().__init__(f"{exchange} API Error: {message}")
+
+
+async def retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0):
+    """Retry function with exponential backoff."""
+    for attempt in range(max_retries):
+        try:
+            return await func()
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise e
+            
+            delay = base_delay * (2 ** attempt)
+            logger.warning(f"Attempt {attempt + 1} failed, retrying in {delay}s: {str(e)}")
+            await asyncio.sleep(delay)
+
+
+async def validate_exchange_response(response, exchange: str):
+    """Validate exchange API response and handle common errors."""
+    if response.status == 429:
+        raise ExchangeAPIError(exchange, "Rate limit exceeded", 429)
+    elif response.status == 401:
+        raise ExchangeAPIError(exchange, "Invalid API credentials", 401)
+    elif response.status == 403:
+        raise ExchangeAPIError(exchange, "Insufficient API permissions", 403)
+    elif response.status >= 500:
+        raise ExchangeAPIError(exchange, f"Exchange server error: {response.status}", response.status)
+    elif response.status != 200:
+        raise ExchangeAPIError(exchange, f"API request failed: {response.status}", response.status)
 
 
 async def sync_exchange_balances(user_id: str, exchange: str, api_key_id: str):
@@ -868,10 +1404,12 @@ async def sync_exchange_balances(user_id: str, exchange: str, api_key_id: str):
 
 
 async def update_balance_records(user_id: str, exchange: str, balances: List[Dict], db: AsyncSession):
-    """Update balance records in database."""
+    """Update balance records in database using ENTERPRISE UPSERT logic."""
     try:
-        from sqlalchemy import select, delete
+        from sqlalchemy import select, update
+        from sqlalchemy.dialects.postgresql import insert
         from decimal import Decimal
+        import uuid
         
         # Get the exchange account
         account_result = await db.execute(
@@ -886,31 +1424,62 @@ async def update_balance_records(user_id: str, exchange: str, balances: List[Dic
             logger.error(f"No exchange account found for user {user_id}, exchange {exchange}")
             return
         
-        # Delete existing balance records for this account
-        await db.execute(
-            delete(ExchangeBalance).filter(ExchangeBalance.account_id == account.id)
-        )
-        
-        # Insert new balance records
+        # ENTERPRISE UPSERT LOGIC - Handle concurrent updates gracefully
+        updated_count = 0
         for balance in balances:
             if balance.get("total", 0) > 0:  # Only store non-zero balances
-                exchange_balance = ExchangeBalance(
-                    account_id=account.id,
-                    symbol=balance.get("asset", ""),
-                    total_balance=Decimal(str(balance.get("total", 0))),
-                    available_balance=Decimal(str(balance.get("free", 0))),
-                    locked_balance=Decimal(str(balance.get("locked", 0))),
-                    usd_value=Decimal(str(balance.get("value_usd", 0))),
-                    last_updated=datetime.utcnow()
+                balance_data = {
+                    "id": uuid.uuid4(),
+                    "account_id": account.id,
+                    "symbol": balance.get("asset", ""),
+                    "asset_type": "crypto",
+                    "total_balance": Decimal(str(balance.get("total", 0))),
+                    "available_balance": Decimal(str(balance.get("free", 0))),
+                    "locked_balance": Decimal(str(balance.get("locked", 0))),
+                    "usd_value": Decimal(str(balance.get("value_usd", 0))),
+                    "is_active": True,
+                    "sync_enabled": True,
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                    "last_sync_at": datetime.utcnow()
+                }
+                
+                # PostgreSQL UPSERT - INSERT ON CONFLICT UPDATE
+                stmt = insert(ExchangeBalance).values(balance_data)
+                stmt = stmt.on_conflict_do_update(
+                    constraint="unique_account_symbol_balance",
+                    set_={
+                        "total_balance": stmt.excluded.total_balance,
+                        "available_balance": stmt.excluded.available_balance,
+                        "locked_balance": stmt.excluded.locked_balance,
+                        "usd_value": stmt.excluded.usd_value,
+                        "updated_at": stmt.excluded.updated_at,
+                        "last_sync_at": stmt.excluded.last_sync_at,
+                        "is_active": True
+                    }
                 )
-                db.add(exchange_balance)
+                
+                await db.execute(stmt)
+                updated_count += 1
+        
+        # Set inactive for balances not in current update (zero balances)
+        current_symbols = [b.get("asset", "") for b in balances if b.get("total", 0) > 0]
+        if current_symbols:
+            await db.execute(
+                update(ExchangeBalance)
+                .where(
+                    ExchangeBalance.account_id == account.id,
+                    ~ExchangeBalance.symbol.in_(current_symbols)
+                )
+                .values(is_active=False, updated_at=datetime.utcnow())
+            )
         
         await db.commit()
-        logger.info(f"Updated {len(balances)} balance records for user {user_id}, exchange {exchange}")
+        logger.info(f"Updated {updated_count} balance records for user {user_id}, exchange {exchange}")
         
     except Exception as e:
         await db.rollback()
-        logger.error("Balance update failed", error=str(e))
+        logger.error("Balance update failed", error=str(e), exc_info=True)
 
 
 async def get_daily_volume_usage(user_id: str, exchange: str) -> float:
@@ -928,3 +1497,84 @@ def mask_api_key(api_key: str) -> str:
     if len(api_key) <= 8:
         return "*" * len(api_key)
     return api_key[:4] + "*" * (len(api_key) - 8) + api_key[-4:]
+
+
+async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> Dict[str, Any]:
+    """Get user's portfolio data from all connected exchanges using existing balance system."""
+    try:
+        # Import SQLAlchemy helpers locally
+        from sqlalchemy import select, and_
+        
+        # Get all active exchange accounts for user
+        stmt = select(ExchangeAccount, ExchangeApiKey).join(
+            ExchangeApiKey, ExchangeAccount.id == ExchangeApiKey.account_id
+        ).where(
+            and_(
+                ExchangeAccount.user_id == user_id,
+                ExchangeAccount.status == ExchangeStatus.ACTIVE,
+                ExchangeApiKey.status == ApiKeyStatus.ACTIVE
+            )
+        )
+        
+        result = await db.execute(stmt)
+        user_exchanges = result.fetchall()
+        
+        if not user_exchanges:
+            return {
+                "success": True,
+                "total_value_usd": 0.0,
+                "balances": [],
+                "exchanges": [],
+                "message": "No exchange accounts connected"
+            }
+        
+        # Fetch balances from all exchanges using existing fetch_exchange_balances
+        all_balances = []
+        total_value_usd = 0.0
+        exchange_summaries = []
+        
+        for account, api_key in user_exchanges:
+            try:
+                # Use existing balance fetching function
+                balances = await fetch_exchange_balances(api_key, db)
+                
+                exchange_value = sum(b.get("value_usd", 0) for b in balances)
+                total_value_usd += exchange_value
+                
+                # Add exchange info to each balance
+                for balance in balances:
+                    balance["exchange"] = account.exchange_name
+                
+                all_balances.extend(balances)
+                exchange_summaries.append({
+                    "exchange": account.exchange_name,
+                    "account_id": str(account.id),
+                    "total_value_usd": exchange_value,
+                    "asset_count": len(balances),
+                    "last_updated": datetime.utcnow().isoformat()
+                })
+                
+            except Exception as e:
+                logger.error(
+                    "Failed to fetch balances from exchange",
+                    error=str(e),
+                    exchange=account.exchange_name,
+                    user_id=user_id
+                )
+                continue
+        
+        return {
+            "success": True,
+            "total_value_usd": total_value_usd,
+            "balances": all_balances,
+            "exchanges": exchange_summaries,
+            "last_updated": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(
+            "Failed to get user portfolio from exchanges",
+            error=str(e),
+            user_id=user_id
+        )
+        return {"success": False, "error": str(e)}

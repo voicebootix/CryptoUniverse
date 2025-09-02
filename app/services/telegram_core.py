@@ -34,7 +34,7 @@ from app.services.market_analysis import market_analysis_service
 from app.services.trade_execution import trade_execution_service
 from app.services.trading_strategies import trading_strategies_service
 from app.services.ai_consensus import ai_consensus_service
-from app.services.portfolio_risk import portfolio_risk_service
+from app.services.portfolio_risk_core import portfolio_risk_service
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -54,7 +54,10 @@ class TelegramAPIConnector(LoggerMixin):
     
     def __init__(self):
         self.bot_token = settings.TELEGRAM_BOT_TOKEN
-        self.api_base_url = TelegramConfig.API_BASE_URL.format(token=self.bot_token)
+        if self.bot_token:
+            self.api_base_url = TelegramConfig.API_BASE_URL.format(token=self.bot_token)
+        else:
+            self.api_base_url = None
         self.rate_limiter = {}
         self.message_queue = asyncio.Queue()
         self.webhook_url = None
@@ -71,6 +74,10 @@ class TelegramAPIConnector(LoggerMixin):
         priority: MessagePriority = MessagePriority.NORMAL
     ) -> Dict[str, Any]:
         """Send message via Telegram Bot API with rate limiting."""
+        
+        # Skip if telegram is not configured
+        if not self.bot_token or not self.api_base_url:
+            return {"success": False, "error": "Telegram not configured"}
         
         try:
             # Check rate limiting
@@ -383,7 +390,28 @@ class MessageRouter(LoggerMixin):
             return {"success": False, "error": "Unknown command"}
     
     async def _route_natural_language(self, chat_id: str, user_id: str, text: str) -> Dict[str, Any]:
-        """Route natural language messages to AI conversation."""
+        """Route natural language messages to unified AI manager."""
+        
+        try:
+            # Check if unified manager is available
+            if hasattr(self, 'unified_manager') and self.unified_manager:
+                # Use unified AI manager for consistent experience
+                result = await self.unified_manager.handle_telegram_request(chat_id, user_id, text)
+                return result
+            else:
+                # Fallback to original implementation
+                return await self._route_natural_language_fallback(chat_id, user_id, text)
+                
+        except Exception as e:
+            self.logger.error("Natural language processing failed", error=str(e))
+            await self.telegram_api.send_message(
+                chat_id,
+                "🤖 Sorry, I encountered an error processing your message. Please try again."
+            )
+            return {"success": False, "error": str(e)}
+    
+    async def _route_natural_language_fallback(self, chat_id: str, user_id: str, text: str) -> Dict[str, Any]:
+        """Fallback natural language processing (original implementation)."""
         
         try:
             # Get conversation context
@@ -411,6 +439,7 @@ class MessageRouter(LoggerMixin):
             }
             
             # Get AI response
+            from app.services.ai_consensus import ai_consensus_service
             ai_response = await ai_consensus_service.analyze_opportunity(
                 json.dumps(ai_request),
                 confidence_threshold=75.0,
@@ -437,11 +466,7 @@ class MessageRouter(LoggerMixin):
             return {"success": True, "response": "AI conversation handled"}
             
         except Exception as e:
-            self.logger.error("Natural language processing failed", error=str(e))
-            await self.telegram_api.send_message(
-                chat_id,
-                "🤖 Sorry, I encountered an error processing your message. Please try again."
-            )
+            self.logger.error("Fallback natural language processing failed", error=str(e))
             return {"success": False, "error": str(e)}
     
     def _parse_command(self, command_text: str) -> Optional[Dict[str, Any]]:
@@ -629,7 +654,7 @@ Need help with something specific? Just ask me naturally! 🤖
                 return {"success": False, "error": "Market data retrieval failed"}
             
             # Format market response
-            market_text = self._format_market_response(symbol, market_result)
+            market_text = await self._format_market_response(symbol, market_result)
             await self.telegram_api.send_message(chat_id, market_text)
             
             return {"success": True, "command": "market"}
@@ -813,7 +838,7 @@ Current settings are optimized for safety and comprehensive analysis. 🛡️
         
         return "\n".join(response_parts)
     
-    def _format_market_response(self, symbol: str, market_result: Dict[str, Any]) -> str:
+    async def _format_market_response(self, symbol: str, market_result: Dict[str, Any]) -> str:
         """Format market data for Telegram display."""
         
         market_data = market_result.get("price_data", {})
@@ -1102,27 +1127,26 @@ class TelegramCommanderService(LoggerMixin):
         """Get chat ID for recipient type - DYNAMIC RECIPIENT RESOLUTION."""
         try:
             # Real production implementation - get from database/config
-            from app.core.database import get_database
+            from app.core.database import AsyncSessionLocal
             
-            db = await get_database()
-            
-            if recipient == RecipientType.OWNER:
-                # Get owner's chat ID from user settings
-                owner_chat = await db.execute(
-                    "SELECT telegram_chat_id FROM users WHERE is_admin = TRUE AND telegram_chat_id IS NOT NULL LIMIT 1"
-                )
-                result = owner_chat.fetchone()
-                return result[0] if result else await self._get_env_chat_id("OWNER_TELEGRAM_CHAT_ID")
-                
-            elif recipient == RecipientType.ALERTS_CHANNEL:
-                # Get alerts channel ID from system config
-                return await self._get_env_chat_id("ALERTS_TELEGRAM_CHAT_ID")
-                
-            elif recipient == RecipientType.TRADING_GROUP:
-                # Get trading group ID from system config
-                return await self._get_env_chat_id("TRADING_TELEGRAM_CHAT_ID")
-                
-            return None
+            async with AsyncSessionLocal() as db:
+                if recipient == RecipientType.OWNER:
+                    # Get owner's chat ID from user settings
+                    owner_chat = await db.execute(
+                        "SELECT telegram_chat_id FROM users WHERE is_admin = TRUE AND telegram_chat_id IS NOT NULL LIMIT 1"
+                    )
+                    result = owner_chat.fetchone()
+                    return result[0] if result else await self._get_env_chat_id("OWNER_TELEGRAM_CHAT_ID")
+                    
+                elif recipient == RecipientType.ALERTS_CHANNEL:
+                    # Get alerts channel ID from system config
+                    return await self._get_env_chat_id("ALERTS_TELEGRAM_CHAT_ID")
+                    
+                elif recipient == RecipientType.TRADING_GROUP:
+                    # Get trading group ID from system config
+                    return await self._get_env_chat_id("TRADING_TELEGRAM_CHAT_ID")
+                    
+                return None
             
         except Exception as e:
             self.logger.error("Failed to resolve chat ID", recipient=recipient, error=str(e))
