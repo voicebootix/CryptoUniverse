@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # Server settings
     HOST: str = Field(default="0.0.0.0", description="Server host")
     PORT: int = Field(default=8000, description="Server port")
-    BASE_URL: str = Field(default="http://localhost:8000", description="Base URL for the application")
+    BASE_URL: str = Field(default="https://cryptouniverse.onrender.com", description="Base URL for the application")
     FRONTEND_URL: str = Field(default="https://cryptouniverse-frontend.onrender.com", description="Frontend URL for redirects")
     ALLOWED_HOSTS: List[str] = Field(default=[], description="Allowed hosts for the application")
     
@@ -92,10 +92,21 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = Field(default=None, description="Anthropic API key")
     GOOGLE_AI_API_KEY: Optional[str] = Field(default=None, description="Google AI API key")
     
+    # Telegram settings
+    TELEGRAM_BOT_TOKEN: Optional[str] = Field(default=None, env="TELEGRAM_BOT_TOKEN", description="Telegram bot token")
+    OWNER_TELEGRAM_CHAT_ID: Optional[str] = Field(default=None, env="OWNER_TELEGRAM_CHAT_ID", description="Owner's Telegram chat ID")
+    ALERTS_TELEGRAM_CHAT_ID: Optional[str] = Field(default=None, env="ALERTS_TELEGRAM_CHAT_ID", description="Alerts Telegram chat ID")
+    TRADING_TELEGRAM_CHAT_ID: Optional[str] = Field(default=None, env="TRADING_TELEGRAM_CHAT_ID", description="Trading Telegram chat ID")
+    
+    # Market data API keys
+    ALPHA_VANTAGE_API_KEY: Optional[str] = Field(default=None, env="ALPHA_VANTAGE_API_KEY", description="Alpha Vantage API key")
+    COINGECKO_API_KEY: Optional[str] = Field(default=None, env="COINGECKO_API_KEY", description="CoinGecko API key")
+    FINNHUB_API_KEY: Optional[str] = Field(default=None, env="FINNHUB_API_KEY", description="Finnhub API key")
+    
     # OAuth settings
     GOOGLE_CLIENT_ID: Optional[str] = Field(default=None, description="Google OAuth client ID")
     GOOGLE_CLIENT_SECRET: Optional[str] = Field(default=None, description="Google OAuth client secret")
-    OAUTH_REDIRECT_URL: str = Field(default="https://cryptouniverse.onrender.com/auth/callback", description="OAuth redirect URL")
+    OAUTH_REDIRECT_URL: str = Field(default="https://cryptouniverse-frontend.onrender.com/auth/callback", description="OAuth redirect URL")
     API_V1_PREFIX: str = Field(default="https://cryptouniverse.onrender.com/api/v1", description="API v1 prefix URL")
     
     class Config:

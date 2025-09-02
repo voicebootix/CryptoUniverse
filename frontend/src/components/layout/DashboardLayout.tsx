@@ -39,6 +39,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { getInitials } from '@/lib/utils';
+import ChatWidget from '@/components/chat/ChatWidget';
 
 interface NavigationItem {
   name: string;
@@ -51,12 +52,14 @@ interface NavigationItem {
 const navigation: NavigationItem[] = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'AI Command', href: '/dashboard/ai-command', icon: Brain, badge: 'AI' },
+  { name: 'AI Chat', href: '/dashboard/ai-chat', icon: MessageSquare, badge: 'NEW' },
   { name: 'Beast Mode', href: '/dashboard/beast-mode', icon: Flame, badge: 'PRO' },
   { name: 'Strategies', href: '/dashboard/strategies', icon: Crown, badge: '25+' },
   { name: 'Exchange Hub', href: '/dashboard/exchanges-hub', icon: Globe, badge: '8' },
   { name: 'Copy Trading', href: '/dashboard/copy-trading', icon: Users, badge: 'HOT' },
   { name: 'Telegram', href: '/dashboard/telegram', icon: MessageSquare },
   { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3, badge: 'PRO' },
+  { name: 'Market Analysis', href: '/dashboard/market-analysis', icon: Activity, badge: 'LIVE' },
   { name: 'Trading', href: '/dashboard/trading', icon: TrendingUp },
   { name: 'Portfolio', href: '/dashboard/portfolio', icon: Wallet },
   { name: 'Billing', href: '/dashboard/billing', icon: CreditCard },
@@ -384,6 +387,9 @@ const SidebarContent: React.FC<SidebarContentProps> = ({
           </div>
         </div>
       </nav>
+
+      {/* Chat Widget - Available on all pages */}
+      <ChatWidget />
     </div>
   );
 };

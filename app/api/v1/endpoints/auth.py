@@ -189,13 +189,17 @@ async def get_current_user(
         )
     
     # Check if token is blacklisted
+    # ENTERPRISE REDIS RESILIENCE
     redis = await get_redis_client()
-    blacklisted = await redis.get(f"blacklist:{token}")
-    if blacklisted:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has been revoked"
-        )
+    if redis:
+        blacklisted = await redis.get(f"blacklist:{token}")
+        if blacklisted:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked"
+            )
+    else:
+        logger.warning("Redis unavailable for blacklist check, proceeding without")
     
     result = await db.execute(select(User).filter(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -378,6 +382,26 @@ async def register(
     
     logger.info("User registered", user_id=str(user.id), email=user.email)
     
+    # 🎁 SETUP WELCOME PACKAGE: $100 FREE CREDITS + 3 BASIC STRATEGIES
+    try:
+        from app.services.profit_sharing_service import profit_sharing_service
+        
+        welcome_result = await profit_sharing_service.setup_new_user_welcome_package(str(user.id))
+        
+        if welcome_result.get("success"):
+            logger.info(
+                "🎁 Welcome package activated for new user",
+                user_id=str(user.id),
+                free_credits=100,
+                free_strategies=3,
+                profit_potential="$400"
+            )
+        else:
+            logger.warning("Welcome package setup failed", user_id=str(user.id), error=welcome_result.get("error"))
+    
+    except Exception as e:
+        logger.error("Welcome package setup failed", user_id=str(user.id), error=str(e))
+    
     return UserResponse(
         id=str(user.id),
         email=user.email,
@@ -391,13 +415,18 @@ async def register(
     )
 
 
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
-    refresh_token: str,
+    request: RefreshTokenRequest,
     db: AsyncSession = Depends(get_database)
 ):
     """Refresh access token using refresh token."""
     
+    refresh_token = request.refresh_token
     # Verify refresh token
     payload = auth_service.verify_token(refresh_token)
     
@@ -456,31 +485,54 @@ async def refresh_token(
 
 @router.post("/logout")
 async def logout(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    current_user: User = Depends(get_current_user),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: AsyncSession = Depends(get_database)
 ):
-    """Logout user and revoke tokens."""
+    """Logout user and revoke tokens - ENTERPRISE RESILIENT."""
     
-    token = credentials.credentials
+    # ENTERPRISE: Handle logout even if token is invalid/expired
+    try:
+        if credentials:
+            token = credentials.credentials
+            # Try to get user for proper cleanup
+            try:
+                current_user = await get_current_user(credentials, db)
+                user_id = current_user.id
+            except HTTPException:
+                # Token invalid but we can still blacklist it
+                user_id = None
+                logger.info("Logout with invalid token, blacklisting anyway")
+        else:
+            # No credentials provided - just return success
+            return {"message": "Already logged out"}
     
-    # Blacklist the access token
-    redis = await get_redis_client()
-    await redis.setex(
-        f"blacklist:{token}",
-        int(auth_service.access_token_expire.total_seconds()),
-        "revoked"
-    )
-    
-    # Remove all user sessions
-    await db.execute(delete(UserSession).filter(
-        UserSession.user_id == current_user.id
-    ))
-    await db.commit()
-    
-    logger.info("User logged out", user_id=str(current_user.id))
-    
-    return {"message": "Successfully logged out"}
+        # Blacklist the access token if we have one
+        redis = await get_redis_client()
+        if redis and credentials:
+            await redis.setex(
+                f"blacklist:{token}",
+                int(auth_service.access_token_expire.total_seconds()),
+                "revoked"
+            )
+        else:
+            logger.warning("Redis unavailable for blacklist, skipping blacklist")
+        
+        # Remove user sessions if we have a valid user
+        if user_id:
+            await db.execute(delete(UserSession).filter(
+                UserSession.user_id == user_id
+            ))
+            await db.commit()
+            logger.info("User logged out", user_id=str(user_id))
+        else:
+            logger.info("Token blacklisted without user context")
+        
+        return {"message": "Successfully logged out"}
+        
+    except Exception as e:
+        logger.error("Logout failed", error=str(e))
+        # ENTERPRISE: Always succeed logout attempts to prevent user lockout
+        return {"message": "Logout completed (degraded mode)"}
 
 
 @router.get("/me", response_model=UserResponse)

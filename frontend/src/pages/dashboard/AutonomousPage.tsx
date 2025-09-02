@@ -41,6 +41,7 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { useUser } from '@/store/authStore';
+import { useCredits } from '@/hooks/useCredits';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
 
 interface AutonomousConfig {

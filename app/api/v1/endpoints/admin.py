@@ -47,6 +47,18 @@ class SystemConfigRequest(BaseModel):
     emergency_stop_all: Optional[bool] = None
 
 
+class CreditPricingConfigRequest(BaseModel):
+    platform_fee_percentage: Optional[float] = None  # 25.0 for 25%
+    credit_to_dollar_cost: Optional[float] = None    # 1.0 for $1 = 1 credit
+    welcome_profit_potential: Optional[float] = None # 100.0 for $100 profit potential
+    welcome_strategies_count: Optional[int] = None   # 3 for 3 free strategies
+    welcome_enabled: Optional[bool] = None           # True to enable welcome packages
+
+
+class StrategyPricingRequest(BaseModel):
+    strategy_pricing: Dict[str, int]  # strategy_name -> credit_cost
+
+
 class UserManagementRequest(BaseModel):
     user_id: str
     action: str  # "activate", "deactivate", "suspend", "reset_credits"
@@ -228,8 +240,199 @@ async def configure_system(
         logger.error("System configuration failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"System configuration failed: {str(e)}"
+                    detail=f"System configuration failed: {str(e)}"
+    )
+
+
+@router.get("/credit-pricing")
+async def get_credit_pricing_config(
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Get current credit pricing configuration."""
+    
+    try:
+        from app.services.profit_sharing_service import profit_sharing_service
+        
+        # Get current pricing configuration
+        pricing_config = await profit_sharing_service.get_current_pricing_config()
+        
+        # Get strategy pricing
+        if profit_sharing_service.strategy_pricing is None:
+            await profit_sharing_service.ensure_pricing_loaded()
+        
+        return {
+            "success": True,
+            "pricing_config": pricing_config,
+            "strategy_pricing": profit_sharing_service.strategy_pricing,
+            "explanation": {
+                "platform_fee": "Percentage of profits users pay as platform fee",
+                "credit_calculation": "Credits = Profit Potential × Platform Fee Percentage",
+                "example": f"$100 profit potential = ${pricing_config.get('platform_fee_percentage', 25):.0f} credits at {pricing_config.get('platform_fee_percentage', 25):.0f}% fee"
+            }
+        }
+        
+    except Exception as e:
+        logger.exception("Failed to get credit pricing config: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get pricing config: {str(e)}"
+        ) from e
+
+
+@router.put("/credit-pricing")
+async def update_credit_pricing_config(
+    request: CreditPricingConfigRequest,
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Update credit pricing configuration."""
+    
+    try:
+        from app.core.redis import get_redis_client
+        
+        redis = await get_redis_client()
+        
+        # Get current config
+        current_config = await redis.hgetall("admin:pricing_config")
+        
+        # Update only provided fields
+        updates = {}
+        
+        if request.platform_fee_percentage is not None:
+            if not 5.0 <= request.platform_fee_percentage <= 50.0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Platform fee must be between 5% and 50%"
+                )
+            updates["platform_fee_percentage"] = request.platform_fee_percentage
+        
+        if request.credit_to_dollar_cost is not None:
+            if not 0.1 <= request.credit_to_dollar_cost <= 10.0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Credit to dollar cost must be between 0.1 and 10.0"
+                )
+            updates["credit_to_dollar_cost"] = request.credit_to_dollar_cost
+        
+        if request.welcome_profit_potential is not None:
+            if not 50.0 <= request.welcome_profit_potential <= 500.0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Welcome profit potential must be between $50 and $500"
+                )
+            updates["welcome_profit_potential"] = request.welcome_profit_potential
+        
+        if request.welcome_strategies_count is not None:
+            if not 1 <= request.welcome_strategies_count <= 10:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Welcome strategies count must be between 1 and 10"
+                )
+            updates["welcome_strategies_count"] = request.welcome_strategies_count
+        
+        if request.welcome_enabled is not None:
+            updates["welcome_enabled"] = "true" if request.welcome_enabled else "false"
+        
+        if updates:
+            # Add metadata
+            updates.update({
+                "last_updated": datetime.utcnow().isoformat(),
+                "updated_by": str(current_user.id)
+            })
+            
+            # Save updates
+            await redis.hset("admin:pricing_config", mapping=updates)
+            
+            # Force reload in service
+            from app.services.profit_sharing_service import profit_sharing_service
+            await profit_sharing_service.load_dynamic_pricing_config()
+            
+            logger.info(
+                "Credit pricing configuration updated",
+                admin_user=str(current_user.id),
+                updates=list(updates.keys())
+            )
+            
+            return {
+                "success": True,
+                "message": "Credit pricing configuration updated successfully",
+                "updates_applied": list(updates.keys()),
+                "new_config": await profit_sharing_service.get_current_pricing_config()
+            }
+        else:
+            return {
+                "success": False,
+                "error": "No valid updates provided"
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to update credit pricing: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update pricing: {str(e)}"
+        ) from e
+
+
+@router.put("/strategy-pricing")
+async def update_strategy_pricing(
+    request: StrategyPricingRequest,
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Update strategy pricing configuration."""
+    
+    try:
+        from app.core.redis import get_redis_client
+        
+        redis = await get_redis_client()
+        
+        # Validate pricing values
+        for strategy, cost in request.strategy_pricing.items():
+            if not 1 <= cost <= 500:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Strategy {strategy} cost must be between 1 and 500 credits"
+                )
+        
+        # Update strategy pricing
+        await redis.delete("admin:strategy_pricing")  # Clear existing
+        await redis.hset("admin:strategy_pricing", mapping=request.strategy_pricing)
+        
+        # Add metadata
+        await redis.hset("admin:strategy_pricing_meta", mapping={
+            "last_updated": datetime.utcnow().isoformat(),
+            "updated_by": str(current_user.id),
+            "total_strategies": len(request.strategy_pricing)
+        })
+        
+        # Force reload in services
+        from app.services.profit_sharing_service import profit_sharing_service
+        from app.services.strategy_marketplace_service import strategy_marketplace_service
+        
+        profit_sharing_service.strategy_pricing = await profit_sharing_service._load_dynamic_strategy_pricing()
+        strategy_marketplace_service.strategy_pricing = await strategy_marketplace_service._load_dynamic_strategy_pricing()
+        
+        logger.info(
+            "Strategy pricing updated",
+            admin_user=str(current_user.id),
+            strategies_updated=len(request.strategy_pricing)
         )
+        
+        return {
+            "success": True,
+            "message": f"Updated pricing for {len(request.strategy_pricing)} strategies",
+            "strategies_updated": list(request.strategy_pricing.keys()),
+            "new_pricing": request.strategy_pricing
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to update strategy pricing: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update strategy pricing: {str(e)}"
+        ) from e
 
 
 @router.get("/users", response_model=UserListResponse)

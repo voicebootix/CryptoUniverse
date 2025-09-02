@@ -43,6 +43,10 @@ from app.models.system import (
     SystemConfiguration,
     BackgroundTask,
 )
+from app.models.telegram_integration import (
+    UserTelegramConnection,
+    TelegramMessage,
+)
 
 __all__ = [
     "Base",
@@ -102,4 +106,7 @@ __all__ = [
     "AuditLog",
     "SystemConfiguration",
     "BackgroundTask",
+    # Telegram models
+    "UserTelegramConnection",
+    "TelegramMessage",
 ]
