@@ -226,6 +226,25 @@ async def start_monitoring(interval_seconds: int = 30):
         }
 
 
+@api_router.post("/monitoring/alerts/clear")
+async def clear_all_alerts():
+    """Clear all active alerts (for testing/reset purposes)."""
+    try:
+        from app.services.system_monitoring import system_monitoring_service
+        result = system_monitoring_service.clear_all_alerts()
+        return {
+            **result,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error("Failed to clear alerts", error=str(e))
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+
 @api_router.post("/system/cleanup")
 async def trigger_system_cleanup():
     """ENTERPRISE: Manual system cleanup for high disk usage."""

@@ -272,9 +272,34 @@ class SystemMonitoringService:
                         timestamp=current_time
                     )
                     await self._add_alert(alert)
+                
+                # Auto-resolve alerts when metrics return to normal
+                else:
+                    await self._auto_resolve_alerts(metric_name, current_value)
         
         except Exception as e:
             logger.error("Failed to check alert conditions", error=str(e))
+    
+    async def _auto_resolve_alerts(self, metric_name: str, current_value: float):
+        """Auto-resolve alerts when metrics return to normal levels."""
+        try:
+            for alert in self.active_alerts:
+                if not alert.resolved:
+                    alert_metric = alert.message.split(':')[0]
+                    if alert_metric == metric_name:
+                        # Resolve alert if metric is now below warning threshold
+                        threshold = self.thresholds[metric_name]["warning"]
+                        if current_value < threshold:
+                            alert.resolved = True
+                            logger.info(
+                                "Alert auto-resolved", 
+                                metric=metric_name, 
+                                current_value=current_value,
+                                threshold=threshold,
+                                alert_id=alert.id
+                            )
+        except Exception as e:
+            logger.debug("Auto-resolve failed", error=str(e))
     
     async def _trigger_disk_cleanup(self):
         """ENTERPRISE: Aggressive disk cleanup when usage is critical."""
@@ -389,13 +414,44 @@ class SystemMonitoringService:
             logger.error("Disk cleanup failed", error=str(e))
     
     async def _add_alert(self, alert: SystemAlert):
-        """Add alert if not already active."""
-        # Check if similar alert already exists
-        existing = [a for a in self.active_alerts if a.message == alert.message and not a.resolved]
-        if not existing:
+        """Add alert if not already active, or update existing alert with current timestamp."""
+        # Check if similar alert type already exists (by metric name and severity)
+        metric_name = alert.message.split(':')[0]  # Extract metric name (e.g., "disk_usage_pct")
+        existing_idx = None
+        
+        for idx, existing_alert in enumerate(self.active_alerts):
+            if not existing_alert.resolved:
+                existing_metric = existing_alert.message.split(':')[0]
+                if existing_metric == metric_name and existing_alert.severity == alert.severity:
+                    existing_idx = idx
+                    break
+        
+        if existing_idx is not None:
+            # Update existing alert with new timestamp and message (live values)
+            self.active_alerts[existing_idx].message = alert.message
+            self.active_alerts[existing_idx].timestamp = alert.timestamp
+            self.active_alerts[existing_idx].id = alert.id  # Update ID with current timestamp
+            logger.info("System alert updated", alert=alert.message, severity=alert.severity)
+        else:
+            # Add new alert
             self.active_alerts.append(alert)
             self.alert_history.append(alert)
             logger.warning("System alert generated", alert=alert.message, severity=alert.severity)
+        
+        # Clean up old resolved alerts (keep last 10 resolved alerts per metric)
+        await self._cleanup_old_alerts()
+    
+    async def _cleanup_old_alerts(self):
+        """Clean up old resolved alerts to prevent memory buildup."""
+        try:
+            # Remove resolved alerts older than 1 hour
+            cutoff_time = datetime.utcnow() - timedelta(hours=1)
+            self.active_alerts = [
+                alert for alert in self.active_alerts 
+                if not alert.resolved or alert.timestamp >= cutoff_time
+            ]
+        except Exception as e:
+            logger.debug("Alert cleanup failed", error=str(e))
     
     def get_monitoring_status(self) -> Dict[str, Any]:
         """Get comprehensive monitoring status."""
@@ -429,6 +485,17 @@ class SystemMonitoringService:
                 logger.info("Alert resolved", alert_id=alert_id)
                 return True
         return False
+    
+    def clear_all_alerts(self) -> Dict[str, Any]:
+        """Clear all active alerts (for testing/reset purposes)."""
+        cleared_count = len([a for a in self.active_alerts if not a.resolved])
+        self.active_alerts = []
+        logger.info("All alerts cleared", cleared_count=cleared_count)
+        return {
+            "success": True,
+            "cleared_count": cleared_count,
+            "message": f"Cleared {cleared_count} active alerts"
+        }
     
     def get_metrics_dashboard(self, duration_minutes: int = 60) -> Dict[str, Any]:
         """Get comprehensive metrics dashboard."""
