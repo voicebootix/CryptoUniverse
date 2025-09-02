@@ -74,7 +74,7 @@ def configure_logging(log_level: str = "INFO", environment: str = "development")
     logging.getLogger("ccxt").setLevel(logging.WARNING)
 
     # Production log rotation
-    if settings.ENV == 'production':
+    if settings.ENVIRONMENT == 'production':
         rotating_handler = logging.handlers.RotatingFileHandler(
             'cryptouniverse.log',
             maxBytes=100 * 1024 * 1024,  # 100MB
