@@ -16,12 +16,13 @@ from urllib.parse import quote
 from fastapi.responses import RedirectResponse
 import bcrypt
 import jwt
+from jwt import InvalidTokenError
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -147,7 +148,7 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has expired"
             )
-        except jwt.JWTError:
+        except InvalidTokenError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token"
@@ -485,54 +486,151 @@ async def refresh_token(
 
 @router.post("/logout")
 async def logout(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
     db: AsyncSession = Depends(get_database)
 ):
-    """Logout user and revoke tokens - ENTERPRISE RESILIENT."""
+    """ENTERPRISE: Logout user and revoke tokens - always succeeds to prevent lockouts."""
     
-    # ENTERPRISE: Handle logout even if token is invalid/expired
+    # ENTERPRISE: Graceful logout regardless of authentication state
     try:
-        if credentials:
+        user_id = None
+        token = None
+        sessions_cleaned = 0
+        
+        # Process credentials if provided
+        if credentials and credentials.credentials:
             token = credentials.credentials
-            # Try to get user for proper cleanup
+            
+            # Try to identify the user for proper cleanup
             try:
-                current_user = await get_current_user(credentials, db)
-                user_id = current_user.id
-            except HTTPException:
-                # Token invalid but we can still blacklist it
-                user_id = None
-                logger.info("Logout with invalid token, blacklisting anyway")
-        else:
-            # No credentials provided - just return success
-            return {"message": "Already logged out"}
-    
-        # Blacklist the access token if we have one
-        redis = await get_redis_client()
-        if redis and credentials:
-            await redis.setex(
-                f"blacklist:{token}",
-                int(auth_service.access_token_expire.total_seconds()),
-                "revoked"
-            )
-        else:
-            logger.warning("Redis unavailable for blacklist, skipping blacklist")
+                # Attempt to decode token to get user ID
+                payload = jwt.decode(
+                    token, 
+                    settings.SECRET_KEY, 
+                    algorithms=[auth_service.algorithm]
+                )
+                user_id = payload.get("sub")
+                logger.debug("Token decoded successfully for logout", user_id=user_id)
+                
+            except InvalidTokenError as jwt_error:
+                # Token is invalid/expired - still allow logout
+                logger.info("Logout with invalid/expired token - proceeding anyway", error=str(jwt_error))
+                # Try to extract user ID from token without validation (for cleanup)
+                try:
+                    import jwt as raw_jwt
+                    unverified = raw_jwt.decode(token, options={"verify_signature": False})
+                    user_id = unverified.get("sub")
+                    logger.debug("Extracted user ID from invalid token for cleanup", user_id=user_id)
+                except Exception:
+                    pass  # Can't extract user ID, proceed without it
+            except Exception as decode_error:
+                logger.warning("Token processing failed during logout", error=str(decode_error))
         
-        # Remove user sessions if we have a valid user
+        # Blacklist the token if we have one (regardless of validity)
+        redis = None
+        token_blacklisted = False
+        try:
+            redis = await get_redis_client()
+            if redis and token:
+                # SECURITY: Hash token before using as Redis key (never store raw JWT)
+                import hashlib
+                token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+                
+                # Use longer TTL for blacklist to be safe
+                blacklist_ttl = max(3600, int(auth_service.access_token_expire.total_seconds()))
+                
+                # Capture Redis operation result
+                redis_result = await redis.setex(
+                    f"blacklist:{token_hash}",
+                    blacklist_ttl,
+                    "revoked_during_logout"
+                )
+                
+                # Verify blacklist write succeeded
+                token_blacklisted = bool(redis_result)
+                
+                if token_blacklisted:
+                    logger.debug("Token blacklisted successfully", token_hash=token_hash[:16])
+                else:
+                    logger.error("Token blacklist write failed", token_hash=token_hash[:16], redis_result=redis_result)
+                    
+        except Exception as redis_error:
+            logger.error("Redis blacklisting failed - critical security issue", 
+                        token_hash=token_hash[:16] if 'token_hash' in locals() else "unknown", 
+                        error=str(redis_error))
+        
+        # Clean up user sessions if we have a user ID
         if user_id:
-            await db.execute(delete(UserSession).filter(
-                UserSession.user_id == user_id
-            ))
+            try:
+                # Remove all active sessions for this user
+                result = await db.execute(
+                    delete(UserSession).where(
+                        UserSession.user_id == user_id
+                    )
+                )
+                await db.commit()
+                sessions_cleaned = result.rowcount
+                logger.info("User sessions cleaned during logout", user_id=user_id, sessions_removed=sessions_cleaned)
+                
+            except Exception as db_error:
+                logger.warning("Database session cleanup failed - non-critical", error=str(db_error))
+                try:
+                    await db.rollback()
+                except:
+                    pass
+        
+        # ENTERPRISE: Additional cleanup - remove expired sessions (housekeeping)
+        try:
+            expired_result = await db.execute(
+                delete(UserSession).where(
+                    UserSession.expires_at < func.now()
+                )
+            )
             await db.commit()
-            logger.info("User logged out", user_id=str(user_id))
-        else:
-            logger.info("Token blacklisted without user context")
+            
+            if expired_result.rowcount > 0:
+                logger.debug(f"Cleaned up {expired_result.rowcount} expired sessions during logout")
+                
+        except Exception as cleanup_error:
+            logger.debug("Expired session cleanup failed - non-critical", error=str(cleanup_error))
+            try:
+                await db.rollback()
+            except:
+                pass
         
-        return {"message": "Successfully logged out"}
+        # Always return success
+        response = {
+            "message": "Successfully logged out",
+            "user_id": user_id or "anonymous",
+            "sessions_cleaned": sessions_cleaned,
+            "token_blacklisted": token_blacklisted,
+            "redis_available": redis is not None
+        }
         
-    except Exception as e:
-        logger.error("Logout failed", error=str(e))
-        # ENTERPRISE: Always succeed logout attempts to prevent user lockout
-        return {"message": "Logout completed (degraded mode)"}
+        logger.info("Logout completed successfully", **response)
+        return response
+        
+    except Exception as critical_error:
+        # ENTERPRISE: Even complete failure should not prevent logout
+        logger.error(
+            "Logout encountered critical error - allowing logout anyway",
+            error=str(critical_error),
+            message="User security prioritized over error handling"
+        )
+        
+        # Ensure database is in clean state
+        try:
+            await db.rollback()
+        except:
+            pass
+        
+        return {
+            "message": "Logout completed (degraded mode)",
+            "status": "degraded",
+            "user_id": "unknown",
+            "sessions_cleaned": 0,
+            "error": "Critical failure - investigate logs"
+        }
 
 
 @router.get("/me", response_model=UserResponse)

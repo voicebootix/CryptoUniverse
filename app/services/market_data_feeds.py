@@ -677,24 +677,76 @@ class MarketDataFeeds:
             return {"success": False, "error": str(e)}
     
     async def sync_market_data_batch(self, symbols: List[str]):
-        """Sync market data for multiple symbols to cache and Supabase."""
+        """ENTERPRISE: Sync market data for multiple symbols with comprehensive error handling."""
         try:
-            logger.info(f"Syncing market data for {len(symbols)} symbols")
+            if not symbols:
+                logger.error("Failed to sync market data batch", error="No valid symbols")
+                return
             
-            # Get batch prices
-            result = await self.get_multiple_prices(symbols)
+            logger.info(f"Syncing market data for {len(symbols)} symbols", symbols=symbols[:10])
             
-            if result.get("success"):
-                for symbol, data in result.get("data", {}).items():
-                    # Sync to Supabase
-                    await supabase_client.sync_market_data(symbol, data)
+            # ENTERPRISE: Validate symbols before processing
+            valid_symbols = []
+            for symbol in symbols:
+                if isinstance(symbol, str) and len(symbol) >= 2 and symbol.strip():
+                    valid_symbols.append(symbol.strip().upper())
+            
+            if not valid_symbols:
+                logger.error("Failed to sync market data batch", error="No valid symbols after validation")
+                return
+            
+            logger.info(f"Processing {len(valid_symbols)} validated symbols")
+            
+            # Get batch prices with enhanced error handling
+            result = await self.get_multiple_prices(valid_symbols)
+            
+            if result.get("success") and result.get("data"):
+                successful_syncs = 0
+                failed_syncs = 0
                 
-                logger.info(f"Successfully synced {len(result.get('data', {}))} symbols")
+                for symbol, data in result.get("data", {}).items():
+                    try:
+                        # Sync to Supabase with error handling
+                        await supabase_client.sync_market_data(symbol, data)
+                        successful_syncs += 1
+                    except Exception as sync_error:
+                        failed_syncs += 1
+                        logger.warning(f"Supabase sync failed for {symbol}", error=str(sync_error))
+                
+                logger.info(
+                    f"Market data sync completed", 
+                    successful=successful_syncs, 
+                    failed=failed_syncs,
+                    total_symbols=len(valid_symbols)
+                )
+                
+            elif result.get("success") and not result.get("data"):
+                logger.warning("Market data fetch succeeded but returned no data", symbols=valid_symbols[:5])
             else:
-                logger.error("Failed to sync market data batch", error=result.get("error"))
+                error_msg = result.get("error", "Unknown error")
+                logger.error("Failed to sync market data batch", error=error_msg, symbols=valid_symbols[:5])
+                
+                # ENTERPRISE: Fallback individual symbol processing
+                logger.info("Attempting individual symbol processing as fallback")
+                successful_individual = 0
+                
+                for symbol in valid_symbols[:20]:  # Limit to prevent overwhelming
+                    try:
+                        individual_result = await self.get_real_time_price(symbol)
+                        if individual_result.get("success") and individual_result.get("data"):
+                            await supabase_client.sync_market_data(symbol, individual_result["data"])
+                            successful_individual += 1
+                    except Exception as individual_error:
+                        logger.debug(f"Individual sync failed for {symbol}", error=str(individual_error))
+                        continue
+                
+                if successful_individual > 0:
+                    logger.info(f"Individual fallback processing completed {successful_individual} symbols")
+                else:
+                    logger.error("All market data sync methods failed - check API connectivity")
                 
         except Exception as e:
-            logger.error("Market data batch sync failed", error=str(e))
+            logger.error("Market data batch sync completely failed", error=str(e), symbols=symbols[:5] if symbols else [])
     
     async def get_exchange_rates(self) -> Dict[str, Any]:
         """Get USD exchange rates for fiat currencies."""
