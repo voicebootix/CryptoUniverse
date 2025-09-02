@@ -381,8 +381,7 @@ async def register(
     
     db.add(user)
     await db.commit()
-    await db.refresh(user)
-    
+    await db.refresh(user)    
     # Create user profile with full_name
     from app.models.user import UserProfile
     profile = UserProfile(
