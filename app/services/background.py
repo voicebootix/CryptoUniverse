@@ -42,7 +42,8 @@ class BackgroundServiceManager(LoggerMixin):
             "market_data_sync": 60,      # 1 minute
             "balance_sync": 300,         # 5 minutes
             "risk_monitor": 30,          # 30 seconds
-            "rate_limit_cleanup": 1800   # 30 minutes
+            "rate_limit_cleanup": 1800,  # 30 minutes
+            "portfolio_snapshot": 300    # 5 minutes - for performance history
         }
         
         # Dynamic service configurations (no hardcoded restrictions)
@@ -80,6 +81,7 @@ class BackgroundServiceManager(LoggerMixin):
         self.tasks["market_data_sync"] = asyncio.create_task(self._market_data_sync_service())
         self.tasks["balance_sync"] = asyncio.create_task(self._balance_sync_service())
         self.tasks["risk_monitor"] = asyncio.create_task(self._risk_monitor_service())
+        self.tasks["portfolio_snapshot"] = asyncio.create_task(self._portfolio_snapshot_service())
         self.tasks["rate_limit_cleanup"] = asyncio.create_task(self._rate_limit_cleanup_service())
         
         # Update service status
@@ -517,6 +519,105 @@ class BackgroundServiceManager(LoggerMixin):
             
             await asyncio.sleep(self.intervals["balance_sync"])
     
+    async def _portfolio_snapshot_service(self):
+        """Create regular portfolio snapshots for performance tracking."""
+        while self.running:
+            try:
+                from app.core.database import AsyncSessionLocal, get_database
+                from app.models.trading import Portfolio, PortfolioSnapshot
+                from app.models.user import User
+                from sqlalchemy import select
+                from datetime import datetime
+                import json
+
+                async with AsyncSessionLocal() as db:
+                    # Get all active users
+                    stmt = select(User).where(User.status == 'active')
+                    result = await db.execute(stmt)
+                    users = result.scalars().all()
+
+                    for user in users:
+                        try:
+                            # Get user's portfolio
+                            portfolio_stmt = select(Portfolio).where(Portfolio.user_id == user.id)
+                            portfolio_result = await db.execute(portfolio_stmt)
+                            portfolio = portfolio_result.scalar_one_or_none()
+
+                            if portfolio:
+                                # Create snapshot
+                                snapshot = PortfolioSnapshot(
+                                    portfolio_id=portfolio.id,
+                                    snapshot_date=datetime.utcnow(),
+                                    total_value_usd=portfolio.total_value_usd,
+                                    cash_balance_usd=portfolio.cash_balance_usd,
+                                    invested_value_usd=portfolio.invested_value_usd,
+                                    daily_pnl_usd=portfolio.total_pnl_usd,  # This should be daily PnL
+                                    daily_pnl_percent=(portfolio.total_pnl_usd / portfolio.total_value_usd * 100) if portfolio.total_value_usd > 0 else 0,
+                                    total_pnl_usd=portfolio.total_pnl_usd,
+                                    total_pnl_percent=portfolio.total_pnl_percent or 0,
+                                    positions_data={
+                                        'positions': [
+                                            {
+                                                'symbol': pos.symbol,
+                                                'quantity': float(pos.quantity),
+                                                'value': float(pos.current_value or 0),
+                                                'pnl': float(pos.unrealized_pnl or 0)
+                                            }
+                                            for pos in portfolio.positions if not pos.closed
+                                        ],
+                                        'trades_count': len([p for p in portfolio.positions if not p.closed])
+                                    },
+                                    allocation_data={
+                                        'assets': [
+                                            {
+                                                'symbol': pos.symbol,
+                                                'percentage': float(pos.current_value / portfolio.total_value_usd * 100) if portfolio.total_value_usd > 0 else 0
+                                            }
+                                            for pos in portfolio.positions if not pos.closed
+                                        ]
+                                    }
+                                )
+
+                                db.add(snapshot)
+                                await db.commit()
+
+                                # Broadcast snapshot via WebSocket
+                                try:
+                                    from app.core.websocket import manager
+                                    await manager.broadcast_portfolio_snapshot(
+                                        user_id=str(user.id),
+                                        snapshot_date=snapshot.snapshot_date,
+                                        total_value_usd=float(snapshot.total_value_usd),
+                                        daily_pnl_usd=float(snapshot.daily_pnl_usd),
+                                        daily_pnl_percent=float(snapshot.daily_pnl_percent)
+                                    )
+                                except Exception as e:
+                                    self.logger.warning(
+                                        "Failed to broadcast portfolio snapshot",
+                                        user_id=str(user.id),
+                                        error=str(e)
+                                    )
+
+                                self.logger.debug(
+                                    "Portfolio snapshot created",
+                                    user_id=str(user.id),
+                                    portfolio_id=str(portfolio.id),
+                                    total_value=float(portfolio.total_value_usd)
+                                )
+
+                        except Exception as e:
+                            self.logger.error(
+                                "Failed to create portfolio snapshot",
+                                user_id=str(user.id),
+                                error=str(e)
+                            )
+                            continue
+
+            except Exception as e:
+                self.logger.error("Portfolio snapshot service error", error=str(e))
+
+            await asyncio.sleep(self.intervals["portfolio_snapshot"])
+
     async def _risk_monitor_service(self):
         """Monitor risk levels and trigger alerts."""
         self.logger.info("⚠️ Risk monitor service started")

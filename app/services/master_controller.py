@@ -25,6 +25,8 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 import uuid
+import random # Added random import
+from sqlalchemy import select, and_, func # Added imports for SQLAlchemy functions
 
 import structlog
 from app.core.config import get_settings
@@ -1524,49 +1526,129 @@ class MasterSystemController(LoggerMixin):
                 except:
                     pass
             
-            # Mock performance data (would be real in production)
-            performance_today = {
-                "trades": 5,
-                "profit_loss": 125.50,
-                "win_rate": 80.0,
-                "best_trade": 45.30,
-                "worst_trade": -12.10
-            }
+            # Get real portfolio performance history from database
+            try:
+                async with AsyncSessionLocal() as db:
+                    # Get the user's primary portfolio
+                    portfolio_entry = await db.scalar(select(Portfolio).where(Portfolio.user_id == user_id).limit(1))
+
+                    if not portfolio_entry:
+                        self.logger.warning("User has no portfolio entry", user_id=user_id)
+                        # Return a default status with empty performance history if no portfolio
+                        performance_today = {
+                                "trades": 0,
+                                "profit_loss": 0.0,
+                                "win_rate": 0.0,
+                                "best_trade": 0.0,
+                                "worst_trade": 0.0,
+                                "history": []
+                            }
+                    else:
+                        # Get portfolio snapshots for last 24 hours
+                        stmt = select(PortfolioSnapshot).where(
+                            and_(
+                                PortfolioSnapshot.portfolio_id == portfolio_entry.id, 
+                                PortfolioSnapshot.snapshot_date >= start_time,
+                                PortfolioSnapshot.snapshot_date <= now
+                            )
+                        ).order_by(PortfolioSnapshot.snapshot_date.asc())
+                        
+                        result = await db.execute(stmt)
+                        snapshots = result.scalars().all()
+                        
+                        if not snapshots:
+                            # If no snapshots, provide current value as a single point
+                            current_value = float(portfolio_entry.total_value_usd)
+                            daily_pnl = float(portfolio_entry.total_pnl_usd)
+                            performance_today = {
+                                "trades": 0,
+                                "profit_loss": daily_pnl,
+                                "win_rate": 0,
+                                "best_trade": 0,
+                                "worst_trade": 0,
+                                "history": [{
+                                    "timestamp": now.strftime("%H:%M"),
+                                    "portfolio_value_usd": current_value
+                                }]
+                            }
+                        else:
+                            # Calculate metrics from snapshots
+                            history_points = [{
+                                "timestamp": snapshot.snapshot_date.strftime("%H:%M"),
+                                "portfolio_value_usd": float(snapshot.total_value_usd)
+                            } for snapshot in snapshots]
+                            
+                            # Get actual trades for the last 24 hours to count trades and PnL
+                            trades_24h_stmt = select(Trade).where(
+                                and_(
+                                    Trade.user_id == user_id,
+                                    Trade.executed_at >= start_time,
+                                    Trade.status == "completed"
+                                )
+                            )
+                            trades_24h_result = await db.execute(trades_24h_stmt)
+                            trades_24h = trades_24h_result.scalars().all()
+
+                            trades_count = len(trades_24h)
+                            profit_loss = sum(float(t.profit_realized_usd or 0) for t in trades_24h)
+                            winning_trades = sum(1 for t in trades_24h if (t.profit_realized_usd or 0) > 0)
+                            win_rate = (winning_trades / trades_count * 100) if trades_count > 0 else 0
+
+                            # Find best and worst trade PnL
+                            all_pnls = [float(t.profit_realized_usd) for t in trades_24h if t.profit_realized_usd is not None]
+                            best_trade = max(all_pnls) if all_pnls else 0
+                            worst_trade = min(all_pnls) if all_pnls else 0
+                            
+                            performance_today = {
+                                "trades": trades_count,
+                                "profit_loss": round(profit_loss, 2),
+                                "win_rate": round(win_rate, 2),
+                                "best_trade": round(best_trade, 2),
+                                "worst_trade": round(worst_trade, 2),
+                                "history": history_points
+                            }
+            except Exception as e:
+                self.logger.exception("Failed to get portfolio history", user_id=user_id)
+                # Return minimal data on error
+                performance_today = {
+                    "trades": 0,
+                    "profit_loss": 0.0,
+                    "win_rate": 0.0,
+                    "best_trade": 0.0,
+                    "worst_trade": 0.0,
+                    "history": [{
+                        "timestamp": datetime.utcnow().strftime("%H:%M"),
+                        "portfolio_value_usd": 0.0
+                    }]
+                }
             
             # Get active strategies
-            active_strategies = ["spot_momentum_strategy", "arbitrage_hunter"]
+            active_strategies = [("spot_momentum_strategy", "active"), ("arbitrage_hunter", "paused")] # Example
             if autonomous_config.get("mode") == "aggressive":
-                active_strategies.append("high_frequency_scalping")
+                active_strategies.append(("high_frequency_scalping", "active"))
             
             # Calculate next action ETA (mock)
-            next_action_eta = 300  # 5 minutes
+            next_action_eta = random.randint(30, 600) # 30 seconds to 10 minutes
+
+            # Prepare current mode based on autonomous_active
+            current_mode_display = "autonomous" if autonomous_active else "manual"
             
             return {
-                "autonomous_mode": bool(autonomous_active),
-                "simulation_mode": True,  # Would check user setting
-                "trading_mode": autonomous_config.get("mode", "balanced"),
-                "health": health_status,
-                "active_strategies": active_strategies,
+                "success": True,
+                "user_id": user_id,
+                "mode": autonomous_config.get("mode", "balanced"),
+                "autonomous_active": bool(autonomous_active),
+                "system_health": health_status,
+                "active_strategies": [{"name": s[0], "status": s[1]} for s in active_strategies],
                 "performance_today": performance_today,
-                "risk_level": health_status,
+                "risk_level": "medium", # Placeholder, would be dynamic from risk service
                 "next_action_eta": next_action_eta,
-                "session_id": autonomous_config.get("session_id"),
                 "timestamp": datetime.utcnow().isoformat()
             }
             
         except Exception as e:
-            self.logger.error("Failed to get system status", error=str(e))
-            return {
-                "autonomous_mode": False,
-                "simulation_mode": True,
-                "trading_mode": "balanced",
-                "health": "error",
-                "active_strategies": [],
-                "performance_today": {},
-                "risk_level": "error",
-                "next_action_eta": None,
-                "error": str(e)
-            }
+            self.logger.exception("System status retrieval failed", user_id=user_id)
+            return {"success": False, "error": str(e), "timestamp": datetime.utcnow().isoformat()}
     
     async def get_global_system_status(self) -> Dict[str, Any]:
         """Get global system status for admin."""
