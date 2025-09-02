@@ -161,28 +161,26 @@ class KrakenNonceManager:
                         await self._sync_server_time()
                         server_time = time.time() + self._server_time_offset
                         
-                        # ENTERPRISE: Multi-component nonce with bit-shifting to prevent collisions
-                        # Format: [time_bits] | [counter_bits] | [node_bits]
-                        # Bit allocation: 40 bits for time (2^40 = ~34 years of microseconds)
-                        #                 20 bits for counter (2^20 = ~1M requests) 
-                        #                 4 bits for node (16 possible nodes)
-                        time_component = int(server_time * 1000000) & 0xFFFFFFFFFF  # 40 bits
-                        counter_component = (redis_counter % 1048576) & 0xFFFFF      # 20 bits 
-                        node_component = abs(hash(self._node_id or "default")) % 16 & 0xF  # 4 bits
+                        # ENTERPRISE: Kraken-compatible nonce with distributed coordination
+                        # Kraken expects reasonable timestamp-based nonces, not massive bit-shifted values
+                        # Format: [microsecond_timestamp] + [small_counter] + [node_offset]
+                        base_time = int(server_time * 1000000)  # Microseconds timestamp
                         
-                        # Validate component ranges to prevent overlap
-                        if time_component >= (1 << 40):
-                            logger.warning("Time component exceeds 40 bits", time_component=time_component)
-                            time_component = time_component & 0xFFFFFFFFFF
-                        if counter_component >= (1 << 20):
-                            logger.warning("Counter component exceeds 20 bits", counter_component=counter_component) 
-                            counter_component = counter_component & 0xFFFFF
-                        if node_component >= (1 << 4):
-                            logger.warning("Node component exceeds 4 bits", node_component=node_component)
-                            node_component = node_component & 0xF
+                        # Small additions to ensure uniqueness without making nonce too large
+                        counter_offset = (redis_counter % 99999)  # Max 5 digits
+                        node_offset = abs(hash(self._node_id or "default")) % 999  # Max 3 digits
                         
-                        # Combine with bit-shifting to prevent overlap: [time][counter][node]
-                        distributed_nonce = (time_component << 24) | (counter_component << 4) | node_component
+                        # Simple addition instead of bit-shifting (Kraken-compatible)
+                        # Keep nonce within reasonable range for Kraken API
+                        distributed_nonce = base_time + counter_offset + node_offset
+                        
+                        # Ensure nonce doesn't exceed reasonable limits for Kraken
+                        if distributed_nonce > 9999999999999999:  # 16 digits max
+                            # Fallback to simpler format if too large
+                            distributed_nonce = base_time + (redis_counter % 999)
+                            logger.warning("Nonce too large, using simplified format", 
+                                         original=base_time + counter_offset + node_offset,
+                                         simplified=distributed_nonce)
                         
                         # Expire Redis counter periodically to prevent infinite growth
                         if redis_counter % 500 == 0:

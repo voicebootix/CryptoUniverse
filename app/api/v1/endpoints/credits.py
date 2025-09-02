@@ -738,17 +738,10 @@ async def get_credit_transaction_history(
     """Get user's credit transaction history."""
     
     try:
-        stmt = select(CreditTransaction).outerjoin(
+        stmt = select(CreditTransaction).join(
             CreditAccount, CreditTransaction.account_id == CreditAccount.id
         ).where(
-            # Support both new transactions (with account_id) and legacy transactions (with user_id)
-            or_(
-                CreditAccount.user_id == current_user.id,  # New transactions via account_id
-                and_(
-                    CreditTransaction.account_id.is_(None),  # Legacy transactions
-                    CreditTransaction.user_id == current_user.id  # Use user_id directly for legacy
-                )
-            )
+            CreditAccount.user_id == current_user.id
         ).order_by(desc(CreditTransaction.created_at)).limit(limit)
         
         result = await db.execute(stmt)

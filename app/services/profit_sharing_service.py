@@ -537,8 +537,10 @@ class ProfitSharingService(LoggerMixin):
             async with get_async_session() as db:
                 # Check if user already received welcome package
                 existing_welcome = await db.execute(
-                    select(CreditTransaction).where(
-                        CreditTransaction.user_id == user_id,
+                    select(CreditTransaction).join(
+                        CreditAccount, CreditTransaction.account_id == CreditAccount.id
+                    ).where(
+                        CreditAccount.user_id == user_id,
                         CreditTransaction.transaction_type == "welcome_bonus"
                     )
                 )
