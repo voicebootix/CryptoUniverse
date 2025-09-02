@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useAuthStore, useUser } from '@/store/authStore';
+import React, { useState } from "react";
+import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
+import { useAuthStore, useUser } from "@/store/authStore";
 import {
   LayoutDashboard,
   TrendingUp,
@@ -11,7 +11,6 @@ import {
   Users,
   Menu,
   X,
-  Bell,
   User,
   LogOut,
   Shield,
@@ -26,9 +25,9 @@ import {
   Globe,
   CreditCard,
   MessageSquare,
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,10 +35,11 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Badge } from '@/components/ui/badge';
-import { getInitials } from '@/lib/utils';
-import ChatWidget from '@/components/chat/ChatWidget';
+} from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
+import { getInitials } from "@/lib/utils";
+import ChatWidget from "@/components/chat/ChatWidget";
+import NotificationDropdown from "@/components/notifications/NotificationDropdown";
 
 interface NavigationItem {
   name: string;
@@ -50,23 +50,63 @@ interface NavigationItem {
 }
 
 const navigation: NavigationItem[] = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'AI Command', href: '/dashboard/ai-command', icon: Brain, badge: 'AI' },
-  { name: 'AI Chat', href: '/dashboard/ai-chat', icon: MessageSquare, badge: 'NEW' },
-  { name: 'Beast Mode', href: '/dashboard/beast-mode', icon: Flame, badge: 'PRO' },
-  { name: 'Strategies', href: '/dashboard/strategies', icon: Crown, badge: '25+' },
-  { name: 'Exchange Hub', href: '/dashboard/exchanges-hub', icon: Globe, badge: '8' },
-  { name: 'Copy Trading', href: '/dashboard/copy-trading', icon: Users, badge: 'HOT' },
-  { name: 'Telegram', href: '/dashboard/telegram', icon: MessageSquare },
-  { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3, badge: 'PRO' },
-  { name: 'Market Analysis', href: '/dashboard/market-analysis', icon: Activity, badge: 'LIVE' },
-  { name: 'Trading', href: '/dashboard/trading', icon: TrendingUp },
-  { name: 'Portfolio', href: '/dashboard/portfolio', icon: Wallet },
-  { name: 'Billing', href: '/dashboard/billing', icon: CreditCard },
-  { name: 'Autonomous', href: '/dashboard/autonomous', icon: Bot },
-  { name: 'Exchanges', href: '/dashboard/exchanges', icon: BarChart3 },
-  { name: 'Settings', href: '/dashboard/settings', icon: Settings },
-  { name: 'Admin', href: '/dashboard/admin', icon: Users, adminOnly: true },
+  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  {
+    name: "AI Command",
+    href: "/dashboard/ai-command",
+    icon: Brain,
+    badge: "AI",
+  },
+  {
+    name: "AI Chat",
+    href: "/dashboard/ai-chat",
+    icon: MessageSquare,
+    badge: "NEW",
+  },
+  {
+    name: "Beast Mode",
+    href: "/dashboard/beast-mode",
+    icon: Flame,
+    badge: "PRO",
+  },
+  {
+    name: "Strategies",
+    href: "/dashboard/strategies",
+    icon: Crown,
+    badge: "25+",
+  },
+  {
+    name: "Exchange Hub",
+    href: "/dashboard/exchanges-hub",
+    icon: Globe,
+    badge: "8",
+  },
+  {
+    name: "Copy Trading",
+    href: "/dashboard/copy-trading",
+    icon: Users,
+    badge: "HOT",
+  },
+  { name: "Telegram", href: "/dashboard/telegram", icon: MessageSquare },
+  {
+    name: "Analytics",
+    href: "/dashboard/analytics",
+    icon: BarChart3,
+    badge: "PRO",
+  },
+  {
+    name: "Market Analysis",
+    href: "/dashboard/market-analysis",
+    icon: Activity,
+    badge: "LIVE",
+  },
+  { name: "Trading", href: "/dashboard/trading", icon: TrendingUp },
+  { name: "Portfolio", href: "/dashboard/portfolio", icon: Wallet },
+  { name: "Billing", href: "/dashboard/billing", icon: CreditCard },
+  { name: "Autonomous", href: "/dashboard/autonomous", icon: Bot },
+  { name: "Exchanges", href: "/dashboard/exchanges", icon: BarChart3 },
+  { name: "Settings", href: "/dashboard/settings", icon: Settings },
+  { name: "Admin", href: "/dashboard/admin", icon: Users, adminOnly: true },
 ];
 
 const DashboardLayout: React.FC = () => {
@@ -78,15 +118,15 @@ const DashboardLayout: React.FC = () => {
 
   const handleLogout = () => {
     logout();
-    navigate('/auth/login');
+    navigate("/auth/login");
   };
 
   const filteredNavigation = navigation.filter(
-    (item) => !item.adminOnly || user?.role === 'admin'
+    (item) => !item.adminOnly || user?.role === "admin"
   );
 
   const isActivePath = (href: string) => {
-    if (href === '/dashboard') {
+    if (href === "/dashboard") {
       return location.pathname === href;
     }
     return location.pathname.startsWith(href);
@@ -103,7 +143,7 @@ const DashboardLayout: React.FC = () => {
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 lg:hidden"
           >
-            <div 
+            <div
               className="absolute inset-0 bg-black/20 backdrop-blur-sm"
               onClick={() => setSidebarOpen(false)}
             />
@@ -114,7 +154,7 @@ const DashboardLayout: React.FC = () => {
               transition={{ type: "spring", damping: 30, stiffness: 300 }}
               className="absolute left-0 top-0 h-full w-80 bg-card border-r border-border shadow-xl"
             >
-              <SidebarContent 
+              <SidebarContent
                 navigation={filteredNavigation}
                 isActivePath={isActivePath}
                 onClose={() => setSidebarOpen(false)}
@@ -128,7 +168,7 @@ const DashboardLayout: React.FC = () => {
 
       {/* Desktop sidebar */}
       <div className="hidden lg:fixed lg:inset-y-0 lg:flex lg:w-80 lg:flex-col">
-        <SidebarContent 
+        <SidebarContent
           navigation={filteredNavigation}
           isActivePath={isActivePath}
           user={user}
@@ -155,7 +195,8 @@ const DashboardLayout: React.FC = () => {
             <div className="flex items-center">
               <nav className="flex text-sm">
                 <span className="text-muted-foreground">
-                  {navigation.find(item => isActivePath(item.href))?.name || 'Dashboard'}
+                  {navigation.find((item) => isActivePath(item.href))?.name ||
+                    "Dashboard"}
                 </span>
               </nav>
             </div>
@@ -174,9 +215,9 @@ const DashboardLayout: React.FC = () => {
             </div>
 
             {/* Emergency logout button */}
-            <Button 
-              onClick={handleLogout} 
-              variant="outline" 
+            <Button
+              onClick={handleLogout}
+              variant="outline"
               size="sm"
               className="hidden sm:flex items-center gap-2 text-xs h-8 px-3 border-destructive/20 text-destructive hover:bg-destructive hover:text-destructive-foreground"
             >
@@ -185,24 +226,23 @@ const DashboardLayout: React.FC = () => {
             </Button>
 
             {/* Notifications */}
-            <Button variant="ghost" size="icon" className="relative">
-              <Bell className="h-5 w-5" />
-              <Badge
-                variant="destructive"
-                className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs"
-              >
-                3
-              </Badge>
-            </Button>
+            <NotificationDropdown />
 
             {/* User menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                <Button
+                  variant="ghost"
+                  className="relative h-8 w-8 rounded-full"
+                >
                   <Avatar className="h-8 w-8">
                     <AvatarImage src={user?.avatar_url} alt={user?.full_name} />
                     <AvatarFallback>
-                      {user && user.full_name ? getInitials(user.full_name) : (user?.email ? getInitials(user.email) : 'U')}
+                      {user && user.full_name
+                        ? getInitials(user.full_name)
+                        : user?.email
+                        ? getInitials(user.email)
+                        : "U"}
                     </AvatarFallback>
                   </Avatar>
                 </Button>
@@ -231,7 +271,7 @@ const DashboardLayout: React.FC = () => {
                     Settings
                   </Link>
                 </DropdownMenuItem>
-                {user?.role === 'admin' && (
+                {user?.role === "admin" && (
                   <DropdownMenuItem asChild>
                     <Link to="/dashboard/admin">
                       <Shield className="mr-2 h-4 w-4" />
@@ -285,10 +325,12 @@ const SidebarContent: React.FC<SidebarContentProps> = ({
           </div>
           <div className="flex flex-col">
             <span className="text-lg font-bold">CryptoUniverse</span>
-            <span className="text-xs text-muted-foreground">AI Money Manager</span>
+            <span className="text-xs text-muted-foreground">
+              AI Money Manager
+            </span>
           </div>
         </Link>
-        
+
         {onClose && (
           <Button variant="ghost" size="icon" onClick={onClose}>
             <X className="h-6 w-6" />
@@ -302,13 +344,15 @@ const SidebarContent: React.FC<SidebarContentProps> = ({
           <Avatar className="h-10 w-10">
             <AvatarImage src={user?.avatar_url} alt={user?.full_name} />
             <AvatarFallback>
-              {user && user.full_name ? getInitials(user.full_name) : (user?.email ? getInitials(user.email) : 'U')}
+              {user && user.full_name
+                ? getInitials(user.full_name)
+                : user?.email
+                ? getInitials(user.email)
+                : "U"}
             </AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">
-              {user?.full_name}
-            </p>
+            <p className="text-sm font-medium truncate">{user?.full_name}</p>
             <div className="flex items-center space-x-2">
               <Badge variant="secondary" className="text-xs">
                 {user?.role}
@@ -335,21 +379,24 @@ const SidebarContent: React.FC<SidebarContentProps> = ({
                   onClick={onClose}
                   className={`
                     group flex gap-x-3 rounded-md p-3 text-sm leading-6 font-semibold transition-all duration-200
-                    ${isActive
-                      ? 'bg-primary text-primary-foreground shadow-md'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    ${
+                      isActive
+                        ? "bg-primary text-primary-foreground shadow-md"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                     }
                   `}
                 >
                   <item.icon
                     className={`h-5 w-5 shrink-0 transition-colors ${
-                      isActive ? 'text-primary-foreground' : 'text-muted-foreground group-hover:text-foreground'
+                      isActive
+                        ? "text-primary-foreground"
+                        : "text-muted-foreground group-hover:text-foreground"
                     }`}
                   />
                   <span className="flex-1">{item.name}</span>
                   {item.badge && (
-                    <Badge 
-                      variant={isActive ? "secondary" : "outline"} 
+                    <Badge
+                      variant={isActive ? "secondary" : "outline"}
                       className="text-xs"
                     >
                       {item.badge}
@@ -371,7 +418,7 @@ const SidebarContent: React.FC<SidebarContentProps> = ({
                 <span className="text-sm font-medium">Trading Status</span>
               </div>
               <Badge variant="outline" className="text-xs">
-                {user?.simulation_mode ? 'Simulation' : 'Live'}
+                {user?.simulation_mode ? "Simulation" : "Live"}
               </Badge>
             </div>
           </div>
@@ -382,7 +429,9 @@ const SidebarContent: React.FC<SidebarContentProps> = ({
               <div className="status-indicator status-online">
                 <div className="h-2 w-2 bg-profit rounded-full" />
               </div>
-              <span className="text-xs text-muted-foreground">All systems operational</span>
+              <span className="text-xs text-muted-foreground">
+                All systems operational
+              </span>
             </div>
           </div>
         </div>
