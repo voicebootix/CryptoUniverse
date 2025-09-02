@@ -45,37 +45,12 @@ export const useNotifications = () => {
           })
         );
 
-        // Add some mock notifications for demo purposes
-        const mockNotifications: Notification[] = [
-          {
-            id: "trade_001",
-            severity: "info",
-            message: "BTC/USDT trade executed successfully: +$234.56",
-            timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-            type: "trade_execution",
-          },
-          {
-            id: "portfolio_001",
-            severity: "warning",
-            message: "Portfolio risk level increased to 7.2/10",
-            timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-            type: "risk_alert",
-          },
-          {
-            id: "market_001",
-            severity: "info",
-            message: "ETH price alert: $3,245 target reached",
-            timestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-            type: "price_alert",
-          },
-        ];
-
-        const allNotifications = [...notifications, ...mockNotifications];
-        const unreadCount = allNotifications.filter((n) => !n.resolved).length;
+        // Use notifications directly from the backend
+        const unreadCount = notifications.filter((n) => !n.resolved).length;
 
         setState((prev) => ({
           ...prev,
-          notifications: allNotifications,
+          notifications: notifications,
           unreadCount,
           isLoading: false,
         }));
@@ -108,13 +83,21 @@ export const useNotifications = () => {
           await api.post(`/monitoring/alerts/${notificationId}/resolve`);
         }
 
-        setState((prev) => ({
-          ...prev,
-          notifications: prev.notifications.map((n) =>
+        setState((prev) => {
+          const newNotifications = prev.notifications.map((n) =>
             n.id === notificationId ? { ...n, resolved: true } : n
-          ),
-          unreadCount: Math.max(0, prev.unreadCount - 1),
-        }));
+          );
+          // Derive unreadCount from the new notifications array
+          const newUnreadCount = newNotifications.filter(
+            (n) => !n.resolved
+          ).length;
+
+          return {
+            ...prev,
+            notifications: newNotifications,
+            unreadCount: newUnreadCount,
+          };
+        });
       } catch (error) {
         console.error("Failed to mark notification as read:", error);
       }
@@ -147,17 +130,40 @@ export const useNotifications = () => {
     }
   }, [state.notifications]);
 
-  const clearNotification = useCallback((notificationId: string) => {
-    setState((prev) => ({
-      ...prev,
-      notifications: prev.notifications.filter((n) => n.id !== notificationId),
-      unreadCount: prev.notifications.find(
-        (n) => n.id === notificationId && !n.resolved
-      )
-        ? prev.unreadCount - 1
-        : prev.unreadCount,
-    }));
-  }, []);
+  const clearNotification = useCallback(
+    async (notificationId: string) => {
+      try {
+        const notification = state.notifications.find(
+          (n) => n.id === notificationId
+        );
+
+        if (notification?.type === "system_alert" && !notification.resolved) {
+          // Resolve system alerts on the server before removing
+          await api.post(`/monitoring/alerts/${notificationId}/resolve`);
+        }
+
+        setState((prev) => {
+          const newNotifications = prev.notifications.filter(
+            (n) => n.id !== notificationId
+          );
+          // Recompute unreadCount from remaining notifications
+          const newUnreadCount = newNotifications.filter(
+            (n) => !n.resolved
+          ).length;
+
+          return {
+            ...prev,
+            notifications: newNotifications,
+            unreadCount: newUnreadCount,
+          };
+        });
+      } catch (error) {
+        console.error("Failed to clear notification:", error);
+        // Optionally show error to user via toast/alert
+      }
+    },
+    [state.notifications]
+  );
 
   const getSeverityColor = (severity: Notification["severity"]) => {
     switch (severity) {
