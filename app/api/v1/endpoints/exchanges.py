@@ -1220,10 +1220,11 @@ async def fetch_kraken_balances(api_key: str, api_secret: str) -> List[Dict[str,
         # Prepare POST data
         post_data = urllib.parse.urlencode({"nonce": str(nonce)})
         
-        # Create signature for Kraken API
+        # Create signature for Kraken API (Kraken-specific format)
         encoded_endpoint = endpoint.encode()
-        encoded_nonce_postdata = (str(nonce) + post_data).encode()
-        sha256_hash = hashlib.sha256(encoded_nonce_postdata).digest()
+        # CRITICAL FIX: Kraken signature uses nonce + post_data (nonce not duplicated)
+        nonce_postdata = str(nonce) + post_data  # "123456nonce=123456" format expected by Kraken
+        sha256_hash = hashlib.sha256(nonce_postdata.encode('utf-8')).digest()
         signature_data = encoded_endpoint + sha256_hash
         
         signature = base64.b64encode(

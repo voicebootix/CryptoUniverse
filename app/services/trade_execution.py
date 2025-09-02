@@ -483,9 +483,9 @@ class ExchangeConnector(LoggerMixin):
         
         # ENTERPRISE KRAKEN NONCE MANAGEMENT - Import and use global nonce manager
         from app.api.v1.endpoints.exchanges import kraken_nonce_manager
-        nonce = kraken_nonce_manager.get_nonce()
+        nonce = await kraken_nonce_manager.get_nonce()  # CRITICAL: Add missing await
         params = {
-            "nonce": nonce,
+            "nonce": str(nonce),
             "pair": order_params["symbol"].replace("/", ""),
             "type": order_params["side"].lower(),
             "ordertype": "market",
@@ -494,8 +494,8 @@ class ExchangeConnector(LoggerMixin):
         
         post_data = "&".join([f"{k}={v}" for k, v in params.items()])
         
-        # Create signature for Kraken
-        encoded = (nonce + post_data).encode()
+        # Create signature for Kraken (nonce is already in post_data)
+        encoded = (str(nonce) + post_data).encode()
         message = "/0/private/AddOrder".encode() + hashlib.sha256(encoded).digest()
         signature = hmac.new(
             base64.b64decode(config["secret_key"]),

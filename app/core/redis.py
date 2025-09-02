@@ -245,12 +245,39 @@ redis_connection_manager = RedisConnectionManager()
 
 async def get_redis_client() -> Optional[Redis]:
     """
-    Get Redis client instance with ENTERPRISE connection management.
+    Get Redis client instance with ENTERPRISE connection management and retry logic.
     
     Returns:
         Redis: Redis client instance or None if unavailable
     """
-    return await redis_connection_manager.get_client()
+    # PRODUCTION: Add retry logic for connection establishment
+    max_retries = 3
+    base_delay = 0.1
+    
+    for attempt in range(max_retries):
+        try:
+            client = await redis_connection_manager.get_client()
+            if client:
+                # Validate connection with ping test
+                await asyncio.wait_for(client.ping(), timeout=2.0)
+                return client
+            return None
+        except (ConnectionError, TimeoutError, asyncio.TimeoutError) as e:
+            if attempt == max_retries - 1:
+                logger.warning(f"Redis connection failed after {max_retries} attempts", error=str(e))
+                return None
+            
+            # Exponential backoff with jitter
+            delay = base_delay * (2 ** attempt) + (time.time() % 0.1)
+            logger.debug(f"Redis connection attempt {attempt + 1} failed, retrying in {delay:.2f}s")
+            await asyncio.sleep(delay)
+        except Exception as e:
+            logger.warning(f"Redis connection error on attempt {attempt + 1}", error=str(e))
+            if attempt == max_retries - 1:
+                return None
+            await asyncio.sleep(base_delay)
+    
+    return None
 
 
 async def close_redis_client():

@@ -29,27 +29,34 @@ def get_async_database_url() -> str:
         return db_url.replace("sqlite://", "sqlite+aiosqlite://")
     return db_url
 
-# ENTERPRISE SQLAlchemy async engine with optimized connection pooling
+# ENTERPRISE SQLAlchemy async engine optimized for Render production
 engine = create_async_engine(
     get_async_database_url(),
     poolclass=QueuePool,  # ENTERPRISE: Use proper connection pooling
-    pool_size=20,         # ENTERPRISE: Base connection pool size
-    max_overflow=30,      # ENTERPRISE: Additional connections during peak
+    pool_size=10,         # PRODUCTION: Optimized for Render starter plan
+    max_overflow=15,      # PRODUCTION: Reasonable overflow for cloud environment
     pool_pre_ping=True,   # ENTERPRISE: Health check connections
-    pool_recycle=3600,    # ENTERPRISE: Recycle connections every hour
+    pool_recycle=1800,    # PRODUCTION: Faster recycle for cloud (30 min)
+    pool_timeout=10,      # PRODUCTION: Faster timeout for cloud latency
     echo=getattr(settings, 'DATABASE_ECHO', False),
     future=True,
-    # ENTERPRISE: Additional performance settings
+    # ENTERPRISE: Production performance settings
     execution_options={
         "isolation_level": "READ_COMMITTED",
+        "compiled_cache": {},  # Enable query compilation cache
     },
-    # ENTERPRISE: Query optimization settings for PostgreSQL only
+    # PRODUCTION: Optimized settings for Render → Supabase
     connect_args={
-        "command_timeout": 30,
+        "command_timeout": 15,  # Faster timeout for cloud
         "server_settings": {
-            "statement_timeout": "30s",  # Move to server_settings for asyncpg
-            "jit": "off",  # Disable JIT for consistent performance
-            "application_name": "crypto_trading_platform",
+            "statement_timeout": "15s",  # Aggressive timeout for production
+            "lock_timeout": "5s",       # Prevent long locks
+            "idle_in_transaction_session_timeout": "30s",  # Clean up idle connections
+            "jit": "off",  # Disable JIT for predictable performance
+            "application_name": "cryptouniverse_production",
+            "tcp_keepalives_idle": "300",     # Keep connections alive
+            "tcp_keepalives_interval": "30",  # Ping every 30s
+            "tcp_keepalives_count": "3",      # Max 3 failed pings
         }
     } if "postgresql" in get_async_database_url() else {}
 )

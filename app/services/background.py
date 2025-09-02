@@ -553,27 +553,68 @@ class BackgroundServiceManager(LoggerMixin):
             }
         ]
         
-        # ENTERPRISE: Concurrent API calls for optimal performance (avoid >1min latency)
+        # ENTERPRISE: Rate-limit aware API calls with intelligent backoff
         async def fetch_api_symbols(session, api_config):
-            """Fetch symbols from a single API concurrently."""
+            """Fetch symbols from a single API with rate limit awareness."""
             try:
-                headers = {"User-Agent": "CryptoUniverse-Trading-Platform/1.0"}
+                headers = {
+                    "User-Agent": "CryptoUniverse-Enterprise/1.0 (+https://cryptouniverse.onrender.com)",
+                    "Accept": "application/json",
+                    "Connection": "keep-alive"
+                }
+                
+                # Check if API is rate limited (using Redis if available)
+                if self.redis:
+                    rate_limit_key = f"api_rate_limit:{api_config['name'].lower()}"
+                    is_limited = await self.redis.get(rate_limit_key)
+                    if is_limited:
+                        self.logger.info(f"API {api_config['name']} is rate limited, using cached data")
+                        # Try to get cached symbols instead
+                        cache_key = f"api_symbols_cache:{api_config['name'].lower()}"
+                        cached_symbols = await self.redis.get(cache_key)
+                        if cached_symbols:
+                            try:
+                                import json
+                                return set(json.loads(cached_symbols))
+                            except:
+                                pass
+                        return set()
+                
                 async with session.get(
                     api_config["url"], 
-                    timeout=10,  # Reduced timeout for concurrent calls
+                    timeout=8,  # Faster timeout to detect issues quickly
                     headers=headers
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
                         symbols = api_config["parser"](data)
                         valid_symbols = {s for s in symbols if s and isinstance(s, str) and len(s) >= 2}
-                        self.logger.info(f"Concurrent API {api_config['name']} found {len(valid_symbols)} symbols")
+                        
+                        # Cache successful results for 5 minutes
+                        if self.redis and valid_symbols:
+                            import json
+                            await self.redis.setex(
+                                f"api_symbols_cache:{api_config['name'].lower()}", 
+                                300,  # 5 minute cache
+                                json.dumps(list(valid_symbols))
+                            )
+                        
+                        self.logger.info(f"API {api_config['name']} found {len(valid_symbols)} symbols")
                         return valid_symbols
+                        
+                    elif response.status == 429:
+                        # Rate limited - cache the rate limit status
+                        retry_after = response.headers.get('Retry-After', '60')
+                        if self.redis:
+                            await self.redis.setex(f"api_rate_limit:{api_config['name'].lower()}", int(retry_after), "limited")
+                        
+                        self.logger.warning(f"API {api_config['name']} rate limited, retry after {retry_after}s")
+                        return set()
                     else:
-                        self.logger.warning(f"Concurrent API {api_config['name']} returned {response.status}")
+                        self.logger.warning(f"API {api_config['name']} returned {response.status}")
                         return set()
             except Exception as e:
-                self.logger.warning(f"Concurrent API {api_config['name']} failed", api_name=api_config['name'], error=str(e))
+                self.logger.warning(f"API {api_config['name']} failed", api_name=api_config['name'], error=str(e))
                 return set()
         
         try:
