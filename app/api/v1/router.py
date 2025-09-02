@@ -156,9 +156,9 @@ async def get_monitoring_dashboard(duration_minutes: int = 60):
     """ENTERPRISE comprehensive monitoring dashboard with metrics."""
     try:
         from app.services.system_monitoring import system_monitoring_service
-        return system_monitoring_service.get_metrics_dashboard(duration_minutes)
+        return await system_monitoring_service.get_metrics_dashboard(duration_minutes)
     except Exception as e:
-        logger.error("Monitoring dashboard failed", error=str(e))
+        logger.exception("Monitoring dashboard failed")
         return {
             "error": "Monitoring dashboard unavailable",
             "message": str(e),
@@ -172,12 +172,12 @@ async def get_active_alerts():
     try:
         from app.services.system_monitoring import system_monitoring_service
         return {
-            "active_alerts": system_monitoring_service.get_active_alerts(),
+            "active_alerts": await system_monitoring_service.get_active_alerts(),
             "monitoring_status": system_monitoring_service.get_monitoring_status(),
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
-        logger.error("Alerts retrieval failed", error=str(e))
+        logger.exception("Alerts retrieval failed")
         return {
             "error": "Alerts unavailable", 
             "message": str(e),
@@ -190,7 +190,7 @@ async def resolve_alert(alert_id: str):
     """Resolve a specific alert."""
     try:
         from app.services.system_monitoring import system_monitoring_service
-        success = system_monitoring_service.resolve_alert(alert_id)
+        success = await system_monitoring_service.resolve_alert(alert_id)
         return {
             "success": success,
             "alert_id": alert_id,
@@ -198,7 +198,7 @@ async def resolve_alert(alert_id: str):
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
-        logger.error("Alert resolution failed", error=str(e))
+        logger.exception("Alert resolution failed")
         return {
             "success": False,
             "error": str(e),
@@ -218,7 +218,7 @@ async def start_monitoring(interval_seconds: int = 30):
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
-        logger.error("Failed to start monitoring", error=str(e))
+        logger.exception("Failed to start monitoring")
         return {
             "success": False,
             "error": str(e),
@@ -231,13 +231,13 @@ async def clear_all_alerts():
     """Clear all active alerts (for testing/reset purposes)."""
     try:
         from app.services.system_monitoring import system_monitoring_service
-        result = system_monitoring_service.clear_all_alerts()
+        result = await system_monitoring_service.clear_all_alerts()
         return {
             **result,
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
-        logger.error("Failed to clear alerts", error=str(e))
+        logger.exception("Failed to clear alerts")
         return {
             "success": False,
             "error": str(e),
@@ -279,7 +279,7 @@ async def trigger_system_cleanup():
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception as e:
-        logger.error("Manual cleanup failed", error=str(e))
+        logger.exception("Manual cleanup failed")
         return {
             "success": False,
             "error": str(e),
