@@ -8,8 +8,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // import { ReactQueryDevtools } from '@tanstack/react-query-devtools'.;
 import { Toaster } from "@/components/ui/toaster";
-import { useAuthStore, useIsAuthenticated } from "@/store/authStore"; 
-
+import { useAuthStore, useIsAuthenticated } from "@/store/authStore";
 
 // Layout Components
 import AuthLayout from "@/components/layout/AuthLayout";
@@ -37,26 +36,9 @@ import AutonomousPage from "@/pages/dashboard/AutonomousPage";
 import ExchangesPage from "@/pages/dashboard/ExchangesPage";
 import SettingsPage from "@/pages/dashboard/SettingsPage";
 import AdminPage from "@/pages/dashboard/AdminPage";
-=======
-import TradingDashboard from '@/pages/dashboard/TradingDashboard';
-import AICommandCenter from '@/pages/dashboard/AICommandCenter';
-import AIChatPage from '@/pages/dashboard/AIChatPage';
-import BeastModeDashboard from '@/pages/dashboard/BeastModeDashboard';
-import StrategyMarketplace from '@/pages/dashboard/StrategyMarketplace';
-import MultiExchangeHub from '@/pages/dashboard/MultiExchangeHub';
-import CreditBillingCenter from '@/pages/dashboard/CreditBillingCenter';
-import ProfitSharingCenter from '@/pages/dashboard/ProfitSharingCenter';
-import CopyTradingNetwork from '@/pages/dashboard/CopyTradingNetwork';
-import TelegramCenter from '@/pages/dashboard/TelegramCenter';
-import AdvancedAnalytics from '@/pages/dashboard/AdvancedAnalytics';
-import TradingPage from '@/pages/dashboard/TradingPage';
-import PortfolioPage from '@/pages/dashboard/PortfolioPage';
-import AutonomousPage from '@/pages/dashboard/AutonomousPage';
-import ExchangesPage from '@/pages/dashboard/ExchangesPage';
-import SettingsPage from '@/pages/dashboard/SettingsPage';
-import AdminPage from '@/pages/dashboard/AdminPage';
-import MarketAnalysisPage from '@/pages/dashboard/MarketAnalysisPage';
-
+import AIChatPage from "@/pages/dashboard/AIChatPage";
+import ProfitSharingCenter from "@/pages/dashboard/ProfitSharingCenter";
+import MarketAnalysisPage from "@/pages/dashboard/MarketAnalysisPage";
 
 // Loading Component
 const LoadingScreen: React.FC = () => (
@@ -168,7 +150,6 @@ const App: React.FC = () => {
               {/* AI Command Center */}
               <Route path="ai-command" element={<AICommandCenter />} />
 
-
               {/* Beast Mode Dashboard */}
               <Route path="beast-mode" element={<BeastModeDashboard />} />
 
@@ -193,39 +174,36 @@ const App: React.FC = () => {
               {/* Trading */}
               <Route path="trading" element={<TradingPage />} />
 
-
-              
               {/* AI Chat Manager */}
               <Route path="ai-chat" element={<AIChatPage />} />
-              
+
               {/* Beast Mode Dashboard */}
               <Route path="beast-mode" element={<BeastModeDashboard />} />
-              
-                          {/* Strategy Marketplace */}
-            <Route path="strategies" element={<StrategyMarketplace />} />
-            
-            {/* Multi-Exchange Hub */}
-            <Route path="exchanges-hub" element={<MultiExchangeHub />} />
-            
-            {/* Credit & Billing */}
-            <Route path="billing" element={<ProfitSharingCenter />} />
-            <Route path="credits" element={<ProfitSharingCenter />} />
-            
-            {/* Copy Trading Network */}
-            <Route path="copy-trading" element={<CopyTradingNetwork />} />
-            
-            {/* Telegram Center */}
-            <Route path="telegram" element={<TelegramCenter />} />
-            
-            {/* Advanced Analytics */}
-            <Route path="analytics" element={<AdvancedAnalytics />} />
-            
-            {/* Market Analysis */}
-            <Route path="market-analysis" element={<MarketAnalysisPage />} />
-            
-            {/* Trading */}
-            <Route path="trading" element={<TradingPage />} />
-              
+
+              {/* Strategy Marketplace */}
+              <Route path="strategies" element={<StrategyMarketplace />} />
+
+              {/* Multi-Exchange Hub */}
+              <Route path="exchanges-hub" element={<MultiExchangeHub />} />
+
+              {/* Credit & Billing */}
+              <Route path="billing" element={<ProfitSharingCenter />} />
+              <Route path="credits" element={<ProfitSharingCenter />} />
+
+              {/* Copy Trading Network */}
+              <Route path="copy-trading" element={<CopyTradingNetwork />} />
+
+              {/* Telegram Center */}
+              <Route path="telegram" element={<TelegramCenter />} />
+
+              {/* Advanced Analytics */}
+              <Route path="analytics" element={<AdvancedAnalytics />} />
+
+              {/* Market Analysis */}
+              <Route path="market-analysis" element={<MarketAnalysisPage />} />
+
+              {/* Trading */}
+              <Route path="trading" element={<TradingPage />} />
 
               {/* Portfolio */}
               <Route path="portfolio" element={<PortfolioPage />} />
