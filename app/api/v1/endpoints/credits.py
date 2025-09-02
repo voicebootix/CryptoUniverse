@@ -42,6 +42,32 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
+# Helper Functions
+async def get_or_create_credit_account(user_id: str, db: AsyncSession) -> CreditAccount:
+    """Get existing credit account or create new one with zero balances."""
+    # Try to find existing account
+    stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
+    result = await db.execute(stmt)
+    credit_account = result.scalar_one_or_none()
+    
+    if credit_account:
+        return credit_account
+    
+    # Create new account with zero balances
+    credit_account = CreditAccount(
+        user_id=user_id,
+        total_credits=0,
+        available_credits=0,
+        used_credits=0,
+        expired_credits=0
+    )
+    
+    db.add(credit_account)
+    await db.commit()
+    await db.refresh(credit_account)
+    return credit_account
+
+
 # Request/Response Models
 class CreditPurchaseRequest(BaseModel):
     amount_usd: Decimal

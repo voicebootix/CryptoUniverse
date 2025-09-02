@@ -281,11 +281,13 @@ class UnifiedAIManager(LoggerMixin):
             })
             
             if master_result.get("success"):
-                # Store unified config
-                await self.redis.hset(
-                    f"unified_ai_config:{user_id}",
-                    mapping=autonomous_config
-                )
+                # Store unified config as JSON blob
+                redis_client = await self._ensure_redis()
+                if redis_client:
+                    await redis_client.set(
+                        f"unified_ai_config:{user_id}",
+                        json.dumps(autonomous_config)
+                    )
                 
                 # Notify all connected interfaces
                 await self._notify_all_interfaces(user_id, {
@@ -437,9 +439,19 @@ class UnifiedAIManager(LoggerMixin):
         """Handle autonomous AI decisions during automated trading cycles."""
         
         try:
-            # Get user autonomous config
+            # Get user autonomous config  
             redis_client = await self._ensure_redis()
-            autonomous_config = await redis_client.hgetall(f"unified_ai_config:{user_id}") if redis_client else {}
+            if redis_client:
+                config_data = await redis_client.get(f"unified_ai_config:{user_id}")
+                if config_data:
+                    try:
+                        autonomous_config = json.loads(config_data)
+                    except json.JSONDecodeError:
+                        autonomous_config = {}
+                else:
+                    autonomous_config = {}
+            else:
+                autonomous_config = {}
             
             if not autonomous_config:
                 return {"success": False, "error": "No autonomous configuration found"}
@@ -528,14 +540,21 @@ class UnifiedAIManager(LoggerMixin):
     async def _get_user_config(self, user_id: str) -> Dict[str, Any]:
         """Get user configuration and preferences."""
         
-        # Get from Redis cache first
+        # Get from Redis cache first  
         redis_client = await self._ensure_redis()
-        cached_config = await redis_client.hgetall(f"user_ai_config:{user_id}") if redis_client else {}
-        
-        if cached_config:
-            return {k.decode() if isinstance(k, bytes) else k: 
-                   v.decode() if isinstance(v, bytes) else v 
-                   for k, v in cached_config.items()}
+        if redis_client:
+            config_data = await redis_client.get(f"user_ai_config:{user_id}")
+            if config_data:
+                try:
+                    cached_config = json.loads(config_data)
+                    if cached_config:
+                        return cached_config
+                except json.JSONDecodeError:
+                    cached_config = {}
+            else:
+                cached_config = {}
+        else:
+            cached_config = {}
         
         # Default configuration
         default_config = {
@@ -555,14 +574,44 @@ class UnifiedAIManager(LoggerMixin):
             }
         }
         
-        # Cache for future use
-        await self.redis.hset(f"user_ai_config:{user_id}", mapping=default_config)
+        # Cache for future use as JSON blob
+        redis_client = await self._ensure_redis()
+        if redis_client:
+            await redis_client.set(f"user_ai_config:{user_id}", json.dumps(default_config))
         
         return default_config
     
     async def _set_user_operation_mode(self, user_id: str, mode: OperationMode):
         """Set user operation mode."""
-        await self.redis.hset(f"user_ai_config:{user_id}", "operation_mode", mode.value)
+        redis_client = await self._ensure_redis()
+        if redis_client:
+            # Get existing config
+            config_data = await redis_client.get(f"user_ai_config:{user_id}")
+            if config_data:
+                try:
+                    user_config = json.loads(config_data)
+                except json.JSONDecodeError:
+                    # Create default config directly to avoid circular calls
+                    user_config = {
+                        "operation_mode": "assisted",
+                        "risk_tolerance": "balanced",
+                        "trading_mode": "balanced",
+                        "ai_confidence_threshold": 80.0
+                    }
+            else:
+                # Create default config directly
+                user_config = {
+                    "operation_mode": "assisted", 
+                    "risk_tolerance": "balanced",
+                    "trading_mode": "balanced",
+                    "ai_confidence_threshold": 80.0
+                }
+            
+            # Update operation mode
+            user_config["operation_mode"] = mode.value
+            
+            # Save updated config back as JSON
+            await redis_client.set(f"user_ai_config:{user_id}", json.dumps(user_config))
     
     async def _classify_unified_intent(self, request: str, interface: InterfaceType, context: Optional[Dict]) -> str:
         """Classify intent across all interfaces consistently."""
