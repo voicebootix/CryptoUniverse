@@ -375,52 +375,232 @@ class BackgroundServiceManager(LoggerMixin):
             await asyncio.sleep(self.intervals["market_data_sync"])
     
     async def _discover_active_trading_symbols(self) -> List[str]:
-        """Dynamically discover active trading symbols across all exchanges."""
+        """ENTERPRISE: Dynamically discover ALL trading opportunities without limits."""
+        all_discovered_symbols = set()
+        
         try:
             from app.services.market_analysis_core import MarketAnalysisService
             market_service = MarketAnalysisService()
             
-            # Use your sophisticated discover_exchange_assets function
-            discovery_result = await market_service.discover_exchange_assets(
-                exchanges="all",
-                min_volume_usd=self.service_configs["market_data_discovery"]["min_volume_usd_24h"],
-                user_id="system"
-            )
+            # ENTERPRISE: Progressive discovery with multiple strategies (NO ARTIFICIAL LIMITS)
+            discovery_strategies = [
+                {"min_volume_usd": 100000, "description": "High volume assets"},  # $100K min
+                {"min_volume_usd": 50000, "description": "Medium-high volume"},   # $50K min  
+                {"min_volume_usd": 10000, "description": "Medium volume"},       # $10K min
+                {"min_volume_usd": 1000, "description": "Low volume"},          # $1K min
+                {"min_volume_usd": 0, "description": "All assets"},             # NO MINIMUM
+            ]
             
-            if discovery_result.get("success"):
-                discovered_assets = discovery_result.get("discovered_assets", {})
-                
-                # Extract symbols from all exchanges
-                all_symbols = set()
-                for exchange, assets in discovered_assets.items():
-                    if isinstance(assets, list):
-                        all_symbols.update(assets)
-                    elif isinstance(assets, dict):
-                        all_symbols.update(assets.keys())
-                
-                # Filter by volume and market cap criteria
-                filtered_symbols = []
-                for symbol in all_symbols:
-                    # Basic filtering - your market analysis service provides sophisticated filtering
-                    if len(symbol) <= 10 and not any(char in symbol for char in ['/', '-', '_']):
-                        filtered_symbols.append(symbol)
-                
-                # Limit to prevent overwhelming the system
-                max_symbols = self.service_configs["market_data_discovery"]["max_symbols_per_sync"]
-                filtered_symbols = filtered_symbols[:max_symbols]
-                
-                self.logger.info(f"🔍 Discovered {len(filtered_symbols)} active trading symbols")
-                return filtered_symbols
-            
-            # Fallback to major cryptocurrencies if discovery fails
-            fallback_symbols = ["BTC", "ETH", "SOL", "ADA", "DOT", "MATIC", "LINK", "UNI", "AVAX", "ATOM"]
-            self.logger.warning("Symbol discovery failed, using fallback symbols")
-            return fallback_symbols
+            for strategy in discovery_strategies:
+                try:
+                    discovery_result = await market_service.discover_exchange_assets(
+                        exchanges="all",
+                        min_volume_usd=strategy["min_volume_usd"],
+                        user_id="system"
+                    )
+                    
+                    if discovery_result.get("success"):
+                        discovered_assets = discovery_result.get("discovered_assets", {})
+                        
+                        # Extract ALL symbols from ALL exchanges without limits
+                        strategy_symbols = set()
+                        self._extract_symbols_from_discovery(discovered_assets, strategy_symbols)
+                        
+                        # ENTERPRISE: Minimal filtering - only remove obviously invalid
+                        valid_symbols = set()
+                        for symbol in strategy_symbols:
+                            if (isinstance(symbol, str) and 
+                                len(symbol) >= 2 and len(symbol) <= 15 and 
+                                symbol.replace('-', '').replace('_', '').isalnum() and
+                                not symbol.lower().startswith('test') and
+                                symbol.upper() not in ['NULL', 'NONE', 'UNDEFINED']):
+                                valid_symbols.add(symbol.upper())
+                        
+                        all_discovered_symbols.update(valid_symbols)
+                        
+                        self.logger.info(
+                            f"Discovery strategy: {strategy['description']} found {len(valid_symbols)} symbols", 
+                            min_volume=strategy["min_volume_usd"],
+                            total_discovered=len(all_discovered_symbols)
+                        )
+                        
+                        # Continue with all strategies to maximize opportunities
+                            
+                except Exception as e:
+                    self.logger.warning(f"Discovery strategy failed: {strategy['description']}", error=str(e))
+                    continue
             
         except Exception as e:
-            self.logger.error("Symbol discovery failed", error=str(e))
-            # Emergency fallback
-            return ["BTC", "ETH", "SOL"]
+            self.logger.error("Market analysis discovery failed", error=str(e))
+        
+        # ENTERPRISE: Direct exchange API discovery (bypass service layer if needed)
+        try:
+            exchange_symbols = await self._discover_symbols_direct_apis()
+            all_discovered_symbols.update(exchange_symbols)
+            self.logger.info(f"Direct API discovery added {len(exchange_symbols)} additional symbols")
+        except Exception as e:
+            self.logger.warning("Direct API discovery failed", error=str(e))
+        
+        # ENTERPRISE: Comprehensive fallback with ALL profitable cryptos
+        if len(all_discovered_symbols) < 50:  # Only if discovery seriously failed
+            comprehensive_fallback = self._get_comprehensive_crypto_universe()
+            all_discovered_symbols.update(comprehensive_fallback)
+            self.logger.warning(
+                f"Enhanced fallback: added {len(comprehensive_fallback)} symbols",
+                total_symbols=len(all_discovered_symbols),
+                message="Ensuring no opportunities are missed"
+            )
+        
+        discovered_list = list(all_discovered_symbols)
+        
+        self.logger.info(
+            f"🔍 Discovered {len(discovered_list)} active trading symbols - NO LIMITS",
+            sample_symbols=discovered_list[:20],
+            message="ENTERPRISE: All opportunities captured for maximum profit"
+        )
+        
+        return discovered_list
+    
+    def _extract_symbols_from_discovery(self, data, symbols_set):
+        """Recursively extract symbols from complex discovery data structures."""
+        if isinstance(data, dict):
+            for key, value in data.items():
+                # Look for symbol fields at any level
+                if key.lower() in ['symbol', 'base_asset', 'base', 'coin', 'currency', 'asset']:
+                    if isinstance(value, str) and value:
+                        symbols_set.add(value)
+                elif key.lower() in ['symbols', 'assets', 'coins', 'pairs', 'currencies']:
+                    if isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, str):
+                                symbols_set.add(item)
+                            elif isinstance(item, dict):
+                                self._extract_symbols_from_discovery(item, symbols_set)
+                    elif isinstance(value, dict):
+                        self._extract_symbols_from_discovery(value, symbols_set)
+                elif isinstance(value, (dict, list)):
+                    self._extract_symbols_from_discovery(value, symbols_set)
+        elif isinstance(data, list):
+            for item in data:
+                if isinstance(item, str) and item:
+                    symbols_set.add(item)
+                elif isinstance(item, dict):
+                    self._extract_symbols_from_discovery(item, symbols_set)
+    
+    async def _discover_symbols_direct_apis(self) -> set:
+        """ENTERPRISE: Direct API calls to multiple exchanges for maximum symbol coverage."""
+        all_symbols = set()
+        
+        apis_to_try = [
+            {
+                "name": "Binance",
+                "url": "https://api.binance.com/api/v3/exchangeInfo",
+                "parser": lambda data: [s.get("baseAsset") for s in data.get("symbols", []) if s.get("status") == "TRADING"]
+            },
+            {
+                "name": "KuCoin", 
+                "url": "https://api.kucoin.com/api/v1/symbols",
+                "parser": lambda data: [s.get("baseCurrency") for s in data.get("data", [])]
+            },
+            {
+                "name": "CoinGecko_Top250",
+                "url": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1",
+                "parser": lambda data: [coin.get("symbol", "").upper() for coin in data if coin.get("symbol")]
+            },
+            {
+                "name": "CoinGecko_Volume",
+                "url": "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=volume_desc&per_page=250&page=1",
+                "parser": lambda data: [coin.get("symbol", "").upper() for coin in data if coin.get("symbol")]
+            },
+            {
+                "name": "CoinCap_Top200",
+                "url": "https://api.coincap.io/v2/assets?limit=200",
+                "parser": lambda data: [asset.get("symbol", "").upper() for asset in data.get("data", []) if asset.get("symbol")]
+            }
+        ]
+        
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                for api_config in apis_to_try:
+                    try:
+                        async with session.get(api_config["url"], timeout=15) as response:
+                            if response.status == 200:
+                                data = await response.json()
+                                symbols = api_config["parser"](data)
+                                valid_symbols = {s for s in symbols if s and isinstance(s, str) and len(s) >= 2}
+                                all_symbols.update(valid_symbols)
+                                self.logger.info(f"Direct API {api_config['name']} found {len(valid_symbols)} symbols")
+                            else:
+                                self.logger.warning(f"Direct API {api_config['name']} returned {response.status}")
+                    except Exception as e:
+                        self.logger.warning(f"Direct API {api_config['name']} failed", error=str(e))
+                        continue
+                        
+        except Exception as e:
+            self.logger.error("Direct API symbol discovery completely failed", error=str(e))
+        
+        return all_symbols
+    
+    def _get_comprehensive_crypto_universe(self) -> set:
+        """ENTERPRISE: Comprehensive list of all profitable cryptocurrencies (continuously updated)."""
+        return {
+            # Layer 1 Blockchains & Protocols
+            "BTC", "ETH", "SOL", "ADA", "DOT", "AVAX", "ATOM", "NEAR", "ALGO", "XTZ", "EGLD", "FTM", "LUNA", "ROSE",
+            "KAVA", "RUNE", "OSMO", "JUNO", "SCRT", "BAND", "AKASH", "IRIS", "REGEN", "LIKE", "IOV", "SIFCHAIN",
+            
+            # Layer 2 & Scaling Solutions  
+            "MATIC", "OP", "ARB", "LRC", "IMX", "MINA", "CELO", "SKALE", "POKT",
+            
+            # DeFi Ecosystem (All Major Protocols)
+            "UNI", "AAVE", "COMP", "MKR", "SNX", "CRV", "SUSHI", "1INCH", "YFI", "BAL", "ALPHA", "CREAM", "BADGER",
+            "CVX", "FXS", "FRAX", "OHM", "SPELL", "ICE", "TIME", "TOKE", "FEI", "TRIBE", "RAI", "LUSD", "LQTY",
+            
+            # Exchange Tokens & CEX
+            "BNB", "CRO", "FTT", "HT", "OKB", "LEO", "GT", "KCS", "BGB", "MX", "WRX",
+            
+            # Oracle & Infrastructure
+            "LINK", "BAND", "API3", "TRB", "DIA", "UMA", "NEST", "FLUX",
+            
+            # Privacy & Anonymous Coins
+            "XMR", "ZEC", "DASH", "SCRT", "TORN", "NYM", "DERO",
+            
+            # Enterprise & Institutional
+            "XRP", "XLM", "HBAR", "VET", "ENJ", "CHZ", "HOT", "WINk", "BTT", "JST", "SUN", "TRX",
+            
+            # Gaming & NFT Ecosystem
+            "AXS", "SAND", "MANA", "ENJ", "FLOW", "WAX", "GALA", "ILV", "YGG", "GHST", "ALICE", "TLM", "SLP",
+            "SKILL", "THG", "PYR", "NFTX", "RARI", "SUPER", "AUDIO", "LOOKS", "APE",
+            
+            # AI & Data Economy
+            "FET", "OCEAN", "AGI", "NMR", "GRT", "LPT", "RLC", "CTXC", "DBC", "MATRIX", "COVAL",
+            
+            # Storage & Computing
+            "FIL", "AR", "SC", "STORJ", "BTT", "SAFE", "ANKR", "REN", "NKN", "CKB",
+            
+            # Social & Content Creation
+            "BAT", "THETA", "LPT", "AUDIO", "MASK", "RALLY", "WHALE", "AMPL", "FORTH",
+            
+            # Stablecoins & Forex
+            "USDT", "USDC", "BUSD", "DAI", "TUSD", "FRAX", "LUSD", "SUSD", "ALUSD", "MIM", "DOLA", "FEI",
+            "EUROC", "EURT", "EURS", "XSGD", "XAUD", "XIDR", "FLEXUSD",
+            
+            # Memcoins & Community (High volatility = high opportunity)
+            "DOGE", "SHIB", "ELON", "FLOKI", "BABYDOGE", "SAFEMOON", "HOGE", "KISHU", "LEASH", "BONE",
+            
+            # Regional & Emerging Markets
+            "BRL", "TRY", "INR", "KRW", "THB", "PHP", "VND", "MYR", "SGD", "HKD", "TWD", "JPY", "CNY",
+            
+            # Cross-Chain & Interoperability
+            "DOT", "KSM", "ATOM", "OSMO", "AKT", "DVPN", "ROWAN", "RUNE", "GRAV", "XPRT", "NGM", "BLD",
+            
+            # Emerging High-Potential (Continuously Monitor)
+            "IOST", "ZIL", "ICX", "ONT", "GAS", "NEO", "VEN", "QTUM", "LSK", "ARK", "STRAT", "NAV", "PART",
+            "DCR", "BTG", "ZEN", "FIRO", "BEAM", "GRIN", "RVN", "ERG", "FLUX", "NEBL", "PIV", "XVS",
+            
+            # New Listings & Innovations (High Growth Potential)  
+            "GMT", "STG", "APE", "LOOKS", "STEPN", "GST", "SWEAT", "C98", "ALPACA", "BOBA", "METIS", "SYN",
+        }
     
     async def _calculate_adaptive_cycle_interval(self) -> int:
         """Calculate adaptive cycle interval based on market conditions and activity."""

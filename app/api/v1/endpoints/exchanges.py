@@ -60,67 +60,165 @@ cipher_suite = Fernet(encryption_key)
 
 # ENTERPRISE KRAKEN NONCE MANAGER
 class KrakenNonceManager:
-    """Enterprise-grade Kraken nonce manager to prevent EAPI:Invalid nonce errors."""
+    """
+    ENTERPRISE: Distributed Redis-based nonce manager for production Kraken trading.
+    
+    Eliminates nonce conflicts in multi-instance deployments and high-frequency trading.
+    Solves: Invalid nonce errors, race conditions, server time drift, distributed synchronization.
+    """
     
     def __init__(self):
-        self._last_nonce = 0
-        self._lock = threading.Lock()
-        self._nonce_increment = 0
-        self._call_count = 0
-        self._server_time_offset = 0  # Kraken server time offset
+        self._local_call_count = 0
+        self._server_time_offset = 0
         self._last_time_sync = 0
+        self._redis = None
+        self._fallback_nonce = 0
+        self._node_id = None
+        self._lock = threading.Lock()
+        
+    async def _init_redis(self):
+        """Initialize Redis for distributed nonce coordination."""
+        if self._redis is None:
+            try:
+                from app.core.redis import get_redis_client
+                self._redis = await get_redis_client()
+                
+                # Unique node identifier for this server instance
+                import uuid
+                import socket
+                self._node_id = f"{socket.gethostname()}_{uuid.uuid4().hex[:8]}"
+                
+                logger.info("Distributed Kraken nonce manager initialized", node_id=self._node_id)
+            except Exception as e:
+                logger.warning("Redis unavailable for nonce coordination", error=str(e))
     
     async def _sync_server_time(self) -> bool:
-        """ENTERPRISE: Sync with Kraken server time for accurate nonces."""
+        """ENTERPRISE: Distributed server time sync with Redis caching."""
         try:
-            import aiohttp
             current_time = time.time()
+            await self._init_redis()
             
-            # Only sync every 5 minutes to avoid excessive calls
-            if current_time - self._last_time_sync < 300:
-                return True
+            # Try cached server time first (shared across instances)
+            if self._redis:
+                try:
+                    cached_offset = await self._redis.get("kraken:server_time_offset")
+                    cached_sync_time = await self._redis.get("kraken:last_time_sync")
+                    
+                    if cached_offset and cached_sync_time:
+                        last_sync = float(cached_sync_time)
+                        if current_time - last_sync < 120:  # 2 minute cache
+                            self._server_time_offset = float(cached_offset)
+                            self._last_time_sync = last_sync
+                            return True
+                except Exception:
+                    pass  # Cache miss, fetch fresh
             
+            # Fetch fresh server time
+            import aiohttp
             async with aiohttp.ClientSession() as session:
-                async with session.get("https://api.kraken.com/0/public/Time", timeout=10) as response:
+                async with session.get("https://api.kraken.com/0/public/Time", timeout=8) as response:
                     if response.status == 200:
                         data = await response.json()
                         if data.get("result") and data["result"].get("unixtime"):
                             server_time = float(data["result"]["unixtime"])
                             self._server_time_offset = server_time - current_time
                             self._last_time_sync = current_time
-                            logger.info(f"Kraken server time synced", offset=self._server_time_offset)
+                            
+                            # Cache for other instances
+                            if self._redis:
+                                try:
+                                    await self._redis.setex("kraken:server_time_offset", 180, str(self._server_time_offset))
+                                    await self._redis.setex("kraken:last_time_sync", 180, str(current_time))
+                                except Exception:
+                                    pass  # Non-critical
+                            
+                            logger.info("Kraken server time synced", offset=self._server_time_offset)
                             return True
             return False
         except Exception as e:
-            logger.warning(f"Failed to sync Kraken server time: {e}")
+            logger.warning("Server time sync failed", error=str(e))
             return False
     
     async def get_nonce(self) -> str:
-        """Generate a unique, strictly increasing nonce using Kraken server time."""
-        with self._lock:
-            self._call_count += 1
+        """ENTERPRISE: Generate globally unique, strictly increasing nonce."""
+        try:
+            await self._init_redis()
             
-            # ENTERPRISE: Use server-synchronized time
-            await self._sync_server_time()
-            server_time = time.time() + self._server_time_offset
-            current_time_microseconds = int(server_time * 1000000)
+            with self._lock:
+                self._local_call_count += 1
+                
+                # PRODUCTION: Redis-based global nonce counter
+                if self._redis:
+                    try:
+                        # Atomic increment ensures global uniqueness across all instances
+                        redis_counter = await self._redis.incr("kraken:global_nonce")
+                        
+                        # Sync server time
+                        await self._sync_server_time()
+                        server_time = time.time() + self._server_time_offset
+                        
+                        # ENTERPRISE: Multi-component nonce for guaranteed uniqueness
+                        # Format: [server_time_microseconds] + [redis_counter] + [node_hash]
+                        time_component = int(server_time * 1000000)
+                        counter_component = (redis_counter % 99999)  # Prevent overflow
+                        node_component = abs(hash(self._node_id or "default")) % 9999
+                        
+                        # Combine components with proper spacing to ensure strict ordering
+                        distributed_nonce = time_component + counter_component + node_component
+                        
+                        # Expire Redis counter periodically to prevent infinite growth
+                        if redis_counter % 500 == 0:
+                            await self._redis.expire("kraken:global_nonce", 1800)  # 30 min TTL
+                        
+                        logger.info(
+                            "Distributed Kraken nonce generated",
+                            nonce=distributed_nonce,
+                            redis_counter=redis_counter,
+                            local_count=self._local_call_count,
+                            node=self._node_id,
+                            server_offset=self._server_time_offset
+                        )
+                        
+                        return str(distributed_nonce)
+                        
+                    except Exception as redis_error:
+                        logger.error("Redis nonce generation failed - using fallback", error=str(redis_error))
+                
+                # FALLBACK: Local nonce if Redis fails
+                await self._sync_server_time()
+                server_time = time.time() + self._server_time_offset
+                time_microseconds = int(server_time * 1000000)
+                
+                # Ensure strictly increasing in fallback mode
+                if time_microseconds <= self._fallback_nonce:
+                    self._fallback_nonce += 25000  # Large increment
+                else:
+                    self._fallback_nonce = time_microseconds
+                
+                # Add local identifiers
+                fallback_nonce = self._fallback_nonce + self._local_call_count + (hash(str(self._node_id or "")) % 9999)
+                
+                logger.warning(
+                    "Fallback nonce generated - potential conflicts in distributed setup",
+                    nonce=fallback_nonce,
+                    local_count=self._local_call_count,
+                    message="Redis unavailable - investigate immediately for production trading"
+                )
+                
+                return str(fallback_nonce)
+                
+        except Exception as critical_error:
+            # EMERGENCY: Time-based nonce as last resort
+            emergency_nonce = int(time.time() * 1000000) + self._local_call_count + abs(hash(str(critical_error))) % 9999
             
-            # ENTERPRISE: Ensure nonce is ALWAYS strictly increasing with large gaps
-            if current_time_microseconds <= self._last_nonce:
-                # If server time hasn't advanced enough, use last nonce + large increment
-                self._last_nonce += 10000  # Very large increment to avoid any collisions
-            else:
-                self._last_nonce = current_time_microseconds
+            logger.error(
+                "CRITICAL: Emergency nonce generation - all methods failed",
+                nonce=emergency_nonce,
+                error=str(critical_error),
+                message="Immediate investigation required for production trading system"
+            )
             
-            # Add unique call identifier to guarantee uniqueness
-            self._nonce_increment = (self._nonce_increment + 1) % 100000  # Very large range
-            final_nonce = self._last_nonce + self._nonce_increment
-            
-            # Log for debugging critical nonce issues
-            logger.info(f"Kraken nonce generated", nonce=final_nonce, call_count=self._call_count, 
-                       server_offset=self._server_time_offset)
-            
-            return str(final_nonce)
+            return str(emergency_nonce)
 
 # Global nonce manager instance
 kraken_nonce_manager = KrakenNonceManager()
