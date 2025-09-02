@@ -15,6 +15,10 @@ from structlog.stdlib import add_log_level, add_logger_name
 
 import logging.handlers
 
+from app.core.config import get_settings
+
+settings = get_settings()
+
 
 def configure_logging(log_level: str = "INFO", environment: str = "development") -> None:
     """
