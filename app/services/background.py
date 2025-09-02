@@ -9,7 +9,7 @@ import asyncio
 import time
 import psutil
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Set
 import structlog
 from app.core.logging import LoggerMixin
 from app.core.config import get_settings
@@ -388,83 +388,48 @@ class BackgroundServiceManager(LoggerMixin):
             
             await asyncio.sleep(self.intervals["market_data_sync"])
     
-    async def _discover_active_trading_symbols(self) -> List[str]:
-        """ENTERPRISE: Dynamically discover ALL trading opportunities without limits."""
+    async def _discover_active_trading_symbols(self) -> Set[str]:
         all_discovered_symbols = set()
+        strategies = [
+            {"name": "enterprise_unlimited", "description": "Unlimited asset discovery"},
+            {"min_volume_usd": 100000, "description": "High volume assets"},  # $100K min
+            {"min_volume_usd": 50000, "description": "Medium-high volume"},   # $50K min  
+            {"min_volume_usd": 10000, "description": "Medium volume"},       # $10K min
+            {"min_volume_usd": 1000, "description": "Low volume"},          # $1K min
+            {"min_volume_usd": 0, "description": "All assets"},             # NO MINIMUM
+        ]
         
         try:
             from app.services.market_analysis_core import MarketAnalysisService
             market_service = MarketAnalysisService()
             
-            # ENTERPRISE: Progressive discovery with multiple strategies (NO ARTIFICIAL LIMITS)
-            discovery_strategies = [
-                {"min_volume_usd": 100000, "description": "High volume assets"},  # $100K min
-                {"min_volume_usd": 50000, "description": "Medium-high volume"},   # $50K min  
-                {"min_volume_usd": 10000, "description": "Medium volume"},       # $10K min
-                {"min_volume_usd": 1000, "description": "Low volume"},          # $1K min
-                {"min_volume_usd": 0, "description": "All assets"},             # NO MINIMUM
-            ]
-            
-            for strategy in discovery_strategies:
+            for strategy in strategies:
                 try:
-            discovery_result = await market_service.discover_exchange_assets(
-                exchanges="all",
-                user_id="system"
-            )
+                    discovery_result = await market_service.discover_exchange_assets(
+                        exchanges="all", user_id="system"
+                    )
+                    if discovery_result.get("success"):
+                        discovered_assets = discovery_result.get("asset_discovery", {}).get("detailed_results", {})
+                        for exchange, assets in discovered_assets.items():
+                            all_discovered_symbols.update(assets.get("active_symbols", []))
+                        
+                        # Inline validation
+                        if not discovery_result:
+                            self.logger.warning("No assets discovered - fallback to cache", strategy=strategy["name"])
+                    else:
+                        self.logger.warning(f"Discovery failed: {discovery_result.get('error')}")
+                except Exception as e:
+                    self.logger.exception(f"Discovery strategy failed: {strategy['description']}", exc_info=e)
+                    # Continue to next strategy (graceful degradation)
+                finally:
+                    # Cleanup (e.g., release any temp resources if needed)
+                    pass
             
-            if discovery_result.get("success"):
-                        # ENTERPRISE: Try both response formats for compatibility
-                        discovered_assets = (
-                            discovery_result.get("asset_discovery", {}).get("detailed_results", {}) or
-                            discovery_result.get("discovered_assets", {})
-                        )
-                        
-                        # Extract ALL symbols from ALL exchanges without limits
-                        strategy_symbols = set()
-                        
-                        # Handle both old and new response formats
-                        if discovered_assets:
-                for exchange, assets in discovered_assets.items():
-                                if isinstance(assets, dict):
-                                    # New format: extract base assets from structured data
-                                    base_assets = assets.get("base_assets", [])
-                                    if base_assets:
-                                        strategy_symbols.update(base_assets)
-                                    
-                                    # Also try recursive extraction for complex structures
-                                    self._extract_symbols_from_discovery(assets, strategy_symbols)
-                                elif isinstance(assets, list):
-                                    # Direct list format
-                                    strategy_symbols.update(assets)
-                        
-                        # ENTERPRISE: Minimal filtering - only remove obviously invalid
-                        valid_symbols = set()
-                        for symbol in strategy_symbols:
-                            if (isinstance(symbol, str) and 
-                                len(symbol) >= 2 and len(symbol) <= 15 and 
-                                symbol.replace('-', '').replace('_', '').isalnum() and
-                                not symbol.lower().startswith('test') and
-                                symbol.upper() not in ['NULL', 'NONE', 'UNDEFINED']):
-                                valid_symbols.add(symbol.upper())
-                        
-                        all_discovered_symbols.update(valid_symbols)
-                        
-                        self.logger.info(
-                            f"Discovery strategy: {strategy['description']} found {len(valid_symbols)} symbols", 
-                            min_volume=strategy["min_volume_usd"],
-                            total_discovered=len(all_discovered_symbols)
-                        )
-                        
-                        # Continue with all strategies to maximize opportunities
-                        # Break early if we have enough symbols to save API calls
-                        if len(all_discovered_symbols) >= 200:
-                            self.logger.info(f"Early termination - sufficient symbols discovered: {len(all_discovered_symbols)}")
-                            break
+            # Deduplicate and normalize
+            all_discovered_symbols = {sym.upper() for sym in all_discovered_symbols}
             
-        except Exception as e:
-                    self.logger.exception(f"Discovery strategy failed: {strategy['description']}")
-                    continue
-            
+            self.logger.info(f"Discovered {len(all_discovered_symbols)} active trading symbols")
+            return all_discovered_symbols
         except Exception as e:
             self.logger.exception("Market analysis discovery failed")
         
