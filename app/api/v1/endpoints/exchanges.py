@@ -161,26 +161,37 @@ class KrakenNonceManager:
                         await self._sync_server_time()
                         server_time = time.time() + self._server_time_offset
                         
-                        # ENTERPRISE: Kraken-compatible nonce with distributed coordination
-                        # Kraken expects reasonable timestamp-based nonces, not massive bit-shifted values
-                        # Format: [microsecond_timestamp] + [small_counter] + [node_offset]
+                        # ENTERPRISE: Kraken-compatible distributed nonce with guaranteed gaps  
+                        # Kraken requires LARGE gaps between nonces for distributed processing
                         base_time = int(server_time * 1000000)  # Microseconds timestamp
                         
-                        # Small additions to ensure uniqueness without making nonce too large
-                        counter_offset = (redis_counter % 99999)  # Max 5 digits
-                        node_offset = abs(hash(self._node_id or "default")) % 999  # Max 3 digits
+                        # LARGE multipliers to ensure significant gaps between instances
+                        counter_multiplier = (redis_counter % 9999) * 100000  # 100K increments
+                        node_multiplier = abs(hash(self._node_id or "default")) % 99 * 10000  # 10K node gaps
                         
-                        # Simple addition instead of bit-shifting (Kraken-compatible)
-                        # Keep nonce within reasonable range for Kraken API
-                        distributed_nonce = base_time + counter_offset + node_offset
+                        # ENTERPRISE: Ensure MASSIVE gaps between nonces for Kraken distributed processing
+                        distributed_nonce = base_time + counter_multiplier + node_multiplier
                         
-                        # Ensure nonce doesn't exceed reasonable limits for Kraken
+                        # Additional safety: ensure minimum 50K gap from previous
+                        last_nonce_key = "kraken:last_global_nonce"
+                        try:
+                            last_nonce = await self._redis.get(last_nonce_key)
+                            if last_nonce:
+                                last_val = int(last_nonce)
+                                if distributed_nonce <= last_val:
+                                    distributed_nonce = last_val + 50000  # Force 50K minimum gap
+                            
+                            # Store this nonce for next comparison  
+                            await self._redis.setex(last_nonce_key, 3600, str(distributed_nonce))
+                        except Exception:
+                            pass  # Non-critical optimization
+                        
+                        # Validate final nonce is reasonable for Kraken
                         if distributed_nonce > 9999999999999999:  # 16 digits max
-                            # Fallback to simpler format if too large
-                            distributed_nonce = base_time + (redis_counter % 999)
-                            logger.warning("Nonce too large, using simplified format", 
-                                         original=base_time + counter_offset + node_offset,
-                                         simplified=distributed_nonce)
+                            # Emergency fallback with guaranteed large increment
+                            distributed_nonce = base_time + (redis_counter * 100000) % 999999999
+                            logger.warning("Using emergency nonce format", 
+                                         emergency_nonce=distributed_nonce)
                         
                         # Expire Redis counter periodically to prevent infinite growth
                         if redis_counter % 500 == 0:

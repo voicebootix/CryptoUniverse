@@ -3521,6 +3521,28 @@ class TradingStrategiesService(LoggerMixin):
                 "largest_loss": 0.0
             }
     
+    def _get_period_days_safe(self, analysis_period: str) -> int:
+        """Convert analysis period string to number of days."""
+        try:
+            # Parse period strings like "30d", "7d", "1y", "1m", etc.
+            period_lower = analysis_period.lower()
+            
+            if period_lower.endswith('d'):
+                return int(period_lower[:-1])
+            elif period_lower.endswith('w'):
+                return int(period_lower[:-1]) * 7
+            elif period_lower.endswith('m'):
+                return int(period_lower[:-1]) * 30
+            elif period_lower.endswith('y'):
+                return int(period_lower[:-1]) * 365
+            else:
+                # Default to 30 days if format not recognized
+                self.logger.warning(f"Unknown period format: {analysis_period}, defaulting to 30 days")
+                return 30
+        except (ValueError, IndexError) as e:
+            self.logger.warning(f"Failed to parse analysis period: {analysis_period}, error: {e}")
+            return 30  # Safe default
+    
     async def strategy_performance(
         self,
         strategy_name: Optional[str] = None,
@@ -3554,7 +3576,7 @@ class TradingStrategiesService(LoggerMixin):
             
             perf_result["performance_metrics"] = {
                 "total_return_pct": total_return,
-                "annualized_return_pct": total_return * (365 / self._get_period_days(analysis_period)),
+                "annualized_return_pct": total_return * (365 / self._get_period_days_safe(analysis_period)),
                 "volatility_annualized": volatility * (252 ** 0.5),
                 "max_drawdown_pct": max_drawdown,
                 "recovery_time_days": strategy_data.get("recovery_time", 12),
