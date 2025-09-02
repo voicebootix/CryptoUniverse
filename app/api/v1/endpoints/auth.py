@@ -433,67 +433,147 @@ class RefreshTokenRequest(BaseModel):
 
 
 @router.post("/refresh", response_model=TokenResponse)
+@rate_limiter.limit("5/minute")  # Rate limit refreshes to 5 per minute per IP
 async def refresh_token(
     request: RefreshTokenRequest,
+    client_request: Request,
     db: AsyncSession = Depends(get_database)
 ):
-    """Refresh access token using refresh token."""
+    """
+    Refresh access token using refresh token with enhanced security.
     
-    refresh_token = request.refresh_token
-    # Verify refresh token
-    payload = auth_service.verify_token(refresh_token)
-    
-    if payload.get("type") != "refresh":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token type"
+    - Implements rate limiting to prevent token refresh abuse
+    - Validates refresh token and checks for revocation
+    - Issues new access and refresh tokens
+    - Maintains single active session per device
+    """
+    try:
+        # Get client IP for rate limiting and logging
+        client_ip = client_request.client.host if client_request.client else "unknown"
+        logger.info("Token refresh requested", client_ip=client_ip)
+        
+        # Verify refresh token structure
+        if not request.refresh_token:
+            logger.warning("No refresh token provided", client_ip=client_ip)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Refresh token is required"
+            )
+            
+        # Verify refresh token signature and expiration
+        try:
+            payload = auth_service.verify_token(request.refresh_token)
+            if not payload or payload.get("type") != "refresh":
+                raise ValueError("Invalid token type")
+        except (jwt.ExpiredSignatureError, ValueError) as e:
+            logger.warning("Invalid or expired refresh token", 
+                         client_ip=client_ip, 
+                         error=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired refresh token"
+            )
+            
+        # Get user from database with tenant context
+        user_id = payload.get("sub")
+        session_id = payload.get("sid")  # Get session ID from token
+        
+        if not user_id or not session_id:
+            logger.warning("Invalid token payload", 
+                         client_ip=client_ip, 
+                         user_id=user_id,
+                         session_id=session_id)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token"
+            )
+            
+        # Get Redis client for token operations
+        redis = await get_redis_client()
+        
+        # Check if refresh token is in blacklist
+        is_revoked = await redis.get(f"token:revoked:{request.refresh_token}")
+        if is_revoked:
+            logger.warning("Attempt to use revoked refresh token", 
+                         user_id=user_id, 
+                         client_ip=client_ip)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token has been revoked"
+            )
+            
+        # Get user and verify status
+        user = await db.get(User, user_id)
+        if not user or user.status != UserStatus.ACTIVE:
+            logger.warning("User not found or inactive", 
+                         user_id=user_id,
+                         status=getattr(user, 'status', None) if user else None)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found or inactive"
+            )
+            
+        # Verify session is still valid
+        session_key = f"user:{user_id}:sessions:{session_id}"
+        session_data = await redis.get(session_key)
+        if not session_data:
+            logger.warning("Session not found or expired", 
+                         user_id=user_id,
+                         session_id=session_id)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired"
+            )
+            
+        # Create new tokens with updated expiration
+        new_access_token = auth_service.create_access_token(user, session_id=session_id)
+        new_refresh_token = auth_service.create_refresh_token(user, session_id=session_id)
+        
+        # Update session in Redis with new refresh token
+        session_ttl = int(auth_service.refresh_token_expire.total_seconds())
+        await redis.setex(
+            session_key,
+            session_ttl,
+            json.dumps({
+                "user_agent": client_request.headers.get("user-agent", "unknown"),
+                "ip_address": client_ip,
+                "last_active": datetime.utcnow().isoformat(),
+                "refresh_token": new_refresh_token
+            })
         )
-    
-    user_id = payload.get("sub")
-    jti = payload.get("jti")
-    
-    # Verify session exists
-    result = await db.execute(select(UserSession).filter(
-        UserSession.user_id == user_id,
-        UserSession.refresh_token == refresh_token,
-        UserSession.expires_at > datetime.utcnow()
-    ))
-    session = result.scalar_one_or_none()
-    
-    if not session:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid refresh token"
+        
+        # Add old refresh token to blacklist with TTL
+        await redis.setex(
+            f"token:revoked:{request.refresh_token}",
+            session_ttl,  # Match session TTL
+            "1"
         )
-    
-    # Get user
-    result = await db.execute(select(User).filter(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user or user.status != UserStatus.ACTIVE:
+        
+        logger.info("Token refresh successful", 
+                   user_id=user_id,
+                   client_ip=client_ip)
+        
+        return {
+            "access_token": new_access_token,
+            "refresh_token": new_refresh_token,
+            "token_type": "bearer",
+            "expires_in": int(auth_service.access_token_expire.total_seconds()),
+            "user_id": str(user.id),
+            "role": user.role.value,
+            "tenant_id": str(user.tenant_id),
+            "permissions": get_user_permissions(user.role)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Unexpected error during token refresh",
+                    error=str(e),
+                    exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found or inactive"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while refreshing tokens"
         )
-    
-    # Create new tokens
-    new_access_token = auth_service.create_access_token(user)
-    new_refresh_token = auth_service.create_refresh_token(user)
-    
-    # Update session
-    session.refresh_token = new_refresh_token
-    session.expires_at = datetime.utcnow() + auth_service.refresh_token_expire
-    await db.commit()
-    
-    return TokenResponse(
-        access_token=new_access_token,
-        refresh_token=new_refresh_token,
-        token_type="bearer",
-        expires_in=int(auth_service.access_token_expire.total_seconds()),
-        user_id=str(user.id),
-        role=user.role.value,
-        tenant_id=str(user.tenant_id) if user.tenant_id else "",
-        permissions=get_user_permissions(user.role)
-    )
 
 
 @router.post("/logout")

@@ -10,7 +10,10 @@ from fastapi import APIRouter
 import structlog
 
 # Import endpoint routers
-from app.api.v1.endpoints import auth, trading, admin, exchanges, strategies, credits, telegram, paper_trading, chat, market_analysis
+from app.api.v1.endpoints import (
+    auth, trading, admin, exchanges, strategies, credits,
+    telegram, paper_trading, chat, market_analysis, api_keys
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -19,6 +22,7 @@ api_router = APIRouter()
 
 # Include endpoint routers
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+api_router.include_router(api_keys.router, prefix="/api-keys", tags=["API Keys"])
 api_router.include_router(trading.router, prefix="/trading", tags=["Trading"])
 api_router.include_router(exchanges.router, prefix="/exchanges", tags=["Exchange Management"])
 api_router.include_router(strategies.router, prefix="/strategies", tags=["Trading Strategies"])
@@ -38,12 +42,14 @@ async def api_status():
         "message": "CryptoUniverse Enterprise API v1 - AI Money Manager",
         "endpoints": {
             "authentication": "/api/v1/auth",
+            "api_keys": "/api/v1/api-keys",
             "trading": "/api/v1/trading",
             "exchanges": "/api/v1/exchanges",
             "administration": "/api/v1/admin"
         },
         "features": [
             "JWT Authentication with MFA",
+            "API Key Management with Rotation",
             "Manual & Autonomous Trading",
             "Simulation & Live Mode",
             "Rate Limiting & Security",
