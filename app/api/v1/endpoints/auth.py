@@ -507,7 +507,7 @@ async def logout(
                 payload = jwt.decode(
                     token, 
                     settings.SECRET_KEY, 
-                    algorithms=[settings.ALGORITHM]
+                    algorithms=[auth_service.algorithm]
                 )
                 user_id = payload.get("sub")
                 logger.debug("Token decoded successfully for logout", user_id=user_id)

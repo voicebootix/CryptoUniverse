@@ -426,7 +426,7 @@ class BackgroundServiceManager(LoggerMixin):
                         # Continue with all strategies to maximize opportunities
                             
                 except Exception as e:
-                    self.logger.warning(f"Discovery strategy failed: {strategy['description']}", error=str(e))
+                    self.logger.exception(f"Discovery strategy failed: {strategy['description']}")
                     continue
             
         except Exception as e:
@@ -541,12 +541,12 @@ class BackgroundServiceManager(LoggerMixin):
                         continue
                         
         except Exception as e:
-            self.logger.error("Direct API symbol discovery completely failed", error=str(e))
+            self.logger.exception("Direct API symbol discovery completely failed")
         
         return all_symbols
     
     def _get_comprehensive_crypto_universe(self) -> set:
-        """ENTERPRISE: Comprehensive list of all profitable cryptocurrencies (continuously updated)."""
+        """ENTERPRISE: Emergency fallback list (ONLY used if dynamic discovery completely fails)."""
         return {
             # Layer 1 Blockchains & Protocols
             "BTC", "ETH", "SOL", "ADA", "DOT", "AVAX", "ATOM", "NEAR", "ALGO", "XTZ", "EGLD", "FTM", "LUNA", "ROSE",
@@ -562,30 +562,30 @@ class BackgroundServiceManager(LoggerMixin):
             # Exchange Tokens & CEX
             "BNB", "CRO", "FTT", "HT", "OKB", "LEO", "GT", "KCS", "BGB", "MX", "WRX",
             
-            # Oracle & Infrastructure
-            "LINK", "BAND", "API3", "TRB", "DIA", "UMA", "NEST", "FLUX",
+            # Oracle & Infrastructure  
+            "LINK", "API3", "TRB", "DIA", "UMA", "NEST", "FLUX",
             
             # Privacy & Anonymous Coins
-            "XMR", "ZEC", "DASH", "SCRT", "TORN", "NYM", "DERO",
+            "XMR", "ZEC", "DASH", "TORN", "NYM", "DERO",
             
             # Enterprise & Institutional
             "XRP", "XLM", "HBAR", "VET", "ENJ", "CHZ", "HOT", "WINk", "BTT", "JST", "SUN", "TRX",
             
             # Gaming & NFT Ecosystem
-            "AXS", "SAND", "MANA", "ENJ", "FLOW", "WAX", "GALA", "ILV", "YGG", "GHST", "ALICE", "TLM", "SLP",
+            "AXS", "SAND", "MANA", "FLOW", "WAX", "GALA", "ILV", "YGG", "GHST", "ALICE", "TLM", "SLP",
             "SKILL", "THG", "PYR", "NFTX", "RARI", "SUPER", "AUDIO", "LOOKS", "APE",
             
             # AI & Data Economy
             "FET", "OCEAN", "AGI", "NMR", "GRT", "LPT", "RLC", "CTXC", "DBC", "MATRIX", "COVAL",
             
             # Storage & Computing
-            "FIL", "AR", "SC", "STORJ", "BTT", "SAFE", "ANKR", "REN", "NKN", "CKB",
+            "FIL", "AR", "SC", "STORJ", "SAFE", "ANKR", "REN", "NKN", "CKB",
             
             # Social & Content Creation
-            "BAT", "THETA", "LPT", "AUDIO", "MASK", "RALLY", "WHALE", "AMPL", "FORTH",
+            "BAT", "THETA", "MASK", "RALLY", "WHALE", "AMPL", "FORTH",
             
             # Stablecoins & Forex
-            "USDT", "USDC", "BUSD", "DAI", "TUSD", "FRAX", "LUSD", "SUSD", "ALUSD", "MIM", "DOLA", "FEI",
+            "USDT", "USDC", "BUSD", "DAI", "TUSD", "SUSD", "ALUSD", "MIM", "DOLA",
             "EUROC", "EURT", "EURS", "XSGD", "XAUD", "XIDR", "FLEXUSD",
             
             # Memcoins & Community (High volatility = high opportunity)
@@ -595,14 +595,14 @@ class BackgroundServiceManager(LoggerMixin):
             "BRL", "TRY", "INR", "KRW", "THB", "PHP", "VND", "MYR", "SGD", "HKD", "TWD", "JPY", "CNY",
             
             # Cross-Chain & Interoperability
-            "DOT", "KSM", "ATOM", "OSMO", "AKT", "DVPN", "ROWAN", "RUNE", "GRAV", "XPRT", "NGM", "BLD",
+            "KSM", "AKT", "DVPN", "ROWAN", "GRAV", "XPRT", "NGM", "BLD",
             
             # Emerging High-Potential (Continuously Monitor)
             "IOST", "ZIL", "ICX", "ONT", "GAS", "NEO", "VEN", "QTUM", "LSK", "ARK", "STRAT", "NAV", "PART",
-            "DCR", "BTG", "ZEN", "FIRO", "BEAM", "GRIN", "RVN", "ERG", "FLUX", "NEBL", "PIV", "XVS",
+            "DCR", "BTG", "ZEN", "FIRO", "BEAM", "GRIN", "RVN", "ERG", "NEBL", "PIV", "XVS",
             
             # New Listings & Innovations (High Growth Potential)  
-            "GMT", "STG", "APE", "LOOKS", "STEPN", "GST", "SWEAT", "C98", "ALPACA", "BOBA", "METIS", "SYN",
+            "GMT", "STG", "STEPN", "GST", "SWEAT", "C98", "ALPACA", "BOBA", "METIS", "SYN",
         }
     
     async def _calculate_adaptive_cycle_interval(self) -> int:
