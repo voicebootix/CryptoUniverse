@@ -74,7 +74,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         # Start background services
         await background_manager.start_all()
-        logger.info("✅ Background services started")
+        logger.info("✅ Background services started") 
+
+
+        try:
+            from app.services.system_monitoring import system_monitoring_service
+            await system_monitoring_service.start_monitoring()
+            logger.info("✅ System monitoring started")
+        except Exception as e:
+            logger.warning("System monitoring startup failed", error=str(e))
 
 
         logger.info(
