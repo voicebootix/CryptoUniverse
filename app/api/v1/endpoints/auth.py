@@ -24,6 +24,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
+from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.config import get_settings
 from app.core.database import get_database

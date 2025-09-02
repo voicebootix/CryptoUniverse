@@ -14,6 +14,11 @@ import structlog
 from app.core.logging import LoggerMixin
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
+from sqlalchemy.ext.asyncio import AsyncSession
+from uuid import UUID
+from app.models.user import User
+from sqlalchemy import select, and_, distinct
+import json
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)

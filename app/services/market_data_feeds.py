@@ -676,48 +676,25 @@ class MarketDataFeeds:
         except Exception as e:
             return {"success": False, "error": str(e)}
     
-    async def sync_market_data_batch(self, symbols: List[str]):
-        """ENTERPRISE: Sync market data for multiple symbols with comprehensive error handling."""
-        if not symbols:
-            return
-        
-        # Adaptive batch size based on symbol count
-        batch_size = min(50, max(10, len(symbols) // 10))  # Dynamic: 10-50
-        batches = [symbols[i:i + batch_size] for i in range(0, len(symbols), batch_size)]
-        
-        for idx, batch in enumerate(batches):
+    async def sync_market_data_batch(self, symbols: List[str], batch_size: int = 50) -> Dict[str, float]:
+        results = {}
+        batches = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
+        current_backoff = 0
+        for batch in batches:
             try:
-                result = await self.get_multiple_prices(batch)
-                if result.get("success"):
-                    # Process and cache results
-                    for symbol, data in result["data"].items():
-                        await self._cache_price(symbol, data["price"])
-                
-                # Progressive backoff between batches
-                await asyncio.sleep(1 + idx * 0.5)  # 1s + 0.5s per batch
-            
+                prices = await self._fetch_batch_with_retries(batch)
+                results.update(prices)
             except Exception as e:
-                if "429" in str(e):
-                    logger.warning(f"Rate limit hit - backing off for 60s")
-                    await asyncio.sleep(60)
-                    # Retry this batch once
-                    retry_result = await self.get_multiple_prices(batch)
-                    # ... process retry
-                
+                if "429" in str(e):  # Rate limit detected
+                    current_backoff = min(60, current_backoff + 10)  # Progressive backoff
+                    await asyncio.sleep(current_backoff)
+                    batch_size = max(10, batch_size // 2)  # Adaptive size reduction
                 else:
-                    # Individual fallback
-                    for symbol in batch:
-                        price = await self.get_real_time_price(symbol)
-                        if price:
-                            await self._cache_price(symbol, price)
-        
-        # Final stale cache rescue if needed
-        failed_symbols = [s for s in symbols if not await self._get_cached_price(s)]
-        if failed_symbols:
-            for symbol in failed_symbols:
-                stale = await self._rescue_stale_cache(symbol)
-                if stale:
-                    await self._cache_price(symbol, stale, ttl=300)  # Short TTL for stale
+                    logger.exception("Batch sync failed", exc_info=e)
+                    # Stale cache fallback
+                    for sym in batch:
+                        results[sym] = await self._get_stale_price(sym) or 0.0
+        return results
     
     async def get_exchange_rates(self) -> Dict[str, Any]:
         """Get USD exchange rates for fiat currencies."""
