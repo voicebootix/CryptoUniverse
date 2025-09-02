@@ -6,6 +6,7 @@ for the multi-tenant cryptocurrency trading platform.
 """
 
 import asyncio
+import logging
 from typing import AsyncGenerator, Optional
 
 import sqlalchemy
@@ -74,6 +75,21 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def set_postgresql_timeouts(dbapi_connection, _connection_record):
+    """Set PostgreSQL connection-level timeouts to avoid per-session overhead."""
+    logger = logging.getLogger(__name__)
+    
+    if "postgresql" in get_async_database_url():
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("SET statement_timeout = '30s'")
+            cursor.execute("SET lock_timeout = '10s'")
+            cursor.close()
+        except Exception as e:
+            logger.debug("Failed to set PostgreSQL connection timeouts", exc_info=True)
 
 
 @event.listens_for(engine.sync_engine, "before_cursor_execute")
@@ -353,10 +369,8 @@ async def get_database() -> AsyncSession:
     """
     async with AsyncSessionLocal() as session:
         try:
-            # ENTERPRISE: Optimize session for read-heavy workloads
-            if "postgresql" in get_async_database_url():
-                await session.execute(text("SET statement_timeout = '30s'"))
-                await session.execute(text("SET lock_timeout = '10s'"))
+            # ENTERPRISE: Connection-level timeouts are now set via event listeners
+            # No need for per-session timeout settings
             
             yield session
             await session.commit()

@@ -1460,7 +1460,7 @@ class MasterSystemController(LoggerMixin):
         
         try:
             # Get current config
-            config = await self.redis.hgetall(f"autonomous_config:{user_id}")
+            config = await self.redis.hgetall(f"autonomous_config:{user_id}") if self.redis else {}
             
             if config:
                 session_duration = 0
@@ -1706,7 +1706,7 @@ class MasterSystemController(LoggerMixin):
                     continue
                 
                 # Get user config
-                config = await self.redis.hgetall(f"autonomous_config:{user_id}")
+                config = await self.redis.hgetall(f"autonomous_config:{user_id}") if self.redis else {}
                 if not config:
                     continue
             

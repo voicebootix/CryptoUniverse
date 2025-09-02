@@ -638,9 +638,29 @@ async def get_recent_trades(
         user_id=str(current_user.id)
     )
     try:
+        # Query recent trades for the current user
+        stmt = select(Trade).where(
+            Trade.user_id == current_user.id
+        ).order_by(Trade.created_at.desc()).limit(50)
         
         result = await db.execute(stmt)
         trades = result.scalars().all()
+        
+        # Convert to response format
+        recent_trades = []
+        for trade in trades:
+            recent_trades.append(RecentTrade(
+                id=str(trade.id),
+                symbol=trade.symbol,
+                side=trade.action.value,  # Use action.value instead of non-existent side
+                amount=Decimal(str(trade.quantity)),
+                price=Decimal(str(trade.executed_price or trade.price or 0)),
+                time=trade.created_at.isoformat(),
+                status=trade.status.value,
+                pnl=Decimal(str(trade.profit_realized_usd or 0))
+            ))
+        
+        return RecentTradesResponse(recent_trades=recent_trades)
         
     except Exception as e:
         logger.error("Recent trades retrieval failed", error=str(e))
@@ -651,8 +671,7 @@ async def get_recent_trades(
 
 @router.websocket("/ws")
 async def websocket_endpoint(
-    websocket: WebSocket,
-    db: AsyncSession = Depends(get_database)
+    websocket: WebSocket
 ):
     # ENTERPRISE: Simple, robust WebSocket connection pattern
     await websocket.accept()
@@ -711,7 +730,20 @@ async def websocket_endpoint(
                 await websocket.send_text(f"Echo: {data}")
                 
     except WebSocketDisconnect:
-        manager.disconnect(websocket, user_id)
+        # Normal disconnect - don't log as error
+        pass
+    except asyncio.CancelledError:
+        # Re-raise cancellation so it's not swallowed
+        raise
+    except Exception as e:
+        logger.exception("WebSocket error during message processing", user_id=user_id)
+    finally:
+        # Always ensure cleanup regardless of how the coroutine ends
+        try:
+            await manager.disconnect(websocket, user_id)
+            await websocket.close()
+        except Exception as e:
+            logger.debug("Error during WebSocket cleanup", error=str(e))
 
 @router.post("/stop-all")
 async def emergency_stop_all_trading(

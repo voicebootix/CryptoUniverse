@@ -8,6 +8,7 @@ for real-time features in the cryptocurrency trading platform.
 import json
 import asyncio
 import time
+import socket
 from typing import Any, Dict, List, Optional, Union
 from contextlib import asynccontextmanager
 import redis.asyncio as redis
@@ -44,17 +45,30 @@ class RedisConnectionManager:
         """Get or create Redis connection pool with enterprise settings."""
         if self.pool is None:
             try:
-                self.pool = ConnectionPool.from_url(
-                    settings.REDIS_URL,
-                    max_connections=50,  # Increased for enterprise
-                    retry_on_timeout=True,
-                    retry_on_error=[ConnectionError, TimeoutError],
-                    health_check_interval=30,
-                    socket_keepalive=True,
-                    socket_keepalive_options={"TCP_KEEPIDLE": 1, "TCP_KEEPINTVL": 3, "TCP_KEEPCNT": 5},
-                    connection_class=redis.Connection,
-                    decode_responses=True
-                )
+                # Build socket keepalive options conditionally for cross-platform compatibility
+                keepalive_options = {}
+                if hasattr(socket, 'TCP_KEEPIDLE'):
+                    keepalive_options[socket.TCP_KEEPIDLE] = 1
+                if hasattr(socket, 'TCP_KEEPINTVL'):
+                    keepalive_options[socket.TCP_KEEPINTVL] = 3
+                if hasattr(socket, 'TCP_KEEPCNT'):
+                    keepalive_options[socket.TCP_KEEPCNT] = 5
+                
+                pool_kwargs = {
+                    "max_connections": 50,  # Increased for enterprise
+                    "retry_on_timeout": True,
+                    "retry_on_error": [ConnectionError, TimeoutError],
+                    "health_check_interval": 30,
+                    "socket_keepalive": True,
+                    "connection_class": redis.Connection,
+                    "decode_responses": True
+                }
+                
+                # Only add socket_keepalive_options if we have any valid options
+                if keepalive_options:
+                    pool_kwargs["socket_keepalive_options"] = keepalive_options
+                
+                self.pool = ConnectionPool.from_url(settings.REDIS_URL, **pool_kwargs)
                 logger.info("Redis connection pool created with enterprise settings")
             except Exception as e:
                 logger.error("Failed to create Redis connection pool", error=str(e))

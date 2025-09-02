@@ -91,8 +91,9 @@ class UnifiedAIManager(LoggerMixin):
         self.adapters = chat_adapters
         self.telegram_core = TelegramCore()
         
-        # Redis for state management
-        self.redis = get_redis_client()
+        # Redis for state management - initialize properly for async usage
+        self.redis = None
+        self._redis_initialized = False
         
         # Decision tracking
         self.active_decisions: Dict[str, AIDecision] = {}
@@ -115,6 +116,17 @@ class UnifiedAIManager(LoggerMixin):
         self.master_controller.unified_manager = self
         
         self.logger.info("🧠 Unified AI brain connected to all interfaces")
+    
+    async def _ensure_redis(self):
+        """Ensure Redis client is properly initialized."""
+        if getattr(self, "_redis_initialized", False) is False:
+            try:
+                from app.core.redis import get_redis_client
+                self.redis = await get_redis_client()
+            except Exception:
+                self.redis = None
+            self._redis_initialized = True
+        return self.redis
     
     async def process_user_request(
         self,
@@ -269,11 +281,13 @@ class UnifiedAIManager(LoggerMixin):
             })
             
             if master_result.get("success"):
-                # Store unified config
-                await self.redis.hset(
-                    f"unified_ai_config:{user_id}",
-                    mapping=autonomous_config
-                )
+                # Store unified config as JSON blob
+                redis_client = await self._ensure_redis()
+                if redis_client:
+                    await redis_client.set(
+                        f"unified_ai_config:{user_id}",
+                        json.dumps(autonomous_config)
+                    )
                 
                 # Notify all connected interfaces
                 await self._notify_all_interfaces(user_id, {
@@ -308,7 +322,9 @@ class UnifiedAIManager(LoggerMixin):
             master_result = await self.master_controller.stop_autonomous_mode(user_id)
             
             # Clean up unified config
-            await self.redis.delete(f"unified_ai_config:{user_id}")
+            redis_client = await self._ensure_redis()
+            if redis_client:
+                await redis_client.delete(f"unified_ai_config:{user_id}")
             
             # Notify all connected interfaces
             await self._notify_all_interfaces(user_id, {
@@ -338,8 +354,18 @@ class UnifiedAIManager(LoggerMixin):
             user_config = await self._get_user_config(user_id)
             
             # Get autonomous status
-            autonomous_active = await self.redis.get(f"autonomous_active:{user_id}")
-            autonomous_config = await self.redis.hgetall(f"unified_ai_config:{user_id}") if autonomous_active else {}
+            redis_client = await self._ensure_redis()
+            autonomous_active = await redis_client.get(f"autonomous_active:{user_id}") if redis_client else None
+            
+            # Get autonomous config using JSON GET instead of hgetall
+            autonomous_config = {}
+            if autonomous_active and redis_client:
+                config_data = await redis_client.get(f"unified_ai_config:{user_id}")
+                if config_data:
+                    try:
+                        autonomous_config = json.loads(config_data)
+                    except json.JSONDecodeError:
+                        autonomous_config = {}
             
             # Get system status
             master_status = await self.master_controller.get_system_status(user_id)
@@ -425,8 +451,19 @@ class UnifiedAIManager(LoggerMixin):
         """Handle autonomous AI decisions during automated trading cycles."""
         
         try:
-            # Get user autonomous config
-            autonomous_config = await self.redis.hgetall(f"unified_ai_config:{user_id}")
+            # Get user autonomous config  
+            redis_client = await self._ensure_redis()
+            if redis_client:
+                config_data = await redis_client.get(f"unified_ai_config:{user_id}")
+                if config_data:
+                    try:
+                        autonomous_config = json.loads(config_data)
+                    except json.JSONDecodeError:
+                        autonomous_config = {}
+                else:
+                    autonomous_config = {}
+            else:
+                autonomous_config = {}
             
             if not autonomous_config:
                 return {"success": False, "error": "No autonomous configuration found"}
@@ -515,18 +552,37 @@ class UnifiedAIManager(LoggerMixin):
     async def _get_user_config(self, user_id: str) -> Dict[str, Any]:
         """Get user configuration and preferences."""
         
-        # Get from Redis cache first
-        cached_config = await self.redis.hgetall(f"user_ai_config:{user_id}")
+        # Get from Redis cache first  
+        redis_client = await self._ensure_redis()
+        if redis_client:
+            config_data = await redis_client.get(f"user_ai_config:{user_id}")
+            if config_data:
+                try:
+                    cached_config = json.loads(config_data)
+                    if cached_config:
+                        return cached_config
+                except json.JSONDecodeError:
+                    cached_config = {}
+            else:
+                cached_config = {}
+        else:
+            cached_config = {}
         
-        if cached_config:
-            return {k.decode() if isinstance(k, bytes) else k: 
-                   v.decode() if isinstance(v, bytes) else v 
-                   for k, v in cached_config.items()}
+        # Use single default configuration source
+        default_config = self._get_default_user_config()
         
-        # Default configuration
-        default_config = {
+        # Cache for future use as JSON blob
+        redis_client = await self._ensure_redis()
+        if redis_client:
+            await redis_client.set(f"user_ai_config:{user_id}", json.dumps(default_config))
+        
+        return default_config
+    
+    def _get_default_user_config(self) -> Dict[str, Any]:
+        """Get single default user configuration to avoid duplication."""
+        return {
             "operation_mode": "assisted",
-            "risk_tolerance": "balanced",
+            "risk_tolerance": "balanced", 
             "trading_mode": "balanced",
             "ai_confidence_threshold": 80.0,
             "max_position_size_pct": 10.0,
@@ -540,15 +596,48 @@ class UnifiedAIManager(LoggerMixin):
                 "email": False
             }
         }
-        
-        # Cache for future use
-        await self.redis.hset(f"user_ai_config:{user_id}", mapping=default_config)
-        
-        return default_config
-    
+
     async def _set_user_operation_mode(self, user_id: str, mode: OperationMode):
-        """Set user operation mode."""
-        await self.redis.hset(f"user_ai_config:{user_id}", "operation_mode", mode.value)
+        """Set user operation mode with in-memory fallback when Redis unavailable."""
+        redis_client = await self._ensure_redis()
+        
+        # Get existing config from Redis or in-memory fallback
+        user_config = None
+        if redis_client:
+            config_data = await redis_client.get(f"user_ai_config:{user_id}")
+            if config_data:
+                try:
+                    user_config = json.loads(config_data)
+                except json.JSONDecodeError:
+                    pass
+        
+        # Fall back to in-memory store or defaults
+        if not user_config:
+            user_config = self.user_preferences.get(user_id, self._get_default_user_config().copy())
+        
+        # Always update operation mode (whether Redis available or not)
+        user_config["operation_mode"] = mode.value
+        
+        # Store in in-memory fallback
+        self.user_preferences[user_id] = user_config
+        
+        # Write-through to Redis if available
+        if redis_client:
+            try:
+                await redis_client.set(f"user_ai_config:{user_id}", json.dumps(user_config))
+                
+                # Handle autonomous mode flag for status coherence
+                if mode.value == "autonomous":
+                    await redis_client.set(f"autonomous_active:{user_id}", "true")
+                else:
+                    await redis_client.delete(f"autonomous_active:{user_id}")
+                    
+                # Success - could optionally remove dirty flag here
+                # self.user_preferences.pop(user_id, None)  # Clean in-memory on successful Redis write
+                
+            except Exception as e:
+                # Redis write failed, keep in-memory version
+                self.logger.debug(f"Failed to write user config to Redis, keeping in-memory fallback", error=str(e))
     
     async def _classify_unified_intent(self, request: str, interface: InterfaceType, context: Optional[Dict]) -> str:
         """Classify intent across all interfaces consistently."""
@@ -764,8 +853,10 @@ class UnifiedAIManager(LoggerMixin):
                 pass
             
             # Store notification for UI polling
-            await self.redis.lpush(f"notifications:{user_id}", json.dumps(notification))
-            await self.redis.ltrim(f"notifications:{user_id}", 0, 99)  # Keep last 100
+            redis_client = await self._ensure_redis()
+            if redis_client:
+                await redis_client.lpush(f"notifications:{user_id}", json.dumps(notification))
+                await redis_client.ltrim(f"notifications:{user_id}", 0, 99)  # Keep last 100
             
         except Exception as e:
             self.logger.warning("Interface notification failed", error=str(e), user_id=user_id)

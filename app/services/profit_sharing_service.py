@@ -59,7 +59,7 @@ class ProfitSharingService(LoggerMixin):
             redis = await get_redis_client()
             
             # Load admin pricing configuration
-            pricing_config = await redis.hgetall("admin:pricing_config")
+            pricing_config = await redis.hgetall("admin:pricing_config") if redis else {}
             
             if pricing_config:
                 # Use admin-configured values
@@ -165,7 +165,7 @@ class ProfitSharingService(LoggerMixin):
             redis = await get_redis_client()
             
             # Load strategy pricing from admin settings
-            strategy_pricing_data = await redis.hgetall("admin:strategy_pricing")
+            strategy_pricing_data = await redis.hgetall("admin:strategy_pricing") if redis else {}
             
             if strategy_pricing_data:
                 # Convert bytes to proper format
