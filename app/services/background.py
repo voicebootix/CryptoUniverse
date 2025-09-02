@@ -434,9 +434,13 @@ class BackgroundServiceManager(LoggerMixin):
         
         # ENTERPRISE: Direct exchange API discovery (bypass service layer if needed)
         try:
-            exchange_symbols = await self._discover_symbols_direct_apis()
+            exchange_symbols_raw = await self._discover_symbols_direct_apis()
+            # Normalize to uppercase to avoid price mismatches with downstream services
+            exchange_symbols = {symbol.upper() for symbol in exchange_symbols_raw if symbol and isinstance(symbol, str)}
             all_discovered_symbols.update(exchange_symbols)
-            self.logger.info(f"Direct API discovery added {len(exchange_symbols)} additional symbols")
+            self.logger.info(f"Direct API discovery added {len(exchange_symbols)} normalized symbols", 
+                           raw_count=len(exchange_symbols_raw), 
+                           normalized_count=len(exchange_symbols))
         except Exception as e:
             self.logger.warning("Direct API discovery failed", error=str(e))
         

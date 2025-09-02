@@ -16,7 +16,7 @@ from urllib.parse import quote
 from fastapi.responses import RedirectResponse
 import bcrypt
 import jwt
-from jwt import JWTError
+from jwt import InvalidTokenError
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -148,7 +148,7 @@ class AuthService:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has expired"
             )
-        except jwt.JWTError:
+        except InvalidTokenError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token"
@@ -512,7 +512,7 @@ async def logout(
                 user_id = payload.get("sub")
                 logger.debug("Token decoded successfully for logout", user_id=user_id)
                 
-            except JWTError as jwt_error:
+            except InvalidTokenError as jwt_error:
                 # Token is invalid/expired - still allow logout
                 logger.info("Logout with invalid/expired token - proceeding anyway", error=str(jwt_error))
                 # Try to extract user ID from token without validation (for cleanup)
