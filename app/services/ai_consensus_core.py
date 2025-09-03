@@ -198,6 +198,18 @@ class AIModelConnector(LoggerMixin):
     ) -> AIModelResponse:
         """Query GPT-4 API."""
         
+        if not settings.OPENAI_API_KEY:
+            return AIModelResponse(
+                provider=AIModelProvider.GPT4,
+                content="",
+                confidence=0.0,
+                reasoning="OpenAI API key not configured",
+                cost=0.0,
+                response_time=0.0,
+                success=False,
+                error="OPENAI_API_KEY not set in environment"
+            )
+        
         headers = {
             "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
             "Content-Type": "application/json"
@@ -257,36 +269,89 @@ class AIModelConnector(LoggerMixin):
         config: Dict[str, Any],
         request_id: str
     ) -> AIModelResponse:
-        """Query Claude API - simplified implementation."""
+        """Query Claude API with proper Anthropic integration."""
         
-        # Simulate Claude response for now (would implement real API call)
-        import random
+        if not settings.ANTHROPIC_API_KEY:
+            return AIModelResponse(
+                provider=AIModelProvider.CLAUDE,
+                content="",
+                confidence=0.0,
+                reasoning="Anthropic API key not configured",
+                cost=0.0,
+                response_time=0.0,
+                success=False,
+                error="ANTHROPIC_API_KEY not set in environment"
+            )
         
-        confidence = random.uniform(70, 95)
+        headers = {
+            "x-api-key": settings.ANTHROPIC_API_KEY,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
+        }
         
-        content = f"""
-        Analysis of the provided context shows several key factors:
-
-        1. Market conditions indicate {random.choice(['bullish', 'bearish', 'neutral'])} sentiment
-        2. Technical indicators suggest {random.choice(['strong momentum', 'consolidation', 'reversal potential'])}
-        3. Risk assessment shows {random.choice(['moderate', 'elevated', 'low'])} risk levels
-
-        Confidence: {confidence:.1f}%
-        Recommendation: {random.choice(['BUY', 'SELL', 'HOLD'])}
-        """
+        # Format the prompt for Claude's expected format
+        system_prompt = "You are an expert cryptocurrency trading analyst. Provide precise, actionable analysis with confidence scores."
+        user_content = f"Context: {json.dumps(context) if context else 'None'}\n\nRequest: {prompt}"
         
-        reasoning = "Analysis based on market technical indicators and sentiment analysis"
-        cost = 0.002  # Estimated cost
+        payload = {
+            "model": config["model"],
+            "max_tokens": config["max_tokens"],
+            "temperature": config["temperature"],
+            "system": system_prompt,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": user_content
+                }
+            ]
+        }
         
-        return AIModelResponse(
-            provider=AIModelProvider.CLAUDE,
-            content=content,
-            confidence=confidence,
-            reasoning=reasoning,
-            cost=cost,
-            response_time=0.0,
-            success=True
-        )
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    config["api_url"],
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=ProductionConfiguration.REQUEST_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise Exception(f"Claude API error: {response.status} - {error_text}")
+                    
+                    result = await response.json()
+                    content = result["content"][0]["text"]
+                    
+                    confidence = self._extract_confidence(content)
+                    reasoning = self._extract_reasoning(content)
+                    
+                    # Calculate cost based on usage
+                    input_tokens = result.get("usage", {}).get("input_tokens", 1000)
+                    output_tokens = result.get("usage", {}).get("output_tokens", 500)
+                    total_tokens = input_tokens + output_tokens
+                    cost = total_tokens * config["cost_per_token"]
+                    
+                    return AIModelResponse(
+                        provider=AIModelProvider.CLAUDE,
+                        content=content,
+                        confidence=confidence,
+                        reasoning=reasoning,
+                        cost=cost,
+                        response_time=0.0,
+                        success=True
+                    )
+                    
+        except Exception as e:
+            self.logger.error("Claude API query failed", error=str(e), request_id=request_id)
+            return AIModelResponse(
+                provider=AIModelProvider.CLAUDE,
+                content="",
+                confidence=0.0,
+                reasoning=f"Claude API error: {str(e)}",
+                cost=0.0,
+                response_time=0.0,
+                success=False,
+                error=str(e)
+            )
     
     async def _query_gemini(
         self,
