@@ -784,7 +784,14 @@ const TelegramCenter: React.FC = () => {
         isOpen={showConnectionModal}
         onClose={() => setShowConnectionModal(false)}
         onConnect={async (config) => {
-          await actions.connectTelegram(config);
+          const result = await actions.connectTelegram(config);
+          return (
+            result || {
+              auth_token: "",
+              connection_id: "",
+              setup_instructions: "",
+            }
+          );
         }}
         connecting={connecting}
       />
