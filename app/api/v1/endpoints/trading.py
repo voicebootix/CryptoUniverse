@@ -671,14 +671,28 @@ async def get_recent_trades(
 
 @router.websocket("/ws")
 async def websocket_endpoint(
-    websocket: WebSocket
+    websocket: WebSocket,
+    token: Optional[str] = None
 ):
     # ENTERPRISE: Simple, robust WebSocket connection pattern
     await websocket.accept()
     
-    # For now, connect without authentication
-    # TODO: Implement WebSocket token authentication via query params
-    user_id = "anonymous"  # Temporary
+    # Optional authentication via query params or headers
+    user_id = "anonymous"  # Default for public market data
+    
+    try:
+        if token:
+            # Try to authenticate user
+            from app.core.security import verify_access_token
+            payload = verify_access_token(token)
+            if payload and payload.get("sub"):
+                user_id = payload["sub"]
+                logger.info("WebSocket authenticated user connected", user_id=user_id)
+        else:
+            logger.info("WebSocket anonymous user connected")
+    except Exception as e:
+        logger.debug("WebSocket authentication failed, proceeding as anonymous", error=str(e))
+    
     await manager.connect(websocket, user_id)
     
     try:

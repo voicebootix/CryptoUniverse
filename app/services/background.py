@@ -411,7 +411,10 @@ class BackgroundServiceManager(LoggerMixin):
                     if discovery_result.get("success"):
                         discovered_assets = discovery_result.get("asset_discovery", {}).get("detailed_results", {})
                         for exchange, assets in discovered_assets.items():
-                            all_discovered_symbols.update(assets.get("active_symbols", []))
+                            if isinstance(assets, dict):
+                                all_discovered_symbols.update(assets.get("active_symbols", []))
+                            elif isinstance(assets, (list, set)):
+                                all_discovered_symbols.update(assets)
                         
                         # Inline validation
                         if not discovery_result:

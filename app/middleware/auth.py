@@ -27,9 +27,12 @@ PUBLIC_PATHS = {
     "/api/v1/auth/refresh",
     "/api/v1/auth/register",
     "/api/v1/health",
+    "/health",
+    "/",
     "/docs",
     "/openapi.json",
-    "/redoc"
+    "/redoc",
+    "/metrics"
 }
 
 # Paths that require a valid token but not necessarily authentication
@@ -63,11 +66,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
         Returns:
             Response: The HTTP response
         """
-        # Skip authentication for public paths
-        if request.url.path in PUBLIC_PATHS or any(request.url.path.startswith(p) for p in [
-            "/static/", 
-            "/health"
-        ]):
+        # Skip authentication for public paths and specific patterns
+        if (request.url.path in PUBLIC_PATHS or 
+            request.method == "OPTIONS" or  # Allow all preflight requests
+            any(request.url.path.startswith(p) for p in [
+                "/static/", 
+                "/health",
+                "/api/v1/trading/ws",  # WebSocket endpoint
+                "/vite.svg",  # Static assets
+                "/login"  # Login page
+            ])):
             return await call_next(request)
             
         # Get authorization header

@@ -300,18 +300,23 @@ async def login(
         access_token = auth_service.create_access_token(user)
         refresh_token = auth_service.create_refresh_token(user)
         
+        # Batch operations for better performance
+        current_time = datetime.utcnow()
+        
         # Create session record
         session = UserSession(
             user_id=user.id,
             refresh_token=refresh_token,
             ip_address=client_ip,
             user_agent=client_request.headers.get("user-agent", ""),
-            expires_at=datetime.utcnow() + auth_service.refresh_token_expire
+            expires_at=current_time + auth_service.refresh_token_expire
         )
         db.add(session)
         
-        # Update last login
-        user.last_login = datetime.utcnow()
+        # Update last login in the same transaction
+        user.last_login = current_time
+        
+        # Single commit for both operations
         await db.commit()
         
         logger.info("Login successful", user_id=str(user.id), email=user.email)
