@@ -6,6 +6,16 @@ import {
 import { formatCurrency, formatPercentage, downloadFile } from "@/lib/utils";
 
 class ReportService {
+  private escapeHTML(value: unknown): string {
+    const s = String(value ?? "");
+    return s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   private escapeCSVField(field: string): string {
     // Convert to string and handle null/undefined
     const str = String(field || "");
@@ -66,7 +76,10 @@ class ReportService {
       rows.push(["Total Balance", formatCurrency(sanitizedData.total_balance)]);
       rows.push(["24h P&L", formatCurrency(sanitizedData.total_pnl_24h)]);
       rows.push(["24h Volume", formatCurrency(sanitizedData.total_volume_24h)]);
-      rows.push(["Win Rate", formatPercentage(sanitizedData.overall_win_rate)]);
+      rows.push([
+        "Win Rate",
+        formatPercentage(sanitizedData.overall_win_rate / 100),
+      ]);
       rows.push([
         "Active Positions",
         sanitizedData.active_positions.toString(),
@@ -91,7 +104,7 @@ class ReportService {
           formatCurrency(ex.balance),
           formatCurrency(ex.pnl_24h),
           ex.trades_24h.toString(),
-          formatPercentage(ex.win_rate),
+          formatPercentage(ex.win_rate / 100),
           ex.connection_status,
         ])
       );
@@ -132,7 +145,7 @@ class ReportService {
         ...sanitizedData.performance_metrics.map((metric) => [
           metric.exchange_name,
           metric.trades.toString(),
-          formatPercentage(metric.win_rate),
+          formatPercentage(metric.win_rate / 100),
           formatCurrency(metric.avg_profit),
           formatCurrency(metric.volume),
         ])
@@ -176,7 +189,7 @@ class ReportService {
             </div>
             <div class="metric-card">
                 <strong>Win Rate:</strong> ${formatPercentage(
-                  sanitizedData.overall_win_rate
+                  sanitizedData.overall_win_rate / 100
                 )}
             </div>
         </div>
@@ -204,12 +217,12 @@ class ReportService {
                   .map(
                     (ex) => `
                     <tr>
-                        <td>${ex.name}</td>
+                        <td>${this.escapeHTML(ex.name)}</td>
                         <td>${formatCurrency(ex.balance)}</td>
                         <td>${formatCurrency(ex.pnl_24h)}</td>
                         <td>${ex.trades_24h}</td>
-                        <td>${formatPercentage(ex.win_rate)}</td>
-                        <td>${ex.connection_status}</td>
+                        <td>${formatPercentage(ex.win_rate / 100)}</td>
+                        <td>${this.escapeHTML(ex.connection_status)}</td>
                     </tr>
                 `
                   )
@@ -241,13 +254,13 @@ class ReportService {
                   .map(
                     (opp) => `
                     <tr>
-                        <td>${opp.symbol}</td>
-                        <td>${opp.buy_exchange}</td>
+                        <td>${this.escapeHTML(opp.symbol)}</td>
+                        <td>${this.escapeHTML(opp.buy_exchange)}</td>
                         <td>${formatCurrency(opp.buy_price)}</td>
-                        <td>${opp.sell_exchange}</td>
+                        <td>${this.escapeHTML(opp.sell_exchange)}</td>
                         <td>${formatCurrency(opp.sell_price)}</td>
                         <td>${opp.profit_bps} bps</td>
-                        <td>${opp.execution_complexity}</td>
+                        <td>${this.escapeHTML(opp.execution_complexity)}</td>
                     </tr>
                 `
                   )
@@ -277,9 +290,9 @@ class ReportService {
                   .map(
                     (metric) => `
                     <tr>
-                        <td>${metric.exchange_name}</td>
+                        <td>${this.escapeHTML(metric.exchange_name)}</td>
                         <td>${metric.trades}</td>
-                        <td>${formatPercentage(metric.win_rate)}</td>
+                        <td>${formatPercentage(metric.win_rate / 100)}</td>
                         <td>${formatCurrency(metric.avg_profit)}</td>
                         <td>${formatCurrency(metric.volume)}</td>
                     </tr>
@@ -312,13 +325,13 @@ class ReportService {
 <body>
     <div class="header">
         <h1>Exchange Hub Trading Report</h1>
-        <p>Generated on: ${new Date(
-          sanitizedData.timestamp
-        ).toLocaleString()}</p>
-        <p>Time Range: ${options.time_range}</p>
-        <p>Data Level: ${
+        <p>Generated on: ${this.escapeHTML(
+          new Date(sanitizedData.timestamp).toLocaleString()
+        )}</p>
+        <p>Time Range: ${this.escapeHTML(options.time_range)}</p>
+        <p>Data Level: ${this.escapeHTML(
           options.include_sensitive_data ? "Full Data" : "Anonymized Data"
-        }</p>
+        )}</p>
     </div>
     ${sectionsHTML}
 </body>
