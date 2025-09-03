@@ -56,12 +56,12 @@ class AIModelConfiguration:
     
     GEMINI_CONFIG = {
         "provider": "google",
-        "model": "gemini-pro",
-        "api_url": "https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent",
+        "model": "gemini-1.5-pro",
+        "api_url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
         "max_tokens": 2000,
         "temperature": 0.3,
-        "cost_per_token": 0.000005,
-        "reliability_score": 0.88,
+        "cost_per_token": 0.0000025,
+        "reliability_score": 0.90,
         "specialty": "market_analysis",
         "weight_factor": 0.9
     }
@@ -360,36 +360,91 @@ class AIModelConnector(LoggerMixin):
         config: Dict[str, Any],
         request_id: str
     ) -> AIModelResponse:
-        """Query Gemini API - simplified implementation."""
+        """Query Google Gemini API with proper integration."""
         
-        # Simulate Gemini response for now
-        import random
+        if not settings.GOOGLE_AI_API_KEY:
+            return AIModelResponse(
+                provider=AIModelProvider.GEMINI,
+                content="",
+                confidence=0.0,
+                reasoning="Google AI API key not configured",
+                cost=0.0,
+                response_time=0.0,
+                success=False,
+                error="GOOGLE_AI_API_KEY not set in environment"
+            )
         
-        confidence = random.uniform(65, 90)
+        # Format the prompt for Gemini's expected format
+        system_instruction = "You are an expert cryptocurrency trading analyst. Provide precise, actionable analysis with confidence scores."
+        user_content = f"Context: {json.dumps(context) if context else 'None'}\n\nRequest: {prompt}"
         
-        content = f"""
-        Market analysis reveals:
-
-        - Current price action shows {random.choice(['strength', 'weakness', 'consolidation'])}
-        - Volume patterns indicate {random.choice(['accumulation', 'distribution', 'neutral activity'])}  
-        - Key support/resistance levels are {random.choice(['holding', 'breaking', 'testing'])}
-
-        Analysis confidence: {confidence:.1f}%
-        Market outlook: {random.choice(['BULLISH', 'BEARISH', 'NEUTRAL'])}
-        """
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": f"{system_instruction}\n\n{user_content}"
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": config["temperature"],
+                "maxOutputTokens": config["max_tokens"],
+                "candidateCount": 1
+            }
+        }
         
-        reasoning = "Technical analysis with volume and price action confirmation"
-        cost = 0.001  # Lower cost for Gemini
-        
-        return AIModelResponse(
-            provider=AIModelProvider.GEMINI,
-            content=content,
-            confidence=confidence,
-            reasoning=reasoning,
-            cost=cost,
-            response_time=0.0,
-            success=True
-        )
+        try:
+            # Google AI API uses a different URL format
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{config['model']}:generateContent?key={settings.GOOGLE_AI_API_KEY}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    api_url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=ProductionConfiguration.REQUEST_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise Exception(f"Gemini API error: {response.status} - {error_text}")
+                    
+                    result = await response.json()
+                    
+                    if "candidates" not in result or not result["candidates"]:
+                        raise Exception("No candidates in Gemini response")
+                    
+                    content = result["candidates"][0]["content"]["parts"][0]["text"]
+                    
+                    confidence = self._extract_confidence(content)
+                    reasoning = self._extract_reasoning(content)
+                    
+                    # Estimate tokens used (Gemini doesn't return usage info in all cases)
+                    estimated_tokens = len(user_content.split()) + len(content.split())
+                    cost = estimated_tokens * config["cost_per_token"]
+                    
+                    return AIModelResponse(
+                        provider=AIModelProvider.GEMINI,
+                        content=content,
+                        confidence=confidence,
+                        reasoning=reasoning,
+                        cost=cost,
+                        response_time=0.0,
+                        success=True
+                    )
+                    
+        except Exception as e:
+            self.logger.error("Gemini API query failed", error=str(e), request_id=request_id)
+            return AIModelResponse(
+                provider=AIModelProvider.GEMINI,
+                content="",
+                confidence=0.0,
+                reasoning=f"Gemini API error: {str(e)}",
+                cost=0.0,
+                response_time=0.0,
+                success=False,
+                error=str(e)
+            )
     
     def _extract_confidence(self, content: str) -> float:
         """Extract confidence score from AI response."""

@@ -138,7 +138,7 @@ class EnhancedDebugInsightGenerator(LoggerMixin):
         self.applied_fixes: Dict[str, AIFix] = {}
         
         # AI client settings
-        self.claude_api_key = settings.CLAUDE_API_KEY or settings.OPENAI_API_KEY
+        self.claude_api_key = settings.ANTHROPIC_API_KEY or settings.OPENAI_API_KEY
         self.claude_model = "claude-3-5-sonnet-latest"
         
         # System monitoring
