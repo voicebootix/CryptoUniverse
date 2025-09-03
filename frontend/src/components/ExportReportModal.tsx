@@ -253,10 +253,11 @@ const ExportReportModal: React.FC<ExportReportModalProps> = ({
                     ) : (
                       <EyeOff className="w-4 h-4" />
                     )}
-                    Include Sensitive Data
+                    Include Account Metadata
                   </Label>
                   <p className="text-sm text-gray-500">
-                    Include API keys, balances and other sensitive information
+                    Include account metadata and anonymized usage (secrets and
+                    API keys are never exported)
                   </p>
                 </div>
                 <Switch
