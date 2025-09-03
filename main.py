@@ -149,8 +149,8 @@ def create_application() -> FastAPI:
     
     # Always include production frontend URL
     production_origins = [
-        "https://cryptouniverse-frontend.onrender.com",
-        "https://cryptouniverse.onrender.com"
+        settings.FRONTEND_URL, # Ensure frontend URL is always included
+        settings.BASE_URL # Ensure base URL is also included
     ]
     
     # Add localhost for development
