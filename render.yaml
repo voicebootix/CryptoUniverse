@@ -26,6 +26,8 @@ services:
           property: connectionString
       - key: CORS_ORIGINS
         value: https://cryptouniverse-frontend.onrender.com
+      - key: BACKEND_CORS_ORIGINS
+        value: https://cryptouniverse-frontend.onrender.com
       - key: BASE_URL
         value: https://cryptouniverse.onrender.com
       - key: HOST
@@ -93,7 +95,9 @@ databases:
     staticPublishPath: ./frontend/dist
     envVars:
       - key: VITE_API_URL
-        value: https://cryptouniverse-backend.onrender.com/api/v1
+        value: https://cryptouniverse.onrender.com/api/v1
+      - key: VITE_ENVIRONMENT
+        value: production
     routes:
       - type: rewrite
         source: /api/*
