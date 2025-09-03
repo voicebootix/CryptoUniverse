@@ -114,7 +114,7 @@ class AuthService:
         self.access_token_expire = timedelta(hours=1)
         self.refresh_token_expire = timedelta(days=30)
     
-    def create_access_token(self, user: User) -> str:
+    def create_access_token(self, user: User, session_id: Optional[str] = None) -> str:
         """Create JWT access token."""
         expire = datetime.utcnow() + self.access_token_expire
         to_encode = {
@@ -124,11 +124,14 @@ class AuthService:
             "tenant_id": str(user.tenant_id) if user.tenant_id else "",
             "exp": expire,
             "iat": datetime.utcnow(),
+            "jti": secrets.token_hex(16),  # Add required JWT ID
             "type": "access"
         }
+        if session_id:
+            to_encode["sid"] = session_id
         return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
     
-    def create_refresh_token(self, user: User) -> str:
+    def create_refresh_token(self, user: User, session_id: Optional[str] = None) -> str:
         """Create JWT refresh token."""
         expire = datetime.utcnow() + self.refresh_token_expire
         to_encode = {
@@ -138,6 +141,8 @@ class AuthService:
             "type": "refresh",
             "jti": secrets.token_hex(16)  # Unique token ID
         }
+        if session_id:
+            to_encode["sid"] = session_id
         return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
     
     def verify_token(self, token: str) -> Dict[str, Any]:
