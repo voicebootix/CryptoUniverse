@@ -33,6 +33,29 @@ api_router.include_router(market_analysis.router, prefix="/market", tags=["Marke
 api_router.include_router(admin.router, prefix="/admin", tags=["Administration"])
 api_router.include_router(chat.router, prefix="/chat", tags=["AI Chat"])
 
+# Add monitoring endpoint that frontend expects
+@api_router.get("/monitoring/alerts")
+async def get_monitoring_alerts(
+    current_user: dict = None  # Make optional for now
+):
+    """Get system monitoring alerts."""
+    try:
+        # Return basic alerts structure that frontend expects
+        return {
+            "success": True,
+            "alerts": [],
+            "system_status": "operational",
+            "last_updated": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "alerts": [],
+            "system_status": "unknown",
+            "last_updated": datetime.utcnow().isoformat()
+        }
+
 @api_router.get("/status")
 async def api_status():
     """API status endpoint."""

@@ -47,11 +47,11 @@ engine = create_async_engine(
     },
     # PRODUCTION: Optimized settings for Render → Supabase
     connect_args={
-        "command_timeout": 15,  # Faster timeout for cloud
+        "command_timeout": 30,  # Increased for stability
         "server_settings": {
-            "statement_timeout": "15s",  # Aggressive timeout for production
-            "lock_timeout": "5s",       # Prevent long locks
-            "idle_in_transaction_session_timeout": "30s",  # Clean up idle connections
+            "statement_timeout": "45s",  # Increased for complex queries
+            "lock_timeout": "10s",       # Prevent long locks
+            "idle_in_transaction_session_timeout": "60s",  # Clean up idle connections
             "jit": "off",  # Disable JIT for predictable performance
             "application_name": "cryptouniverse_production",
             "tcp_keepalives_idle": "300",     # Keep connections alive
@@ -92,8 +92,8 @@ def set_postgresql_timeouts(dbapi_connection, _connection_record):
     if "postgresql" in get_async_database_url():
         try:
             cursor = dbapi_connection.cursor()
-            cursor.execute("SET statement_timeout = '30s'")
-            cursor.execute("SET lock_timeout = '10s'")
+            cursor.execute("SET statement_timeout = '45s'")
+            cursor.execute("SET lock_timeout = '15s'")
             cursor.close()
         except Exception as e:
             logger.debug("Failed to set PostgreSQL connection timeouts", exc_info=True)

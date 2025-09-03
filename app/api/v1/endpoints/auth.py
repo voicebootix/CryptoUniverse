@@ -111,7 +111,7 @@ class AuthService:
     def __init__(self):
         self.secret_key = settings.SECRET_KEY
         self.algorithm = "HS256"
-        self.access_token_expire = timedelta(hours=1)
+        self.access_token_expire = timedelta(hours=8)  # Increased for trading platform
         self.refresh_token_expire = timedelta(days=30)
     
     def create_access_token(self, user: User, session_id: Optional[str] = None) -> str:

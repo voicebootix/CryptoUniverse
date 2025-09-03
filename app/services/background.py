@@ -747,7 +747,7 @@ class BackgroundServiceManager(LoggerMixin):
                         )
                         
                         result = await db.execute(stmt)
-                        user_ids = [row[0] for row in result.fetchall()]
+                        user_ids = [str(row[0]) for row in result.fetchall()]  # Convert UUID to string
                         
                         # Cache for 5 minutes
                         await redis.setex(cache_key, 300, json.dumps(user_ids))
