@@ -3096,8 +3096,31 @@ class TradingStrategiesService(LoggerMixin):
                 "risk_adjustments": {}
             }
             
-            # Get current positions (mock data)
-            current_positions = await self._get_user_positions(user_id)
+            # Get current positions from REAL exchange data
+            try:
+                from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
+                from app.core.database import AsyncSessionLocal
+                
+                async with AsyncSessionLocal() as db:
+                    portfolio_data = await get_user_portfolio_from_exchanges(user_id, db)
+                
+                if portfolio_data.get("success"):
+                    # Convert balance data to position format
+                    current_positions = []
+                    for balance in portfolio_data.get("balances", []):
+                        if balance.get("total", 0) > 0:
+                            current_positions.append({
+                                "symbol": balance.get("asset", "Unknown"),
+                                "market_value": balance.get("value_usd", 0),
+                                "unrealized_pnl": balance.get("unrealized_pnl", 0),
+                                "quantity": balance.get("total", 0),
+                                "exchange": balance.get("exchange", "Unknown")
+                            })
+                else:
+                    current_positions = []
+            except Exception as e:
+                self.logger.error("Failed to get real positions", error=str(e))
+                current_positions = []
             
             # Portfolio overview
             total_portfolio_value = sum(pos.get("market_value", 0) for pos in current_positions)
@@ -3297,8 +3320,31 @@ class TradingStrategiesService(LoggerMixin):
                 "risk_monitoring": {}
             }
             
-            # Get portfolio data
-            current_positions = await self._get_user_positions(user_id)
+            # Get portfolio data from REAL exchange data
+            try:
+                from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
+                from app.core.database import AsyncSessionLocal
+                
+                async with AsyncSessionLocal() as db:
+                    portfolio_data = await get_user_portfolio_from_exchanges(user_id, db)
+                
+                if portfolio_data.get("success"):
+                    # Convert balance data to position format
+                    current_positions = []
+                    for balance in portfolio_data.get("balances", []):
+                        if balance.get("total", 0) > 0:
+                            current_positions.append({
+                                "symbol": balance.get("asset", "Unknown"),
+                                "market_value": balance.get("value_usd", 0),
+                                "unrealized_pnl": balance.get("unrealized_pnl", 0),
+                                "quantity": balance.get("total", 0),
+                                "exchange": balance.get("exchange", "Unknown")
+                            })
+                else:
+                    current_positions = []
+            except Exception as e:
+                self.logger.error("Failed to get real positions", error=str(e))
+                current_positions = []
             total_portfolio_value = sum(pos.get("market_value", 0) for pos in current_positions)
             
             # Portfolio-level risk metrics
