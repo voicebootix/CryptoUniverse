@@ -25,9 +25,7 @@ services:
           name: cryptouniverse-redis
           property: connectionString
       - key: CORS_ORIGINS
-        value: https://cryptouniverse-frontend.onrender.com
-      - key: BACKEND_CORS_ORIGINS
-        value: https://cryptouniverse-frontend.onrender.com
+        value: https://cryptouniverse-frontend.onrender.com,https://cryptouniverse.onrender.com
       - key: BASE_URL
         value: https://cryptouniverse.onrender.com
       - key: HOST
