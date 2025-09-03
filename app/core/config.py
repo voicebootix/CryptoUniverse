@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field(..., env="SECRET_KEY", description="Secret key for JWT")
     ENCRYPTION_KEY: str = Field(default="", env="ENCRYPTION_KEY", description="Key for encrypting sensitive data like API keys")
     
+    # JWT settings
+    JWT_ALGORITHM: str = Field(default="HS256", description="JWT signing algorithm")
+    JWT_ACCESS_TOKEN_EXPIRE_HOURS: int = Field(default=8, env="JWT_ACCESS_TOKEN_EXPIRE_HOURS", description="JWT access token expiration in hours")
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=30, env="JWT_REFRESH_TOKEN_EXPIRE_DAYS", description="JWT refresh token expiration in days")
+    
     # Database settings
     DATABASE_URL: str = Field(..., env="DATABASE_URL", description="Database connection URL")
     
