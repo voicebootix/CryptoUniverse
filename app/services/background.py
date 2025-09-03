@@ -726,8 +726,10 @@ class BackgroundServiceManager(LoggerMixin):
                 redis = await get_redis_client()
                 cache_key = "active_trading_users"
                 
-                # Check cache first
-                cached_users = await redis.get(cache_key)
+                # Check cache first (with Redis resilience)
+                cached_users = None
+                if redis:
+                    cached_users = await redis.get(cache_key)
                 if cached_users:
                     user_ids = json.loads(cached_users)
                     self.logger.debug(f"Using cached active users: {len(user_ids)}")
@@ -749,8 +751,9 @@ class BackgroundServiceManager(LoggerMixin):
                         result = await db.execute(stmt)
                         user_ids = [str(row[0]) for row in result.fetchall()]  # Convert UUID to string
                         
-                        # Cache for 5 minutes
-                        await redis.setex(cache_key, 300, json.dumps(user_ids))
+                        # Cache for 5 minutes (with Redis resilience)
+                        if redis:
+                            await redis.setex(cache_key, 300, json.dumps(user_ids))
                         self.logger.debug(f"Cached {len(user_ids)} active users")
                 
                 # Proceed with sync...
