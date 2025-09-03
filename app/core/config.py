@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     PORT: int = Field(default=8000, description="Server port")
     BASE_URL: str = Field(default="https://cryptouniverse.onrender.com", description="Base URL for the application")
     FRONTEND_URL: str = Field(default="https://cryptouniverse-frontend.onrender.com", description="Frontend URL for redirects")
-    ALLOWED_HOSTS: List[str] = Field(default=[], description="Allowed hosts for the application")
+    ALLOWED_HOSTS: str = Field(default="localhost,127.0.0.1", env="ALLOWED_HOSTS", description="Allowed hosts for the application (comma-separated or JSON list)")
     
     # Security settings
     SECRET_KEY: str = Field(..., env="SECRET_KEY", description="Secret key for JWT")
@@ -70,6 +70,27 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in v.split(',') if origin.strip()]
         # Single value
         return [v.strip()] if v.strip() else ["*"]
+    
+    @computed_field
+    @property
+    def allowed_hosts(self) -> List[str]:
+        """Parse allowed hosts from string to list."""
+        v = self.ALLOWED_HOSTS
+        if not v or v == "":
+            return ["localhost", "127.0.0.1"]
+        # Handle JSON array format
+        if v.startswith('['):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+        # Handle comma-separated format
+        if ',' in v:
+            return [host.strip() for host in v.split(',') if host.strip()]
+        # Single value
+        return [v.strip()] if v.strip() else ["localhost", "127.0.0.1"]
     
     # Supabase settings
     SUPABASE_URL: Optional[str] = Field(default=None, env="SUPABASE_URL", description="Supabase project URL")

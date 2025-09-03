@@ -8,7 +8,9 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm cache clean --force
+RUN rm -rf node_modules
+RUN npm install --include=dev
 
 # Copy source code
 COPY . .

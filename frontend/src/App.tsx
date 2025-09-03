@@ -103,12 +103,19 @@ const App: React.FC = () => {
             {/* Public Routes */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             
+            {/* Login page with custom layout */}
+            <Route path="/auth/login" element={
+              <PublicRoute>
+                <LoginPage />
+              </PublicRoute>
+            } />
+            
+            {/* Other auth routes with AuthLayout */}
             <Route path="/auth/*" element={
               <PublicRoute>
                 <AuthLayout />
               </PublicRoute>
             }>
-              <Route path="login" element={<LoginPage />} />
               <Route path="register" element={<RegisterPage />} />
               <Route path="callback" element={<OAuthCallbackPage />} />
               <Route path="*" element={<Navigate to="/auth/login" replace />} />

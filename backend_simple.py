@@ -12,8 +12,9 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import sqlite3
 import json
+import base64
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
@@ -21,10 +22,18 @@ import uvicorn
 import jwt
 import bcrypt
 
+from dotenv import load_dotenv
+
+load_dotenv() # Load environment variables from .env file
+
 # Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "your-super-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "YOUR_GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "YOUR_GOOGLE_CLIENT_SECRET")
+REDIRECT_URI = os.getenv("REDIRECT_URI", "http://localhost:8000/api/v1/auth/oauth/callback")
 
 # Database file
 DB_FILE = "cryptouniverse.db"
@@ -79,6 +88,35 @@ class UserResponse(BaseModel):
     role: str
     status: str
     created_at: datetime
+
+class PortfolioResponse(BaseModel):
+    balance: float
+    holdings: Dict[str, Any]
+    performance: Dict[str, Any]
+
+class TradingStatusResponse(BaseModel):
+    overall_status: str
+    system_health: Dict[str, Any]
+    message: str
+
+class MarketOverviewResponse(BaseModel):
+    top_gainers: list[Dict[str, Any]]
+    top_losers: list[Dict[str, Any]]
+    market_trends: str
+
+class RecentTradesResponse(BaseModel):
+    trades: list[Dict[str, Any]]
+
+class OAuthUrlResponse(BaseModel):
+    authorization_url: str
+
+class TokenData(BaseModel):
+    access_token: str
+    token_type: str
+    expires_in: int
+    user_id: str
+    role: str
+    email: str
 
 # Database functions
 def init_database():
@@ -304,6 +342,63 @@ async def get_me(current_user: Dict = Depends(get_current_user)):
         created_at=datetime.fromisoformat(current_user["created_at"])
     )
 
+@app.get("/api/v1/trading/portfolio", response_model=PortfolioResponse)
+async def get_portfolio(current_user: Dict = Depends(get_current_user)):
+    """Get user's trading portfolio."""
+    # Placeholder data - In a real app, you would fetch this from a database or external API
+    return PortfolioResponse(
+        balance=10000.00,
+        holdings={
+            "BTC": {"amount": 0.5, "avg_price": 30000.0},
+            "ETH": {"amount": 3.0, "avg_price": 2000.0},
+        },
+        performance={
+            "daily": 0.05,
+            "total": 0.15,
+        },
+    )
+
+@app.get("/api/v1/trading/status", response_model=TradingStatusResponse)
+async def get_trading_status(current_user: Dict = Depends(get_current_user)):
+    """Get overall trading system status."""
+    # Placeholder data
+    return TradingStatusResponse(
+        overall_status="Operational",
+        system_health={
+            "data_feeds": "Healthy",
+            "execution_engine": "Healthy",
+            "risk_management": "Healthy",
+        },
+        message="All systems are functioning normally.",
+    )
+
+@app.get("/api/v1/trading/market-overview", response_model=MarketOverviewResponse)
+async def get_market_overview(current_user: Dict = Depends(get_current_user)):
+    """Get market overview data."""
+    # Placeholder data
+    return MarketOverviewResponse(
+        top_gainers=[
+            {"symbol": "SOL", "change": 0.12, "price": 150.0},
+            {"symbol": "ADA", "change": 0.08, "price": 0.75},
+        ],
+        top_losers=[
+            {"symbol": "XRP", "change": -0.04, "price": 0.50},
+            {"symbol": "DOGE", "change": -0.07, "price": 0.15},
+        ],
+        market_trends="Overall bullish sentiment with increasing institutional interest.",
+    )
+
+@app.get("/api/v1/trading/recent-trades", response_model=RecentTradesResponse)
+async def get_recent_trades(current_user: Dict = Depends(get_current_user)):
+    """Get recent trading activity."""
+    # Placeholder data
+    return RecentTradesResponse(
+        trades=[
+            {"id": "trade1", "symbol": "BTC", "type": "buy", "amount": 0.1, "price": 31000.0, "timestamp": datetime.now().isoformat()},
+            {"id": "trade2", "symbol": "ETH", "type": "sell", "amount": 0.5, "price": 2100.0, "timestamp": datetime.now().isoformat()},
+        ]
+    )
+
 @app.get("/docs")
 async def get_docs():
     """API documentation."""
@@ -315,6 +410,96 @@ async def get_docs():
         "POST /api/v1/auth/register - User registration",
         "GET /api/v1/auth/me - Current user info"
     ]}
+
+@app.post("/api/v1/auth/logout")
+async def logout(current_user: Dict = Depends(get_current_user)):
+    """Logout user and invalidate token (client-side only for JWT)."""
+    # For JWT, logout is primarily handled client-side by deleting the token.
+    # On the server, we might optionally blacklist tokens, but for this simplified version,
+    # we just return a success message.
+    return {"message": "Logged out successfully"}
+
+@app.post("/api/v1/auth/oauth/url", response_model=OAuthUrlResponse)
+async def get_oauth_url():
+    """Get the OAuth authorization URL."""
+    # This is a placeholder. In a real application, you'd generate a dynamic URL
+    # based on your OAuth provider (e.g., Google, GitHub, etc.) and client ID/secret.
+    oauth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={GOOGLE_CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=email%20profile"
+    return OAuthUrlResponse(authorization_url=oauth_url)
+
+
+@app.get("/api/v1/auth/oauth/callback")
+async def oauth_callback(code: str, state: str, response: Response):
+    """Handle OAuth callback from Google."""
+    # In a real app, you would verify the 'state' parameter to prevent CSRF attacks.
+    # For simplicity, we are skipping state verification here.
+
+    # Exchange authorization code for access token
+    # This part would involve an HTTP POST request to Google's token endpoint.
+    # For this example, we'll simulate a token exchange.
+    # Replace with actual API call to Google for token exchange
+    try:
+        # Simulate Google token exchange and user info fetching
+        # In a real app, use `httpx` or `requests` to call Google API
+        # token_response = httpx.post("https://oauth2.googleapis.com/token", data={
+        #     "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+        #     "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+        #     "code": code,
+        #     "redirect_uri": "http://localhost:8000/api/v1/auth/oauth/callback",
+        #     "grant_type": "authorization_code",
+        # })
+        # access_token = token_response.json()["access_token"]
+
+        # user_info_response = httpx.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={
+        #     "Authorization": f"Bearer {access_token}"
+        # })
+        # google_user_info = user_info_response.json()
+
+        # --- Placeholder for actual Google API calls ---
+        # For demonstration, we'll create a dummy user based on the code
+        dummy_email = f"user_{secrets.token_hex(4)}@example.com"
+        dummy_full_name = f"OAuth User {secrets.token_hex(2)}"
+
+        user = get_user_by_email(dummy_email)
+        if not user:
+            user = create_user(dummy_email, secrets.token_hex(16), dummy_full_name, "trader")
+        
+        access_token = create_access_token(user)
+
+        # Prepare auth data for frontend
+        auth_data = {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "user_id": user["id"],
+            "role": user["role"],
+            "email": user["email"],
+            "user": {
+                "id": user["id"],
+                "email": user["email"],
+                "full_name": user["full_name"],
+                "role": user["role"],
+                "status": user["status"],
+                "created_at": user["created_at"].isoformat(),
+            },
+        }
+
+        # Encode auth data in base64 to pass through URL
+        encoded_data = base64.b64encode(json.dumps(auth_data).encode()).decode()
+
+        # Redirect to frontend with success and data
+        redirect_url = f"http://localhost:3000/auth/oauth/callback?success=true&data={encoded_data}"
+        response.headers["Location"] = redirect_url
+        response.status_code = status.HTTP_302_FOUND
+        return response
+
+    except Exception as e:
+        print(f"OAuth callback error: {e}")
+        error_message = base64.b64encode(str(e).encode()).decode()
+        redirect_url = f"http://localhost:3000/auth/oauth/callback?error=true&message={error_message}"
+        response.headers["Location"] = redirect_url
+        response.status_code = status.HTTP_302_FOUND
+        return response
 
 # Startup
 @app.on_event("startup")
