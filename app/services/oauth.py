@@ -34,9 +34,9 @@ class OAuthService:
     def __init__(self):
         # JWT configuration (same as AuthService)
         self.secret_key = settings.SECRET_KEY
-        self.algorithm = "HS256"
-        self.access_token_expire = timedelta(hours=1)
-        self.refresh_token_expire = timedelta(days=30)
+        self.algorithm = settings.JWT_ALGORITHM
+        self.access_token_expire = timedelta(hours=settings.JWT_ACCESS_TOKEN_EXPIRE_HOURS)
+        self.refresh_token_expire = timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
         
         self.oauth = OAuth()
         

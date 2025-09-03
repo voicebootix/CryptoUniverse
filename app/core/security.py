@@ -19,8 +19,8 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT settings
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30  # 30 minutes
-REFRESH_TOKEN_EXPIRE_DAYS = 7     # 7 days
+ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8 hours (enterprise setting)
+REFRESH_TOKEN_EXPIRE_DAYS = 30     # 30 days
 TOKEN_LEEWAY = 60                 # 60 seconds leeway for clock skew
 
 # Token types
