@@ -156,7 +156,7 @@ const ProfitSharingCenter: React.FC = () => {
     },
   ];
 
-  const COLORS = ["#10b981", "#3b82f6", "#8b5cf6", "#f59e0b", "#64748b"];
+  const COLORS = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6"];
 
   const processPayment = async () => {
     try {
@@ -193,7 +193,7 @@ const ProfitSharingCenter: React.FC = () => {
           </Badge>
           <Badge variant="outline" className="px-3 py-1 text-blue-600">
             <Target className="w-4 h-4 mr-2" />$
-            {formatNumber(strategyBudget.availableCredits)} Earning Potential
+            {formatNumber(profitData?.earningPotential || 0)} Earning Potential
           </Badge>
         </div>
       </div>
@@ -394,11 +394,10 @@ const ProfitSharingCenter: React.FC = () => {
 
         {/* Payment Due */}
         <TabsContent value="payment" className="space-y-6">
-          <Card className="border border-[#2a2d35] bg-[#1a1c23] relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-purple-500/5"></div>
+          <Card className="border-2 border-orange-200">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Receipt className="w-5 h-5 text-blue-600" />
+                <Receipt className="w-5 h-5 text-orange-600" />
                 Payment Due: {formatCurrency(profitData.platformFee)}
               </CardTitle>
               <CardDescription>
@@ -409,19 +408,19 @@ const ProfitSharingCenter: React.FC = () => {
             <CardContent className="space-y-6">
               {/* Payment Breakdown */}
               <div className="grid gap-4 md:grid-cols-3">
-                <div className="p-4 bg-emerald-50/80 rounded-lg border border-emerald-200 hover:shadow-lg hover:shadow-emerald-500/10 transition-all duration-300">
+                <div className="p-4 bg-green-50 rounded-lg border border-green-200">
                   <div className="flex items-center gap-2 mb-2">
-                    <TrendingUp className="w-4 h-4 text-emerald-600" />
-                    <span className="font-medium text-emerald-900">
+                    <TrendingUp className="w-4 h-4 text-green-600" />
+                    <span className="font-medium text-green-900">
                       Your Profits
                     </span>
                   </div>
-                  <div className="text-2xl font-bold text-emerald-600">
+                  <div className="text-2xl font-bold text-green-600">
                     {formatCurrency(profitData.totalProfit)}
                   </div>
                 </div>
 
-                <div className="p-4 bg-blue-50/80 rounded-lg border border-blue-200 hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300">
+                <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
                   <div className="flex items-center gap-2 mb-2">
                     <Calculator className="w-4 h-4 text-blue-600" />
                     <span className="font-medium text-blue-900">
@@ -433,7 +432,7 @@ const ProfitSharingCenter: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="p-4 bg-purple-50/80 rounded-lg border border-purple-200 hover:shadow-lg hover:shadow-purple-500/10 transition-all duration-300">
+                <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
                   <div className="flex items-center gap-2 mb-2">
                     <Coins className="w-4 h-4 text-purple-600" />
                     <span className="font-medium text-purple-900">
@@ -480,10 +479,10 @@ const ProfitSharingCenter: React.FC = () => {
                       key={crypto.id}
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
-                      className={`p-4 rounded-lg cursor-pointer transition-all ${
+                      className={`p-4 border-2 rounded-lg cursor-pointer transition-all ${
                         paymentMethod === crypto.id
-                          ? "bg-[#1e2128] border-[1px] border-blue-500/50 shadow-lg shadow-blue-500/10"
-                          : "bg-[#1a1c23] border-[1px] border-[#2a2d35] hover:bg-[#1e2128] hover:border-[#3a3d45]"
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-gray-300"
                       }`}
                       onClick={() => setPaymentMethod(crypto.id)}
                     >
@@ -508,7 +507,7 @@ const ProfitSharingCenter: React.FC = () => {
 
               <Button
                 onClick={processPayment}
-                className="w-full bg-gradient-to-r from-emerald-600 via-blue-600 to-purple-600 text-white py-4 mt-2 rounded-lg font-medium hover:shadow-lg hover:shadow-blue-500/20 transition-all duration-300"
+                className="w-full bg-gradient-to-r from-green-600 to-blue-600 text-white py-3"
                 size="lg"
               >
                 <CreditCard className="w-4 h-4 mr-2" />
@@ -516,13 +515,11 @@ const ProfitSharingCenter: React.FC = () => {
                 {profitData.creditsEarned} Credits
               </Button>
 
-              <div className="p-4 bg-[#1e2128] border-[1px] border-[#2a2d35] rounded-lg mt-4 hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300">
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <div className="flex items-start gap-3">
                   <CheckCircle className="w-5 h-5 text-blue-600 mt-0.5" />
                   <div>
-                    <h4 className="font-medium bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                      After Payment
-                    </h4>
+                    <h4 className="font-medium text-blue-900">After Payment</h4>
                     <p className="text-sm text-blue-700">
                       You'll have {profitData.creditsEarned} credits to purchase
                       additional strategies. Each credit represents $1 earning
@@ -713,7 +710,7 @@ const ProfitSharingCenter: React.FC = () => {
                     <Line
                       type="monotone"
                       dataKey="profit"
-                      stroke="#10b981"
+                      stroke="#22c55e"
                       strokeWidth={3}
                       name="Profit ($)"
                     />

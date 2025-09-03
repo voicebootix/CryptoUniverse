@@ -4,6 +4,13 @@ import { useExchanges } from "@/hooks/useExchanges";
 import { useArbitrage } from "@/hooks/useArbitrage";
 import ExchangeConnectionModal from "@/components/ExchangeConnectionModal";
 import ExchangeHubSettingsModal from "@/components/ExchangeHubSettingsModal";
+import ExportReportModal from "@/components/ExportReportModal";
+import { reportService } from "@/lib/services/reportService";
+import { ReportGenerationOptions, TradingReport } from "@/types/reports";
+import {
+  ExchangeSettings,
+  DEFAULT_EXCHANGE_SETTINGS,
+} from "@/types/exchange-settings";
 import {
   Globe,
   TrendingUp,
@@ -53,50 +60,17 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { formatCurrency, formatPercentage, formatNumber } from "@/lib/utils";
-
-// Type definition for Exchange Hub Settings
-interface ExchangeSettings {
-  // Connection Parameters
-  timeout_seconds: number;
-  rate_limit_per_minute: number;
-  max_retries: number;
-  connection_pool_size: number;
-
-  // Arbitrage Automation
-  auto_execute_arbitrage: boolean;
-  min_profit_threshold: number;
-  max_position_size: number;
-  risk_level: "conservative" | "moderate" | "aggressive";
-
-  // Trading Preferences
-  default_order_type: "market" | "limit";
-  max_slippage_percent: number;
-  order_routing_priority: "speed" | "cost" | "balanced";
-  enable_smart_routing: boolean;
-
-  // Data Refresh
-  price_update_interval: number;
-  balance_update_interval: number;
-  orderbook_depth: number;
-  enable_real_time: boolean;
-
-  // UI/UX Preferences
-  default_view: "grid" | "table" | "chart";
-  show_advanced_metrics: boolean;
-  enable_sound_notifications: boolean;
-  theme_mode: "dark" | "light" | "auto";
-
-  // Security Settings
-  show_api_keys: boolean;
-  enable_audit_logging: boolean;
-  require_2fa_for_trades: boolean;
-  session_timeout_minutes: number;
-}
 import {
   LineChart,
   Line,
@@ -171,45 +145,57 @@ const MultiExchangeHub: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [filterExchange, setFilterExchange] = useState<string>("all");
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
-  const [hubSettings, setHubSettings] = useState<ExchangeSettings>({
-    // Connection Parameters
-    timeout_seconds: 30,
-    rate_limit_per_minute: 100,
-    max_retries: 3,
-    connection_pool_size: 5,
-
-    // Arbitrage Automation
-    auto_execute_arbitrage: false,
-    min_profit_threshold: 0.5,
-    max_position_size: 10000,
-    risk_level: "moderate",
-
-    // Trading Preferences
-    default_order_type: "market",
-    max_slippage_percent: 1.0,
-    order_routing_priority: "balanced",
-    enable_smart_routing: true,
-
-    // Data Refresh
-    price_update_interval: 5,
-    balance_update_interval: 30,
-    orderbook_depth: 20,
-    enable_real_time: true,
-
-    // UI/UX Preferences
-    default_view: "grid",
-    show_advanced_metrics: false,
-    enable_sound_notifications: true,
-    theme_mode: "dark",
-
-    // Security Settings
-    show_api_keys: false,
-    enable_audit_logging: true,
-    require_2fa_for_trades: false,
-    session_timeout_minutes: 60,
-  });
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [hubSettings, setHubSettings] = useState<ExchangeSettings>(
+    DEFAULT_EXCHANGE_SETTINGS
+  );
 
   // Settings handlers
+  const handleExportReport = async (options: ReportGenerationOptions) => {
+    const reportData: TradingReport = {
+      timestamp: new Date().toISOString(),
+      total_balance: aggregatedStats.totalBalance,
+      total_pnl_24h: aggregatedStats.totalPnl24h,
+      total_volume_24h: aggregatedStats.totalTrades24h * 10000,
+      overall_win_rate: 68.5,
+      active_positions: Math.floor(aggregatedStats.totalTrades24h / 2),
+      exchanges: exchanges.map((ex) => ({
+        exchange_id: ex.id,
+        name: ex.nickname || EXCHANGE_NAMES[ex.exchange] || ex.exchange,
+        balance: ex.balance || 0,
+        pnl_24h: ex.pnl_24h || 0,
+        trades_24h: ex.trades_24h || 0,
+        win_rate: 65,
+        connection_status: ex.connection_status,
+        last_sync: new Date().toISOString(),
+      })),
+      arbitrage_opportunities: arbitrageOpportunities.map((opp) => ({
+        symbol: opp.pair,
+        buy_exchange: opp.buyExchange,
+        sell_exchange: opp.sellExchange,
+        buy_price: opp.buyPrice,
+        sell_price: opp.sellPrice,
+        spread_percentage: opp.spreadPct,
+        profit_percentage: opp.spreadPct,
+        profit_bps: opp.spreadPct * 100,
+        profit_usd: opp.profit,
+        volume_24h: 1000000,
+        volume_constraint: 1000000,
+        execution_complexity: opp.risk,
+        last_updated: new Date().toISOString(),
+      })),
+      performance_metrics: currentExchangePerformance.map((perf) => ({
+        exchange_name: perf.name,
+        trades: perf.trades,
+        win_rate: perf.winRate,
+        avg_profit: perf.avgProfit,
+        volume: perf.volume,
+      })),
+    };
+
+    await reportService.generateReport(reportData, options);
+  };
+
   const handleSaveSettings = async (newSettings: ExchangeSettings) => {
     try {
       // TODO: Save to backend API
@@ -322,7 +308,11 @@ const MultiExchangeHub: React.FC = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <Button variant="outline" size="sm">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowExportModal(true)}
+          >
             <Download className="w-4 h-4 mr-2" />
             Export Report
           </Button>
@@ -374,11 +364,35 @@ const MultiExchangeHub: React.FC = () => {
             <div className="flex justify-between items-start">
               <div>
                 <p className="text-sm font-medium text-green-400">24h P&L</p>
-                <p className="text-2xl font-bold mt-2 text-green-400">
-                  +{formatCurrency(aggregatedStats.totalPnl24h)}
+                <p
+                  className={`text-2xl font-bold mt-2 ${
+                    aggregatedStats.totalPnl24h > 0
+                      ? "text-green-400"
+                      : aggregatedStats.totalPnl24h < 0
+                      ? "text-red-400"
+                      : "text-gray-400"
+                  }`}
+                >
+                  {aggregatedStats.totalPnl24h > 0 ? "+" : ""}
+                  {formatCurrency(aggregatedStats.totalPnl24h)}
                 </p>
-                <p className="text-xs font-medium text-gray-400 mt-2">
-                  +{formatPercentage(2.64)}
+                <p
+                  className={`text-xs font-medium mt-2 ${
+                    aggregatedStats.totalPnl24h > 0
+                      ? "text-green-400"
+                      : aggregatedStats.totalPnl24h < 0
+                      ? "text-red-400"
+                      : "text-gray-400"
+                  }`}
+                >
+                  {aggregatedStats.totalPnl24h > 0 ? "+" : ""}
+                  {formatPercentage(
+                    Math.abs(
+                      (aggregatedStats.totalPnl24h /
+                        aggregatedStats.totalBalance) *
+                        100
+                    )
+                  )}
                 </p>
               </div>
               <div className="p-3 bg-green-500/10 rounded-xl">
@@ -711,7 +725,10 @@ const MultiExchangeHub: React.FC = () => {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={clearArbitrageError}
+                      onClick={() => {
+                        clearArbitrageError();
+                        refreshArbitrageData();
+                      }}
                       className="ml-auto"
                     >
                       Retry
@@ -833,12 +850,17 @@ const MultiExchangeHub: React.FC = () => {
                   value={filterExchange}
                   onValueChange={setFilterExchange}
                 >
-                  <option value="all">All Exchanges</option>
-                  {exchanges.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {EXCHANGE_NAMES[e.exchange] || e.exchange}
-                    </option>
-                  ))}
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="Select exchange" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Exchanges</SelectItem>
+                    {exchanges.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {EXCHANGE_NAMES[e.exchange] || e.exchange}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               </div>
             </div>
@@ -933,6 +955,13 @@ const MultiExchangeHub: React.FC = () => {
         onClose={() => setShowSettingsModal(false)}
         onSave={handleSaveSettings}
         initialSettings={hubSettings}
+      />
+
+      {/* Export Report Modal */}
+      <ExportReportModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        onExport={handleExportReport}
       />
     </div>
   );

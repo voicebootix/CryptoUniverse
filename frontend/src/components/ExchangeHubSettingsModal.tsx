@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   Settings,
@@ -28,49 +28,15 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Slider } from "./ui/slider";
 import { useToast } from "./ui/use-toast";
-
-interface ExchangeSettings {
-  // Connection Parameters
-  timeout_seconds: number;
-  rate_limit_per_minute: number;
-  max_retries: number;
-  connection_pool_size: number;
-
-  // Arbitrage Automation
-  auto_execute_arbitrage: boolean;
-  min_profit_threshold: number;
-  max_position_size: number;
-  risk_level: "conservative" | "moderate" | "aggressive";
-
-  // Trading Preferences
-  default_order_type: "market" | "limit";
-  max_slippage_percent: number;
-  order_routing_priority: "speed" | "cost" | "balanced";
-  enable_smart_routing: boolean;
-
-  // Data Refresh
-  price_update_interval: number;
-  balance_update_interval: number;
-  orderbook_depth: number;
-  enable_real_time: boolean;
-
-  // UI/UX Preferences
-  default_view: "grid" | "table" | "chart";
-  show_advanced_metrics: boolean;
-  enable_sound_notifications: boolean;
-  theme_mode: "dark" | "light" | "auto";
-
-  // Security Settings
-  show_api_keys: boolean;
-  enable_audit_logging: boolean;
-  require_2fa_for_trades: boolean;
-  session_timeout_minutes: number;
-}
+import {
+  ExchangeSettings,
+  DEFAULT_EXCHANGE_SETTINGS,
+} from "@/types/exchange-settings";
 
 interface ExchangeHubSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (settings: ExchangeSettings) => void;
+  onSave: (settings: ExchangeSettings) => Promise<void>;
   initialSettings: ExchangeSettings;
 }
 
@@ -84,6 +50,14 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
   const [activeTab, setActiveTab] = useState("connection");
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
+
+  // Sync settings when modal opens or initialSettings change
+  useEffect(() => {
+    if (isOpen) {
+      setSettings(initialSettings);
+      setSaving(false);
+    }
+  }, [isOpen, initialSettings]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -108,15 +82,18 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
   };
 
   const handleReset = () => {
-    setSettings(initialSettings);
+    setSettings(DEFAULT_EXCHANGE_SETTINGS);
     toast({
       title: "Settings Reset",
-      description: "All settings have been reset to their previous values.",
+      description: "All settings have been reset to defaults.",
       variant: "default",
     });
   };
 
-  const updateSetting = (key: keyof ExchangeSettings, value: any) => {
+  const updateSetting = <K extends keyof ExchangeSettings>(
+    key: K,
+    value: ExchangeSettings[K]
+  ) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -364,9 +341,9 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                         <Label className="text-gray-300">Risk Level</Label>
                         <Select
                           value={settings.risk_level}
-                          onValueChange={(value) =>
-                            updateSetting("risk_level", value)
-                          }
+                          onValueChange={(
+                            value: "conservative" | "moderate" | "aggressive"
+                          ) => updateSetting("risk_level", value)}
                         >
                           <SelectTrigger className="bg-[#1a1c23] border-[#2a2d35] text-gray-200">
                             <SelectValue />
@@ -401,7 +378,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                         </Label>
                         <Select
                           value={settings.default_order_type}
-                          onValueChange={(value) =>
+                          onValueChange={(value: "market" | "limit") =>
                             updateSetting("default_order_type", value)
                           }
                         >
@@ -446,9 +423,9 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                         </Label>
                         <Select
                           value={settings.order_routing_priority}
-                          onValueChange={(value) =>
-                            updateSetting("order_routing_priority", value)
-                          }
+                          onValueChange={(
+                            value: "speed" | "cost" | "balanced"
+                          ) => updateSetting("order_routing_priority", value)}
                         >
                           <SelectTrigger className="bg-[#1a1c23] border-[#2a2d35] text-gray-200">
                             <SelectValue />
@@ -584,7 +561,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                         <Label className="text-gray-300">Default View</Label>
                         <Select
                           value={settings.default_view}
-                          onValueChange={(value) =>
+                          onValueChange={(value: "grid" | "table" | "chart") =>
                             updateSetting("default_view", value)
                           }
                         >
@@ -603,7 +580,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                         <Label className="text-gray-300">Theme Mode</Label>
                         <Select
                           value={settings.theme_mode}
-                          onValueChange={(value) =>
+                          onValueChange={(value: "dark" | "light" | "auto") =>
                             updateSetting("theme_mode", value)
                           }
                         >
