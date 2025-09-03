@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
-import { apiClient } from '@/lib/api/client';
-import { useToast } from '@/components/ui/use-toast';
+import { useState, useEffect } from "react";
+import { apiClient } from "@/lib/api/client";
+import { useToast } from "@/components/ui/use-toast";
 
 export interface TelegramConnection {
   connected: boolean;
@@ -34,7 +34,7 @@ export const useTelegram = () => {
     voice_commands_enabled: false,
     is_authenticated: false,
     total_messages: 0,
-    total_commands: 0
+    total_commands: 0,
   });
   const [loading, setLoading] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -46,16 +46,16 @@ export const useTelegram = () => {
     try {
       setLoading(true);
       setError(null);
-      
-      const response = await apiClient.get('/telegram/connection');
+
+      const response = await apiClient.get("/telegram/connection");
       setConnection(response.data);
-      
     } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || 'Failed to fetch Telegram connection';
+      const errorMsg =
+        err.response?.data?.detail || "Failed to fetch Telegram connection";
       setError(errorMsg);
-      
+
       // Don't show toast for "not connected" errors
-      if (!errorMsg.includes('No Telegram')) {
+      if (!errorMsg.includes("No Telegram")) {
         toast({
           title: "Error",
           description: "Failed to load Telegram connection status",
@@ -73,11 +73,10 @@ export const useTelegram = () => {
       setConnecting(true);
       setError(null);
 
-      const response = await apiClient.post('/telegram/connect', config);
-      
+      const response = await apiClient.post("/telegram/connect", config);
       if (response.data.connection_id) {
         // Connection created, but not yet authenticated
-        setConnection(prev => ({
+        setConnection((prev) => ({
           ...prev,
           connected: true,
           connection_id: response.data.connection_id,
@@ -85,24 +84,24 @@ export const useTelegram = () => {
           trading_enabled: config.enable_trading,
           notifications_enabled: config.enable_notifications,
           voice_commands_enabled: config.enable_voice_commands,
-          is_authenticated: false
+          is_authenticated: false,
         }));
-        
+
         return response.data; // Return auth token and instructions
       } else {
-        throw new Error('Connection creation failed');
+        throw new Error("Connection creation failed");
       }
-      
     } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || 'Failed to connect Telegram';
+      const errorMsg =
+        err.response?.data?.detail || "Failed to connect Telegram";
       setError(errorMsg);
-      
+
       toast({
         title: "Connection Failed",
         description: errorMsg,
         variant: "destructive",
       });
-      
+
       throw err;
     } finally {
       setConnecting(false);
@@ -112,8 +111,8 @@ export const useTelegram = () => {
   // Disconnect Telegram account
   const disconnectTelegram = async () => {
     try {
-      await apiClient.delete('/telegram/disconnect');
-      
+      await apiClient.delete("/telegram/disconnect");
+
       setConnection({
         connected: false,
         is_active: false,
@@ -122,17 +121,17 @@ export const useTelegram = () => {
         voice_commands_enabled: false,
         is_authenticated: false,
         total_messages: 0,
-        total_commands: 0
+        total_commands: 0,
       });
-      
+
       toast({
         title: "Telegram Disconnected",
         description: "Your Telegram account has been disconnected",
         variant: "default",
       });
-      
     } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || 'Failed to disconnect Telegram';
+      const errorMsg =
+        err.response?.data?.detail || "Failed to disconnect Telegram";
       toast({
         title: "Error",
         description: errorMsg,
@@ -145,29 +144,28 @@ export const useTelegram = () => {
   // Send message to Telegram
   const sendMessage = async (message: string) => {
     try {
-      const response = await apiClient.post('/telegram/send-message', {
+      const response = await apiClient.post("/telegram/send-message", {
         message: message,
-        message_type: 'text'
+        message_type: "text",
       });
-      
+
       if (response.data.success) {
         toast({
           title: "Message Sent",
           description: "Message sent to your Telegram",
           variant: "default",
         });
-        
+
         // Update message count
-        setConnection(prev => ({
+        setConnection((prev) => ({
           ...prev,
-          total_messages: prev.total_messages + 1
+          total_messages: prev.total_messages + 1,
         }));
       }
-      
+
       return response.data;
-      
     } catch (err: any) {
-      const errorMsg = err.response?.data?.detail || 'Failed to send message';
+      const errorMsg = err.response?.data?.detail || "Failed to send message";
       toast({
         title: "Send Failed",
         description: errorMsg,
@@ -181,18 +179,17 @@ export const useTelegram = () => {
   const testConnection = async () => {
     try {
       const testMessage = `🧪 **Connection Test**\n\nTime: ${new Date().toLocaleString()}\nStatus: Connected and working!`;
-      
+
       await sendMessage(testMessage);
-      
+
       toast({
         title: "Test Successful",
         description: "Check your Telegram for the test message",
         variant: "default",
       });
-      
     } catch (err: any) {
       toast({
-        title: "Test Failed", 
+        title: "Test Failed",
         description: "Connection test failed - check your Telegram setup",
         variant: "destructive",
       });
@@ -214,7 +211,7 @@ export const useTelegram = () => {
       disconnectTelegram,
       sendMessage,
       testConnection,
-      fetchConnection
-    }
+      fetchConnection,
+    },
   };
 };

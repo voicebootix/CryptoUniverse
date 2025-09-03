@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Users,
   TrendingUp,
@@ -53,28 +53,48 @@ import {
   VolumeX,
   Play,
   Pause,
-  RefreshCw
-} from 'lucide-react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Progress } from '@/components/ui/progress';
-import { Avatar } from '@/components/ui/avatar';
-import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
-import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
+  RefreshCw,
+} from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
+import { Avatar } from "@/components/ui/avatar";
+import { formatCurrency, formatPercentage, formatNumber } from "@/lib/utils";
+import {
+  LineChart,
+  Line,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart as RechartsPieChart,
+  Pie,
+  Cell,
+  RadarChart,
+  Radar,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+} from "recharts";
 
 // Top Signal Providers
 const signalProviders = [
   {
     id: 1,
-    username: 'CryptoWhale',
-    avatar: '🐋',
+    username: "CryptoWhale",
+    avatar: "🐋",
     verified: true,
-    tier: 'platinum',
+    tier: "platinum",
     followers: 12453,
     winRate: 78.5,
     avgReturn: 24.3,
@@ -83,27 +103,48 @@ const signalProviders = [
     monthlyFee: 99,
     signals30d: 145,
     successRate: 82,
-    specialties: ['BTC', 'ETH', 'DeFi'],
+    specialties: ["BTC", "ETH", "DeFi"],
     performance: [
-      { month: 'Jan', return: 18.5 },
-      { month: 'Feb', return: 22.3 },
-      { month: 'Mar', return: 31.2 },
-      { month: 'Apr', return: 15.8 },
-      { month: 'May', return: 28.4 },
-      { month: 'Jun', return: 24.3 }
+      { month: "Jan", return: 18.5 },
+      { month: "Feb", return: 22.3 },
+      { month: "Mar", return: 31.2 },
+      { month: "Apr", return: 15.8 },
+      { month: "May", return: 28.4 },
+      { month: "Jun", return: 24.3 },
     ],
     recentSignals: [
-      { pair: 'BTC/USDT', type: 'LONG', entry: 43250, target: 44500, status: 'active', pnl: 2.3 },
-      { pair: 'ETH/USDT', type: 'SHORT', entry: 2280, target: 2150, status: 'closed', pnl: 5.7 },
-      { pair: 'SOL/USDT', type: 'LONG', entry: 98.5, target: 105, status: 'active', pnl: 3.2 }
-    ]
+      {
+        pair: "BTC/USDT",
+        type: "LONG",
+        entry: 43250,
+        target: 44500,
+        status: "active",
+        pnl: 2.3,
+      },
+      {
+        pair: "ETH/USDT",
+        type: "SHORT",
+        entry: 2280,
+        target: 2150,
+        status: "closed",
+        pnl: 5.7,
+      },
+      {
+        pair: "SOL/USDT",
+        type: "LONG",
+        entry: 98.5,
+        target: 105,
+        status: "active",
+        pnl: 3.2,
+      },
+    ],
   },
   {
     id: 2,
-    username: 'AITraderPro',
-    avatar: '🤖',
+    username: "AITraderPro",
+    avatar: "🤖",
     verified: true,
-    tier: 'gold',
+    tier: "gold",
     followers: 8932,
     winRate: 72.3,
     avgReturn: 18.7,
@@ -112,23 +153,23 @@ const signalProviders = [
     monthlyFee: 79,
     signals30d: 98,
     successRate: 75,
-    specialties: ['AI Signals', 'Scalping', 'Futures'],
+    specialties: ["AI Signals", "Scalping", "Futures"],
     performance: [
-      { month: 'Jan', return: 15.2 },
-      { month: 'Feb', return: 19.8 },
-      { month: 'Mar', return: 22.1 },
-      { month: 'Apr', return: 12.4 },
-      { month: 'May', return: 20.3 },
-      { month: 'Jun', return: 18.7 }
+      { month: "Jan", return: 15.2 },
+      { month: "Feb", return: 19.8 },
+      { month: "Mar", return: 22.1 },
+      { month: "Apr", return: 12.4 },
+      { month: "May", return: 20.3 },
+      { month: "Jun", return: 18.7 },
     ],
-    recentSignals: []
+    recentSignals: [],
   },
   {
     id: 3,
-    username: 'DeFiMaster',
-    avatar: '💎',
+    username: "DeFiMaster",
+    avatar: "💎",
     verified: true,
-    tier: 'platinum',
+    tier: "platinum",
     followers: 6543,
     winRate: 81.2,
     avgReturn: 32.1,
@@ -137,23 +178,23 @@ const signalProviders = [
     monthlyFee: 149,
     signals30d: 67,
     successRate: 85,
-    specialties: ['DeFi', 'Yield Farming', 'NFTs'],
+    specialties: ["DeFi", "Yield Farming", "NFTs"],
     performance: [
-      { month: 'Jan', return: 28.5 },
-      { month: 'Feb', return: 35.2 },
-      { month: 'Mar', return: 41.3 },
-      { month: 'Apr', return: 22.8 },
-      { month: 'May', return: 38.6 },
-      { month: 'Jun', return: 32.1 }
+      { month: "Jan", return: 28.5 },
+      { month: "Feb", return: 35.2 },
+      { month: "Mar", return: 41.3 },
+      { month: "Apr", return: 22.8 },
+      { month: "May", return: 38.6 },
+      { month: "Jun", return: 32.1 },
     ],
-    recentSignals: []
+    recentSignals: [],
   },
   {
     id: 4,
-    username: 'SwingKing',
-    avatar: '👑',
+    username: "SwingKing",
+    avatar: "👑",
     verified: false,
-    tier: 'silver',
+    tier: "silver",
     followers: 4321,
     winRate: 68.9,
     avgReturn: 14.2,
@@ -162,10 +203,10 @@ const signalProviders = [
     monthlyFee: 49,
     signals30d: 45,
     successRate: 70,
-    specialties: ['Swing Trading', 'Altcoins'],
+    specialties: ["Swing Trading", "Altcoins"],
     performance: [],
-    recentSignals: []
-  }
+    recentSignals: [],
+  },
 ];
 
 // Your Copy Trading Stats
@@ -178,60 +219,147 @@ const myStats = {
   winRate: 71.2,
   activeCopies: 12,
   monthlyProfit: 1850,
-  bestProvider: 'CryptoWhale',
-  worstProvider: 'SwingKing'
+  bestProvider: "CryptoWhale",
+  worstProvider: "SwingKing",
 };
 
 // Active Copied Trades
 const activeCopiedTrades = [
-  { id: 1, provider: 'CryptoWhale', pair: 'BTC/USDT', type: 'LONG', entry: 43250, current: 43680, pnl: 430, pnlPct: 0.99, status: 'active', copiedAt: '2h ago' },
-  { id: 2, provider: 'AITraderPro', pair: 'ETH/USDT', type: 'SHORT', entry: 2280, current: 2245, pnl: 350, pnlPct: 1.54, status: 'active', copiedAt: '4h ago' },
-  { id: 3, provider: 'DeFiMaster', pair: 'UNI/USDT', type: 'LONG', entry: 5.45, current: 5.68, pnl: 230, pnlPct: 4.22, status: 'active', copiedAt: '6h ago' },
-  { id: 4, provider: 'CryptoWhale', pair: 'SOL/USDT', type: 'LONG', entry: 98.5, current: 101.8, pnl: 330, pnlPct: 3.35, status: 'active', copiedAt: '1d ago' }
+  {
+    id: 1,
+    provider: "CryptoWhale",
+    pair: "BTC/USDT",
+    type: "LONG",
+    entry: 43250,
+    current: 43680,
+    pnl: 430,
+    pnlPct: 0.99,
+    status: "active",
+    copiedAt: "2h ago",
+  },
+  {
+    id: 2,
+    provider: "AITraderPro",
+    pair: "ETH/USDT",
+    type: "SHORT",
+    entry: 2280,
+    current: 2245,
+    pnl: 350,
+    pnlPct: 1.54,
+    status: "active",
+    copiedAt: "4h ago",
+  },
+  {
+    id: 3,
+    provider: "DeFiMaster",
+    pair: "UNI/USDT",
+    type: "LONG",
+    entry: 5.45,
+    current: 5.68,
+    pnl: 230,
+    pnlPct: 4.22,
+    status: "active",
+    copiedAt: "6h ago",
+  },
+  {
+    id: 4,
+    provider: "CryptoWhale",
+    pair: "SOL/USDT",
+    type: "LONG",
+    entry: 98.5,
+    current: 101.8,
+    pnl: 330,
+    pnlPct: 3.35,
+    status: "active",
+    copiedAt: "1d ago",
+  },
 ];
 
 // Leaderboard data
 const leaderboardData = [
-  { rank: 1, provider: 'CryptoWhale', return30d: 45.6, return90d: 134.2, followers: 12453, tier: 'platinum' },
-  { rank: 2, provider: 'DeFiMaster', return30d: 42.3, return90d: 128.7, followers: 6543, tier: 'platinum' },
-  { rank: 3, provider: 'AITraderPro', return30d: 38.7, return90d: 98.4, followers: 8932, tier: 'gold' },
-  { rank: 4, provider: 'QuantumTrader', return30d: 35.2, return90d: 89.3, followers: 5234, tier: 'gold' },
-  { rank: 5, provider: 'SwingKing', return30d: 28.9, return90d: 72.1, followers: 4321, tier: 'silver' }
+  {
+    rank: 1,
+    provider: "CryptoWhale",
+    return30d: 45.6,
+    return90d: 134.2,
+    followers: 12453,
+    tier: "platinum",
+  },
+  {
+    rank: 2,
+    provider: "DeFiMaster",
+    return30d: 42.3,
+    return90d: 128.7,
+    followers: 6543,
+    tier: "platinum",
+  },
+  {
+    rank: 3,
+    provider: "AITraderPro",
+    return30d: 38.7,
+    return90d: 98.4,
+    followers: 8932,
+    tier: "gold",
+  },
+  {
+    rank: 4,
+    provider: "QuantumTrader",
+    return30d: 35.2,
+    return90d: 89.3,
+    followers: 5234,
+    tier: "gold",
+  },
+  {
+    rank: 5,
+    provider: "SwingKing",
+    return30d: 28.9,
+    return90d: 72.1,
+    followers: 4321,
+    tier: "silver",
+  },
 ];
 
 const CopyTradingNetwork: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<string>('discover');
+  const [activeTab, setActiveTab] = useState<string>("discover");
   const [selectedProvider, setSelectedProvider] = useState<any>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [filterTier, setFilterTier] = useState<string>('all');
-  const [filterSpecialty, setFilterSpecialty] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<string>('returns');
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [filterTier, setFilterTier] = useState<string>("all");
+  const [filterSpecialty, setFilterSpecialty] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<string>("returns");
   const [autoCopy, setAutoCopy] = useState<boolean>(true);
   const [riskLimit, setRiskLimit] = useState<number>(3);
   const [showOnlyVerified, setShowOnlyVerified] = useState<boolean>(false);
 
   const getTierColor = (tier: string) => {
     switch (tier) {
-      case 'platinum': return 'from-gray-400 to-gray-600';
-      case 'gold': return 'from-yellow-400 to-yellow-600';
-      case 'silver': return 'from-gray-300 to-gray-500';
-      default: return 'from-blue-400 to-blue-600';
+      case "platinum":
+        return "from-gray-400 to-gray-600";
+      case "gold":
+        return "from-yellow-400 to-yellow-600";
+      case "silver":
+        return "from-gray-300 to-gray-500";
+      default:
+        return "from-blue-400 to-blue-600";
     }
   };
 
   const getTierIcon = (tier: string) => {
     switch (tier) {
-      case 'platinum': return <Crown className="w-4 h-4" />;
-      case 'gold': return <Trophy className="w-4 h-4" />;
-      case 'silver': return <Award className="w-4 h-4" />;
-      default: return <Star className="w-4 h-4" />;
+      case "platinum":
+        return <Crown className="w-4 h-4" />;
+      case "gold":
+        return <Trophy className="w-4 h-4" />;
+      case "silver":
+        return <Award className="w-4 h-4" />;
+      default:
+        return <Star className="w-4 h-4" />;
     }
   };
 
   const getRiskColor = (score: number) => {
-    if (score <= 2) return 'text-green-600';
-    if (score <= 3) return 'text-yellow-600';
-    return 'text-red-600';
+    if (score <= 2) return "text-green-600";
+    if (score <= 3) return "text-yellow-600";
+    return "text-red-600";
   };
 
   return (
@@ -242,7 +370,9 @@ const CopyTradingNetwork: React.FC = () => {
           <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
             Copy Trading Network
           </h1>
-          <p className="text-gray-500 mt-1">Follow and copy successful traders automatically</p>
+          <p className="text-gray-500 mt-1">
+            Follow and copy successful traders automatically
+          </p>
         </div>
         <div className="flex gap-3">
           <Button variant="outline" size="sm">
@@ -262,47 +392,96 @@ const CopyTradingNetwork: React.FC = () => {
 
       {/* Stats Overview */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="p-6 bg-gradient-to-br from-purple-50 to-pink-50 border-purple-200">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm text-gray-600">Total Return</p>
-              <p className="text-2xl font-bold mt-1">+{formatCurrency(myStats.totalReturn)}</p>
-              <p className="text-xs text-green-600 mt-1">+{formatPercentage(myStats.returnPct)}</p>
+        <Card className="relative overflow-hidden bg-[#1a1c23] border-[#2a2d35] hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300">
+          <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/10 to-purple-500/10"></div>
+          <div className="relative p-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-sm font-medium text-indigo-400">
+                  Total Return
+                </p>
+                <p className="text-2xl font-bold mt-2 text-white">
+                  +{formatCurrency(myStats.totalReturn)}
+                </p>
+                <div className="flex items-center gap-1 mt-2">
+                  <ArrowUpRight className="w-4 h-4 text-green-400" />
+                  <p className="text-sm font-medium text-green-400">
+                    +{formatPercentage(myStats.returnPct)}
+                  </p>
+                </div>
+              </div>
+              <div className="p-3 bg-indigo-500/10 rounded-xl">
+                <TrendingUp className="w-6 h-6 text-indigo-400" />
+              </div>
             </div>
-            <TrendingUp className="w-8 h-8 text-purple-600" />
           </div>
         </Card>
 
-        <Card className="p-6 bg-gradient-to-br from-blue-50 to-purple-50 border-blue-200">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm text-gray-600">Following</p>
-              <p className="text-2xl font-bold mt-1">{myStats.following} Providers</p>
-              <p className="text-xs text-gray-500 mt-1">{myStats.activeCopies} active copies</p>
+        <Card className="relative overflow-hidden bg-[#1a1c23] border-[#2a2d35] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300">
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-cyan-500/10"></div>
+          <div className="relative p-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-sm font-medium text-blue-400">Following</p>
+                <p className="text-2xl font-bold mt-2 text-white">
+                  {myStats.following}
+                </p>
+                <div className="flex items-center gap-1 mt-2">
+                  <p className="text-sm font-medium text-gray-400">
+                    {myStats.activeCopies} active copies
+                  </p>
+                </div>
+              </div>
+              <div className="p-3 bg-blue-500/10 rounded-xl">
+                <Users className="w-6 h-6 text-blue-400" />
+              </div>
             </div>
-            <Users className="w-8 h-8 text-blue-600" />
           </div>
         </Card>
 
-        <Card className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm text-gray-600">Win Rate</p>
-              <p className="text-2xl font-bold mt-1">{formatPercentage(myStats.winRate)}</p>
-              <p className="text-xs text-gray-500 mt-1">Last 30 days</p>
+        <Card className="relative overflow-hidden bg-[#1a1c23] border-[#2a2d35] hover:shadow-lg hover:shadow-emerald-500/10 transition-all duration-300">
+          <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-green-500/10"></div>
+          <div className="relative p-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-sm font-medium text-emerald-400">Win Rate</p>
+                <p className="text-2xl font-bold mt-2 text-white">
+                  {formatPercentage(myStats.winRate)}
+                </p>
+                <div className="flex items-center gap-1 mt-2">
+                  <p className="text-sm font-medium text-gray-400">
+                    Last 30 days
+                  </p>
+                </div>
+              </div>
+              <div className="p-3 bg-emerald-500/10 rounded-xl">
+                <Target className="w-6 h-6 text-emerald-400" />
+              </div>
             </div>
-            <Target className="w-8 h-8 text-green-600" />
           </div>
         </Card>
 
-        <Card className="p-6 bg-gradient-to-br from-orange-50 to-red-50 border-orange-200">
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm text-gray-600">Monthly Profit</p>
-              <p className="text-2xl font-bold mt-1">{formatCurrency(myStats.monthlyProfit)}</p>
-              <p className="text-xs text-gray-500 mt-1">This month</p>
+        <Card className="relative overflow-hidden bg-[#1a1c23] border-[#2a2d35] hover:shadow-lg hover:shadow-orange-500/10 transition-all duration-300">
+          <div className="absolute inset-0 bg-gradient-to-br from-orange-500/10 to-red-500/10"></div>
+          <div className="relative p-6">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="text-sm font-medium text-orange-400">
+                  Monthly Profit
+                </p>
+                <p className="text-2xl font-bold mt-2 text-white">
+                  {formatCurrency(myStats.monthlyProfit)}
+                </p>
+                <div className="flex items-center gap-1 mt-2">
+                  <p className="text-sm font-medium text-gray-400">
+                    This month
+                  </p>
+                </div>
+              </div>
+              <div className="p-3 bg-orange-500/10 rounded-xl">
+                <DollarSign className="w-6 h-6 text-orange-400" />
+              </div>
             </div>
-            <DollarSign className="w-8 h-8 text-orange-600" />
           </div>
         </Card>
       </div>
@@ -339,7 +518,10 @@ const CopyTradingNetwork: React.FC = () => {
                 <option value="gold">Gold</option>
                 <option value="silver">Silver</option>
               </Select>
-              <Select value={filterSpecialty} onValueChange={setFilterSpecialty}>
+              <Select
+                value={filterSpecialty}
+                onValueChange={setFilterSpecialty}
+              >
                 <option value="all">All Specialties</option>
                 <option value="btc">BTC Trading</option>
                 <option value="defi">DeFi</option>
@@ -353,7 +535,10 @@ const CopyTradingNetwork: React.FC = () => {
                 <option value="signals">Most Signals</option>
               </Select>
               <div className="flex items-center gap-2">
-                <Switch checked={showOnlyVerified} onCheckedChange={setShowOnlyVerified} />
+                <Switch
+                  checked={showOnlyVerified}
+                  onCheckedChange={setShowOnlyVerified}
+                />
                 <span className="text-sm">Verified Only</span>
               </div>
             </div>
@@ -381,8 +566,14 @@ const CopyTradingNetwork: React.FC = () => {
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-lg">{provider.username}</h3>
-                          <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r ${getTierColor(provider.tier)} text-white text-xs`}>
+                          <h3 className="font-semibold text-lg">
+                            {provider.username}
+                          </h3>
+                          <div
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r ${getTierColor(
+                              provider.tier
+                            )} text-white text-xs`}
+                          >
                             {getTierIcon(provider.tier)}
                             <span>{provider.tier}</span>
                           </div>
@@ -399,7 +590,10 @@ const CopyTradingNetwork: React.FC = () => {
                         </div>
                       </div>
                     </div>
-                    <Button size="sm" className="bg-gradient-to-r from-purple-600 to-pink-600 text-white">
+                    <Button
+                      size="sm"
+                      className="bg-gradient-to-r from-purple-600 to-pink-600 text-white"
+                    >
                       <UserPlus className="w-4 h-4 mr-1" />
                       Follow
                     </Button>
@@ -408,26 +602,43 @@ const CopyTradingNetwork: React.FC = () => {
                   <div className="grid grid-cols-3 gap-4 mb-4">
                     <div>
                       <p className="text-xs text-gray-500">Win Rate</p>
-                      <p className="text-lg font-semibold text-green-600">{formatPercentage(provider.winRate)}</p>
+                      <p className="text-lg font-semibold text-green-600">
+                        {formatPercentage(provider.winRate)}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500">Avg Return</p>
-                      <p className="text-lg font-semibold">{formatPercentage(provider.avgReturn)}</p>
+                      <p className="text-lg font-semibold">
+                        {formatPercentage(provider.avgReturn)}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500">Risk Score</p>
-                      <p className={`text-lg font-semibold ${getRiskColor(provider.riskScore)}`}>
+                      <p
+                        className={`text-lg font-semibold ${getRiskColor(
+                          provider.riskScore
+                        )}`}
+                      >
                         {provider.riskScore}/5
                       </p>
                     </div>
                   </div>
 
                   <div className="mb-4">
-                    <p className="text-xs text-gray-500 mb-2">Performance (6 months)</p>
+                    <p className="text-xs text-gray-500 mb-2">
+                      Performance (6 months)
+                    </p>
                     {provider.performance.length > 0 && (
                       <ResponsiveContainer width="100%" height={60}>
                         <AreaChart data={provider.performance}>
-                          <Area type="monotone" dataKey="return" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} strokeWidth={2} />
+                          <Area
+                            type="monotone"
+                            dataKey="return"
+                            stroke="#8b5cf6"
+                            fill="#8b5cf6"
+                            fillOpacity={0.3}
+                            strokeWidth={2}
+                          />
                         </AreaChart>
                       </ResponsiveContainer>
                     )}
@@ -442,28 +653,50 @@ const CopyTradingNetwork: React.FC = () => {
                       ))}
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-semibold">${provider.monthlyFee}/mo</p>
+                      <p className="text-sm font-semibold">
+                        ${provider.monthlyFee}/mo
+                      </p>
                       <p className="text-xs text-gray-500">Subscription</p>
                     </div>
                   </div>
 
                   {provider.recentSignals.length > 0 && (
                     <div className="mt-4 pt-4 border-t">
-                      <p className="text-xs text-gray-500 mb-2">Recent Signals</p>
+                      <p className="text-xs text-gray-500 mb-2">
+                        Recent Signals
+                      </p>
                       <div className="space-y-2">
-                        {provider.recentSignals.slice(0, 2).map((signal, idx) => (
-                          <div key={idx} className="flex items-center justify-between text-sm">
-                            <div className="flex items-center gap-2">
-                                                      <Badge variant={signal.type === 'LONG' ? 'default' : 'destructive'}>
-                          {signal.type}
-                        </Badge>
-                              <span>{signal.pair}</span>
+                        {provider.recentSignals
+                          .slice(0, 2)
+                          .map((signal, idx) => (
+                            <div
+                              key={idx}
+                              className="flex items-center justify-between text-sm"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  variant={
+                                    signal.type === "LONG"
+                                      ? "default"
+                                      : "destructive"
+                                  }
+                                >
+                                  {signal.type}
+                                </Badge>
+                                <span>{signal.pair}</span>
+                              </div>
+                              <span
+                                className={`font-medium ${
+                                  signal.pnl >= 0
+                                    ? "text-green-600"
+                                    : "text-red-600"
+                                }`}
+                              >
+                                {signal.pnl >= 0 ? "+" : ""}
+                                {signal.pnl}%
+                              </span>
                             </div>
-                            <span className={`font-medium ${signal.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {signal.pnl >= 0 ? '+' : ''}{signal.pnl}%
-                            </span>
-                          </div>
-                        ))}
+                          ))}
                       </div>
                     </div>
                   )}
@@ -475,21 +708,30 @@ const CopyTradingNetwork: React.FC = () => {
 
         <TabsContent value="following">
           <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-4">Providers You're Following</h3>
+            <h3 className="text-lg font-semibold mb-4">
+              Providers You're Following
+            </h3>
             <div className="space-y-4">
               {signalProviders.slice(0, 3).map((provider) => (
-                <div key={provider.id} className="flex items-center justify-between p-4 border rounded-lg">
+                <div
+                  key={provider.id}
+                  className="flex items-center justify-between p-4 border rounded-lg"
+                >
                   <div className="flex items-center gap-4">
                     <div className="text-3xl">{provider.avatar}</div>
                     <div>
                       <p className="font-semibold">{provider.username}</p>
-                      <p className="text-sm text-gray-500">Following since Dec 2023</p>
+                      <p className="text-sm text-gray-500">
+                        Following since Dec 2023
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-6">
                     <div>
                       <p className="text-sm text-gray-500">Your Return</p>
-                      <p className="text-lg font-semibold text-green-600">+{formatPercentage(provider.avgReturn)}</p>
+                      <p className="text-lg font-semibold text-green-600">
+                        +{formatPercentage(provider.avgReturn)}
+                      </p>
                     </div>
                     <div className="flex items-center gap-2">
                       <Switch checked={true} />
@@ -542,22 +784,35 @@ const CopyTradingNetwork: React.FC = () => {
                       <td className="py-3">{trade.provider}</td>
                       <td className="py-3 font-medium">{trade.pair}</td>
                       <td className="py-3">
-                        <Badge variant={trade.type === 'LONG' ? 'default' : 'destructive'}>
+                        <Badge
+                          variant={
+                            trade.type === "LONG" ? "default" : "destructive"
+                          }
+                        >
                           {trade.type}
                         </Badge>
                       </td>
                       <td className="py-3">${trade.entry}</td>
                       <td className="py-3">${trade.current}</td>
                       <td className="py-3">
-                        <div className={`font-semibold ${trade.pnl >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {trade.pnl >= 0 ? '+' : ''}{formatCurrency(trade.pnl)}
-                          <span className="text-xs ml-1">({trade.pnlPct}%)</span>
+                        <div
+                          className={`font-semibold ${
+                            trade.pnl >= 0 ? "text-green-600" : "text-red-600"
+                          }`}
+                        >
+                          {trade.pnl >= 0 ? "+" : ""}
+                          {formatCurrency(trade.pnl)}
+                          <span className="text-xs ml-1">
+                            ({trade.pnlPct}%)
+                          </span>
                         </div>
                       </td>
                       <td className="py-3">
                         <Badge variant="default">Active</Badge>
                       </td>
-                      <td className="py-3 text-sm text-gray-500">{trade.copiedAt}</td>
+                      <td className="py-3 text-sm text-gray-500">
+                        {trade.copiedAt}
+                      </td>
                       <td className="py-3">
                         <Button variant="outline" size="sm">
                           Close
@@ -592,18 +847,34 @@ const CopyTradingNetwork: React.FC = () => {
                     <tr key={item.rank} className="border-b hover:bg-gray-50">
                       <td className="py-3">
                         <div className="flex items-center gap-2">
-                          {item.rank === 1 && <Trophy className="w-5 h-5 text-yellow-500" />}
-                          {item.rank === 2 && <Trophy className="w-5 h-5 text-gray-400" />}
-                          {item.rank === 3 && <Trophy className="w-5 h-5 text-orange-600" />}
-                          {item.rank > 3 && <span className="ml-6">{item.rank}</span>}
+                          {item.rank === 1 && (
+                            <Trophy className="w-5 h-5 text-yellow-500" />
+                          )}
+                          {item.rank === 2 && (
+                            <Trophy className="w-5 h-5 text-gray-400" />
+                          )}
+                          {item.rank === 3 && (
+                            <Trophy className="w-5 h-5 text-orange-600" />
+                          )}
+                          {item.rank > 3 && (
+                            <span className="ml-6">{item.rank}</span>
+                          )}
                         </div>
                       </td>
                       <td className="py-3 font-semibold">{item.provider}</td>
-                      <td className="py-3 text-green-600 font-medium">+{formatPercentage(item.return30d)}</td>
-                      <td className="py-3 text-green-600 font-medium">+{formatPercentage(item.return90d)}</td>
+                      <td className="py-3 text-green-600 font-medium">
+                        +{formatPercentage(item.return30d)}
+                      </td>
+                      <td className="py-3 text-green-600 font-medium">
+                        +{formatPercentage(item.return90d)}
+                      </td>
                       <td className="py-3">{formatNumber(item.followers)}</td>
                       <td className="py-3">
-                        <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r ${getTierColor(item.tier)} text-white text-xs`}>
+                        <div
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r ${getTierColor(
+                            item.tier
+                          )} text-white text-xs`}
+                        >
                           {getTierIcon(item.tier)}
                           <span>{item.tier}</span>
                         </div>
@@ -624,14 +895,20 @@ const CopyTradingNetwork: React.FC = () => {
         <TabsContent value="signals">
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Live Signal Feed</h3>
-            <p className="text-gray-500">Real-time signals from providers you follow...</p>
+            <p className="text-gray-500">
+              Real-time signals from providers you follow...
+            </p>
           </Card>
         </TabsContent>
 
         <TabsContent value="performance">
           <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-4">Your Copy Trading Performance</h3>
-            <p className="text-gray-500">Detailed performance analytics coming soon...</p>
+            <h3 className="text-lg font-semibold mb-4">
+              Your Copy Trading Performance
+            </h3>
+            <p className="text-gray-500">
+              Detailed performance analytics coming soon...
+            </p>
           </Card>
         </TabsContent>
       </Tabs>
