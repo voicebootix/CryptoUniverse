@@ -8,6 +8,7 @@ for development environments.
 import logging
 import sys
 from typing import Any, Dict, List, Optional
+import json
 
 import structlog
 from structlog.processors import JSONRenderer
@@ -84,7 +85,7 @@ def configure_logging(log_level: str = "INFO", environment: str = "development")
         rotating_handler.setFormatter(structlog.stdlib.ProcessorFormatter(
             processor=structlog.dev.ConsoleRenderer()
         ))
-        logger.addHandler(rotating_handler)
+        logging.getLogger().addHandler(rotating_handler)
         
         # Set root level to WARNING
         logging.getLogger().setLevel(logging.WARNING)
@@ -361,6 +362,9 @@ class BusinessLogger:
 trade_logger = TradeLogger()
 security_logger = SecurityLogger()
 business_logger = BusinessLogger()
+
+# Default logger that can be imported by other modules
+logger = structlog.get_logger(__name__)
 
 
 # Audit logging decorator

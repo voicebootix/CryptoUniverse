@@ -1,0 +1,100 @@
+[33mcommit d24bd634aaad998782559ece69fe6dd9167ca38f[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: Angajan Ramanathan <angajan@gmail.com>
+Date:   Tue Sep 2 20:43:26 2025 +0530
+
+    fix: Add missing limit decorator to RateLimitService
+
+ app/services/rate_limit.py | 93 [32m++++++++++++++++++++++++++++++++++++++++++++++[m
+ 1 file changed, 93 insertions(+)
+
+[33mcommit 315f13ee375ca3712fc0eec9891d87866e1b08d9[m
+Author: Angajan Ramanathan <angajan@gmail.com>
+Date:   Tue Sep 2 20:35:12 2025 +0530
+
+    feat: Implement secure API key management with IP whitelisting and rate limiting
+    
+    - Add IP whitelisting for API keys
+    - Implement rate limiting per API key
+    - Add secure key generation and rotation
+    - Add background tasks for key management
+    - Update API endpoints for key management
+
+ app/api/dependencies/auth.py     |  77 [32m++++++[m
+ app/api/v1/endpoints/api_keys.py | 319 [32m++++++++++++++++++++++[m
+ app/api/v1/endpoints/auth.py     | 186 [32m+++++++++[m[31m----[m
+ app/api/v1/router.py             |   8 [32m+[m[31m-[m
+ app/core/api_keys.py             | 571 [32m+++++++++++++++++++++++++++++++++++++++[m
+ app/core/caching.py              | 427 [32m+++++++++++++++++++++++++++++[m
+ app/core/circuit_breaker.py      | 335 [32m+++++++++++++++++++++++[m
+ app/core/security.py             | 332 [32m+++++++++++++++++++++++[m
+ app/middleware/auth.py           | 207 [32m+++++++++++++[m[31m-[m
+ app/middleware/rate_limit.py     | 215 [32m++++++++++++++[m[31m-[m
+ app/tasks/api_key_tasks.py       |  58 [32m++++[m
+ 11 files changed, 2666 insertions(+), 69 deletions(-)
+
+[33mcommit 715b48f6cb46423f329944c03521f6bac6566986[m
+Author: Angajan Ramanathan <angajan@gmail.com>
+Date:   Tue Sep 2 19:20:06 2025 +0530
+
+    fix: update environment variable check in logging configuration
+
+ app/core/logging.py | 2 [32m+[m[31m-[m
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+[33mcommit b883c23cdbf460400b9801ed475ae7da92a50e68[m
+Merge: 40b7668d f0cdfc85
+Author: voicebootix <angajan@gmail.com>
+Date:   Tue Sep 2 18:59:03 2025 +0530
+
+    Merge pull request #23 from voicebootix/cursor/fix-logging-settings-name-error-58de
+    
+    Fix logging settings name error
+
+ __pycache__/main.cpython-313.pyc              | Bin [31m0[m -> [32m15748[m bytes
+ app/__pycache__/__init__.cpython-313.pyc      | Bin [31m367[m -> [32m367[m bytes
+ app/core/__pycache__/__init__.cpython-313.pyc | Bin [31m168[m -> [32m168[m bytes
+ app/core/__pycache__/logging.cpython-313.pyc  | Bin [31m13103[m -> [32m14030[m bytes
+ app/core/logging.py                           |   4 [32m++++[m
+ 5 files changed, 4 insertions(+)
+
+[33mcommit f0cdfc850b4df8e79b4ffe9ad45d1b9de028c3d3[m[33m ([m[1;31morigin/cursor/fix-logging-settings-name-error-58de[m[33m)[m
+Author: Cursor Agent <cursoragent@cursor.com>
+Date:   Tue Sep 2 13:20:16 2025 +0000
+
+    Configure logging and add settings to logging configuration
+    
+    Co-authored-by: angajan <angajan@gmail.com>
+
+ __pycache__/main.cpython-313.pyc              | Bin [31m0[m -> [32m15748[m bytes
+ app/__pycache__/__init__.cpython-313.pyc      | Bin [31m367[m -> [32m367[m bytes
+ app/core/__pycache__/__init__.cpython-313.pyc | Bin [31m168[m -> [32m168[m bytes
+ app/core/__pycache__/logging.cpython-313.pyc  | Bin [31m13103[m -> [32m14030[m bytes
+ app/core/logging.py                           |   4 [32m++++[m
+ 5 files changed, 4 insertions(+)
+
+[33mcommit 40b7668d5a54b9568c4d410f25b2f7bfc19330ba[m
+Author: kopi03 <navakoilan@gmail.com>
+Date:   Tue Sep 2 17:07:38 2025 +0530
+
+    ENTERPRISE FIX: Resolved IndentationError in background.py + added error handling/logging/validation
+    
+     Fixed syntax error causing deploy failure (proper try block indentation)
+     Added except/finally with full stack trace logging
+     Inline validation for discovery results (warn on empty)
+     Preserves dynamic asset discovery for all opportunities - no limits/hardcodes
+    
+    Login timeouts resolved post-deploy. Platform stable!
+
+ app/services/background.py | 101 [32m+++++++++++++++[m[31m------------------------------[m
+ 1 file changed, 33 insertions(+), 68 deletions(-)
+
+[33mcommit cc2de30c86cbc5e51c0f8d10f17208ea12d610dc[m
+Author: kopi03 <navakoilan@gmail.com>
+Date:   Tue Sep 2 16:57:14 2025 +0530
+
+    EMERGENCY PRODUCTION FIXES: Applied auto-fixes for login, nonce, queries, sync, and logging as per user request
+
+ app/api/v1/endpoints/auth.py      |  1 [32m+[m
+ app/services/background.py        |  5 [32m++++[m
+ app/services/market_data_feeds.py | 55 [32m++++++++++++[m[31m---------------------------[m
+ 3 files changed, 22 insertions(+), 39 deletions(-)
