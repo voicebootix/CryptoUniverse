@@ -1697,6 +1697,11 @@ class MasterSystemController(LoggerMixin):
             
             self.logger.info(f"🤖 Running autonomous cycle for {len(autonomous_keys)} users")
             
+            # PERFORMANCE OPTIMIZATION: Skip expensive operations if no users are active
+            if len(autonomous_keys) == 0:
+                self.logger.debug("No active autonomous users - skipping cycle")
+                return
+            
             for key in autonomous_keys:
                 user_id = key.decode().split(":")[-1]
                 

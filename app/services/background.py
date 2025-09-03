@@ -451,6 +451,7 @@ class BackgroundServiceManager(LoggerMixin):
         # ENTERPRISE: Comprehensive fallback with ALL profitable cryptos
         if len(all_discovered_symbols) < 50:  # Only if discovery seriously failed
             comprehensive_fallback = self._get_comprehensive_crypto_universe()
+            # comprehensive_fallback is already a set, so we can update directly
             all_discovered_symbols.update(comprehensive_fallback)
             self.logger.warning(
                 f"Enhanced fallback: added {len(comprehensive_fallback)} symbols",
@@ -679,6 +680,15 @@ class BackgroundServiceManager(LoggerMixin):
     async def _calculate_adaptive_cycle_interval(self) -> int:
         """Calculate adaptive cycle interval based on market conditions and activity."""
         try:
+            # PERFORMANCE OPTIMIZATION: Check if any users are active first
+            redis = await get_redis_client()
+            if redis:
+                autonomous_keys = await redis.keys("autonomous_active:*")
+                if len(autonomous_keys) == 0:
+                    # No active users - use very long interval to save CPU
+                    self.logger.debug("No active users - using extended cycle interval")
+                    return 300  # 5 minutes when no users are active
+            
             from app.services.market_analysis_core import MarketAnalysisService
             
             # Get current market volatility
