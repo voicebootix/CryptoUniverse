@@ -96,6 +96,7 @@ class SystemMonitoringService:
         self.alert_history = deque(maxlen=100)
         self.monitoring_active = False
         self._monitoring_task = None
+        self._alerts_lock = asyncio.Lock()  # Protect concurrent access to active_alerts
         
         # Monitoring thresholds
         self.thresholds = {
@@ -272,9 +273,51 @@ class SystemMonitoringService:
                         timestamp=current_time
                     )
                     await self._add_alert(alert)
+                
+                # Auto-resolve alerts when metrics return to normal
+                else:
+                    await self._auto_resolve_alerts(metric_name, current_value)
         
         except Exception as e:
             logger.error("Failed to check alert conditions", error=str(e))
+    
+    async def _auto_resolve_alerts(self, metric_name: str, current_value: float):
+        """Auto-resolve alerts when metrics return to normal levels."""
+        try:
+            # Guard against missing threshold entries
+            if metric_name not in self.thresholds:
+                logger.debug("No threshold found for metric", metric=metric_name)
+                return
+            
+            threshold_config = self.thresholds.get(metric_name)
+            if not threshold_config or "warning" not in threshold_config:
+                logger.debug("No warning threshold found for metric", metric=metric_name)
+                return
+            
+            async with self._alerts_lock:
+                for alert in self.active_alerts:
+                    if not alert.resolved:
+                        # Defensively parse alert message
+                        message_parts = alert.message.split(':')
+                        if len(message_parts) < 2:
+                            logger.debug("Malformed alert message", message=alert.message)
+                            continue
+                        
+                        alert_metric = message_parts[0].strip()
+                        if alert_metric == metric_name:
+                            # Resolve alert if metric is now below warning threshold
+                            threshold = threshold_config["warning"]
+                            if current_value < threshold:
+                                alert.resolved = True
+                                logger.info(
+                                    "Alert auto-resolved", 
+                                    metric=metric_name, 
+                                    current_value=current_value,
+                                    threshold=threshold,
+                                    alert_id=alert.id
+                                )
+        except Exception as e:
+            logger.exception("Auto-resolve failed", metric=metric_name)
     
     async def _trigger_disk_cleanup(self):
         """ENTERPRISE: Aggressive disk cleanup when usage is critical."""
@@ -389,13 +432,52 @@ class SystemMonitoringService:
             logger.error("Disk cleanup failed", error=str(e))
     
     async def _add_alert(self, alert: SystemAlert):
-        """Add alert if not already active."""
-        # Check if similar alert already exists
-        existing = [a for a in self.active_alerts if a.message == alert.message and not a.resolved]
-        if not existing:
-            self.active_alerts.append(alert)
-            self.alert_history.append(alert)
-            logger.warning("System alert generated", alert=alert.message, severity=alert.severity)
+        """Add alert if not already active, or update existing alert with current timestamp."""
+        async with self._alerts_lock:
+            # Check if similar alert type already exists (by metric name and severity)
+            message_parts = alert.message.split(':')
+            if len(message_parts) < 2:
+                logger.debug("Malformed alert message", message=alert.message)
+                return
+                
+            metric_name = message_parts[0].strip()  # Extract metric name (e.g., "disk_usage_pct")
+            existing_idx = None
+            
+            for idx, existing_alert in enumerate(self.active_alerts):
+                if not existing_alert.resolved:
+                    existing_parts = existing_alert.message.split(':')
+                    if len(existing_parts) >= 2:
+                        existing_metric = existing_parts[0].strip()
+                        if existing_metric == metric_name and existing_alert.severity == alert.severity:
+                            existing_idx = idx
+                            break
+            
+            if existing_idx is not None:
+                # Update existing alert with new timestamp and message (live values)
+                # Preserve the original alert ID for client stability
+                self.active_alerts[existing_idx].message = alert.message
+                self.active_alerts[existing_idx].timestamp = alert.timestamp
+                logger.info("System alert updated", alert=alert.message, severity=alert.severity)
+            else:
+                # Add new alert
+                self.active_alerts.append(alert)
+                self.alert_history.append(alert)
+                logger.warning("System alert generated", alert=alert.message, severity=alert.severity)
+        
+        # Clean up old resolved alerts (keep last 10 resolved alerts per metric)
+        await self._cleanup_old_alerts()
+    
+    async def _cleanup_old_alerts(self):
+        """Clean up old resolved alerts to prevent memory buildup."""
+        try:
+            # Remove resolved alerts older than 1 hour
+            cutoff_time = datetime.utcnow() - timedelta(hours=1)
+            self.active_alerts = [
+                alert for alert in self.active_alerts 
+                if not alert.resolved or alert.timestamp >= cutoff_time
+            ]
+        except Exception as e:
+            logger.debug("Alert cleanup failed", error=str(e))
     
     def get_monitoring_status(self) -> Dict[str, Any]:
         """Get comprehensive monitoring status."""
@@ -408,30 +490,54 @@ class SystemMonitoringService:
             "thresholds": self.thresholds
         }
     
-    def get_active_alerts(self) -> List[Dict[str, Any]]:
+    async def get_active_alerts(self) -> List[Dict[str, Any]]:
         """Get all active alerts."""
-        return [
-            {
-                "id": alert.id,
-                "severity": alert.severity,
-                "message": alert.message,
-                "timestamp": alert.timestamp.isoformat(),
-                "resolved": alert.resolved
-            }
-            for alert in self.active_alerts if not alert.resolved
-        ]
+        async with self._alerts_lock:
+            return [
+                {
+                    "id": alert.id,
+                    "severity": alert.severity,
+                    "message": alert.message,
+                    "timestamp": alert.timestamp.isoformat(),
+                    "resolved": alert.resolved
+                }
+                for alert in self.active_alerts if not alert.resolved
+            ]
     
-    def resolve_alert(self, alert_id: str) -> bool:
+    async def resolve_alert(self, alert_id: str) -> bool:
         """Mark an alert as resolved."""
-        for alert in self.active_alerts:
-            if alert.id == alert_id:
-                alert.resolved = True
-                logger.info("Alert resolved", alert_id=alert_id)
-                return True
-        return False
+        async with self._alerts_lock:
+            for alert in self.active_alerts:
+                if alert.id == alert_id:
+                    alert.resolved = True
+                    logger.info("Alert resolved", alert_id=alert_id)
+                    return True
+            return False
     
-    def get_metrics_dashboard(self, duration_minutes: int = 60) -> Dict[str, Any]:
+    async def clear_all_alerts(self) -> Dict[str, Any]:
+        """Clear all active alerts (for testing/reset purposes)."""
+        async with self._alerts_lock:
+            cleared_count = len([a for a in self.active_alerts if not a.resolved])
+            self.active_alerts.clear()  # Clear in place to avoid race conditions
+            logger.info("All alerts cleared", cleared_count=cleared_count)
+            return {
+                "success": True,
+                "cleared_count": cleared_count,
+                "message": f"Cleared {cleared_count} active alerts"
+            }
+    
+    async def get_metrics_dashboard(self, duration_minutes: int = 60) -> Dict[str, Any]:
         """Get comprehensive metrics dashboard."""
+        active_alerts = await self.get_active_alerts()
+        
+        async with self._alerts_lock:
+            alert_summary = {
+                "active": len([a for a in self.active_alerts if not a.resolved]),
+                "total": len(self.alert_history),
+                "critical": len([a for a in self.active_alerts if a.severity == "critical" and not a.resolved]),
+                "warnings": len([a for a in self.active_alerts if a.severity == "warning" and not a.resolved])
+            }
+        
         return {
             "system_overview": {
                 "monitoring_active": self.monitoring_active,
@@ -439,13 +545,8 @@ class SystemMonitoringService:
                 "timestamp": datetime.utcnow().isoformat()
             },
             "metrics": self.metrics_collector.get_all_metrics_summary(duration_minutes),
-            "active_alerts": self.get_active_alerts(),
-            "alert_summary": {
-                "active": len([a for a in self.active_alerts if not a.resolved]),
-                "total": len(self.alert_history),
-                "critical": len([a for a in self.active_alerts if a.severity == "critical" and not a.resolved]),
-                "warnings": len([a for a in self.active_alerts if a.severity == "warning" and not a.resolved])
-            }
+            "active_alerts": active_alerts,
+            "alert_summary": alert_summary
         }
 
 
