@@ -1,0 +1,481 @@
+{
+  "api_name": "CryptoUniverse Enterprise API",
+  "base_url": "https://cryptouniverse.onrender.com/api/v1",
+  "base_url_dev": "http://localhost:8000/api/v1",
+  "authentication": {
+    "type": "Bearer Token",
+    "header": "Authorization",
+    "value_format": "Bearer {token}",
+    "login_endpoint": "/auth/login",
+    "test_credentials": {
+      "email": "test@cryptouniverse.com",
+      "password": "TestPassword123!"
+    }
+  },
+  "endpoints": [
+    {
+      "name": "System Health Check",
+      "method": "GET",
+      "path": "/health",
+      "auth_required": false,
+      "description": "Check system health and status",
+      "expected_status": 200,
+      "tags": ["system", "health"]
+    },
+    {
+      "name": "API Status",
+      "method": "GET", 
+      "path": "/api/v1/status",
+      "auth_required": false,
+      "description": "Get API status and version info",
+      "expected_status": 200,
+      "tags": ["system", "status"]
+    },
+    {
+      "name": "User Login",
+      "method": "POST",
+      "path": "/auth/login",
+      "auth_required": false,
+      "description": "Authenticate user and get JWT token",
+      "body": {
+        "email": "test@cryptouniverse.com",
+        "password": "TestPassword123!"
+      },
+      "expected_status": 200,
+      "response_contains": ["access_token", "refresh_token"],
+      "tags": ["auth", "login"]
+    },
+    {
+      "name": "User Registration",
+      "method": "POST",
+      "path": "/auth/register",
+      "auth_required": false,
+      "description": "Register new user account",
+      "body": {
+        "email": "testuser@example.com",
+        "password": "SecurePass123!",
+        "full_name": "Test User"
+      },
+      "expected_status": 201,
+      "tags": ["auth", "registration"]
+    },
+    {
+      "name": "Refresh Token",
+      "method": "POST",
+      "path": "/auth/refresh",
+      "auth_required": false,
+      "description": "Refresh JWT access token",
+      "body": {
+        "refresh_token": "{refresh_token_from_login}"
+      },
+      "expected_status": 200,
+      "tags": ["auth", "refresh"]
+    },
+    {
+      "name": "Get Current User",
+      "method": "GET",
+      "path": "/auth/me",
+      "auth_required": true,
+      "description": "Get current user information",
+      "expected_status": 200,
+      "response_contains": ["email", "full_name", "role"],
+      "tags": ["auth", "user"]
+    },
+    {
+      "name": "User Logout",
+      "method": "POST",
+      "path": "/auth/logout",
+      "auth_required": true,
+      "description": "Logout and invalidate tokens",
+      "expected_status": 200,
+      "tags": ["auth", "logout"]
+    },
+    {
+      "name": "Execute Manual Trade",
+      "method": "POST",
+      "path": "/trading/execute",
+      "auth_required": true,
+      "description": "Execute manual cryptocurrency trade",
+      "body": {
+        "symbol": "BTCUSDT",
+        "action": "buy",
+        "amount": 0.001,
+        "order_type": "market",
+        "exchange": "binance"
+      },
+      "expected_status": 200,
+      "response_contains": ["trade_id", "status", "symbol"],
+      "tags": ["trading", "execute"]
+    },
+    {
+      "name": "Start Autonomous Trading",
+      "method": "POST",
+      "path": "/trading/autonomous/start",
+      "auth_required": true,
+      "description": "Start autonomous trading mode",
+      "body": {
+        "mode": "conservative",
+        "max_daily_trades": 5,
+        "risk_level": 0.01,
+        "allowed_symbols": ["BTCUSDT", "ETHUSDT"]
+      },
+      "expected_status": 200,
+      "tags": ["trading", "autonomous"]
+    },
+    {
+      "name": "Toggle Simulation Mode",
+      "method": "POST",
+      "path": "/trading/simulation/toggle",
+      "auth_required": true,
+      "description": "Enable/disable simulation trading mode",
+      "body": {
+        "enable": true,
+        "virtual_balance": 10000,
+        "reset_portfolio": false
+      },
+      "expected_status": 200,
+      "tags": ["trading", "simulation"]
+    },
+    {
+      "name": "Get Portfolio Status",
+      "method": "GET",
+      "path": "/trading/portfolio",
+      "auth_required": true,
+      "description": "Get current portfolio status and balances",
+      "expected_status": 200,
+      "response_contains": ["total_value", "positions", "daily_pnl"],
+      "tags": ["trading", "portfolio"]
+    },
+    {
+      "name": "Get Trading System Status",
+      "method": "GET",
+      "path": "/trading/status",
+      "auth_required": true,
+      "description": "Get trading system operational status",
+      "expected_status": 200,
+      "response_contains": ["autonomous_mode", "simulation_mode"],
+      "tags": ["trading", "status"]
+    },
+    {
+      "name": "Get Recent Trades",
+      "method": "GET",
+      "path": "/trading/recent-trades",
+      "auth_required": true,
+      "description": "Get recent trading history",
+      "query_params": {
+        "limit": 10
+      },
+      "expected_status": 200,
+      "response_contains": ["trades"],
+      "tags": ["trading", "history"]
+    },
+    {
+      "name": "Emergency Stop All Trading",
+      "method": "POST",
+      "path": "/trading/stop-all",
+      "auth_required": true,
+      "description": "Emergency stop all trading activities",
+      "expected_status": 200,
+      "tags": ["trading", "emergency"]
+    },
+    {
+      "name": "Get Real-time Prices",
+      "method": "GET",
+      "path": "/market/realtime-prices",
+      "auth_required": true,
+      "description": "Get real-time cryptocurrency prices",
+      "query_params": {
+        "symbols": "BTC,ETH,SOL"
+      },
+      "expected_status": 200,
+      "response_contains": ["prices", "metadata"],
+      "tags": ["market", "prices"]
+    },
+    {
+      "name": "Technical Analysis",
+      "method": "POST",
+      "path": "/market/technical-analysis",
+      "auth_required": true,
+      "description": "Get technical analysis for symbols",
+      "body": {
+        "symbols": ["BTCUSDT", "ETHUSDT"],
+        "timeframes": ["1h", "4h"],
+        "indicators": ["RSI", "MACD"]
+      },
+      "expected_status": 200,
+      "tags": ["market", "analysis"]
+    },
+    {
+      "name": "Sentiment Analysis",
+      "method": "POST",
+      "path": "/market/sentiment-analysis",
+      "auth_required": true,
+      "description": "Get market sentiment analysis",
+      "body": {
+        "symbols": ["BTC", "ETH"],
+        "sources": ["twitter", "news"]
+      },
+      "expected_status": 200,
+      "tags": ["market", "sentiment"]
+    },
+    {
+      "name": "Get Trending Coins",
+      "method": "GET",
+      "path": "/market/trending-coins",
+      "auth_required": true,
+      "description": "Get trending cryptocurrencies",
+      "query_params": {
+        "limit": 10
+      },
+      "expected_status": 200,
+      "tags": ["market", "trending"]
+    },
+    {
+      "name": "Get Supported Exchanges",
+      "method": "GET",
+      "path": "/exchanges/supported",
+      "auth_required": true,
+      "description": "Get list of supported exchanges",
+      "expected_status": 200,
+      "response_contains": ["exchanges"],
+      "tags": ["exchanges", "supported"]
+    },
+    {
+      "name": "Connect Exchange",
+      "method": "POST",
+      "path": "/exchanges/connect",
+      "auth_required": true,
+      "description": "Connect exchange account",
+      "body": {
+        "exchange": "binance",
+        "api_key": "test_api_key",
+        "api_secret": "test_api_secret",
+        "testnet": true
+      },
+      "expected_status": 200,
+      "tags": ["exchanges", "connect"]
+    },
+    {
+      "name": "Get Exchange Accounts",
+      "method": "GET",
+      "path": "/exchanges/accounts",
+      "auth_required": true,
+      "description": "Get connected exchange accounts",
+      "expected_status": 200,
+      "response_contains": ["accounts"],
+      "tags": ["exchanges", "accounts"]
+    },
+    {
+      "name": "Get Available Strategies",
+      "method": "GET",
+      "path": "/strategies/available",
+      "auth_required": true,
+      "description": "Get available trading strategies",
+      "expected_status": 200,
+      "response_contains": ["strategies"],
+      "tags": ["strategies", "available"]
+    },
+    {
+      "name": "Execute Strategy",
+      "method": "POST",
+      "path": "/strategies/execute",
+      "auth_required": true,
+      "description": "Execute trading strategy",
+      "body": {
+        "function": "momentum_strategy",
+        "params": {
+          "symbol": "BTCUSDT",
+          "timeframe": "1h",
+          "risk_level": 0.02
+        }
+      },
+      "expected_status": 200,
+      "tags": ["strategies", "execute"]
+    },
+    {
+      "name": "Get Strategy Marketplace",
+      "method": "GET",
+      "path": "/strategies/marketplace",
+      "auth_required": true,
+      "description": "Get strategy marketplace",
+      "expected_status": 200,
+      "tags": ["strategies", "marketplace"]
+    },
+    {
+      "name": "Get Credit Balance",
+      "method": "GET",
+      "path": "/credits/balance",
+      "auth_required": true,
+      "description": "Get current credit balance",
+      "expected_status": 200,
+      "response_contains": ["balance"],
+      "tags": ["credits", "balance"]
+    },
+    {
+      "name": "Get Credit History",
+      "method": "GET",
+      "path": "/credits/history",
+      "auth_required": true,
+      "description": "Get credit transaction history",
+      "expected_status": 200,
+      "response_contains": ["transactions"],
+      "tags": ["credits", "history"]
+    },
+    {
+      "name": "Create API Key",
+      "method": "POST",
+      "path": "/api-keys",
+      "auth_required": true,
+      "description": "Create new API key",
+      "body": {
+        "name": "Test API Key",
+        "permissions": ["trading", "portfolio"],
+        "expires_in_days": 90
+      },
+      "expected_status": 201,
+      "response_contains": ["key_id", "api_key"],
+      "tags": ["api-keys", "create"]
+    },
+    {
+      "name": "List API Keys",
+      "method": "GET",
+      "path": "/api-keys",
+      "auth_required": true,
+      "description": "List user's API keys",
+      "expected_status": 200,
+      "response_contains": ["keys"],
+      "tags": ["api-keys", "list"]
+    },
+    {
+      "name": "Chat with AI",
+      "method": "POST",
+      "path": "/chat/message",
+      "auth_required": true,
+      "description": "Send message to AI assistant",
+      "body": {
+        "message": "What's the current market outlook for Bitcoin?",
+        "session_id": "test_session_123"
+      },
+      "expected_status": 200,
+      "response_contains": ["response", "session_id"],
+      "tags": ["chat", "ai"]
+    },
+    {
+      "name": "Setup Paper Trading",
+      "method": "POST",
+      "path": "/paper-trading/setup",
+      "auth_required": true,
+      "description": "Setup paper trading account",
+      "body": {
+        "virtual_balance": 10000,
+        "reset_portfolio": false
+      },
+      "expected_status": 200,
+      "tags": ["paper-trading", "setup"]
+    },
+    {
+      "name": "Execute Paper Trade",
+      "method": "POST",
+      "path": "/paper-trading/execute",
+      "auth_required": true,
+      "description": "Execute paper trade",
+      "body": {
+        "symbol": "BTCUSDT",
+        "action": "buy",
+        "amount": 0.001,
+        "order_type": "market"
+      },
+      "expected_status": 200,
+      "tags": ["paper-trading", "execute"]
+    },
+    {
+      "name": "Get Paper Trading Performance",
+      "method": "GET",
+      "path": "/paper-trading/performance",
+      "auth_required": true,
+      "description": "Get paper trading performance metrics",
+      "expected_status": 200,
+      "response_contains": ["performance", "trades"],
+      "tags": ["paper-trading", "performance"]
+    },
+    {
+      "name": "Connect Telegram",
+      "method": "POST",
+      "path": "/telegram/connect",
+      "auth_required": true,
+      "description": "Connect Telegram account",
+      "body": {
+        "user_id": 123456789,
+        "chat_id": 987654321,
+        "username": "test_trading_user"
+      },
+      "expected_status": 200,
+      "tags": ["telegram", "connect"]
+    },
+    {
+      "name": "Send Telegram Message",
+      "method": "POST",
+      "path": "/telegram/send-message",
+      "auth_required": true,
+      "description": "Send message via Telegram",
+      "body": {
+        "message": "Test message from API",
+        "chat_id": 123456789
+      },
+      "expected_status": 200,
+      "tags": ["telegram", "message"]
+    }
+  ],
+  "test_instructions": {
+    "setup": [
+      "1. First call /auth/login to get JWT token",
+      "2. Use the JWT token in Authorization header for authenticated endpoints",
+      "3. Enable simulation mode before testing trading endpoints",
+      "4. Test with small amounts and testnet exchanges when possible"
+    ],
+    "authentication": {
+      "login_first": "Always authenticate first using /auth/login",
+      "token_format": "Bearer {access_token}",
+      "token_expiry": "Tokens expire in 30 minutes, use refresh endpoint"
+    },
+    "trading_safety": [
+      "Enable simulation mode before testing trading endpoints",
+      "Use testnet exchanges when available",
+      "Test with minimal amounts",
+      "Verify emergency stop functionality"
+    ],
+    "rate_limits": {
+      "login": "5 attempts per 5 minutes",
+      "trading": "100 trades per minute",
+      "api_general": "1000 requests per minute"
+    }
+  },
+  "environment_variables": {
+    "production": {
+      "BASE_URL": "https://cryptouniverse.onrender.com",
+      "ENVIRONMENT": "production"
+    },
+    "development": {
+      "BASE_URL": "http://localhost:8000",
+      "ENVIRONMENT": "development"
+    }
+  },
+  "error_handling": {
+    "standard_codes": {
+      "200": "Success",
+      "201": "Created",
+      "400": "Bad Request",
+      "401": "Unauthorized", 
+      "403": "Forbidden",
+      "404": "Not Found",
+      "429": "Rate Limited",
+      "500": "Internal Server Error"
+    },
+    "error_format": {
+      "error": "string",
+      "status_code": "number",
+      "path": "string",
+      "timestamp": "number"
+    }
+  }
+}
