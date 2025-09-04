@@ -125,13 +125,13 @@ class ReportService {
       ]);
       rows.push(
         ...sanitizedData.arbitrage_opportunities.map((opp) => [
-          opp.symbol,
-          opp.buy_exchange,
-          formatCurrency(opp.buy_price),
-          opp.sell_exchange,
-          formatCurrency(opp.sell_price),
-          `${opp.profit_bps} bps`,
-          opp.execution_complexity,
+          opp.pair,
+          opp.buyExchange,
+          formatCurrency(opp.buyPrice),
+          opp.sellExchange,
+          formatCurrency(opp.sellPrice),
+          `${opp.spreadPct.toFixed(2)} %`,
+          opp.risk,
         ])
       );
       rows.push([]);
@@ -254,13 +254,13 @@ class ReportService {
                   .map(
                     (opp) => `
                     <tr>
-                        <td>${this.escapeHTML(opp.symbol)}</td>
-                        <td>${this.escapeHTML(opp.buy_exchange)}</td>
-                        <td>${formatCurrency(opp.buy_price)}</td>
-                        <td>${this.escapeHTML(opp.sell_exchange)}</td>
-                        <td>${formatCurrency(opp.sell_price)}</td>
-                        <td>${opp.profit_bps} bps</td>
-                        <td>${this.escapeHTML(opp.execution_complexity)}</td>
+                        <td>${this.escapeHTML(opp.pair)}</td>
+                        <td>${this.escapeHTML(opp.buyExchange)}</td>
+                        <td>${formatCurrency(opp.buyPrice)}</td>
+                        <td>${this.escapeHTML(opp.sellExchange)}</td>
+                        <td>${formatCurrency(opp.sellPrice)}</td>
+                        <td>${opp.spreadPct.toFixed(2)}%</td>
+                        <td>${this.escapeHTML(opp.risk)}</td>
                     </tr>
                 `
                   )
