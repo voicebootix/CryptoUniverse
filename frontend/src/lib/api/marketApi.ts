@@ -49,17 +49,8 @@ export interface TechnicalAnalysis {
   timestamp: string;
 }
 
-export interface ArbitrageOpportunity {
-  symbol: string;
-  buy_exchange: string;
-  sell_exchange: string;
-  buy_price: number;
-  sell_price: number;
-  profit_percentage: number;
-  profit_bps: number;
-  volume_constraint: number;
-  execution_complexity: string;
-}
+// Use the unified API response type
+export type ArbitrageOpportunity = ArbitrageOpportunityAPI;
 
 export interface MarketAssessment {
   assessment: {

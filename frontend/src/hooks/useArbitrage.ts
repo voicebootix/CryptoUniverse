@@ -1,20 +1,10 @@
 import { useState, useEffect } from 'react';
 import { tradingAPI } from '@/lib/api/client';
-
-export interface ArbitrageOpportunity {
-  id: string;
-  pair: string;
-  buyExchange: string;
-  sellExchange: string;
-  buyPrice: number;
-  sellPrice: number;
-  spread: number;
-  spreadPct: number;
-  volume: number;
-  profit: number;
-  risk: 'low' | 'medium' | 'high';
-  timestamp: string;
-}
+import { 
+  ArbitrageOpportunity, 
+  ArbitrageOpportunityAPI, 
+  ArbitrageDataTransformer 
+} from '@/types/arbitrage';
 
 interface ArbitrageHookState {
   opportunities: ArbitrageOpportunity[];
@@ -45,17 +35,30 @@ export const useArbitrage = (): ArbitrageHookState => {
     try {
       const response = await tradingAPI.get('/arbitrage/opportunities');
       
-      // Handle different response structures
-      if (response.data && Array.isArray(response.data)) {
-        setOpportunities(response.data);
+      // Enterprise-grade response handling with robust data transformation
+      let rawOpportunities: ArbitrageOpportunityAPI[] = [];
+      
+      if (response.data && response.data.success && response.data.data) {
+        // Standard API wrapper response
+        rawOpportunities = response.data.data.opportunities || response.data.data || [];
       } else if (response.data && response.data.data && Array.isArray(response.data.data)) {
-        setOpportunities(response.data.data);
-      } else if (response.data && response.data.success && Array.isArray(response.data.data)) {
-        setOpportunities(response.data.data);
+        // Direct data array response
+        rawOpportunities = response.data.data;
+      } else if (Array.isArray(response.data)) {
+        // Raw array response
+        rawOpportunities = response.data;
+      } else if (response.data && Array.isArray(response.data.opportunities)) {
+        // Opportunities property response
+        rawOpportunities = response.data.opportunities;
       } else {
-        // If no opportunities property exists, use the entire response if it's an array
-        setOpportunities(Array.isArray(response.data) ? response.data : []);
+        console.warn('Unexpected API response structure:', response.data);
+        rawOpportunities = [];
       }
+
+      // Transform API response to frontend format with enterprise error handling
+      const transformedOpportunities = ArbitrageDataTransformer.transformArrayFromAPI(rawOpportunities);
+      setOpportunities(transformedOpportunities);
+      
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || 
                           err?.response?.data?.error || 

@@ -1,4 +1,4 @@
-import type { ArbitrageOpportunity } from "@/lib/api/marketApi";
+import type { ArbitrageOpportunity } from "@/types/arbitrage";
 
 export type ReportFormat = "csv" | "json" | "pdf";
 

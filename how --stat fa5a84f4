@@ -1,0 +1,5 @@
+[33mfa5a84f4[m feat: Enterprise production fixes - resolve critical trading platform issues
+[33m43ff444a[m Complete remaining critical CodeRabbit fixes
+[33m63549437[m ENTERPRISE PRODUCTION FIXES: Complete arbitrage system, API parameter handling, portfolio imports, cross-exchange scanner
+[33m70692040[m[33m ([m[1;31morigin/cursor/analyze-market-analysis-service-for-data-accuracy-8db5[m[33m)[m Resolve CodeRabbit issues across arbitrage, trading, and async endpoints
+[33m6a845699[m Implement real-time arbitrage data with comprehensive error handling

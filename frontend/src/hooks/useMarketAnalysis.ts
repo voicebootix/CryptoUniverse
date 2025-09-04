@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { tradingAPI, apiClient } from '@/lib/api/client';
-import { ArbitrageOpportunity } from './useArbitrage';
+import { ArbitrageOpportunity } from '@/types/arbitrage';
 
 export interface TechnicalAnalysis {
   symbol: string;

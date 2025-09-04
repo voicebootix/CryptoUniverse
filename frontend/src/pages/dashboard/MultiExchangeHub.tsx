@@ -1031,7 +1031,7 @@ const MultiExchangeHub: React.FC = () => {
                           className="mt-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white"
                           onClick={() =>
                             executeArbitrage(
-                              opp.id ?? opp.opportunity_id ?? `${opp.pair}-${opp.buyExchange}-${opp.sellExchange}`
+                              opp.id // Enterprise-grade ID handling via ArbitrageDataTransformer ensures this is always present
                             )
                           }
                         >
