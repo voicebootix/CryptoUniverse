@@ -519,7 +519,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                               "price_update_interval",
                               safeParseNumber(e.target.value, true, 1, 60, settings.price_update_interval)
                             )
-                          )
+                          }
                           className="bg-[#1a1c23] border-[#2a2d35] text-gray-200"
                           disabled={settings.enable_real_time}
                         />
@@ -539,7 +539,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                               "balance_update_interval",
                               safeParseNumber(e.target.value, true, 5, 300, settings.balance_update_interval)
                             )
-                          )
+                          }
                           className="bg-[#1a1c23] border-[#2a2d35] text-gray-200"
                         />
                       </div>

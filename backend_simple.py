@@ -68,12 +68,11 @@ app.add_middleware(
 security = HTTPBearer(auto_error=False)  # Make bearer token optional
 
 # OAuth state tracking for CSRF protection with TTL
-from time import time
 oauth_states: Dict[str, float] = {}  # state -> expiry_timestamp
 
 def cleanup_expired_states():
     """Remove expired OAuth states."""
-    current_time = time()
+    current_time = time.time()
     expired_states = [state for state, expiry in oauth_states.items() if expiry < current_time]
     for state in expired_states:
         oauth_states.pop(state, None)
@@ -488,7 +487,7 @@ async def get_oauth_url():
     cleanup_expired_states()
     
     # Add state with 10-minute expiry
-    expiry_time = time() + (10 * 60)  # 10 minutes
+    expiry_time = time.time() + (10 * 60)  # 10 minutes
     oauth_states[state] = expiry_time
     
     oauth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={GOOGLE_CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=email%20profile&state={state}"
@@ -509,7 +508,7 @@ async def oauth_callback(code: str, state: str, response: Response):
         )
     
     # Check if state is expired
-    if oauth_states[state] < time():
+    if oauth_states[state] < time.time():
         oauth_states.pop(state, None)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
