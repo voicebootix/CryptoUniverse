@@ -354,10 +354,10 @@
       "description": "Send message to AI assistant",
       "body": {
         "message": "What's the current market outlook for Bitcoin?",
-        "session_id": "test_session_123"
+        "session_id": null
       },
       "expected_status": 200,
-      "response_contains": ["response", "session_id"],
+      "response_contains": ["success", "session_id", "message_id", "content", "intent", "confidence", "timestamp"],
       "tags": ["chat", "ai"]
     },
     {
