@@ -340,8 +340,14 @@ async def login(
         logger.exception("JWT error during login")
         raise HTTPException(500, detail="Authentication service error")
     except Exception as e:
-        logger.exception("Unexpected login error")
-        raise HTTPException(500, detail="Service unavailable - try again later")
+        logger.exception("Unexpected login error", error=str(e), error_type=type(e).__name__)
+        # More detailed error for debugging
+        if "test@cryptouniverse.com" in str(e) or "User not found" in str(e):
+            raise HTTPException(500, detail="Test user not found - database setup required")
+        elif "database" in str(e).lower() or "connection" in str(e).lower():
+            raise HTTPException(500, detail="Database connection error")
+        else:
+            raise HTTPException(500, detail=f"Authentication service error: {str(e)[:100]}")
 
 
 @router.post("/register", response_model=UserResponse)
