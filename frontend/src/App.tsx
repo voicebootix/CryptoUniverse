@@ -33,6 +33,7 @@ import ExchangesPage from '@/pages/dashboard/ExchangesPage';
 import SettingsPage from '@/pages/dashboard/SettingsPage';
 import AdminPage from '@/pages/dashboard/AdminPage';
 import MarketAnalysisPage from '@/pages/dashboard/MarketAnalysisPage';
+import MasterControllerCenter from '@/pages/dashboard/MasterControllerCenter';
 
 // Loading Component
 const LoadingScreen: React.FC = () => (
@@ -129,6 +130,9 @@ const App: React.FC = () => {
             }>
               {/* Main Dashboard */}
               <Route index element={<TradingDashboard />} />
+              
+              {/* Master Controller */}
+              <Route path="master-controller" element={<MasterControllerCenter />} />
               
               {/* AI Command Center */}
               <Route path="ai-command" element={<AICommandCenter />} />
