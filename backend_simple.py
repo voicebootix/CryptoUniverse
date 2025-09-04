@@ -14,15 +14,20 @@ import sqlite3
 import json
 import base64
 
-from fastapi import FastAPI, HTTPException, Depends, status, Response
+from fastapi import FastAPI, HTTPException, Depends, status, Response, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 import uvicorn
 import jwt
 import bcrypt
+import logging
 
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv() # Load environment variables from .env file
 
@@ -60,10 +65,18 @@ app.add_middleware(
 )
 
 # Security
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)  # Make bearer token optional
 
-# OAuth state tracking for CSRF protection
-oauth_states: Set[str] = set()
+# OAuth state tracking for CSRF protection with TTL
+from time import time
+oauth_states: Dict[str, float] = {}  # state -> expiry_timestamp
+
+def cleanup_expired_states():
+    """Remove expired OAuth states."""
+    current_time = time()
+    expired_states = [state for state, expiry in oauth_states.items() if expiry < current_time]
+    for state in expired_states:
+        oauth_states.pop(state, None)
 
 # Models
 class LoginRequest(BaseModel):
@@ -93,22 +106,23 @@ class UserResponse(BaseModel):
     created_at: datetime
 
 class PortfolioResponse(BaseModel):
-    balance: float
-    holdings: Dict[str, Any]
-    performance: Dict[str, Any]
+    total_value: float
+    available_balance: float
+    total_pnl: float
+    daily_pnl_pct: float
+    positions: list[Dict[str, Any]]
 
 class TradingStatusResponse(BaseModel):
     overall_status: str
     system_health: Dict[str, Any]
     message: str
+    performance_today: Dict[str, Any]
 
 class MarketOverviewResponse(BaseModel):
-    top_gainers: list[Dict[str, Any]]
-    top_losers: list[Dict[str, Any]]
-    market_trends: str
+    market_data: list[Dict[str, Any]]
 
 class RecentTradesResponse(BaseModel):
-    trades: list[Dict[str, Any]]
+    recent_trades: list[Dict[str, Any]]
 
 class OAuthUrlResponse(BaseModel):
     authorization_url: str
@@ -241,9 +255,28 @@ def verify_password(password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8'))
 
 # Dependencies
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Dict:
-    """Get current authenticated user."""
-    token = credentials.credentials
+async def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> Dict:
+    """Get current authenticated user from bearer token or cookie."""
+    
+    token = None
+    
+    # Try bearer token first
+    if credentials:
+        token = credentials.credentials
+    else:
+        # Fallback to cookie-based authentication
+        token = request.cookies.get("access_token")
+    
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No authentication provided",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
     payload = verify_token(token)
     
     user_id = payload.get("sub")
@@ -348,55 +381,72 @@ async def get_me(current_user: Dict = Depends(get_current_user)):
 @app.get("/api/v1/trading/portfolio", response_model=PortfolioResponse)
 async def get_portfolio(current_user: Dict = Depends(get_current_user)):
     """Get user's trading portfolio."""
-    # Placeholder data - In a real app, you would fetch this from a database or external API
+    # Updated to match frontend contract
     return PortfolioResponse(
-        balance=10000.00,
-        holdings={
-            "BTC": {"amount": 0.5, "avg_price": 30000.0},
-            "ETH": {"amount": 3.0, "avg_price": 2000.0},
-        },
-        performance={
-            "daily": 0.05,
-            "total": 0.15,
-        },
+        total_value=10000.00,
+        available_balance=2500.00,
+        total_pnl=1500.00,
+        daily_pnl_pct=2.5,
+        positions=[
+            {
+                "symbol": "BTC",
+                "amount": 0.5,
+                "avg_price": 30000.0,
+                "market_value": 22500.0,
+                "pnl": 2500.0
+            },
+            {
+                "symbol": "ETH", 
+                "amount": 3.0,
+                "avg_price": 2000.0,
+                "market_value": 6300.0,
+                "pnl": 300.0
+            }
+        ]
     )
 
 @app.get("/api/v1/trading/status", response_model=TradingStatusResponse)
 async def get_trading_status(current_user: Dict = Depends(get_current_user)):
     """Get overall trading system status."""
-    # Placeholder data
+    # Updated to match frontend contract
     return TradingStatusResponse(
         overall_status="Operational",
         system_health={
             "data_feeds": "Healthy",
-            "execution_engine": "Healthy",
+            "execution_engine": "Healthy", 
             "risk_management": "Healthy",
         },
         message="All systems are functioning normally.",
+        performance_today={
+            "history": [
+                {"timestamp": "2024-01-20T09:00:00Z", "pnl": 100.0},
+                {"timestamp": "2024-01-20T12:00:00Z", "pnl": 150.0},
+                {"timestamp": "2024-01-20T15:00:00Z", "pnl": 200.0}
+            ]
+        }
     )
 
 @app.get("/api/v1/trading/market-overview", response_model=MarketOverviewResponse)
 async def get_market_overview(current_user: Dict = Depends(get_current_user)):
     """Get market overview data."""
-    # Placeholder data
+    # Updated to match frontend contract
     return MarketOverviewResponse(
-        top_gainers=[
-            {"symbol": "SOL", "change": 0.12, "price": 150.0},
-            {"symbol": "ADA", "change": 0.08, "price": 0.75},
-        ],
-        top_losers=[
-            {"symbol": "XRP", "change": -0.04, "price": 0.50},
-            {"symbol": "DOGE", "change": -0.07, "price": 0.15},
-        ],
-        market_trends="Overall bullish sentiment with increasing institutional interest.",
+        market_data=[
+            {"symbol": "SOL", "change": 0.12, "price": 150.0, "trend": "up"},
+            {"symbol": "ADA", "change": 0.08, "price": 0.75, "trend": "up"},
+            {"symbol": "XRP", "change": -0.04, "price": 0.50, "trend": "down"},
+            {"symbol": "DOGE", "change": -0.07, "price": 0.15, "trend": "down"},
+            {"symbol": "BTC", "change": 0.02, "price": 45000.0, "trend": "up"},
+            {"symbol": "ETH", "change": 0.03, "price": 3200.0, "trend": "up"}
+        ]
     )
 
 @app.get("/api/v1/trading/recent-trades", response_model=RecentTradesResponse)
 async def get_recent_trades(current_user: Dict = Depends(get_current_user)):
     """Get recent trading activity."""
-    # Placeholder data
+    # Updated to match frontend contract
     return RecentTradesResponse(
-        trades=[
+        recent_trades=[
             {"id": "trade1", "symbol": "BTC", "type": "buy", "amount": 0.1, "price": 31000.0, "timestamp": datetime.now().isoformat()},
             {"id": "trade2", "symbol": "ETH", "type": "sell", "amount": 0.5, "price": 2100.0, "timestamp": datetime.now().isoformat()},
         ]
@@ -415,11 +465,17 @@ async def get_docs():
     ]}
 
 @app.post("/api/v1/auth/logout")
-async def logout(current_user: Dict = Depends(get_current_user)):
-    """Logout user and invalidate token (client-side only for JWT)."""
-    # For JWT, logout is primarily handled client-side by deleting the token.
-    # On the server, we might optionally blacklist tokens, but for this simplified version,
-    # we just return a success message.
+async def logout(response: Response, current_user: Dict = Depends(get_current_user)):
+    """Logout user and clear cookies."""
+    # Clear the access token cookie
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        secure=True,
+        httponly=True,
+        samesite="none"
+    )
+    
     return {"message": "Logged out successfully"}
 
 @app.post("/api/v1/auth/oauth/url", response_model=OAuthUrlResponse)
@@ -427,12 +483,13 @@ async def get_oauth_url():
     """Get the OAuth authorization URL with CSRF protection."""
     # Generate cryptographically secure state for CSRF protection
     state = secrets.token_urlsafe(32)
-    oauth_states.add(state)
     
-    # Clean up old states (keep only last 100)
-    if len(oauth_states) > 100:
-        oauth_states.clear()
-        oauth_states.add(state)
+    # Clean up expired states first
+    cleanup_expired_states()
+    
+    # Add state with 10-minute expiry
+    expiry_time = time() + (10 * 60)  # 10 minutes
+    oauth_states[state] = expiry_time
     
     oauth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={GOOGLE_CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=email%20profile&state={state}"
     return OAuthUrlResponse(authorization_url=oauth_url)
@@ -441,6 +498,9 @@ async def get_oauth_url():
 @app.get("/api/v1/auth/oauth/callback")
 async def oauth_callback(code: str, state: str, response: Response):
     """Handle OAuth callback from Google with CSRF protection."""
+    # Clean up expired states first
+    cleanup_expired_states()
+    
     # Verify state parameter to prevent CSRF attacks
     if state not in oauth_states:
         raise HTTPException(
@@ -448,8 +508,16 @@ async def oauth_callback(code: str, state: str, response: Response):
             detail="Invalid state parameter - possible CSRF attack"
         )
     
+    # Check if state is expired
+    if oauth_states[state] < time():
+        oauth_states.pop(state, None)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="State parameter expired"
+        )
+    
     # Remove used state
-    oauth_states.discard(state)
+    oauth_states.pop(state, None)
 
     # Exchange authorization code for access token
     # This part would involve an HTTP POST request to Google's token endpoint.
@@ -507,7 +575,7 @@ async def oauth_callback(code: str, state: str, response: Response):
             value=access_token,
             httponly=True,
             secure=True,
-            samesite="strict",
+            samesite="none",  # Allow cross-site requests from frontend
             max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )
 
@@ -518,9 +586,13 @@ async def oauth_callback(code: str, state: str, response: Response):
         return response
 
     except Exception as e:
-        print(f"OAuth callback error: {e}")
-        error_message = base64.b64encode(str(e).encode()).decode()
-        redirect_url = f"http://localhost:3000/auth/oauth/callback?error=true&message={error_message}"
+        # Log full exception server-side
+        import uuid
+        error_id = str(uuid.uuid4())
+        logger.error(f"OAuth callback error [{error_id}]", exc_info=True)
+        
+        # Only send opaque error ID to frontend
+        redirect_url = f"http://localhost:3000/auth/oauth/callback?error=true&error_id={error_id}"
         response.headers["Location"] = redirect_url
         response.status_code = status.HTTP_302_FOUND
         return response

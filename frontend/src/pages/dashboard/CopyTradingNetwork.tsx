@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Users,
@@ -336,6 +336,39 @@ const CopyTradingNetwork: React.FC = () => {
   const [riskLimit, setRiskLimit] = useState<number>(3);
   const [showOnlyVerified, setShowOnlyVerified] = useState<boolean>(false);
 
+  // Filter and sort providers based on controls
+  const filteredProviders = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    let data = signalProviders.filter(p => {
+      const matchesSearch =
+        !q ||
+        p.username.toLowerCase().includes(q) ||
+        p.specialties.some((s: string) => s.toLowerCase().includes(q));
+      const matchesTier = filterTier === "all" || p.tier === filterTier;
+      const matchesSpec =
+        filterSpecialty === "all" ||
+        p.specialties.some((s: string) => s.toLowerCase().includes(filterSpecialty));
+      const matchesVerified = !showOnlyVerified || p.verified;
+      return matchesSearch && matchesTier && matchesSpec && matchesVerified;
+    });
+    
+    data.sort((a, b) => {
+      switch (sortBy) {
+        case "winrate":
+          return b.winRate - a.winRate;
+        case "followers":
+          return b.followers - a.followers;
+        case "signals":
+          return b.signals30d - a.signals30d;
+        case "returns":
+        default:
+          return b.avgReturn - a.avgReturn;
+      }
+    });
+    
+    return data;
+  }, [searchQuery, filterTier, filterSpecialty, sortBy, showOnlyVerified]);
+
   const getTierColor = (tier: string) => {
     switch (tier) {
       case "platinum":
@@ -567,7 +600,7 @@ const CopyTradingNetwork: React.FC = () => {
 
           {/* Provider Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {signalProviders.map((provider) => (
+            {filteredProviders.map((provider) => (
               <motion.div
                 key={provider.id}
                 whileHover={{ scale: 1.02 }}

@@ -63,8 +63,8 @@ I conducted a thorough analysis of your AI Money Manager Chat system and impleme
 - **Evidence**: 
   ```bash
   # BEFORE (.env):
-  GOOGLE_CLIENT_ID=81570776011-ecpckcmd73p2ckd7r40ck2oe47413shg.apps.googleusercontent.com
-  GOOGLE_CLIENT_SECRET=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
+  GOOGLE_CLIENT_ID=[EXPOSED_CLIENT_ID]
+  GOOGLE_CLIENT_SECRET=[EXPOSED_CLIENT_SECRET]
   
   # AFTER (.env):
   GOOGLE_CLIENT_ID=
@@ -338,7 +338,7 @@ I conducted a thorough analysis of your AI Money Manager Chat system and impleme
 
 1. **🚨 URGENT - Rotate Google OAuth Credentials:**
    - Go to Google Cloud Console
-   - Revoke the exposed client secret: `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`
+   - Revoke the exposed client secret (see server logs for details)
    - Generate new client ID and secret
    - Update Render Dashboard with new credentials
 

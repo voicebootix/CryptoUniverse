@@ -142,6 +142,7 @@ const MultiExchangeHub: React.FC = () => {
     fetchArbitrageOpportunities,
     fetchCrossExchangeComparison,
     fetchOrderBook,
+    executeArbitrage,
     refreshAll: refreshArbitrageData,
     clearError: clearArbitrageError,
   } = useArbitrage();
@@ -1028,6 +1029,11 @@ const MultiExchangeHub: React.FC = () => {
                         <Button
                           size="sm"
                           className="mt-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white"
+                          onClick={() =>
+                            executeArbitrage(
+                              opp.id ?? opp.opportunity_id ?? `${opp.pair}-${opp.buyExchange}-${opp.sellExchange}`
+                            )
+                          }
                         >
                           Execute Trade
                         </Button>

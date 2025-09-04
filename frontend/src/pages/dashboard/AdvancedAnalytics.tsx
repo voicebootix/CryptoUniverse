@@ -101,7 +101,13 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import { 
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
@@ -527,22 +533,32 @@ const AdvancedAnalytics: React.FC = () => {
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">Timeframe:</span>
             <Select value={timeframe} onValueChange={setTimeframe}>
-              <option value="1M">1 Month</option>
-              <option value="3M">3 Months</option>
-              <option value="6M">6 Months</option>
-              <option value="1Y">1 Year</option>
-              <option value="2Y">2 Years</option>
-              <option value="ALL">All Time</option>
+              <SelectTrigger>
+                <SelectValue placeholder="Select timeframe" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="1M">1 Month</SelectItem>
+                <SelectItem value="3M">3 Months</SelectItem>
+                <SelectItem value="6M">6 Months</SelectItem>
+                <SelectItem value="1Y">1 Year</SelectItem>
+                <SelectItem value="2Y">2 Years</SelectItem>
+                <SelectItem value="ALL">All Time</SelectItem>
+              </SelectContent>
             </Select>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">Benchmark:</span>
             <Select value={benchmark} onValueChange={setBenchmark}>
-              <option value="BTC">Bitcoin</option>
-              <option value="ETH">Ethereum</option>
-              <option value="SPY">S&P 500</option>
-              <option value="GOLD">Gold</option>
-              <option value="CUSTOM">Custom Index</option>
+              <SelectTrigger>
+                <SelectValue placeholder="Select benchmark" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="BTC">Bitcoin</SelectItem>
+                <SelectItem value="ETH">Ethereum</SelectItem>
+                <SelectItem value="SPY">S&P 500</SelectItem>
+                <SelectItem value="GOLD">Gold</SelectItem>
+                <SelectItem value="CUSTOM">Custom Index</SelectItem>
+              </SelectContent>
             </Select>
           </div>
           <div className="flex items-center gap-2">

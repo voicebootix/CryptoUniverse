@@ -201,8 +201,8 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                         </Label>
                         <Input
                           type="number"
-                          min="5"
-                          max="120"
+                          min="1"
+                          max="300"
                           value={settings.timeout_seconds}
                           onChange={(e) =>
                             updateSetting(
@@ -223,7 +223,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                         </Label>
                         <Input
                           type="number"
-                          min="10"
+                          min="1"
                           max="1000"
                           value={settings.rate_limit_per_minute}
                           onChange={(e) =>
@@ -345,8 +345,8 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                         </Label>
                         <Input
                           type="number"
-                          min="100"
-                          max="100000"
+                          min="1"
+                          max="1000000"
                           value={settings.max_position_size}
                           onChange={(e) =>
                             updateSetting(
@@ -517,9 +517,9 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                           onChange={(e) =>
                             updateSetting(
                               "price_update_interval",
-                              parseInt(e.target.value)
+                              safeParseNumber(e.target.value, true, 1, 60, settings.price_update_interval)
                             )
-                          }
+                          )
                           className="bg-[#1a1c23] border-[#2a2d35] text-gray-200"
                           disabled={settings.enable_real_time}
                         />
@@ -537,9 +537,9 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                           onChange={(e) =>
                             updateSetting(
                               "balance_update_interval",
-                              parseInt(e.target.value)
+                              safeParseNumber(e.target.value, true, 5, 300, settings.balance_update_interval)
                             )
-                          }
+                          )
                           className="bg-[#1a1c23] border-[#2a2d35] text-gray-200"
                         />
                       </div>
@@ -731,7 +731,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                           onChange={(e) =>
                             updateSetting(
                               "session_timeout_minutes",
-                              parseInt(e.target.value)
+                              safeParseNumber(e.target.value, true, 5, 480, settings.session_timeout_minutes)
                             )
                           }
                           className="bg-[#1a1c23] border-[#2a2d35] text-gray-200"
