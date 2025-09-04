@@ -190,6 +190,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         """Process request with rate limiting."""
+        # Always allow CORS preflight to pass through unimpeded
+        if request.method == "OPTIONS":
+            return await call_next(request)
         # Skip rate limiting for certain paths
         if any(request.url.path.startswith(p) for p in [
             "/health",

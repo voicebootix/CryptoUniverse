@@ -74,7 +74,15 @@ class Settings(BaseSettings):
         if ',' in v:
             return [origin.strip() for origin in v.split(',') if origin.strip()]
         # Single value
-        return [v.strip()] if v.strip() else ["*"]
+        origins = [v.strip()] if v.strip() else ["*"]
+        # Ensure production frontend and base URLs are present
+        for url in [self.FRONTEND_URL, self.BASE_URL]:
+            if url and url not in origins:
+                origins.append(url)
+        # If we have specific origins, drop wildcard to satisfy allow_credentials
+        if len([o for o in origins if o != "*"]) > 0:
+            origins = [o for o in origins if o != "*"]
+        return origins
     
     @computed_field
     @property
@@ -82,20 +90,33 @@ class Settings(BaseSettings):
         """Parse allowed hosts from string to list."""
         v = self.ALLOWED_HOSTS
         if not v or v == "":
-            return ["localhost", "127.0.0.1"]
-        # Handle JSON array format
-        if v.startswith('['):
+            hosts = ["localhost", "127.0.0.1"]
+        else:
+            # Handle JSON array format
+            if v.startswith('['):
+                try:
+                    parsed = json.loads(v)
+                    if isinstance(parsed, list):
+                        hosts = parsed
+                    else:
+                        hosts = []
+                except (json.JSONDecodeError, TypeError):
+                    hosts = []
+            elif ',' in v:
+                hosts = [host.strip() for host in v.split(',') if host.strip()]
+            else:
+                hosts = [v.strip()] if v.strip() else ["localhost", "127.0.0.1"]
+        # Ensure backend and frontend hosts are included
+        for url in [self.BASE_URL, self.FRONTEND_URL]:
             try:
-                parsed = json.loads(v)
-                if isinstance(parsed, list):
-                    return parsed
-            except (json.JSONDecodeError, TypeError):
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                host = parsed.netloc or parsed.path
+                if host and host not in hosts:
+                    hosts.append(host)
+            except Exception:
                 pass
-        # Handle comma-separated format
-        if ',' in v:
-            return [host.strip() for host in v.split(',') if host.strip()]
-        # Single value
-        return [v.strip()] if v.strip() else ["localhost", "127.0.0.1"]
+        return hosts
     
     # Supabase settings
     SUPABASE_URL: Optional[str] = Field(default=None, env="SUPABASE_URL", description="Supabase project URL")

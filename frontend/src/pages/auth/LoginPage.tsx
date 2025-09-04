@@ -326,7 +326,7 @@ const LoginPage: React.FC = () => {
                 <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 pt-6">
                   <div>
                     <Label htmlFor="email">Email Address</Label>
-                    <Input id="email" type="email" {...register("email")} placeholder="admin@cryptouniverse.com" />
+                    <Input id="email" type="email" autoComplete="email" {...register("email")} placeholder="admin@cryptouniverse.com" />
                     {errors.email && <p className="text-red-400 text-sm mt-1">{errors.email.message}</p>}
                         </div>
 
