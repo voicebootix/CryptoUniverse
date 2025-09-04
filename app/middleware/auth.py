@@ -45,7 +45,6 @@ PUBLIC_PATHS = {
 PROTECTED_PATHS = {
     "/api/v1/auth/logout"
 }
-}
 
 # Token refresh threshold in seconds (5 minutes before expiration)
 TOKEN_REFRESH_THRESHOLD = 300
