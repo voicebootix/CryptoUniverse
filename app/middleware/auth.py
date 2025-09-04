@@ -22,17 +22,12 @@ from app.core.redis import get_redis_client
 from app.core.logging import logger
 
 # Paths that don't require authentication
-# ENTERPRISE FIX APPLIED - TestSprite compatibility paths added
 PUBLIC_PATHS = {
     "/api/v1/auth/login",
     "/api/v1/auth/refresh", 
     "/api/v1/auth/register",
     "/api/v1/health",
-    "/api/v1/status",  # PUBLIC: API status endpoint for TestSprite and monitoring
-    # CRITICAL FIX: Add TestSprite paths (without /api/v1 prefix)
-    "/auth/login",     # TestSprite calls this directly
-    "/auth/register",  # TestSprite calls this directly  
-    "/auth/refresh",   # TestSprite calls this directly
+    "/api/v1/status",
     "/health",
     "/",
     "/docs",
