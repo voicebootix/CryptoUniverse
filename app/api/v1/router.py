@@ -12,7 +12,7 @@ import structlog
 # Import endpoint routers
 from app.api.v1.endpoints import (
     auth, trading, admin, exchanges, strategies, credits,
-    telegram, paper_trading, chat, market_analysis, api_keys
+    telegram, paper_trading, chat, market_analysis, api_keys, ai_consensus
 )
 
 logger = structlog.get_logger(__name__)
@@ -32,6 +32,7 @@ api_router.include_router(paper_trading.router, prefix="/paper-trading", tags=["
 api_router.include_router(market_analysis.router, prefix="/market", tags=["Market Analysis"])
 api_router.include_router(admin.router, prefix="/admin", tags=["Administration"])
 api_router.include_router(chat.router, prefix="/chat", tags=["AI Chat"])
+api_router.include_router(ai_consensus.router, prefix="/ai-consensus", tags=["AI Consensus"])
 
 # Add monitoring endpoint that frontend expects
 @api_router.get("/monitoring/alerts")

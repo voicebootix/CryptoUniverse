@@ -23,110 +23,185 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Loader,
+  Mic,
+  MicOff,
+  StopCircle,
+  PlayCircle,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Slider } from '@/components/ui/slider';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
+import { useAIConsensus } from '@/hooks/useAIConsensus';
+import { useToast } from '@/components/ui/use-toast';
 
-// AI Model Performance Data
-const aiModels = [
-  {
+// AI Model Configuration for display
+const AI_MODEL_CONFIG = {
+  gpt4: {
     name: 'GPT-4 Turbo',
     provider: 'OpenAI',
-    status: 'active',
-    confidence: 87,
-    accuracy: 94.2,
-    latency: 1.2,
-    cost: 0.03,
-    signals: 142,
-    wins: 134,
-    recommendation: 'BUY',
-    reasoning: 'Strong bullish momentum with breakout confirmation above $51,200 resistance',
     icon: '🧠',
-    color: '#10b981'
+    color: '#10b981',
+    specialty: 'Analytical Reasoning'
   },
-  {
+  claude: {
     name: 'Claude-3 Opus',
     provider: 'Anthropic',
-    status: 'active',
-    confidence: 91,
-    accuracy: 96.8,
-    latency: 0.8,
-    cost: 0.015,
-    signals: 156,
-    wins: 151,
-    recommendation: 'BUY',
-    reasoning: 'Technical indicators align with institutional accumulation patterns',
     icon: '🎯',
-    color: '#3b82f6'
+    color: '#3b82f6',
+    specialty: 'Risk Analysis'
   },
-  {
+  gemini: {
     name: 'Gemini Pro',
     provider: 'Google',
-    status: 'active',
-    confidence: 83,
-    accuracy: 91.5,
-    latency: 1.5,
-    cost: 0.01,
-    signals: 128,
-    wins: 117,
-    recommendation: 'HOLD',
-    reasoning: 'Mixed signals suggest consolidation before next major move',
     icon: '⚡',
-    color: '#f59e0b'
+    color: '#f59e0b',
+    specialty: 'Market Analysis'
   }
-];
-
-// Consensus History Data
-const consensusHistory = [
-  { time: '09:00', consensus: 85, gpt4: 87, claude: 91, gemini: 83, price: 50800 },
-  { time: '09:15', consensus: 88, gpt4: 89, claude: 92, gemini: 84, price: 51200 },
-  { time: '09:30', consensus: 91, gpt4: 93, claude: 94, gemini: 86, price: 51650 },
-  { time: '09:45', consensus: 87, gpt4: 85, claude: 93, gemini: 84, price: 51400 },
-  { time: '10:00', consensus: 89, gpt4: 87, claude: 95, gemini: 85, price: 51800 },
-];
-
-// Market Analysis Data
-const marketAnalysis = {
-  sentiment: 'Bullish',
-  momentum: 'Strong',
-  volatility: 'Moderate',
-  volume: 'Above Average',
-  trend: 'Upward',
-  support: 50200,
-  resistance: 52500,
-  nextTarget: 54000,
-  riskLevel: 'Medium',
-  timeframe: '4H',
-  lastUpdate: new Date().toLocaleTimeString()
 };
 
-// Radar Chart Data
-const radarData = [
-  { metric: 'Accuracy', GPT4: 94, Claude: 97, Gemini: 92 },
-  { metric: 'Speed', GPT4: 85, Claude: 95, Gemini: 80 },
-  { metric: 'Cost Efficiency', GPT4: 70, Claude: 85, Gemini: 95 },
-  { metric: 'Consensus', GPT4: 87, Claude: 91, Gemini: 83 },
-  { metric: 'Risk Assessment', GPT4: 90, Claude: 94, Gemini: 88 },
-  { metric: 'Signal Quality', GPT4: 89, Claude: 93, Gemini: 85 },
-];
-
 const AICommandCenter: React.FC = () => {
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [consensusScore, setConsensusScore] = useState(89);
-  const [autoMode, setAutoMode] = useState(true);
   const [selectedTimeframe, setSelectedTimeframe] = useState('4H');
+  const [isListening, setIsListening] = useState(false);
+  const [customWeights, setCustomWeights] = useState<Record<string, number>>({});
+  const [autonomousFrequency, setAutonomousFrequency] = useState(10);
+  const { toast } = useToast();
 
-  const handleAnalyze = async () => {
-    setIsAnalyzing(true);
-    // Simulate AI analysis
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    setIsAnalyzing(false);
-    setConsensusScore(Math.floor(Math.random() * 20) + 80);
+  // Use real AI consensus hook - NO MORE HARDCODED DATA
+  const {
+    aiStatus,
+    userWeights,
+    costSummary,
+    consensusHistory,
+    connectionStatus,
+    isAnalyzing,
+    statusLoading,
+    analyzeOpportunity,
+    validateTrade,
+    assessRisk,
+    reviewPortfolio,
+    analyzeMarket,
+    makeConsensusDecision,
+    updateModelWeights,
+    emergencyStop,
+    resumeOperations
+  } = useAIConsensus();
+
+  // Initialize custom weights from user settings
+  useEffect(() => {
+    if (userWeights?.ai_model_weights) {
+      setCustomWeights(userWeights.ai_model_weights);
+      setAutonomousFrequency(userWeights.autonomous_frequency_minutes || 10);
+    }
+  }, [userWeights]);
+
+  // Voice recognition setup
+  const startVoiceCommand = () => {
+    if (!('webkitSpeechRecognition' in window)) {
+      toast({
+        title: "Voice Not Supported",
+        description: "Voice commands are not supported in this browser",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const recognition = new (window as any).webkitSpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      toast({
+        title: "🎤 Listening...",
+        description: "Say your command to the AI Money Manager",
+      });
+    };
+
+    recognition.onresult = async (event: any) => {
+      const command = event.results[0][0].transcript.toLowerCase();
+      
+      toast({
+        title: "Command Received",
+        description: `Processing: "${command}"`,
+      });
+
+      try {
+        if (command.includes('analyze') || command.includes('opportunity')) {
+          await analyzeOpportunity({
+            symbol: 'BTC/USDT',
+            analysis_type: 'opportunity',
+            timeframe: selectedTimeframe,
+            confidence_threshold: 75
+          });
+        } else if (command.includes('risk') || command.includes('assess')) {
+          // Get portfolio data (would come from portfolio service)
+          await assessRisk({
+            portfolio_data: { user_id: 'current', analysis_type: 'comprehensive' },
+            confidence_threshold: 75
+          });
+        } else if (command.includes('market') || command.includes('analysis')) {
+          await analyzeMarket({
+            symbols: ['BTC', 'ETH', 'SOL'],
+            confidence_threshold: 75,
+            include_sentiment: true
+          });
+        } else if (command.includes('emergency') || command.includes('stop')) {
+          await emergencyStop();
+        } else if (command.includes('resume') || command.includes('start')) {
+          await resumeOperations();
+        } else {
+          toast({
+            title: "Command Not Recognized",
+            description: "Try: 'analyze opportunity', 'assess risk', 'market analysis', 'emergency stop'",
+            variant: "destructive"
+          });
+        }
+      } catch (error) {
+        console.error('Voice command failed:', error);
+      }
+    };
+
+    recognition.onerror = () => {
+      toast({
+        title: "Voice Error",
+        description: "Could not process voice command",
+        variant: "destructive"
+      });
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognition.start();
+  };
+
+  const handleWeightChange = (model: string, value: number[]) => {
+    const newWeights = { ...customWeights, [model]: value[0] / 100 };
+    
+    // Normalize weights to sum to 1.0
+    const total = Object.values(newWeights).reduce((sum, weight) => sum + weight, 0);
+    if (total > 0) {
+      Object.keys(newWeights).forEach(key => {
+        newWeights[key] = newWeights[key] / total;
+      });
+    }
+    
+    setCustomWeights(newWeights);
+  };
+
+  const saveWeights = async () => {
+    try {
+      await updateModelWeights(customWeights as any, autonomousFrequency);
+    } catch (error) {
+      console.error('Failed to update weights:', error);
+    }
   };
 
   const getConsensusColor = (score: number) => {
@@ -139,6 +214,17 @@ const AICommandCenter: React.FC = () => {
     if (rec === 'BUY') return 'bg-green-500/10 text-green-500 border-green-500/20';
     if (rec === 'SELL') return 'bg-red-500/10 text-red-500 border-red-500/20';
     return 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20';
+  };
+
+  const getModelStatus = (modelKey: string) => {
+    const status = aiStatus?.ai_models_status?.[modelKey];
+    return status === 'ONLINE' ? 'active' : 'inactive';
+  };
+
+  const getCurrentConsensusScore = () => {
+    return consensusHistory.length > 0 
+      ? consensusHistory[consensusHistory.length - 1]?.consensus || 0
+      : 0;
   };
 
   return (
