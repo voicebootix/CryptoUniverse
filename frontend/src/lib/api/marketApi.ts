@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import { ArbitrageOpportunityAPI } from '@/types/arbitrage';
 
 // Market Analysis API Client
 export interface MarketDataItem {
