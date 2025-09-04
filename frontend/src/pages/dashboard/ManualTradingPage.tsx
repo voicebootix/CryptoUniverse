@@ -36,6 +36,7 @@ import { useUser } from '@/store/authStore';
 import { useExchanges } from '@/hooks/useExchanges';
 import { useStrategies } from '@/hooks/useStrategies';
 import { formatCurrency } from '@/lib/utils';
+import { apiClient } from '@/lib/api/client';
 
 interface ManualTradeRequest {
   symbol: string;
@@ -85,30 +86,20 @@ const ManualTradingPage: React.FC = () => {
     try {
       setIsExecuting(true);
       
-      // Call your existing trading API
-      const response = await fetch('/api/v1/trading/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          symbol: tradeForm.symbol,
-          action: tradeForm.action,
-          amount: tradeForm.amount,
-          order_type: tradeForm.orderType,
-          price: tradeForm.price,
-          stop_loss: tradeForm.stopLoss,
-          take_profit: tradeForm.takeProfit,
-          exchange: tradeForm.exchange === 'auto' ? undefined : tradeForm.exchange,
-          leverage: tradeForm.leverage
-        })
+      // Call your existing trading API using apiClient
+      const response = await apiClient.post('/trading/execute', {
+        symbol: tradeForm.symbol,
+        action: tradeForm.action,
+        amount: tradeForm.amount,
+        order_type: tradeForm.orderType,
+        price: tradeForm.price,
+        stop_loss: tradeForm.stopLoss,
+        take_profit: tradeForm.takeProfit,
+        exchange: tradeForm.exchange === 'auto' ? undefined : tradeForm.exchange,
+        leverage: tradeForm.leverage
       });
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Trading API error: ${response.status} ${errorText}`);
-      }
-      
-      const result = await response.json();
+      const result = response.data;
       
       if (result.success) {
         // Trade executed successfully
@@ -127,11 +118,7 @@ const ManualTradingPage: React.FC = () => {
       setIsAnalyzing(true);
       
       // Call your existing AI consensus service
-      const response = await fetch('/api/v1/strategies/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
+      const response = await apiClient.post('/strategies/execute', {
           function: 'market_analysis',
           symbol: aiAssistance.symbol,
           parameters: {
@@ -140,15 +127,9 @@ const ManualTradingPage: React.FC = () => {
             include_consensus: aiAssistance.includeConsensus
           },
           simulation_mode: true
-        })
-      });
+        });
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`AI analysis API error: ${response.status} ${errorText}`);
-      }
-      
-      const result = await response.json();
+      const result = response.data;
       setAiAnalysis(result);
       
     } catch (error) {

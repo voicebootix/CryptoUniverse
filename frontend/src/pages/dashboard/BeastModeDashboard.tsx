@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Flame,
@@ -32,6 +32,10 @@ import {
   Gauge,
   Power,
   Crosshair,
+  Layers,
+  Signal,
+  Globe,
+  Square
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -45,445 +49,620 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { useUser } from '@/store/authStore';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { apiClient } from '@/lib/api/client';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
-// Trading Modes Configuration
-const tradingModes = [
-  {
-    id: 'conservative',
-    name: 'Conservative',
-    icon: Shield,
-    color: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
-    description: 'Low risk, steady gains',
-    maxRisk: 2,
-    avgReturn: '8-12%',
-    features: ['Stop losses', 'Position limits', 'Risk management']
-  },
-  {
-    id: 'balanced',
-    name: 'Balanced',
-    icon: Target,
-    color: 'bg-green-500/10 text-green-500 border-green-500/20',
-    description: 'Optimal risk-reward ratio',
-    maxRisk: 5,
-    avgReturn: '15-25%',
-    features: ['AI consensus', 'Dynamic sizing', 'Multi-timeframe']
-  },
-  {
-    id: 'aggressive',
-    name: 'Aggressive',
-    icon: Zap,
-    color: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
-    description: 'Higher risk, higher rewards',
-    maxRisk: 10,
-    avgReturn: '30-50%',
-    features: ['Leverage trading', 'Momentum plays', 'Quick execution']
-  },
-  {
-    id: 'beast_mode',
-    name: 'Beast Mode',
-    icon: Flame,
-    color: 'bg-red-500/10 text-red-500 border-red-500/20',
-    description: 'Maximum performance, institutional-grade',
-    maxRisk: 20,
-    avgReturn: '50-100%+',
-    features: ['HFT algorithms', 'Derivatives', 'AI-driven arbitrage']
-  }
-];
+// Beast Mode Configuration - Maximum Performance Settings
+const BEAST_MODE_CONFIG = {
+  dailyTarget: 15.0,
+  monthlyTarget: 500.0,
+  maxDrawdown: 35.0,
+  minWinRate: 50.0,
+  maxLeverage: 10.0,
+  maxPositionSize: 25.0,
+  aggressiveRebalancing: true,
+  hftEnabled: true,
+  derivativesEnabled: true,
+  maxConcurrentTrades: 50
+};
 
-// Trading Cycles
-const tradingCycles = [
+// HFT Algorithms Available in Beast Mode
+const HFT_ALGORITHMS = [
   {
-    name: 'Arbitrage Cycle',
-    status: 'active',
-    duration: '15s',
-    profit: '+$247.50',
-    trades: 23,
-    success: 95.7,
+    name: 'Lightning Arbitrage',
+    description: 'Sub-second cross-exchange arbitrage',
+    avgExecutionTime: '150ms',
+    successRate: 94.2,
     icon: Zap,
-    color: 'text-green-500',
-    description: 'Cross-exchange price differences'
+    color: 'text-yellow-500'
   },
   {
-    name: 'Momentum Cycle',
-    status: 'active',
-    duration: '4m',
-    profit: '+$1,247.25',
-    trades: 8,
-    success: 87.5,
+    name: 'Momentum Scalping',
+    description: 'High-frequency momentum capture',
+    avgExecutionTime: '300ms',
+    successRate: 87.8,
     icon: TrendingUp,
-    color: 'text-blue-500',
-    description: 'Trend following with AI confirmation'
+    color: 'text-green-500'
   },
   {
-    name: 'Portfolio Rebalance',
-    status: 'pending',
-    duration: '1h',
-    profit: '+$0.00',
-    trades: 0,
-    success: 0,
+    name: 'Market Making',
+    description: 'Automated liquidity provision',
+    avgExecutionTime: '50ms',
+    successRate: 92.1,
+    icon: Target,
+    color: 'text-blue-500'
+  },
+  {
+    name: 'Statistical Arbitrage',
+    description: 'Mean reversion algorithms',
+    avgExecutionTime: '500ms',
+    successRate: 89.3,
     icon: BarChart3,
-    color: 'text-yellow-500',
-    description: 'Risk-adjusted portfolio optimization'
-  },
-  {
-    name: 'Deep Analysis',
-    status: 'analyzing',
-    duration: '30m',
-    profit: '+$0.00',
-    trades: 0,
-    success: 0,
-    icon: Brain,
-    color: 'text-purple-500',
-    description: 'Multi-AI consensus and market sentiment'
+    color: 'text-purple-500'
   }
 ];
 
-// Live Trading Activity
-const liveActivity = [
-  {
-    id: 1,
-    type: 'BUY',
-    symbol: 'BTC/USDT',
-    amount: 0.25,
-    price: 51250.00,
-    time: '10:45:23',
-    profit: '+$125.50',
-    status: 'completed',
-    confidence: 94,
-    strategy: 'Momentum'
-  },
-  {
-    id: 2,
-    type: 'SELL',
-    symbol: 'ETH/USDT',
-    amount: 5.0,
-    price: 2420.00,
-    time: '10:44:15',
-    profit: '+$75.25',
-    status: 'completed',
-    confidence: 87,
-    strategy: 'Arbitrage'
-  },
-  {
-    id: 3,
-    type: 'BUY',
-    symbol: 'SOL/USDT',
-    amount: 50.0,
-    price: 52.30,
-    time: '10:43:42',
-    profit: '+$47.80',
-    status: 'pending',
-    confidence: 91,
-    strategy: 'Mean Reversion'
-  },
-  {
-    id: 4,
-    type: 'SELL',
-    symbol: 'AVAX/USDT',
-    amount: 25.0,
-    price: 28.75,
-    time: '10:42:18',
-    profit: '-$15.25',
-    status: 'completed',
-    confidence: 76,
-    strategy: 'Risk Management'
-  }
-];
+interface SystemStatus {
+  is_active: boolean;
+  current_mode: string;
+  autonomous_enabled: boolean;
+  simulation_mode: boolean;
+  performance_metrics: {
+    cycles_executed: number;
+    trades_executed: number;
+    total_profit_usd: number;
+    success_rate: number;
+    uptime_hours: number;
+    consecutive_wins: number;
+    consecutive_losses: number;
+  };
+  active_cycles: Array<{
+    cycle_type: string;
+    status: string;
+    duration: string;
+    profit: number;
+    trades: number;
+  }>;
+  emergency_level: string;
+}
 
-// Performance data
-const performanceData = [
-  { time: '09:00', profit: 0, trades: 0 },
-  { time: '09:15', profit: 125, trades: 3 },
-  { time: '09:30', profit: 347, trades: 8 },
-  { time: '09:45', profit: 892, trades: 15 },
-  { time: '10:00', profit: 1247, trades: 23 },
-  { time: '10:15', profit: 1456, trades: 28 },
-  { time: '10:30', profit: 1789, trades: 34 },
-  { time: '10:45', profit: 2147, trades: 41 },
-];
+interface RecentTrade {
+  id: string;
+  symbol: string;
+  side: string;
+  amount: number;
+  price: number;
+  profit_loss: number;
+  timestamp: string;
+  exchange: string;
+  strategy: string;
+}
+
+interface ArbitrageOpportunity {
+  symbol: string;
+  buy_exchange: string;
+  sell_exchange: string;
+  buy_price: number;
+  sell_price: number;
+  profit_percentage: number;
+  profit_bps: number;
+  volume_constraint: number;
+  confidence: number;
+}
 
 const BeastModeDashboard: React.FC = () => {
   const user = useUser();
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [recentTrades, setRecentTrades] = useState<RecentTrade[]>([]);
+  const [arbitrageOpps, setArbitrageOpps] = useState<ArbitrageOpportunity[]>([]);
   const [selectedMode, setSelectedMode] = useState('beast_mode');
-  const [isActive, setIsActive] = useState(true);
-  const [riskLevel, setRiskLevel] = useState([15]);
-  const [targetProfit, setTargetProfit] = useState([25]);
-  const [maxDrawdown, setMaxDrawdown] = useState([5]);
+  const [isActive, setIsActive] = useState(false);
+  const [riskLevel, setRiskLevel] = useState([75]);
+  const [maxDrawdown, setMaxDrawdown] = useState([35]);
+  const [leverageLimit, setLeverageLimit] = useState([10]);
+  const [performanceData, setPerformanceData] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const currentMode = tradingModes.find(mode => mode.id === selectedMode);
+  useEffect(() => {
+    fetchSystemData();
+    
+    // Set up real-time updates every 2 seconds for Beast Mode
+    intervalRef.current = setInterval(() => {
+      fetchSystemData();
+    }, 2000);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active': return 'bg-green-500';
-      case 'pending': return 'bg-yellow-500';
-      case 'analyzing': return 'bg-blue-500';
-      default: return 'bg-gray-500';
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
+
+  const fetchSystemData = async () => {
+    try {
+      await Promise.all([
+        fetchSystemStatus(),
+        fetchRecentTrades(),
+        fetchArbitrageOpportunities()
+      ]);
+      setLastUpdate(new Date());
+    } catch (err: any) {
+      console.error('Failed to fetch system data:', err);
+      setError('Failed to fetch system data');
     }
   };
 
-  const getTradeTypeColor = (type: string) => {
-    return type === 'BUY' ? 'text-green-500' : 'text-red-500';
+  const fetchSystemStatus = async () => {
+    try {
+      const response = await apiClient.get('/trading/status');
+      if (response.data.success) {
+        setSystemStatus(response.data.data);
+        setIsActive(response.data.data.is_active);
+        
+        // Update performance chart data
+        if (response.data.data.performance_metrics) {
+          setPerformanceData(prev => [
+            ...prev.slice(-47), // Keep last 48 data points
+            {
+              time: new Date().toLocaleTimeString(),
+              profit: response.data.data.performance_metrics.total_profit_usd,
+              trades: response.data.data.performance_metrics.trades_executed,
+              success: response.data.data.performance_metrics.success_rate,
+              volume: Math.random() * 1000000 + 500000 // Mock volume for visualization
+            }
+          ]);
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch system status:', err);
+    }
   };
+
+  const fetchRecentTrades = async () => {
+    try {
+      const response = await apiClient.get('/trading/recent-trades', {
+        params: { limit: 20 }
+      });
+      if (response.data.success) {
+        setRecentTrades(response.data.data.trades || []);
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch recent trades:', err);
+    }
+  };
+
+  const fetchArbitrageOpportunities = async () => {
+    try {
+      const response = await apiClient.get('/trading/arbitrage/opportunities');
+      if (response.data.success) {
+        setArbitrageOpps(response.data.data.opportunities || []);
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch arbitrage opportunities:', err);
+    }
+  };
+
+  const handleToggleBeastMode = async () => {
+    try {
+      setIsLoading(true);
+      const endpoint = isActive ? '/trading/autonomous/stop' : '/trading/autonomous/start';
+      const response = await apiClient.post(endpoint, {
+        mode: 'beast_mode',
+        risk_level: riskLevel[0],
+        max_drawdown: maxDrawdown[0],
+        max_leverage: leverageLimit[0]
+      });
+      
+      if (response.data.success) {
+        await fetchSystemStatus();
+      }
+    } catch (err: any) {
+      setError('Failed to toggle Beast Mode');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEmergencyStop = async () => {
+    try {
+      setIsLoading(true);
+      const response = await apiClient.post('/trading/stop-all');
+      if (response.data.success) {
+        await fetchSystemStatus();
+      }
+    } catch (err: any) {
+      setError('Failed to execute emergency stop');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (!systemStatus) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <Flame className="h-12 w-12 animate-pulse mx-auto mb-4 text-red-500" />
+          <p className="text-muted-foreground">Loading Beast Mode...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
             <Flame className="h-8 w-8 text-red-500" />
             Beast Mode Dashboard
-            <Crown className="h-6 w-6 text-yellow-500" />
+            <Badge variant="destructive" className="ml-2">MAXIMUM PERFORMANCE</Badge>
           </h1>
           <p className="text-muted-foreground">
-            Autonomous $100M hedge fund brain - Maximum performance mode
+            High-frequency trading with AI-driven arbitrage and derivatives
           </p>
         </div>
 
         <div className="flex items-center gap-3">
+          <Badge variant="outline" className="gap-2">
+            <Activity className="h-4 w-4" />
+            {lastUpdate.toLocaleTimeString()}
+          </Badge>
           <Button
-            variant={isActive ? "destructive" : "default"}
-            onClick={() => setIsActive(!isActive)}
+            variant="outline"
+            onClick={() => fetchSystemData()}
+            disabled={isLoading}
             className="gap-2"
           >
-            {isActive ? (
-              <>
-                <Pause className="h-4 w-4" />
-                Stop Beast Mode
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4" />
-                Activate Beast Mode
-              </>
-            )}
-          </Button>
-
-          <Button variant="outline" className="gap-2">
-            <Settings className="h-4 w-4" />
-            Configure
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
           </Button>
         </div>
       </div>
 
-      {/* Beast Mode Status */}
-      {isActive && (
+      {/* Error Banner */}
+      {error && (
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="relative overflow-hidden rounded-lg border border-red-500/20 bg-gradient-to-r from-red-500/5 to-orange-500/5 p-6"
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-4 bg-destructive/10 border border-destructive/30 rounded-lg"
         >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <Flame className="h-12 w-12 text-red-500" />
-                <div className="absolute -top-1 -right-1">
-                  <div className="h-3 w-3 bg-red-500 rounded-full animate-pulse"></div>
-                </div>
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-red-500">BEAST MODE ACTIVE</h3>
-                <p className="text-sm text-muted-foreground">
-                  Autonomous trading at maximum performance
-                </p>
-              </div>
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-destructive" />
+            <div>
+              <p className="font-medium text-destructive">System Alert</p>
+              <p className="text-sm text-muted-foreground">{error}</p>
             </div>
-            <div className="text-right">
-              <div className="text-2xl font-bold text-green-500">+$2,147.50</div>
-              <div className="text-sm text-muted-foreground">Today's P&L</div>
-            </div>
+            <Button variant="outline" size="sm" onClick={() => setError(null)}>
+              Dismiss
+            </Button>
           </div>
         </motion.div>
       )}
 
-      {/* Performance Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Cycles</CardTitle>
-            <Cpu className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-500">2/4</div>
-            <p className="text-xs text-muted-foreground">
-              Arbitrage & Momentum running
-            </p>
-            <div className="flex gap-1 mt-2">
-              <div className="h-2 w-2 rounded-full bg-green-500"></div>
-              <div className="h-2 w-2 rounded-full bg-green-500"></div>
-              <div className="h-2 w-2 rounded-full bg-yellow-500"></div>
-              <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Beast Mode Status & Controls */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <Card className={`border-l-4 ${isActive ? 'border-l-red-500 bg-red-500/5' : 'border-l-gray-500 bg-gray-500/5'}`}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Beast Mode Status</CardTitle>
+              <Flame className={`h-4 w-4 ${isActive ? 'text-red-500' : 'text-gray-500'}`} />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {isActive ? 'UNLEASHED' : 'DORMANT'}
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <Switch
+                  checked={isActive}
+                  onCheckedChange={handleToggleBeastMode}
+                  disabled={isLoading}
+                />
+                <span className="text-sm text-muted-foreground">
+                  {isActive ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
-            <Target className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">91.5%</div>
-            <p className="text-xs text-muted-foreground">
-              +2.3% from yesterday
-            </p>
-            <Progress value={91.5} className="mt-2" />
-          </CardContent>
-        </Card>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Profit</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-green-500">
+                {formatCurrency(systemStatus.performance_metrics.total_profit_usd)}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Target: {formatPercentage(BEAST_MODE_CONFIG.dailyTarget)} daily
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg Trade Time</CardTitle>
-            <Timer className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">2.3s</div>
-            <p className="text-xs text-muted-foreground">
-              Lightning fast execution
-            </p>
-            <Badge variant="secondary" className="mt-2">HFT Active</Badge>
-          </CardContent>
-        </Card>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+        >
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
+              <Target className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {formatPercentage(systemStatus.performance_metrics.success_rate)}
+              </div>
+              <Progress 
+                value={systemStatus.performance_metrics.success_rate} 
+                className="mt-2 h-2" 
+              />
+              <div className="text-sm text-muted-foreground mt-1">
+                {systemStatus.performance_metrics.trades_executed} trades
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Risk Level</CardTitle>
-            <Gauge className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-orange-500">{riskLevel[0]}%</div>
-            <p className="text-xs text-muted-foreground">
-              Managed exposure
-            </p>
-            <Progress value={riskLevel[0]} className="mt-2" />
-          </CardContent>
-        </Card>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+        >
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Active Algorithms</CardTitle>
+              <Bot className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {HFT_ALGORITHMS.length}
+              </div>
+              <div className="text-sm text-muted-foreground">
+                HFT algorithms running
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="cycles">Trading Cycles</TabsTrigger>
-          <TabsTrigger value="activity">Live Activity</TabsTrigger>
-          <TabsTrigger value="config">Configuration</TabsTrigger>
+      {/* Main Dashboard */}
+      <Tabs defaultValue="performance" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="performance">Performance</TabsTrigger>
+          <TabsTrigger value="algorithms">HFT Algorithms</TabsTrigger>
+          <TabsTrigger value="arbitrage">Live Arbitrage</TabsTrigger>
+          <TabsTrigger value="controls">Beast Controls</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Performance Tab */}
+        <TabsContent value="performance" className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Real-time Performance Chart */}
             <Card>
               <CardHeader>
-                <CardTitle>Performance Chart</CardTitle>
-                <CardDescription>
-                  Real-time P&L and trade count
-                </CardDescription>
+                <CardTitle className="flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5" />
+                  Real-time Performance
+                </CardTitle>
+                <CardDescription>Live profit tracking and trade execution</CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={performanceData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="time" />
-                    <YAxis />
-                    <Tooltip />
-                    <Line type="monotone" dataKey="profit" stroke="#10b981" strokeWidth={2} name="Profit ($)" />
-                    <Line type="monotone" dataKey="trades" stroke="#3b82f6" strokeWidth={2} name="Trades" />
-                  </LineChart>
-                </ResponsiveContainer>
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={performanceData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis
+                        dataKey="time"
+                        stroke="#9CA3AF"
+                        fontSize={12}
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <YAxis
+                        stroke="#9CA3AF"
+                        fontSize={12}
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#1F2937',
+                          border: '1px solid #374151',
+                          borderRadius: '8px',
+                        }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="profit"
+                        stroke="#ef4444"
+                        fill="url(#beastGradient)"
+                        strokeWidth={2}
+                      />
+                      <defs>
+                        <linearGradient id="beastGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Recent Trades */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Activity className="h-5 w-5" />
+                  Live Trade Feed
+                </CardTitle>
+                <CardDescription>Real-time trade execution stream</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3 max-h-[300px] overflow-y-auto">
+                  {recentTrades.length > 0 ? (
+                    recentTrades.slice(0, 10).map((trade, index) => (
+                      <motion.div
+                        key={trade.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        className="flex items-center justify-between p-3 rounded border bg-muted/20"
+                      >
+                        <div className="flex items-center gap-3">
+                          <Badge variant={trade.side === 'buy' ? 'default' : 'destructive'}>
+                            {trade.side.toUpperCase()}
+                          </Badge>
+                          <div>
+                            <div className="font-medium">{trade.symbol}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {trade.exchange} • {trade.strategy}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-mono text-sm">
+                            {formatCurrency(trade.price)}
+                          </div>
+                          <div className={`text-xs font-mono ${
+                            trade.profit_loss >= 0 ? 'text-green-500' : 'text-red-500'
+                          }`}>
+                            {trade.profit_loss >= 0 ? '+' : ''}{formatCurrency(trade.profit_loss)}
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p>No recent trades available</p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Performance Metrics */}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Uptime</p>
+                    <p className="text-2xl font-bold">
+                      {formatNumber(systemStatus.performance_metrics.uptime_hours)}h
+                    </p>
+                  </div>
+                  <Clock className="h-8 w-8 text-blue-500" />
+                </div>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle>Trading Mode</CardTitle>
-                <CardDescription>
-                  Current autonomous configuration
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {currentMode && (
-                  <div className="space-y-4">
-                    <div className={`p-4 rounded-lg border ${currentMode.color}`}>
-                      <div className="flex items-center gap-3">
-                        <currentMode.icon className="h-8 w-8" />
-                        <div>
-                          <h3 className="font-bold text-lg">{currentMode.name}</h3>
-                          <p className="text-sm opacity-80">{currentMode.description}</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <div className="text-muted-foreground">Max Risk</div>
-                        <div className="font-medium">{currentMode.maxRisk}%</div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">Avg Return</div>
-                        <div className="font-medium">{currentMode.avgReturn}</div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm text-muted-foreground mb-2">Features</div>
-                      <div className="flex flex-wrap gap-2">
-                        {currentMode.features.map((feature, index) => (
-                          <Badge key={index} variant="secondary">
-                            {feature}
-                          </Badge>
-                        ))}
-                      </div>
-                    </div>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Win Streak</p>
+                    <p className="text-2xl font-bold text-green-500">
+                      {systemStatus.performance_metrics.consecutive_wins}
+                    </p>
                   </div>
-                )}
+                  <Sparkles className="h-8 w-8 text-green-500" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Cycles</p>
+                    <p className="text-2xl font-bold">
+                      {systemStatus.performance_metrics.cycles_executed}
+                    </p>
+                  </div>
+                  <Cpu className="h-8 w-8 text-purple-500" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Emergency</p>
+                    <p className="text-2xl font-bold">
+                      {systemStatus.emergency_level.toUpperCase()}
+                    </p>
+                  </div>
+                  <Shield className="h-8 w-8 text-yellow-500" />
+                </div>
               </CardContent>
             </Card>
           </div>
         </TabsContent>
 
-        <TabsContent value="cycles" className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {tradingCycles.map((cycle, index) => (
+        {/* HFT Algorithms Tab */}
+        <TabsContent value="algorithms" className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2">
+            {HFT_ALGORITHMS.map((algorithm, index) => (
               <motion.div
-                key={cycle.name}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
+                key={algorithm.name}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: index * 0.1 }}
               >
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <cycle.icon className={`h-5 w-5 ${cycle.color}`} />
-                        <CardTitle className="text-lg">{cycle.name}</CardTitle>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className={`h-2 w-2 rounded-full ${getStatusColor(cycle.status)}`}></div>
-                        <Badge variant="secondary" className="capitalize">
-                          {cycle.status}
-                        </Badge>
+                <Card className="hover:shadow-lg transition-shadow">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <div className="flex items-center gap-3">
+                      <algorithm.icon className={`h-6 w-6 ${algorithm.color}`} />
+                      <div>
+                        <CardTitle className="text-base">{algorithm.name}</CardTitle>
+                        <CardDescription className="text-xs">
+                          {algorithm.description}
+                        </CardDescription>
                       </div>
                     </div>
-                    <CardDescription>{cycle.description}</CardDescription>
+                    <Badge variant="default">ACTIVE</Badge>
                   </CardHeader>
                   <CardContent>
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
-                        <div className="text-muted-foreground">Duration</div>
-                        <div className="font-medium">{cycle.duration}</div>
+                        <span className="text-muted-foreground">Execution Time:</span>
+                        <span className="ml-2 font-mono text-blue-500">
+                          {algorithm.avgExecutionTime}
+                        </span>
                       </div>
                       <div>
-                        <div className="text-muted-foreground">Profit</div>
-                        <div className="font-medium text-green-500">{cycle.profit}</div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">Trades</div>
-                        <div className="font-medium">{cycle.trades}</div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">Success</div>
-                        <div className="font-medium">{cycle.success}%</div>
+                        <span className="text-muted-foreground">Success Rate:</span>
+                        <span className="ml-2 font-mono text-green-500">
+                          {formatPercentage(algorithm.successRate)}
+                        </span>
                       </div>
                     </div>
+                    <Progress 
+                      value={algorithm.successRate} 
+                      className="mt-3 h-2" 
+                    />
                   </CardContent>
                 </Card>
               </motion.div>
@@ -491,137 +670,217 @@ const BeastModeDashboard: React.FC = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="activity" className="space-y-4">
+        {/* Live Arbitrage Tab */}
+        <TabsContent value="arbitrage" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Live Trading Activity</CardTitle>
-              <CardDescription>
-                Real-time trade execution and results
-              </CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                <Zap className="h-5 w-5" />
+                Live Arbitrage Opportunities
+              </CardTitle>
+              <CardDescription>Real-time cross-exchange arbitrage detection</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {liveActivity.map((trade) => (
-                  <div key={trade.id} className="flex items-center justify-between p-3 border rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded ${trade.type === 'BUY' ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-                        {trade.type === 'BUY' ? (
-                          <ArrowUpRight className={`h-4 w-4 ${getTradeTypeColor(trade.type)}`} />
-                        ) : (
-                          <ArrowDownRight className={`h-4 w-4 ${getTradeTypeColor(trade.type)}`} />
-                        )}
-                      </div>
-                      <div>
-                        <div className="font-medium">{trade.symbol}</div>
-                        <div className="text-sm text-muted-foreground">
-                          {trade.strategy} • {trade.time}
+                {arbitrageOpps.length > 0 ? (
+                  arbitrageOpps.slice(0, 8).map((opp, index) => (
+                    <motion.div
+                      key={index}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="flex items-center justify-between p-4 rounded-lg border bg-muted/20 hover:bg-muted/30 transition-colors"
+                    >
+                      <div className="flex items-center gap-4">
+                        <Badge variant="outline" className="font-mono">
+                          {opp.symbol}
+                        </Badge>
+                        <div>
+                          <div className="font-medium">
+                            {opp.buy_exchange} → {opp.sell_exchange}
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            Buy: {formatCurrency(opp.buy_price)} | Sell: {formatCurrency(opp.sell_price)}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <div className={`font-medium ${trade.profit.startsWith('+') ? 'text-green-500' : 'text-red-500'}`}>
-                        {trade.profit}
+                      <div className="text-right">
+                        <div className="text-lg font-bold text-green-500">
+                          +{formatPercentage(opp.profit_percentage)}
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {opp.profit_bps} bps • {Math.round(opp.confidence)}% conf
+                        </div>
                       </div>
-                      <div className="text-sm text-muted-foreground">
-                        {trade.confidence}% confidence
-                      </div>
-                    </div>
-                    <Badge variant={trade.status === 'completed' ? 'default' : 'secondary'}>
-                      {trade.status}
-                    </Badge>
+                    </motion.div>
+                  ))
+                ) : (
+                  <div className="text-center py-8">
+                    <Zap className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <p className="text-muted-foreground">
+                      Scanning for arbitrage opportunities...
+                    </p>
                   </div>
-                ))}
+                )}
               </div>
             </CardContent>
           </Card>
         </TabsContent>
 
-        <TabsContent value="config" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Beast Controls Tab */}
+        <TabsContent value="controls" className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Risk Controls */}
             <Card>
               <CardHeader>
-                <CardTitle>Risk Management</CardTitle>
-                <CardDescription>
-                  Configure risk parameters for Beast Mode
-                </CardDescription>
+                <CardTitle className="flex items-center gap-2">
+                  <Settings className="h-5 w-5" />
+                  Beast Mode Controls
+                </CardTitle>
+                <CardDescription>Maximum performance configuration</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="space-y-2">
-                  <Label>Risk Level: {riskLevel[0]}%</Label>
+                <div>
+                  <Label className="text-sm font-medium">Risk Level: {riskLevel[0]}%</Label>
                   <Slider
                     value={riskLevel}
                     onValueChange={setRiskLevel}
-                    max={25}
-                    min={1}
-                    step={1}
-                    className="w-full"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Target Profit: {targetProfit[0]}%</Label>
-                  <Slider
-                    value={targetProfit}
-                    onValueChange={setTargetProfit}
                     max={100}
-                    min={5}
+                    min={50}
                     step={5}
-                    className="w-full"
+                    className="mt-2"
                   />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Higher risk = Higher potential returns
+                  </p>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Max Drawdown: {maxDrawdown[0]}%</Label>
+                <div>
+                  <Label className="text-sm font-medium">Max Drawdown: {maxDrawdown[0]}%</Label>
                   <Slider
                     value={maxDrawdown}
                     onValueChange={setMaxDrawdown}
+                    max={50}
+                    min={10}
+                    step={5}
+                    className="mt-2"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Maximum acceptable portfolio decline
+                  </p>
+                </div>
+
+                <div>
+                  <Label className="text-sm font-medium">Leverage Limit: {leverageLimit[0]}x</Label>
+                  <Slider
+                    value={leverageLimit}
+                    onValueChange={setLeverageLimit}
                     max={20}
                     min={1}
                     step={1}
-                    className="w-full"
+                    className="mt-2"
                   />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Maximum leverage for positions
+                  </p>
+                </div>
+
+                <div className="pt-4 border-t space-y-3">
+                  <Button
+                    variant={isActive ? "destructive" : "default"}
+                    onClick={handleToggleBeastMode}
+                    disabled={isLoading}
+                    className="w-full gap-2"
+                  >
+                    {isActive ? (
+                      <>
+                        <Pause className="h-4 w-4" />
+                        Stop Beast Mode
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-4 w-4" />
+                        Unleash Beast Mode
+                      </>
+                    )}
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    onClick={handleEmergencyStop}
+                    disabled={isLoading}
+                    className="w-full gap-2 border-red-500 text-red-500 hover:bg-red-500 hover:text-white"
+                  >
+                    <Square className="h-4 w-4" />
+                    EMERGENCY STOP ALL
+                  </Button>
                 </div>
               </CardContent>
             </Card>
 
+            {/* Beast Mode Configuration */}
             <Card>
               <CardHeader>
-                <CardTitle>Strategy Configuration</CardTitle>
-                <CardDescription>
-                  Enable/disable trading strategies
-                </CardDescription>
+                <CardTitle className="flex items-center gap-2">
+                  <Crown className="h-5 w-5" />
+                  Beast Mode Specifications
+                </CardTitle>
+                <CardDescription>Maximum performance parameters</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-medium">High-Frequency Trading</div>
-                    <div className="text-sm text-muted-foreground">Sub-second execution</div>
+              <CardContent>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Daily Target:</span>
+                      <span className="ml-2 font-mono text-green-500">
+                        {formatPercentage(BEAST_MODE_CONFIG.dailyTarget)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Monthly Target:</span>
+                      <span className="ml-2 font-mono text-green-500">
+                        {formatPercentage(BEAST_MODE_CONFIG.monthlyTarget)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Max Position:</span>
+                      <span className="ml-2 font-mono">
+                        {formatPercentage(BEAST_MODE_CONFIG.maxPositionSize)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Concurrent Trades:</span>
+                      <span className="ml-2 font-mono">
+                        {BEAST_MODE_CONFIG.maxConcurrentTrades}
+                      </span>
+                    </div>
                   </div>
-                  <Switch defaultChecked />
-                </div>
 
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-medium">Arbitrage Trading</div>
-                    <div className="text-sm text-muted-foreground">Cross-exchange opportunities</div>
+                  <div className="pt-4 border-t">
+                    <h4 className="font-medium mb-3">Enabled Features:</h4>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <span className="text-sm">High-Frequency Trading</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <span className="text-sm">Derivatives Trading</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <span className="text-sm">Aggressive Rebalancing</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <span className="text-sm">Multi-Exchange Arbitrage</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="h-4 w-4 text-green-500" />
+                        <span className="text-sm">AI-Driven Market Making</span>
+                      </div>
+                    </div>
                   </div>
-                  <Switch defaultChecked />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-medium">Derivatives Trading</div>
-                    <div className="text-sm text-muted-foreground">Futures and options</div>
-                  </div>
-                  <Switch defaultChecked />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-medium">AI Consensus</div>
-                    <div className="text-sm text-muted-foreground">Multi-AI decision making</div>
-                  </div>
-                  <Switch defaultChecked />
                 </div>
               </CardContent>
             </Card>
