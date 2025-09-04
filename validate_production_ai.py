@@ -7,11 +7,14 @@ Tests AI chat functionality in production environment with Render Dashboard API 
 import asyncio
 import json
 import sys
+import aiohttp
 from datetime import datetime
 from typing import Dict, Any
+from pathlib import Path
 
-# Add the app directory to the path
-sys.path.append('.')
+# Add the app directory to the path using proper path resolution
+project_root = Path(__file__).resolve().parent
+sys.path.insert(0, str(project_root))
 
 from app.core.config import get_settings
 from app.services.ai_consensus_core import AIModelConnector, AIModelProvider
@@ -103,11 +106,11 @@ async def test_production_ai_setup() -> Dict[str, Any]:
                     "error": response.error
                 }
         
-        except Exception as e:
-            print(f" ❌ Exception: {str(e)}")
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            print(f" ❌ Exception: {e!s}")
             results["api_connectivity"][provider_name] = {
                 "success": False,
-                "error": f"Exception: {str(e)}"
+                "error": f"Exception: {e!s}"
             }
     
     # Test the full AI chat engine
@@ -147,11 +150,11 @@ async def test_production_ai_setup() -> Dict[str, Any]:
                 "error": response.get('error', 'Unknown error')
             }
     
-    except Exception as e:
-        print(f" ❌ Exception: {str(e)}")
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as e:
+        print(f" ❌ Exception: {e!s}")
         results["chat_engine_test"] = {
             "success": False,
-            "error": f"Exception: {str(e)}"
+            "error": f"Exception: {e!s}"
         }
     
     # Determine overall status

@@ -54,8 +54,12 @@ export const useTelegram = () => {
         err.response?.data?.detail || "Failed to fetch Telegram connection";
       setError(errorMsg);
 
-      // Don't show toast for "not connected" errors
-      if (!errorMsg.includes("No Telegram")) {
+      // Don't show toast for "not connected" errors - check status code instead of string
+      const isNotConnectedError = err?.response?.status === 404 || 
+                                  err?.status === 404 ||
+                                  err?.code === 'TELEGRAM_NOT_CONNECTED';
+      
+      if (!isNotConnectedError) {
         toast({
           title: "Error",
           description: "Failed to load Telegram connection status",

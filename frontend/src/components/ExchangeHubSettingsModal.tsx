@@ -28,6 +28,27 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Slider } from "./ui/slider";
 import { useToast } from "./ui/use-toast";
+
+// Safe number parsing helper
+const safeParseNumber = (
+  value: string, 
+  isInteger: boolean = false, 
+  min?: number, 
+  max?: number,
+  fallback: number = 0
+): number => {
+  const parsed = isInteger ? parseInt(value, 10) : parseFloat(value);
+  
+  if (isNaN(parsed)) {
+    return fallback;
+  }
+  
+  let result = parsed;
+  if (min !== undefined) result = Math.max(min, result);
+  if (max !== undefined) result = Math.min(max, result);
+  
+  return result;
+};
 import {
   ExchangeSettings,
   DEFAULT_EXCHANGE_SETTINGS,
@@ -186,7 +207,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                           onChange={(e) =>
                             updateSetting(
                               "timeout_seconds",
-                              parseInt(e.target.value)
+                              safeParseNumber(e.target.value, true, 1, 300, settings.timeout_seconds)
                             )
                           }
                           className="bg-[#1a1c23] border-[#2a2d35] text-gray-200"
@@ -208,7 +229,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                           onChange={(e) =>
                             updateSetting(
                               "rate_limit_per_minute",
-                              parseInt(e.target.value)
+                              safeParseNumber(e.target.value, true, 1, 1000, settings.rate_limit_per_minute)
                             )
                           }
                           className="bg-[#1a1c23] border-[#2a2d35] text-gray-200"
@@ -230,7 +251,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                           onChange={(e) =>
                             updateSetting(
                               "max_retries",
-                              parseInt(e.target.value)
+                              safeParseNumber(e.target.value, true, 0, 10, settings.max_retries)
                             )
                           }
                           className="bg-[#1a1c23] border-[#2a2d35] text-gray-200"
@@ -252,7 +273,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                           onChange={(e) =>
                             updateSetting(
                               "connection_pool_size",
-                              parseInt(e.target.value)
+                              safeParseNumber(e.target.value, true, 1, 50, settings.connection_pool_size)
                             )
                           }
                           className="bg-[#1a1c23] border-[#2a2d35] text-gray-200"
@@ -330,7 +351,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                           onChange={(e) =>
                             updateSetting(
                               "max_position_size",
-                              parseInt(e.target.value)
+                              safeParseNumber(e.target.value, true, 1, 1000000, settings.max_position_size)
                             )
                           }
                           className="bg-[#1a1c23] border-[#2a2d35] text-gray-200"
@@ -530,7 +551,7 @@ const ExchangeHubSettingsModal: React.FC<ExchangeHubSettingsModalProps> = ({
                         <Select
                           value={settings.orderbook_depth.toString()}
                           onValueChange={(value) =>
-                            updateSetting("orderbook_depth", parseInt(value))
+                            updateSetting("orderbook_depth", safeParseNumber(value, true, 5, 1000, settings.orderbook_depth))
                           }
                         >
                           <SelectTrigger className="bg-[#1a1c23] border-[#2a2d35] text-gray-200">

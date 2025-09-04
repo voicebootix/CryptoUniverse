@@ -184,8 +184,8 @@ def create_application() -> FastAPI:
     app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
 
     # Security middleware
-    if settings.ALLOWED_HOSTS:
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
+    if settings.allowed_hosts:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
     # Custom middleware (order matters!)
     app.add_middleware(RequestLoggingMiddleware)

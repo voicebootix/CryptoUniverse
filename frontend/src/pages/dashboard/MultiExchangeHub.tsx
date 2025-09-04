@@ -397,13 +397,14 @@ const MultiExchangeHub: React.FC = () => {
                   }`}
                 >
                   {aggregatedStats.totalPnl24h > 0 ? "+" : ""}
-                  {formatPercentage(
-                    Math.abs(
-                      (aggregatedStats.totalPnl24h /
-                        aggregatedStats.totalBalance) *
-                        100
-                    )
-                  )}
+                  {aggregatedStats.totalBalance > 0 
+                    ? formatPercentage(
+                        Math.abs(
+                          (aggregatedStats.totalPnl24h / aggregatedStats.totalBalance) * 100
+                        )
+                      )
+                    : "0%"
+                  }
                 </p>
               </div>
               <div className="p-3 bg-green-500/10 rounded-xl">

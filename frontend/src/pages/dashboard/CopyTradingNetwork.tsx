@@ -59,7 +59,13 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import { 
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
@@ -513,26 +519,41 @@ const CopyTradingNetwork: React.FC = () => {
                 </div>
               </div>
               <Select value={filterTier} onValueChange={setFilterTier}>
-                <option value="all">All Tiers</option>
-                <option value="platinum">Platinum</option>
-                <option value="gold">Gold</option>
-                <option value="silver">Silver</option>
+                <SelectTrigger>
+                  <SelectValue placeholder="Filter by tier" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Tiers</SelectItem>
+                  <SelectItem value="platinum">Platinum</SelectItem>
+                  <SelectItem value="gold">Gold</SelectItem>
+                  <SelectItem value="silver">Silver</SelectItem>
+                </SelectContent>
               </Select>
               <Select
                 value={filterSpecialty}
                 onValueChange={setFilterSpecialty}
               >
-                <option value="all">All Specialties</option>
-                <option value="btc">BTC Trading</option>
-                <option value="defi">DeFi</option>
-                <option value="scalping">Scalping</option>
-                <option value="swing">Swing Trading</option>
+                <SelectTrigger>
+                  <SelectValue placeholder="Filter by specialty" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Specialties</SelectItem>
+                  <SelectItem value="btc">BTC Trading</SelectItem>
+                  <SelectItem value="defi">DeFi</SelectItem>
+                  <SelectItem value="scalping">Scalping</SelectItem>
+                  <SelectItem value="swing">Swing Trading</SelectItem>
+                </SelectContent>
               </Select>
               <Select value={sortBy} onValueChange={setSortBy}>
-                <option value="returns">Highest Returns</option>
-                <option value="winrate">Best Win Rate</option>
-                <option value="followers">Most Followers</option>
-                <option value="signals">Most Signals</option>
+                <SelectTrigger>
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="returns">Highest Returns</SelectItem>
+                  <SelectItem value="winrate">Best Win Rate</SelectItem>
+                  <SelectItem value="followers">Most Followers</SelectItem>
+                  <SelectItem value="signals">Most Signals</SelectItem>
+                </SelectContent>
               </Select>
               <div className="flex items-center gap-2">
                 <Switch

@@ -341,17 +341,9 @@ class AIModelConnector(LoggerMixin):
                     )
                     
         except Exception as e:
-            self.logger.error("Claude API query failed", error=str(e), request_id=request_id)
-            return AIModelResponse(
-                provider=AIModelProvider.CLAUDE,
-                content="",
-                confidence=0.0,
-                reasoning=f"Claude API error: {str(e)}",
-                cost=0.0,
-                response_time=0.0,
-                success=False,
-                error=str(e)
-            )
+            self.logger.exception("Claude API query failed", request_id=request_id)
+            # Re-raise to allow retry/circuit-breaker logic to handle
+            raise
     
     async def _query_gemini(
         self,
@@ -396,8 +388,10 @@ class AIModelConnector(LoggerMixin):
         }
         
         try:
-            # Google AI API uses a different URL format
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{config['model']}:generateContent?key={settings.GOOGLE_AI_API_KEY}"
+            # Use configured API URL and append API key
+            base_url = config["api_url"]
+            separator = "&" if "?" in base_url else "?"
+            api_url = f"{base_url}{separator}key={settings.GOOGLE_AI_API_KEY}"
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -434,17 +428,9 @@ class AIModelConnector(LoggerMixin):
                     )
                     
         except Exception as e:
-            self.logger.error("Gemini API query failed", error=str(e), request_id=request_id)
-            return AIModelResponse(
-                provider=AIModelProvider.GEMINI,
-                content="",
-                confidence=0.0,
-                reasoning=f"Gemini API error: {str(e)}",
-                cost=0.0,
-                response_time=0.0,
-                success=False,
-                error=str(e)
-            )
+            self.logger.exception("Gemini API query failed", request_id=request_id)
+            # Re-raise to allow retry/circuit-breaker logic to handle
+            raise
     
     def _extract_confidence(self, content: str) -> float:
         """Extract confidence score from AI response."""

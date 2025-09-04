@@ -3109,11 +3109,20 @@ class TradingStrategiesService(LoggerMixin):
                     current_positions = []
                     for balance in portfolio_data.get("balances", []):
                         if balance.get("total", 0) > 0:
+                            quantity = float(balance.get("total", 0))
+                            value_usd = float(balance.get("value_usd", 0))
+                            
+                            # Calculate entry price safely
+                            entry_price = 0.0
+                            if quantity > 0 and value_usd > 0:
+                                entry_price = value_usd / quantity
+                            
                             current_positions.append({
                                 "symbol": balance.get("asset", "Unknown"),
-                                "market_value": balance.get("value_usd", 0),
+                                "market_value": value_usd,
                                 "unrealized_pnl": balance.get("unrealized_pnl", 0),
-                                "quantity": balance.get("total", 0),
+                                "quantity": quantity,
+                                "entry_price": entry_price,
                                 "exchange": balance.get("exchange", "Unknown")
                             })
                 else:
@@ -3333,11 +3342,20 @@ class TradingStrategiesService(LoggerMixin):
                     current_positions = []
                     for balance in portfolio_data.get("balances", []):
                         if balance.get("total", 0) > 0:
+                            quantity = float(balance.get("total", 0))
+                            value_usd = float(balance.get("value_usd", 0))
+                            
+                            # Calculate entry price safely
+                            entry_price = 0.0
+                            if quantity > 0 and value_usd > 0:
+                                entry_price = value_usd / quantity
+                            
                             current_positions.append({
                                 "symbol": balance.get("asset", "Unknown"),
-                                "market_value": balance.get("value_usd", 0),
+                                "market_value": value_usd,
                                 "unrealized_pnl": balance.get("unrealized_pnl", 0),
-                                "quantity": balance.get("total", 0),
+                                "quantity": quantity,
+                                "entry_price": entry_price,
                                 "exchange": balance.get("exchange", "Unknown")
                             })
                 else:

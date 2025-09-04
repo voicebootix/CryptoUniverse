@@ -420,12 +420,9 @@ const LoginPage: React.FC = () => {
                             Remember me
                           </Label>
                         </div>
-                        <Link
-                          to="/auth/forgot-password"
-                      className="text-sm text-blue-400 hover:text-blue-300 font-semibold transition-colors duration-200"
-                        >
-                          Forgot password?
-                        </Link>
+                        <span className="text-sm text-gray-500">
+                          Forgot password? Contact support
+                        </span>
                   </div>
 
                       {/* Sign In Button */}

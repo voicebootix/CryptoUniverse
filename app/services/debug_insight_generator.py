@@ -138,7 +138,10 @@ class EnhancedDebugInsightGenerator(LoggerMixin):
         self.applied_fixes: Dict[str, AIFix] = {}
         
         # AI client settings
-        self.claude_api_key = settings.ANTHROPIC_API_KEY or settings.OPENAI_API_KEY
+        if not settings.ANTHROPIC_API_KEY:
+            self.logger.error("ANTHROPIC_API_KEY not configured for debug insight generator")
+            raise ValueError("ANTHROPIC_API_KEY is required for debug insight generator")
+        self.claude_api_key = settings.ANTHROPIC_API_KEY
         self.claude_model = "claude-3-5-sonnet-latest"
         
         # System monitoring

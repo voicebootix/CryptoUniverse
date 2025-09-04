@@ -1117,12 +1117,13 @@ const AdvancedAnalytics: React.FC = () => {
                         <div
                           key={asset}
                           className={`p-2 text-center text-xs font-medium text-white rounded ${getCorrelationColor(
-                            row[asset as keyof typeof row] as number
+                            typeof row[asset as keyof typeof row] === 'number' ? row[asset as keyof typeof row] as number : 0
                           )}`}
                         >
-                          {(row[asset as keyof typeof row] as number).toFixed(
-                            2
-                          )}
+                          {typeof row[asset as keyof typeof row] === 'number' 
+                            ? (row[asset as keyof typeof row] as number).toFixed(2)
+                            : '-'
+                          }
                         </div>
                       )
                     )}

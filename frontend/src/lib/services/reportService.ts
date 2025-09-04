@@ -78,7 +78,7 @@ class ReportService {
       rows.push(["24h Volume", formatCurrency(sanitizedData.total_volume_24h)]);
       rows.push([
         "Win Rate",
-        formatPercentage(sanitizedData.overall_win_rate / 100),
+        formatPercentage(sanitizedData.overall_win_rate),
       ]);
       rows.push([
         "Active Positions",
@@ -104,7 +104,7 @@ class ReportService {
           formatCurrency(ex.balance),
           formatCurrency(ex.pnl_24h),
           ex.trades_24h.toString(),
-          formatPercentage(ex.win_rate / 100),
+          formatPercentage(ex.win_rate),
           ex.connection_status,
         ])
       );
@@ -145,7 +145,7 @@ class ReportService {
         ...sanitizedData.performance_metrics.map((metric) => [
           metric.exchange_name,
           metric.trades.toString(),
-          formatPercentage(metric.win_rate / 100),
+          formatPercentage(metric.win_rate),
           formatCurrency(metric.avg_profit),
           formatCurrency(metric.volume),
         ])
@@ -221,7 +221,7 @@ class ReportService {
                         <td>${formatCurrency(ex.balance)}</td>
                         <td>${formatCurrency(ex.pnl_24h)}</td>
                         <td>${ex.trades_24h}</td>
-                        <td>${formatPercentage(ex.win_rate / 100)}</td>
+                        <td>${formatPercentage(ex.win_rate)}</td>
                         <td>${this.escapeHTML(ex.connection_status)}</td>
                     </tr>
                 `
@@ -292,7 +292,7 @@ class ReportService {
                     <tr>
                         <td>${this.escapeHTML(metric.exchange_name)}</td>
                         <td>${metric.trades}</td>
-                        <td>${formatPercentage(metric.win_rate / 100)}</td>
+                        <td>${formatPercentage(metric.win_rate)}</td>
                         <td>${formatCurrency(metric.avg_profit)}</td>
                         <td>${formatCurrency(metric.volume)}</td>
                     </tr>

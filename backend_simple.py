@@ -9,7 +9,7 @@ import hashlib
 import secrets
 import time
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Set
 import sqlite3
 import json
 import base64
@@ -61,6 +61,9 @@ app.add_middleware(
 
 # Security
 security = HTTPBearer()
+
+# OAuth state tracking for CSRF protection
+oauth_states: Set[str] = set()
 
 # Models
 class LoginRequest(BaseModel):
@@ -421,18 +424,32 @@ async def logout(current_user: Dict = Depends(get_current_user)):
 
 @app.post("/api/v1/auth/oauth/url", response_model=OAuthUrlResponse)
 async def get_oauth_url():
-    """Get the OAuth authorization URL."""
-    # This is a placeholder. In a real application, you'd generate a dynamic URL
-    # based on your OAuth provider (e.g., Google, GitHub, etc.) and client ID/secret.
-    oauth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={GOOGLE_CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=email%20profile"
+    """Get the OAuth authorization URL with CSRF protection."""
+    # Generate cryptographically secure state for CSRF protection
+    state = secrets.token_urlsafe(32)
+    oauth_states.add(state)
+    
+    # Clean up old states (keep only last 100)
+    if len(oauth_states) > 100:
+        oauth_states.clear()
+        oauth_states.add(state)
+    
+    oauth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={GOOGLE_CLIENT_ID}&redirect_uri={REDIRECT_URI}&response_type=code&scope=email%20profile&state={state}"
     return OAuthUrlResponse(authorization_url=oauth_url)
 
 
 @app.get("/api/v1/auth/oauth/callback")
 async def oauth_callback(code: str, state: str, response: Response):
-    """Handle OAuth callback from Google."""
-    # In a real app, you would verify the 'state' parameter to prevent CSRF attacks.
-    # For simplicity, we are skipping state verification here.
+    """Handle OAuth callback from Google with CSRF protection."""
+    # Verify state parameter to prevent CSRF attacks
+    if state not in oauth_states:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid state parameter - possible CSRF attack"
+        )
+    
+    # Remove used state
+    oauth_states.discard(state)
 
     # Exchange authorization code for access token
     # This part would involve an HTTP POST request to Google's token endpoint.
@@ -480,15 +497,22 @@ async def oauth_callback(code: str, state: str, response: Response):
                 "full_name": user["full_name"],
                 "role": user["role"],
                 "status": user["status"],
-                "created_at": user["created_at"].isoformat(),
+                "created_at": user["created_at"].isoformat() if hasattr(user["created_at"], 'isoformat') else str(user["created_at"]),
             },
         }
 
-        # Encode auth data in base64 to pass through URL
-        encoded_data = base64.b64encode(json.dumps(auth_data).encode()).decode()
+        # Set secure cookie instead of passing sensitive data in URL
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            secure=True,
+            samesite="strict",
+            max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        )
 
-        # Redirect to frontend with success and data
-        redirect_url = f"http://localhost:3000/auth/oauth/callback?success=true&data={encoded_data}"
+        # Redirect to frontend with only success flag (no sensitive data in URL)
+        redirect_url = f"http://localhost:3000/auth/oauth/callback?success=true"
         response.headers["Location"] = redirect_url
         response.status_code = status.HTTP_302_FOUND
         return response

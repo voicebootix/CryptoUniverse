@@ -304,7 +304,17 @@ const ExchangeConnectionModal: React.FC<ExchangeConnectionModalProps> = ({
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setStep("select")}
+                    onClick={() => {
+                      // Clear sensitive fields when going back
+                      setFormData(prev => ({
+                        ...prev,
+                        api_key: "",
+                        secret_key: "",
+                        passphrase: ""
+                      }));
+                      setErrors({});
+                      setStep("select");
+                    }}
                     className="bg-[#1a1c23] border-[#2a2d35] text-gray-300 hover:text-gray-200"
                   >
                     Change Exchange
@@ -526,7 +536,17 @@ const ExchangeConnectionModal: React.FC<ExchangeConnectionModalProps> = ({
                 <div className="flex justify-end gap-3 p-6 border-t border-[#2a2d35] bg-[#1e2128]">
                   <Button
                     variant="outline"
-                    onClick={() => setStep("select")}
+                    onClick={() => {
+                      // Clear sensitive fields when going back
+                      setFormData(prev => ({
+                        ...prev,
+                        api_key: "",
+                        secret_key: "",
+                        passphrase: ""
+                      }));
+                      setErrors({});
+                      setStep("select");
+                    }}
                     className="bg-[#1a1c23] border-[#2a2d35] text-gray-300 hover:text-gray-200"
                   >
                     Back
