@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&family=JetBrains+Mono:wght@100;200;300;400;500;600;700;800&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&family=JetBrains+Mono:wght@100;200;300;400;500;600;700;800&display=swap");
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -37,7 +37,7 @@
   * {
     @apply border-border;
   }
-  
+
   body {
     @apply bg-background text-foreground font-sans;
     font-feature-settings: "rlig" 1, "calt" 1;
@@ -80,7 +80,11 @@
 @layer components {
   /* Card component styles */
   .card-gradient {
-    background: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--muted)) 100%);
+    background: linear-gradient(
+      135deg,
+      hsl(var(--card)) 0%,
+      hsl(var(--muted)) 100%
+    );
   }
 
   .glass-effect {
@@ -111,7 +115,7 @@
   }
 
   .trading-button::before {
-    content: '';
+    content: "";
     @apply absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-500;
   }
 
@@ -157,7 +161,7 @@
   }
 
   .status-indicator::before {
-    content: '';
+    content: "";
     @apply absolute inline-flex h-full w-full animate-ping rounded-full opacity-75;
   }
 
@@ -189,7 +193,11 @@
 
   /* Grid patterns */
   .dot-pattern {
-    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+    background-image: radial-gradient(
+      circle,
+      rgba(255, 255, 255, 0.1) 1px,
+      transparent 1px
+    );
     background-size: 20px 20px;
   }
 
@@ -217,6 +225,25 @@
 
   .hide-scrollbar::-webkit-scrollbar {
     display: none;
+  }
+
+  /* Messages container scrollbar */
+  .messages-container {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2d35 #1a1c23;
+  }
+
+  .messages-container::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .messages-container::-webkit-scrollbar-thumb {
+    background-color: #2a2d35;
+    border-radius: 4px;
+  }
+
+  .messages-container::-webkit-scrollbar-track {
+    background-color: #1a1c23;
   }
 
   /* Text utilities */
@@ -266,7 +293,7 @@
   .chart-grid {
     stroke: rgba(255, 255, 255, 0.1);
   }
-  
+
   .chart-axis {
     stroke: rgba(255, 255, 255, 0.2);
   }
@@ -277,7 +304,7 @@
   * {
     @apply text-black bg-white;
   }
-  
+
   .no-print {
     display: none !important;
   }
@@ -288,7 +315,7 @@
   .mobile-full {
     @apply w-full min-w-full;
   }
-  
+
   .mobile-stack {
     @apply flex-col space-y-2 space-x-0;
   }

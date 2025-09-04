@@ -56,12 +56,12 @@ class AIModelConfiguration:
     
     GEMINI_CONFIG = {
         "provider": "google",
-        "model": "gemini-pro",
-        "api_url": "https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent",
+        "model": "gemini-1.5-pro",
+        "api_url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent",
         "max_tokens": 2000,
         "temperature": 0.3,
-        "cost_per_token": 0.000005,
-        "reliability_score": 0.88,
+        "cost_per_token": 0.0000025,
+        "reliability_score": 0.90,
         "specialty": "market_analysis",
         "weight_factor": 0.9
     }
@@ -198,6 +198,18 @@ class AIModelConnector(LoggerMixin):
     ) -> AIModelResponse:
         """Query GPT-4 API."""
         
+        if not settings.OPENAI_API_KEY:
+            return AIModelResponse(
+                provider=AIModelProvider.GPT4,
+                content="",
+                confidence=0.0,
+                reasoning="OpenAI API key not configured",
+                cost=0.0,
+                response_time=0.0,
+                success=False,
+                error="OPENAI_API_KEY not set in environment"
+            )
+        
         headers = {
             "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
             "Content-Type": "application/json"
@@ -257,36 +269,81 @@ class AIModelConnector(LoggerMixin):
         config: Dict[str, Any],
         request_id: str
     ) -> AIModelResponse:
-        """Query Claude API - simplified implementation."""
+        """Query Claude API with proper Anthropic integration."""
         
-        # Simulate Claude response for now (would implement real API call)
-        import random
+        if not settings.ANTHROPIC_API_KEY:
+            return AIModelResponse(
+                provider=AIModelProvider.CLAUDE,
+                content="",
+                confidence=0.0,
+                reasoning="Anthropic API key not configured",
+                cost=0.0,
+                response_time=0.0,
+                success=False,
+                error="ANTHROPIC_API_KEY not set in environment"
+            )
         
-        confidence = random.uniform(70, 95)
+        headers = {
+            "x-api-key": settings.ANTHROPIC_API_KEY,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
+        }
         
-        content = f"""
-        Analysis of the provided context shows several key factors:
-
-        1. Market conditions indicate {random.choice(['bullish', 'bearish', 'neutral'])} sentiment
-        2. Technical indicators suggest {random.choice(['strong momentum', 'consolidation', 'reversal potential'])}
-        3. Risk assessment shows {random.choice(['moderate', 'elevated', 'low'])} risk levels
-
-        Confidence: {confidence:.1f}%
-        Recommendation: {random.choice(['BUY', 'SELL', 'HOLD'])}
-        """
+        # Format the prompt for Claude's expected format
+        system_prompt = "You are an expert cryptocurrency trading analyst. Provide precise, actionable analysis with confidence scores."
+        user_content = f"Context: {json.dumps(context) if context else 'None'}\n\nRequest: {prompt}"
         
-        reasoning = "Analysis based on market technical indicators and sentiment analysis"
-        cost = 0.002  # Estimated cost
+        payload = {
+            "model": config["model"],
+            "max_tokens": config["max_tokens"],
+            "temperature": config["temperature"],
+            "system": system_prompt,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": user_content
+                }
+            ]
+        }
         
-        return AIModelResponse(
-            provider=AIModelProvider.CLAUDE,
-            content=content,
-            confidence=confidence,
-            reasoning=reasoning,
-            cost=cost,
-            response_time=0.0,
-            success=True
-        )
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    config["api_url"],
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=ProductionConfiguration.REQUEST_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise Exception(f"Claude API error: {response.status} - {error_text}")
+                    
+                    result = await response.json()
+                    content = result["content"][0]["text"]
+                    
+                    confidence = self._extract_confidence(content)
+                    reasoning = self._extract_reasoning(content)
+                    
+                    # Calculate cost based on usage
+                    input_tokens = result.get("usage", {}).get("input_tokens", 1000)
+                    output_tokens = result.get("usage", {}).get("output_tokens", 500)
+                    total_tokens = input_tokens + output_tokens
+                    cost = total_tokens * config["cost_per_token"]
+                    
+                    return AIModelResponse(
+                        provider=AIModelProvider.CLAUDE,
+                        content=content,
+                        confidence=confidence,
+                        reasoning=reasoning,
+                        cost=cost,
+                        response_time=0.0,
+                        success=True
+                    )
+                    
+        except Exception as e:
+            self.logger.exception("Claude API query failed", request_id=request_id)
+            # Re-raise to allow retry/circuit-breaker logic to handle
+            raise
     
     async def _query_gemini(
         self,
@@ -295,36 +352,85 @@ class AIModelConnector(LoggerMixin):
         config: Dict[str, Any],
         request_id: str
     ) -> AIModelResponse:
-        """Query Gemini API - simplified implementation."""
+        """Query Google Gemini API with proper integration."""
         
-        # Simulate Gemini response for now
-        import random
+        if not settings.GOOGLE_AI_API_KEY:
+            return AIModelResponse(
+                provider=AIModelProvider.GEMINI,
+                content="",
+                confidence=0.0,
+                reasoning="Google AI API key not configured",
+                cost=0.0,
+                response_time=0.0,
+                success=False,
+                error="GOOGLE_AI_API_KEY not set in environment"
+            )
         
-        confidence = random.uniform(65, 90)
+        # Format the prompt for Gemini's expected format
+        system_instruction = "You are an expert cryptocurrency trading analyst. Provide precise, actionable analysis with confidence scores."
+        user_content = f"Context: {json.dumps(context) if context else 'None'}\n\nRequest: {prompt}"
         
-        content = f"""
-        Market analysis reveals:
-
-        - Current price action shows {random.choice(['strength', 'weakness', 'consolidation'])}
-        - Volume patterns indicate {random.choice(['accumulation', 'distribution', 'neutral activity'])}  
-        - Key support/resistance levels are {random.choice(['holding', 'breaking', 'testing'])}
-
-        Analysis confidence: {confidence:.1f}%
-        Market outlook: {random.choice(['BULLISH', 'BEARISH', 'NEUTRAL'])}
-        """
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": f"{system_instruction}\n\n{user_content}"
+                        }
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": config["temperature"],
+                "maxOutputTokens": config["max_tokens"],
+                "candidateCount": 1
+            }
+        }
         
-        reasoning = "Technical analysis with volume and price action confirmation"
-        cost = 0.001  # Lower cost for Gemini
-        
-        return AIModelResponse(
-            provider=AIModelProvider.GEMINI,
-            content=content,
-            confidence=confidence,
-            reasoning=reasoning,
-            cost=cost,
-            response_time=0.0,
-            success=True
-        )
+        try:
+            # Use configured API URL and append API key
+            base_url = config["api_url"]
+            separator = "&" if "?" in base_url else "?"
+            api_url = f"{base_url}{separator}key={settings.GOOGLE_AI_API_KEY}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    api_url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=ProductionConfiguration.REQUEST_TIMEOUT)
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        raise Exception(f"Gemini API error: {response.status} - {error_text}")
+                    
+                    result = await response.json()
+                    
+                    if "candidates" not in result or not result["candidates"]:
+                        raise Exception("No candidates in Gemini response")
+                    
+                    content = result["candidates"][0]["content"]["parts"][0]["text"]
+                    
+                    confidence = self._extract_confidence(content)
+                    reasoning = self._extract_reasoning(content)
+                    
+                    # Estimate tokens used (Gemini doesn't return usage info in all cases)
+                    estimated_tokens = len(user_content.split()) + len(content.split())
+                    cost = estimated_tokens * config["cost_per_token"]
+                    
+                    return AIModelResponse(
+                        provider=AIModelProvider.GEMINI,
+                        content=content,
+                        confidence=confidence,
+                        reasoning=reasoning,
+                        cost=cost,
+                        response_time=0.0,
+                        success=True
+                    )
+                    
+        except Exception as e:
+            self.logger.exception("Gemini API query failed", request_id=request_id)
+            # Re-raise to allow retry/circuit-breaker logic to handle
+            raise
     
     def _extract_confidence(self, content: str) -> float:
         """Extract confidence score from AI response."""

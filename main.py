@@ -149,8 +149,8 @@ def create_application() -> FastAPI:
     
     # Always include production frontend URL
     production_origins = [
-        "https://cryptouniverse-frontend.onrender.com",
-        "https://cryptouniverse.onrender.com"
+        settings.FRONTEND_URL, # Ensure frontend URL is always included
+        settings.BASE_URL # Ensure base URL is also included
     ]
     
     # Add localhost for development
@@ -184,8 +184,8 @@ def create_application() -> FastAPI:
     app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
 
     # Security middleware
-    if settings.ALLOWED_HOSTS:
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
+    if settings.allowed_hosts:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
     # Custom middleware (order matters!)
     app.add_middleware(RequestLoggingMiddleware)

@@ -7,6 +7,8 @@ ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
+WORKDIR /app
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
@@ -19,10 +21,10 @@ RUN apt-get update && apt-get install -y \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy requirements and build script
-COPY build.sh build-requirements.txt requirements.txt .
-RUN chmod +x build.sh
-RUN ./build.sh
+# Copy requirements and install dependencies
+COPY build-requirements.txt requirements.txt ./
+RUN pip install --no-cache-dir -r build-requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Production stage
 FROM python:3.11-slim
@@ -42,6 +44,8 @@ RUN apt-get update && apt-get install -y \
 
 # Create non-root user
 RUN groupadd -r cryptouniverse && useradd -r -g cryptouniverse cryptouniverse
+
+WORKDIR /app
 
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
