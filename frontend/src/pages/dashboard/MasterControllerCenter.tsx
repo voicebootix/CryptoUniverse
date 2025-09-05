@@ -39,6 +39,7 @@ import { Switch } from '@/components/ui/switch';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { apiClient } from '@/lib/api/client';
 import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
@@ -170,8 +171,9 @@ const MasterControllerCenter: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [performanceData, setPerformanceData] = useState<any[]>([]);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  const [isInitialized, setIsInitialized] = useState(false);
   
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     fetchSystemStatus();
@@ -196,6 +198,12 @@ const MasterControllerCenter: React.FC = () => {
       if (response.data.success) {
         setSystemStatus(response.data.data);
         setLastUpdate(new Date());
+        
+        // Sync selectedMode with backend current_mode on first load
+        if (!isInitialized && response.data.data.current_mode) {
+          setSelectedMode(response.data.data.current_mode);
+          setIsInitialized(true);
+        }
         
         // Update performance chart data
         if (response.data.data.performance_metrics) {
@@ -231,9 +239,14 @@ const MasterControllerCenter: React.FC = () => {
     try {
       setIsLoading(true);
       const endpoint = systemStatus?.autonomous_enabled ? '/trading/autonomous/stop' : '/trading/autonomous/start';
-      const response = await apiClient.post(endpoint, {
-        mode: selectedMode
-      });
+      
+      let payload = {};
+      if (!systemStatus?.autonomous_enabled && systemStatus?.current_mode) {
+        // When starting, use the backend's current mode
+        payload = { mode: systemStatus.current_mode };
+      }
+      
+      const response = await apiClient.post(endpoint, payload);
       
       if (response.data.success) {
         await fetchSystemStatus();
@@ -260,6 +273,14 @@ const MasterControllerCenter: React.FC = () => {
   };
 
   const handleEmergencyStop = async () => {
+    const confirmed = window.confirm(
+      'EMERGENCY STOP ALL TRADING\n\n' +
+      'This will immediately halt all trading activities, cancel pending orders, and stop all autonomous operations.\n\n' +
+      'Are you absolutely sure you want to proceed?'
+    );
+    
+    if (!confirmed) return;
+
     try {
       setIsLoading(true);
       const response = await apiClient.post('/trading/stop-all');
@@ -491,12 +512,13 @@ const MasterControllerCenter: React.FC = () => {
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <Label className="font-medium">Autonomous Mode</Label>
+                    <Label htmlFor="autonomous-enabled-switch" className="font-medium">Autonomous Mode</Label>
                     <p className="text-sm text-muted-foreground">
                       Enable AI-driven autonomous trading
                     </p>
                   </div>
                   <Switch
+                    id="autonomous-enabled-switch"
                     checked={systemStatus.autonomous_enabled}
                     onCheckedChange={handleToggleAutonomous}
                     disabled={isLoading}
@@ -505,12 +527,13 @@ const MasterControllerCenter: React.FC = () => {
 
                 <div className="flex items-center justify-between">
                   <div>
-                    <Label className="font-medium">Simulation Mode</Label>
+                    <Label htmlFor="simulation-mode-switch" className="font-medium">Simulation Mode</Label>
                     <p className="text-sm text-muted-foreground">
                       Run in simulation without real trades
                     </p>
                   </div>
                   <Switch
+                    id="simulation-mode-switch"
                     checked={systemStatus.simulation_mode}
                     onCheckedChange={handleToggleSimulation}
                     disabled={isLoading}
