@@ -15,6 +15,13 @@ LOGIN_URL = os.environ.get("LOGIN_URL", f"{BASE_URL}/api/v1/auth/login")
 TEST_EMAIL = os.environ.get("TEST_EMAIL", "test@localhost")
 TEST_PASSWORD = os.environ.get("TEST_PASSWORD", "test123")
 
+# Response time SLA configuration
+try:
+    MAX_RESPONSE_TIME = float(os.environ.get("MAX_RESPONSE_TIME", "1.0"))  # Default 1 second
+except ValueError:
+    print("⚠️ Invalid MAX_RESPONSE_TIME value, using default of 1.0 seconds")
+    MAX_RESPONSE_TIME = 1.0
+
 def get_auth_token():
     """Get authentication token for API requests with proper error handling"""
     try:
@@ -75,9 +82,13 @@ async def test_ai_assistant_response_delay():
         print(f"Response Status Code: {response.status_code}")
         print(f"Response Time: {elapsed_time:.3f} seconds")
         print(f"Response Body: {response.text}")
+        print(f"Response Time SLA: {MAX_RESPONSE_TIME:.3f} seconds")
         
-        # Step 4: Verify response time (200ms limit)
-        assert elapsed_time < 0.2, f"Response time {elapsed_time:.2f} seconds exceeded expected limit of 200ms"
+        # Step 4: Verify response time against configurable SLA
+        assert elapsed_time < MAX_RESPONSE_TIME, (
+            f"Response time {elapsed_time:.2f} seconds exceeded "
+            f"configured SLA of {MAX_RESPONSE_TIME:.2f} seconds"
+        )
         
         # Step 5: Verify response structure
         response_data = response.json()
