@@ -45,7 +45,7 @@ router = APIRouter()
 # Request/Response Models
 class AIConsensusRequest(BaseModel):
     """Base AI consensus request."""
-    analysis_request: str  # JSON string or direct data
+    analysis_request: Optional[str] = None  # JSON string or direct data - made optional
     confidence_threshold: float = 75.0
     ai_models: str = "all"  # "all", "gpt4_claude", "cost_optimized"
     
@@ -71,6 +71,21 @@ class OpportunityAnalysisRequest(AIConsensusRequest):
     analysis_type: str = "opportunity"  # opportunity, technical, fundamental
     timeframe: str = "4h"
     include_risk_metrics: bool = True
+    
+    def get_analysis_data(self) -> Dict[str, Any]:
+        """Get analysis data from either analysis_request or individual fields."""
+        if self.analysis_request:
+            try:
+                return json.loads(self.analysis_request)
+            except json.JSONDecodeError:
+                pass
+        
+        return {
+            "symbol": self.symbol,
+            "analysis_type": self.analysis_type,
+            "timeframe": self.timeframe,
+            "include_risk_metrics": self.include_risk_metrics
+        }
 
 
 class TradeValidationRequest(AIConsensusRequest):
@@ -146,12 +161,7 @@ async def analyze_opportunity_endpoint(
     - Tracking API costs and performance
     """
     
-    await rate_limiter.check_rate_limit(
-        key="ai_consensus:analyze_opportunity",
-        limit=20,
-        window=60,
-        user_id=str(current_user.id)
-    )
+    # Rate limiting handled by middleware - no manual calls needed
     
     logger.info(
         "AI opportunity analysis requested",
@@ -165,15 +175,12 @@ async def analyze_opportunity_endpoint(
         # Track API call start
         call_start_time = datetime.utcnow()
         
-        # Prepare analysis data
-        analysis_data = {
-            "symbol": request.symbol,
-            "analysis_type": request.analysis_type,
-            "timeframe": request.timeframe,
-            "include_risk_metrics": request.include_risk_metrics,
+        # Get analysis data from request
+        analysis_data = request.get_analysis_data()
+        analysis_data.update({
             "user_id": str(current_user.id),
             "timestamp": call_start_time.isoformat()
-        }
+        })
         
         # Use existing AI consensus service - NO DUPLICATION
         result = await ai_consensus_service.analyze_opportunity(
@@ -262,12 +269,7 @@ async def validate_trade_endpoint(
     - Comprehensive validation scoring
     """
     
-    await rate_limiter.check_rate_limit(
-        key="ai_consensus:validate_trade",
-        limit=30,
-        window=60,
-        user_id=str(current_user.id)
-    )
+    # Rate limiting handled by middleware - no manual calls needed
     
     try:
         call_start_time = datetime.utcnow()
@@ -339,12 +341,7 @@ async def risk_assessment_endpoint(
     - Risk mitigation recommendations
     """
     
-    await rate_limiter.check_rate_limit(
-        key="ai_consensus:risk_assessment",
-        limit=15,
-        window=60,
-        user_id=str(current_user.id)
-    )
+    # Rate limiting handled by middleware - no manual calls needed
     
     try:
         call_start_time = datetime.utcnow()
@@ -430,12 +427,7 @@ async def portfolio_review_endpoint(
     - Risk-return optimization
     """
     
-    await rate_limiter.check_rate_limit(
-        key="ai_consensus:portfolio_review",
-        limit=10,
-        window=60,
-        user_id=str(current_user.id)
-    )
+    # Rate limiting handled by middleware - no manual calls needed
     
     try:
         call_start_time = datetime.utcnow()
@@ -507,12 +499,7 @@ async def market_analysis_endpoint(
     - Market regime identification
     """
     
-    await rate_limiter.check_rate_limit(
-        key="ai_consensus:market_analysis",
-        limit=25,
-        window=60,
-        user_id=str(current_user.id)
-    )
+    # Rate limiting handled by middleware - no manual calls needed
     
     try:
         call_start_time = datetime.utcnow()
@@ -591,12 +578,7 @@ async def consensus_decision_endpoint(
     - Execution timing optimization
     """
     
-    await rate_limiter.check_rate_limit(
-        key="ai_consensus:consensus_decision",
-        limit=10,
-        window=60,
-        user_id=str(current_user.id)
-    )
+    # Rate limiting handled by middleware - no manual calls needed
     
     try:
         call_start_time = datetime.utcnow()
@@ -692,12 +674,7 @@ async def update_user_ai_model_weights(
 ):
     """Update user's custom AI model weights and autonomous frequency."""
     
-    await rate_limiter.check_rate_limit(
-        key="ai_consensus:update_weights",
-        limit=5,
-        window=60,
-        user_id=str(current_user.id)
-    )
+    # Rate limiting handled by middleware - no manual calls needed
     
     try:
         # Use enhanced master controller method

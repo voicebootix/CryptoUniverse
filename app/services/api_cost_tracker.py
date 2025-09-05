@@ -276,7 +276,7 @@ class APICostTracker(LoggerMixin):
             await self._update_rate_limits(provider)
             
             # Check budget thresholds
-            await self._check_budget_alerts(cost_usd, user_id)
+            await self._check_budget_alerts(user_id)
             
             # Send real-time cost update via WebSocket
             await self._broadcast_cost_update(api_call)
@@ -467,7 +467,7 @@ class APICostTracker(LoggerMixin):
         except Exception as e:
             self.logger.error("Failed to update rate limits", provider=provider.value, error=str(e))
     
-    async def _check_budget_alerts(self, cost_usd: float, user_id: Optional[str]):
+    async def _check_budget_alerts(self, user_id: Optional[str]):
         """Check if budget thresholds are exceeded."""
         
         try:
@@ -488,7 +488,13 @@ class APICostTracker(LoggerMixin):
                     day_key = datetime.utcnow().replace(day=day).strftime("%Y-%m-%d")
                     day_cost = float(await redis.get(f"cost:daily:{day_key}") or 0)
                     monthly_cost += day_cost
-                except:
+                except Exception as e:
+                    self.logger.debug(
+                        "Failed to get daily cost for monthly calculation",
+                        day=day,
+                        day_key=day_key,
+                        error=str(e)
+                    )
                     continue
             
             # Check thresholds

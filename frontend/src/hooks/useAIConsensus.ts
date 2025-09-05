@@ -172,7 +172,7 @@ export const useAIConsensus = () => {
     onSuccess: (data) => {
       toast({
         title: "✅ Analysis Complete",
-        description: `Consensus: ${data.result.opportunity_analysis?.consensus_score}% confidence`,
+        description: `Consensus: ${data?.result?.opportunity_analysis?.consensus_score || 'N/A'}% confidence`,
       });
     },
     onError: (error: any) => {
@@ -199,10 +199,10 @@ export const useAIConsensus = () => {
       });
     },
     onSuccess: (data) => {
-      const validation = data.result.trade_validation;
+      const validation = data?.result?.trade_validation;
       toast({
         title: validation?.approval_status === 'APPROVED' ? "✅ Trade Approved" : "⚠️ Trade Needs Review",
-        description: `Validation Score: ${validation?.validation_score}%`,
+        description: `Validation Score: ${validation?.validation_score || 'N/A'}%`,
       });
     },
     onError: (error: any) => {
@@ -229,10 +229,10 @@ export const useAIConsensus = () => {
       });
     },
     onSuccess: (data) => {
-      const assessment = data.result.risk_assessment;
+      const assessment = data?.result?.risk_assessment;
       toast({
         title: "🛡️ Risk Assessment Complete",
-        description: `Risk Level: ${assessment?.risk_level} (${assessment?.risk_score}%)`,
+        description: `Risk Level: ${assessment?.risk_level || 'N/A'} (${assessment?.risk_score || 'N/A'}%)`,
       });
     },
     onError: (error: any) => {
@@ -259,10 +259,10 @@ export const useAIConsensus = () => {
       });
     },
     onSuccess: (data) => {
-      const review = data.result.portfolio_review;
+      const review = data?.result?.portfolio_review;
       toast({
         title: "📊 Portfolio Review Complete",
-        description: `Score: ${review?.portfolio_score}% - ${review?.rebalancing_urgency} rebalancing urgency`,
+        description: `Score: ${review?.portfolio_score || 'N/A'}% - ${review?.rebalancing_urgency || 'N/A'} rebalancing urgency`,
       });
     },
     onError: (error: any) => {
@@ -289,10 +289,10 @@ export const useAIConsensus = () => {
       });
     },
     onSuccess: (data) => {
-      const analysis = data.result.market_analysis;
+      const analysis = data?.result?.market_analysis;
       toast({
         title: "📈 Market Analysis Complete",
-        description: `Market Strength: ${analysis?.market_strength}% - ${analysis?.entry_timing} timing`,
+        description: `Market Strength: ${analysis?.market_strength || 'N/A'}% - ${analysis?.entry_timing || 'N/A'} timing`,
       });
     },
     onError: (error: any) => {
@@ -319,10 +319,10 @@ export const useAIConsensus = () => {
       });
     },
     onSuccess: (data) => {
-      const decision = data.result.consensus_decision;
+      const decision = data?.result?.consensus_decision;
       toast({
         title: "🎯 Final Decision Made",
-        description: `Recommendation: ${decision?.final_recommendation} - ${decision?.confidence_level} confidence`,
+        description: `Recommendation: ${decision?.final_recommendation || 'N/A'} - ${decision?.confidence_level || 'N/A'} confidence`,
       });
     },
     onError: (error: any) => {

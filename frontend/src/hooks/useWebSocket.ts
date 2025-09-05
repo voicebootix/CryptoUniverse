@@ -34,8 +34,9 @@ export const useWebSocket = (
   const [connectionStatus, setConnectionStatus] = useState<'Connecting' | 'Open' | 'Closing' | 'Closed'>('Connecting');
   
   const websocketRef = useRef<WebSocket | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectCountRef = useRef(0);
+  const skipNextReconnectRef = useRef(false);
   const { tokens } = useAuthStore();
 
   const connect = useCallback(() => {
@@ -45,14 +46,19 @@ export const useWebSocket = (
       const wsHost = window.location.host;
       const wsUrl = `${wsProtocol}//${wsHost}${url}`;
       
-      // Add authentication token to URL if available
-      const urlWithAuth = tokens?.access_token 
-        ? `${wsUrl}?token=${tokens.access_token}`
-        : wsUrl;
+      // Use secure authentication via subprotocol instead of URL params
+      const authProtocol = tokens?.access_token 
+        ? [`Bearer.${tokens.access_token}`]
+        : undefined;
 
-      websocketRef.current = new WebSocket(urlWithAuth);
+      websocketRef.current = new WebSocket(wsUrl, authProtocol);
       
       websocketRef.current.onopen = () => {
+        // Clear any pending reconnection timeouts
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
         setConnectionStatus('Open');
         reconnectCountRef.current = 0;
         onOpen?.();
@@ -71,11 +77,17 @@ export const useWebSocket = (
       };
 
       websocketRef.current.onclose = () => {
+        // Clear any pending reconnection timeouts
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
+        
         setConnectionStatus('Closed');
         onClose?.();
 
-        // Attempt to reconnect
-        if (reconnectCountRef.current < reconnectAttempts) {
+        // Attempt to reconnect unless we asked to skip (manual reconnect)
+        if (!skipNextReconnectRef.current && reconnectCountRef.current < reconnectAttempts) {
           reconnectCountRef.current += 1;
           console.log(`WebSocket reconnection attempt ${reconnectCountRef.current}/${reconnectAttempts}`);
           
@@ -83,6 +95,9 @@ export const useWebSocket = (
             setConnectionStatus('Connecting');
             connect();
           }, reconnectInterval);
+        } else if (skipNextReconnectRef.current) {
+          // Consume the skip flag once
+          skipNextReconnectRef.current = false;
         }
       };
 
@@ -107,11 +122,24 @@ export const useWebSocket = (
   }, []);
 
   const reconnect = useCallback(() => {
-    if (websocketRef.current) {
-      websocketRef.current.close();
-    }
+    // Set skip flag to prevent automatic reconnection when we manually close
+    skipNextReconnectRef.current = true;
     reconnectCountRef.current = 0;
-    connect();
+    
+    // Clear any pending timeouts
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    
+    // Close existing connection if open
+    if (websocketRef.current && websocketRef.current.readyState !== WebSocket.CLOSED) {
+      websocketRef.current.close();
+    } else {
+      // If already closed, connect immediately
+      setConnectionStatus('Connecting');
+      connect();
+    }
   }, [connect]);
 
   useEffect(() => {
