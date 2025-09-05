@@ -42,6 +42,38 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
+def flatten_ai_consensus_result(result: Dict[str, Any], function: str) -> Dict[str, Any]:
+    """
+    Flatten nested AI consensus result for UnifiedAI processing.
+    
+    Args:
+        result: Raw AI consensus result with nested function-specific data
+        function: Function name (analyze_opportunity, validate_trade, etc.)
+        
+    Returns:
+        Flattened result with top-level consensus_score, recommendation, etc.
+    """
+    
+    # Get the function-specific nested data
+    function_data = result.get(function, {})
+    
+    # Extract top-level fields, preferring function-specific data
+    flattened = {
+        "success": result.get("success", False),
+        "consensus_score": function_data.get("consensus_score") or result.get("consensus_score", 0),
+        "recommendation": function_data.get("recommendation") or result.get("recommendation", "HOLD"),
+        "reasoning": function_data.get("reasoning") or result.get("reasoning", ""),
+        "confidence_threshold_met": function_data.get("confidence_threshold_met") or result.get("confidence_threshold_met", False),
+        "model_responses": function_data.get("model_responses") or result.get("model_responses", []),
+        "cost_summary": function_data.get("cost_summary") or result.get("cost_summary", {}),
+        "timestamp": function_data.get("timestamp") or result.get("timestamp", ""),
+        "function": function,
+        "raw_result": result  # Keep original for debugging
+    }
+    
+    return flattened
+
+
 # Request/Response Models
 class AIConsensusRequest(BaseModel):
     """Base AI consensus request."""
@@ -216,11 +248,14 @@ async def analyze_opportunity_endpoint(
             }
         )
         
+        # Flatten result for unified AI manager processing
+        flattened_result = flatten_ai_consensus_result(result, "analyze_opportunity")
+        
         # Feed to unified AI manager for natural language explanation
         await unified_ai_manager.process_ai_consensus_result(
             user_id=str(current_user.id),
-            function="analyze_opportunity",
-            result=result,
+            function="analyze_opportunity", 
+            result=flattened_result,
             interface=InterfaceType.WEB_UI
         )
         
@@ -302,11 +337,14 @@ async def validate_trade_endpoint(
             success=True
         )
         
+        # Flatten result for unified AI manager processing
+        flattened_result = flatten_ai_consensus_result(result, "validate_trade")
+        
         # Feed to unified AI manager
         await unified_ai_manager.process_ai_consensus_result(
             user_id=str(current_user.id),
             function="validate_trade",
-            result=result,
+            result=flattened_result,
             interface=InterfaceType.WEB_UI
         )
         
@@ -388,11 +426,14 @@ async def risk_assessment_endpoint(
                 "requires_action": emergency_level.value != "normal"
             }
         
+        # Flatten result for unified AI manager processing
+        flattened_result = flatten_ai_consensus_result(result, "risk_assessment")
+        
         # Feed to unified AI manager
         await unified_ai_manager.process_ai_consensus_result(
             user_id=str(current_user.id),
             function="risk_assessment",
-            result=result,
+            result=flattened_result,
             interface=InterfaceType.WEB_UI
         )
         
@@ -460,11 +501,14 @@ async def portfolio_review_endpoint(
             success=True
         )
         
+        # Flatten result for unified AI manager processing
+        flattened_result = flatten_ai_consensus_result(result, "portfolio_review")
+        
         # Feed to unified AI manager
         await unified_ai_manager.process_ai_consensus_result(
             user_id=str(current_user.id),
             function="portfolio_review",
-            result=result,
+            result=flattened_result,
             interface=InterfaceType.WEB_UI
         )
         
@@ -539,11 +583,14 @@ async def market_analysis_endpoint(
             success=True
         )
         
+        # Flatten result for unified AI manager processing
+        flattened_result = flatten_ai_consensus_result(result, "market_analysis")
+        
         # Feed to unified AI manager
         await unified_ai_manager.process_ai_consensus_result(
             user_id=str(current_user.id),
             function="market_analysis",
-            result=result,
+            result=flattened_result,
             interface=InterfaceType.WEB_UI
         )
         
@@ -616,11 +663,14 @@ async def consensus_decision_endpoint(
             }
         )
         
+        # Flatten result for unified AI manager processing
+        flattened_result = flatten_ai_consensus_result(result, "consensus_decision")
+        
         # Feed to unified AI manager for execution
         await unified_ai_manager.process_ai_consensus_result(
             user_id=str(current_user.id),
             function="consensus_decision",
-            result=result,
+            result=flattened_result,
             interface=InterfaceType.WEB_UI
         )
         

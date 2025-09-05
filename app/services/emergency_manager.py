@@ -556,11 +556,12 @@ class EmergencyManager(LoggerMixin):
             # Check if user is in emergency state
             active_emergency = self.active_emergencies.get(user_id)
             
-            # Check if trading is halted
+            # Check if trading is halted - check both possible keys
             redis = await get_redis_client()
             is_halted = False
             if redis:
-                halt_status = await redis.get(f"emergency_halt:{user_id}")
+                halt_status = await redis.get(f"emergency_halt:{user_id}") or \
+                              await redis.get(f"emergency_stop:{user_id}")
                 is_halted = halt_status is not None
             
             return {

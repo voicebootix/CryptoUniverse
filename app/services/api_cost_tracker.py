@@ -241,6 +241,7 @@ class APICostTracker(LoggerMixin):
         
         call_id = f"{provider.value}_{int(datetime.utcnow().timestamp())}_{uuid.uuid4().hex[:8]}"
         timestamp = datetime.utcnow()
+        tracking_successful = False
         
         try:
             # Calculate cost if not provided
@@ -281,8 +282,8 @@ class APICostTracker(LoggerMixin):
             # Send real-time cost update via WebSocket
             await self._broadcast_cost_update(api_call)
             
-            # Return call_id on successful tracking
-            return call_id
+            # Mark as successful
+            tracking_successful = True
             
         except Exception as e:
             self.logger.error(
@@ -290,10 +291,13 @@ class APICostTracker(LoggerMixin):
                 provider=provider.value,
                 endpoint=endpoint,
                 call_id=call_id,
-                error=str(e)
+                error=str(e),
+                exc_info=True  # Include stack trace
             )
-            # Return call_id even on failure for consistency
-            return call_id
+            tracking_successful = False
+        
+        # Always return call_id for consistency
+        return call_id
     
     async def _calculate_cost(
         self,
@@ -307,13 +311,13 @@ class APICostTracker(LoggerMixin):
         try:
             provider_config = self.provider_costs.get(provider, {})
             
-            # AI model costs (token-based)
+            # AI model costs (token-based) - handle zero tokens correctly
             if provider in [APIProvider.OPENAI_GPT4, APIProvider.ANTHROPIC_CLAUDE, APIProvider.GOOGLE_GEMINI]:
-                if input_tokens and output_tokens:
+                if input_tokens is not None and output_tokens is not None:
                     input_cost = (input_tokens / 1000) * provider_config.get("cost_per_1k_input_tokens", 0)
                     output_cost = (output_tokens / 1000) * provider_config.get("cost_per_1k_output_tokens", 0)
                     return input_cost + output_cost
-                elif tokens_used:
+                elif tokens_used is not None:
                     # Estimate 70% input, 30% output for mixed token cost
                     avg_cost_per_1k = (
                         provider_config.get("cost_per_1k_input_tokens", 0) * 0.7 +
@@ -528,20 +532,18 @@ class APICostTracker(LoggerMixin):
         try:
             from app.services.websocket import manager
             
-            # Prepare cost update message
-            cost_update = {
-                "type": "api_cost_update",
-                "data": {
-                    "provider": api_call.provider.value,
-                    "cost_usd": api_call.cost_usd,
-                    "user_id": api_call.user_id,
-                    "success": api_call.success,
-                    "timestamp": api_call.timestamp.isoformat()
-                }
+            # Prepare raw cost data - manager will add type/timestamp wrapper
+            cost_data = {
+                "provider": api_call.provider.value,
+                "cost_usd": api_call.cost_usd,
+                "user_id": api_call.user_id,
+                "success": api_call.success,
+                "endpoint": api_call.endpoint,
+                "response_time_ms": api_call.response_time_ms
             }
             
             # Broadcast to admin cost dashboard subscribers
-            await manager.broadcast_cost_update(cost_update)
+            await manager.broadcast_cost_update(cost_data)
             
         except Exception as e:
             self.logger.error("Failed to broadcast cost update", error=str(e))

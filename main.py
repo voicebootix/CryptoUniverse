@@ -390,10 +390,21 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
         # Import WebSocket manager
         from app.services.websocket import manager
         
-        # Extract user authentication from query params
-        query_params = dict(websocket.query_params)
-        token = query_params.get('token')
+        # Extract user authentication from subprotocol or query params
         user_id = "anonymous"
+        token = None
+        
+        # Try subprotocol first (secure method)
+        subprotocols = getattr(websocket, 'scope', {}).get('subprotocols', [])
+        for protocol in subprotocols:
+            if protocol.startswith('Bearer.'):
+                token = protocol[7:]  # Remove 'Bearer.' prefix
+                break
+        
+        # Fallback to query params (less secure but compatible)
+        if not token:
+            query_params = dict(websocket.query_params)
+            token = query_params.get('token')
         
         if token:
             try:
@@ -401,7 +412,7 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
                 payload = verify_access_token(token)
                 if payload and payload.get("sub"):
                     user_id = payload["sub"]
-                    logger.info("WebSocket authenticated", user_id=user_id, path=path)
+                    logger.info("WebSocket authenticated", user_id=user_id, path=path, auth_method="subprotocol" if subprotocols else "query")
             except Exception as e:
                 logger.debug("WebSocket auth failed, using anonymous", error=str(e))
         

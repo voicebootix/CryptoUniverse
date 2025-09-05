@@ -2558,10 +2558,11 @@ class MasterSystemController(LoggerMixin):
             # Stop autonomous trading for this user
             self.is_active = False
             
-            # Set emergency flag in Redis
+            # Set emergency flag in Redis - use both keys for compatibility
             redis = await self._ensure_redis()
             if redis:
                 await redis.set(f"emergency_stop:{user_id}", reason, ex=3600)  # 1 hour
+                await redis.set(f"emergency_halt:{user_id}", reason, ex=3600)  # Compatible with emergency_manager
             
             # Send WebSocket notification
             await manager.broadcast({
