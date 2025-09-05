@@ -54,7 +54,7 @@ apiClient.interceptors.response.use(
       const startTime = response.config.metadata?.startTime;
       if (startTime) {
         const duration = new Date().getTime() - startTime.getTime();
-        console.log(`API ${response.config.method?.toUpperCase()} ${response.config.url} - ${duration}ms`);
+        // API request timing logged internally
       }
     }
     

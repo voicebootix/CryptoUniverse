@@ -206,7 +206,8 @@ class SystemMonitoringService:
                 from app.core.database import AsyncSessionLocal
                 start_time = time.time()
                 async with AsyncSessionLocal() as db:
-                    await db.execute("SELECT 1")
+                    from sqlalchemy import text
+                    await db.execute(text("SELECT 1"))
                 db_response_time = (time.time() - start_time) * 1000
                 
                 self.metrics_collector.record_metric("database_response_time_ms", db_response_time)

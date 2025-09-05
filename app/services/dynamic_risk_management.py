@@ -177,7 +177,7 @@ class DynamicRiskManagement(LoggerMixin):
             }
             
         except Exception as e:
-            self.logger.error("Dynamic risk calculation failed", error=str(e))
+            self.logger.exception("Dynamic risk calculation failed", error=str(e))
             return {"success": False, "error": str(e)}
     
     async def _get_current_volatility(self, symbol: str) -> float:

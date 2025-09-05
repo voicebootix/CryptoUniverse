@@ -31,6 +31,7 @@ from app.core.config import get_settings
 from app.core.logging import LoggerMixin
 from app.core.redis import get_redis_client
 from app.services.websocket import manager
+from app.services.emergency_manager import emergency_manager, EmergencyLevel
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -52,17 +53,10 @@ class TradingCycle(str, Enum):
     DEEP_ANALYSIS = "deep_analysis"
 
 
-class EmergencyLevel(str, Enum):
-    """Emergency alert levels."""
-    NORMAL = "normal"
-    WARNING = "warning"
-    CRITICAL = "critical"
-    EMERGENCY = "emergency"
-
 
 @dataclass
 class TradingModeConfig:
-    """Trading mode configuration."""
+    """Trading mode configuration with AI model weights and autonomous frequency."""
     daily_target_pct: float
     monthly_target_pct: float
     max_drawdown_pct: float
@@ -73,6 +67,10 @@ class TradingModeConfig:
     profit_take_pct: float
     stop_loss_pct: float
     cash_target_pct: float
+    # NEW: AI Model Configuration
+    ai_model_weights: Dict[str, float]  # User-configurable AI model weights
+    autonomous_frequency_minutes: int   # How often autonomous trading runs
+    emergency_stop_loss_pct: float     # Emergency liquidation threshold
 
 
 class MasterSystemController(LoggerMixin):
@@ -101,6 +99,74 @@ class MasterSystemController(LoggerMixin):
         self.start_time = datetime.utcnow()
         self.redis = None  # Will be initialized lazily
         self._redis_initialized = False
+        
+        # Trading mode configurations with AI model weights and autonomous frequency
+        self.mode_configs = {
+            TradingMode.CONSERVATIVE: TradingModeConfig(
+                daily_target_pct=1.5,
+                monthly_target_pct=30.0,
+                max_drawdown_pct=5.0,
+                min_win_rate_pct=70.0,
+                max_leverage=1.0,
+                max_position_pct=5.0,
+                validation_threshold=80.0,
+                profit_take_pct=5.0,
+                stop_loss_pct=2.0,
+                cash_target_pct=40.0,
+                # AI Model Configuration - Conservative: Favor accuracy over speed
+                ai_model_weights={"gpt4": 0.4, "claude": 0.4, "gemini": 0.2},
+                autonomous_frequency_minutes=15,  # Conservative: Less frequent trading
+                emergency_stop_loss_pct=7.0      # Conservative: Quick emergency stop
+            ),
+            TradingMode.BALANCED: TradingModeConfig(
+                daily_target_pct=3.5,
+                monthly_target_pct=70.0,
+                max_drawdown_pct=10.0,
+                min_win_rate_pct=65.0,
+                max_leverage=3.0,
+                max_position_pct=10.0,
+                validation_threshold=75.0,
+                profit_take_pct=10.0,
+                stop_loss_pct=5.0,
+                cash_target_pct=20.0,
+                # AI Model Configuration - Balanced: Equal weighting
+                ai_model_weights={"gpt4": 0.33, "claude": 0.34, "gemini": 0.33},
+                autonomous_frequency_minutes=10,  # Balanced: Moderate frequency
+                emergency_stop_loss_pct=15.0     # Balanced: Standard emergency threshold
+            ),
+            TradingMode.AGGRESSIVE: TradingModeConfig(
+                daily_target_pct=7.5,
+                monthly_target_pct=200.0,
+                max_drawdown_pct=20.0,
+                min_win_rate_pct=60.0,
+                max_leverage=5.0,
+                max_position_pct=20.0,
+                validation_threshold=70.0,
+                profit_take_pct=15.0,
+                stop_loss_pct=7.0,
+                cash_target_pct=10.0,
+                # AI Model Configuration - Aggressive: Favor speed and opportunity detection
+                ai_model_weights={"gpt4": 0.3, "claude": 0.3, "gemini": 0.4},
+                autonomous_frequency_minutes=5,   # Aggressive: More frequent trading
+                emergency_stop_loss_pct=20.0     # Aggressive: Higher risk tolerance
+            ),
+            TradingMode.BEAST_MODE: TradingModeConfig(
+                daily_target_pct=25.0,
+                monthly_target_pct=500.0,
+                max_drawdown_pct=50.0,
+                min_win_rate_pct=55.0,
+                max_leverage=10.0,
+                max_position_pct=50.0,
+                validation_threshold=60.0,
+                profit_take_pct=20.0,
+                stop_loss_pct=0.0,  # Diamond hands
+                cash_target_pct=5.0,
+                # AI Model Configuration - Beast Mode: Optimized for maximum performance
+                ai_model_weights={"gpt4": 0.35, "claude": 0.35, "gemini": 0.3},
+                autonomous_frequency_minutes=1,   # Beast Mode: Maximum frequency
+                emergency_stop_loss_pct=25.0     # Beast Mode: Highest risk tolerance
+            )
+        }
     
     async def _ensure_redis(self) -> Optional[Any]:
         """ENTERPRISE: Ensure Redis client is available with graceful degradation."""
@@ -118,58 +184,6 @@ class MasterSystemController(LoggerMixin):
                 self.redis = None
                 self._redis_initialized = True
         return self.redis
-        
-        # Trading mode configurations
-        self.mode_configs = {
-            TradingMode.CONSERVATIVE: TradingModeConfig(
-                daily_target_pct=1.5,
-                monthly_target_pct=30.0,
-                max_drawdown_pct=5.0,
-                min_win_rate_pct=70.0,
-                max_leverage=1.0,
-                max_position_pct=5.0,
-                validation_threshold=80.0,
-                profit_take_pct=5.0,
-                stop_loss_pct=2.0,
-                cash_target_pct=40.0
-            ),
-            TradingMode.BALANCED: TradingModeConfig(
-                daily_target_pct=3.5,
-                monthly_target_pct=70.0,
-                max_drawdown_pct=10.0,
-                min_win_rate_pct=65.0,
-                max_leverage=3.0,
-                max_position_pct=10.0,
-                validation_threshold=75.0,
-                profit_take_pct=10.0,
-                stop_loss_pct=5.0,
-                cash_target_pct=20.0
-            ),
-            TradingMode.AGGRESSIVE: TradingModeConfig(
-                daily_target_pct=7.5,
-                monthly_target_pct=200.0,
-                max_drawdown_pct=20.0,
-                min_win_rate_pct=60.0,
-                max_leverage=5.0,
-                max_position_pct=20.0,
-                validation_threshold=70.0,
-                profit_take_pct=15.0,
-                stop_loss_pct=7.0,
-                cash_target_pct=10.0
-            ),
-            TradingMode.BEAST_MODE: TradingModeConfig(
-                daily_target_pct=25.0,
-                monthly_target_pct=500.0,
-                max_drawdown_pct=50.0,
-                min_win_rate_pct=55.0,
-                max_leverage=10.0,
-                max_position_pct=50.0,
-                validation_threshold=60.0,
-                profit_take_pct=20.0,
-                stop_loss_pct=0.0,  # Diamond hands
-                cash_target_pct=5.0
-            )
-        }
         
         # Timezone strategies
         self.timezone_strategies = {
@@ -539,6 +553,17 @@ class MasterSystemController(LoggerMixin):
             portfolio_risk_service = PortfolioRiskServiceExtended()
             trade_execution_service = TradeExecutionService()
             telegram_service = TelegramService()
+            
+            # Get sentiment analysis for strategy optimization
+            try:
+                from app.services.realtime_sentiment_engine import realtime_sentiment_engine
+                sentiment_result = await realtime_sentiment_engine.get_sentiment_for_strategy_optimization(
+                    symbols=["BTC", "ETH", "SOL", "BNB"], 
+                    user_id=user_id
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to fetch sentiment data: {e}")
+                sentiment_result = {"success": False}  # Fallback for sentiment operations
             
             # PHASE 0: Emergency Checks & Timezone Strategy
             phase_start = time.time()
@@ -1519,10 +1544,12 @@ class MasterSystemController(LoggerMixin):
             health_status = "normal"
             if system_health:
                 try:
-                    health_data = eval(system_health)
+                    import json
+                    health_data = json.loads(system_health)
                     health_status = "warning" if health_data.get("alerts") else "normal"
-                except:
-                    pass
+                except (json.JSONDecodeError, ValueError, TypeError) as e:
+                    logger.warning(f"Failed to parse system health data: {e}")
+                    health_status = "unknown"
             
             # Mock performance data (would be real in production)
             performance_today = {
@@ -1582,10 +1609,12 @@ class MasterSystemController(LoggerMixin):
             
             if system_health:
                 try:
-                    health_data = eval(system_health)
+                    import json
+                    health_data = json.loads(system_health)
                     health_status = "warning" if health_data.get("alerts") else "normal"
-                except:
-                    pass
+                except (json.JSONDecodeError, ValueError, TypeError) as e:
+                    logger.warning(f"Failed to parse system health data: {e}")
+                    health_status = "unknown"
             
             # Mock system metrics (would be real)
             return {
@@ -2313,33 +2342,6 @@ class MasterSystemController(LoggerMixin):
             self.logger.warning("Sentiment symbol optimization failed", error=str(e))
             return ["BTC", "ETH", "SOL"]
 
-    async def emergency_stop(self) -> Dict[str, Any]:
-        """Execute emergency stop protocol - LEGACY METHOD."""
-        
-        self.logger.warning("🚨 LEGACY EMERGENCY STOP ACTIVATED")
-        
-        # Stop autonomous operation
-        self.is_active = False
-        
-        # Send critical alert
-        try:
-            from app.services.telegram_commander import telegram_commander_service
-            await telegram_commander_service.send_alert(
-                "🚨 EMERGENCY STOP ACTIVATED 🚨\n"
-                "All autonomous operations halted\n"
-                "Manual intervention required",
-                priority="critical"
-            )
-        except Exception as e:
-            self.logger.error("Failed to send emergency alert", error=str(e))
-        
-        return {
-            "success": True,
-            "message": "Emergency stop activated",
-            "autonomous_active": False,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    
     async def performance_metrics(self) -> Dict[str, Any]:
         """Get comprehensive performance metrics."""
         
@@ -2388,6 +2390,264 @@ class MasterSystemController(LoggerMixin):
                 "valid_modes": [m.value for m in TradingMode]
             }
     
+    async def update_user_ai_model_weights(
+        self,
+        user_id: str,
+        ai_model_weights: Dict[str, float],
+        autonomous_frequency_minutes: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Update user's custom AI model weights and autonomous frequency.
+        
+        Args:
+            user_id: User identifier
+            ai_model_weights: Custom AI model weights {"gpt4": 0.4, "claude": 0.3, "gemini": 0.3}
+            autonomous_frequency_minutes: Custom autonomous trading frequency
+            
+        Returns:
+            Success/failure result
+        """
+        
+        try:
+            # Validate weights sum to 1.0
+            total_weight = sum(ai_model_weights.values())
+            if abs(total_weight - 1.0) > 0.01:
+                return {
+                    "success": False,
+                    "error": f"AI model weights must sum to 1.0, got {total_weight:.3f}"
+                }
+            
+            # Validate weight values
+            for model, weight in ai_model_weights.items():
+                if not 0 <= weight <= 1:
+                    return {
+                        "success": False,
+                        "error": f"Weight for {model} must be between 0 and 1, got {weight}"
+                    }
+                
+                if model not in ["gpt4", "claude", "gemini"]:
+                    return {
+                        "success": False,
+                        "error": f"Invalid AI model: {model}. Must be one of: gpt4, claude, gemini"
+                    }
+            
+            # Validate autonomous frequency
+            if autonomous_frequency_minutes is not None:
+                if not 1 <= autonomous_frequency_minutes <= 60:
+                    return {
+                        "success": False,
+                        "error": "Autonomous frequency must be between 1 and 60 minutes"
+                    }
+            
+            # Get user's current trading mode
+            user_config = await self._get_user_config(user_id)
+            current_mode = TradingMode(user_config.get("trading_mode", "balanced"))
+            
+            # Create custom config based on current mode
+            base_config = self.mode_configs[current_mode]
+            
+            # Store custom AI weights in Redis
+            redis = await self._ensure_redis()
+            if redis:
+                custom_config = {
+                    "ai_model_weights": ai_model_weights,
+                    "autonomous_frequency_minutes": autonomous_frequency_minutes or base_config.autonomous_frequency_minutes,
+                    "base_trading_mode": current_mode.value,
+                    "updated_at": datetime.utcnow().isoformat()
+                }
+                
+                await redis.set(
+                    f"user_ai_config:{user_id}",
+                    json.dumps(custom_config),
+                    ex=86400 * 30  # 30 days expiry
+                )
+            
+            self.logger.info(
+                "AI model weights updated",
+                user_id=user_id,
+                weights=ai_model_weights,
+                frequency=autonomous_frequency_minutes,
+                base_mode=current_mode.value
+            )
+            
+            return {
+                "success": True,
+                "message": "AI model weights updated successfully",
+                "ai_model_weights": ai_model_weights,
+                "autonomous_frequency_minutes": autonomous_frequency_minutes or base_config.autonomous_frequency_minutes,
+                "base_trading_mode": current_mode.value
+            }
+            
+        except Exception as e:
+            self.logger.error("Failed to update AI model weights", user_id=user_id, error=str(e))
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def _get_user_config(self, user_id: str) -> Dict[str, Any]:
+        """Get user's cached config from Redis following UnifiedAIManager pattern."""
+        try:
+            # Attempt to get cached config from Redis
+            redis = await self._ensure_redis()
+            if redis:
+                config_data = await redis.get(f"user_ai_config:{user_id}")
+                if config_data:
+                    try:
+                        # Parse JSON config
+                        parsed_config = json.loads(config_data)
+                        return parsed_config
+                    except json.JSONDecodeError:
+                        self.logger.warning("Invalid JSON in user config, using defaults", user_id=user_id)
+        except Exception as e:
+            self.logger.warning("Failed to get user config from Redis", user_id=user_id, error=str(e))
+        
+        # Return default config when Redis unavailable or cache missing/invalid
+        return {
+            "trading_mode": "balanced",
+            "autonomous_frequency_minutes": 10,
+            "ai_model_weights": {
+                "gpt4": 0.33,
+                "claude": 0.34,
+                "gemini": 0.33
+            }
+        }
+    
+    async def get_user_ai_model_weights(self, user_id: str) -> Dict[str, Any]:
+        """Get user's current AI model weights and autonomous frequency."""
+        
+        try:
+            # Try to get custom config first
+            redis = await self._ensure_redis()
+            if redis:
+                custom_config_str = await redis.get(f"user_ai_config:{user_id}")
+                if custom_config_str is not None:
+                    # Guard against double-decoding - inspect type and parse accordingly
+                    if isinstance(custom_config_str, bytes):
+                        # Decode bytes to string first, then JSON parse
+                        custom_config = json.loads(custom_config_str.decode('utf-8'))
+                    elif isinstance(custom_config_str, str):
+                        # Parse string as JSON
+                        custom_config = json.loads(custom_config_str)
+                    elif isinstance(custom_config_str, (dict, list)):
+                        # Already deserialized - use directly
+                        custom_config = custom_config_str
+                    else:
+                        # Unknown type - skip and use defaults
+                        custom_config = None
+                    
+                    # Only return custom config if we successfully parsed it
+                    if custom_config and isinstance(custom_config, dict):
+                        return {
+                            "success": True,
+                            "ai_model_weights": custom_config.get("ai_model_weights", {}),
+                            "autonomous_frequency_minutes": custom_config.get("autonomous_frequency_minutes", 10),
+                            "base_trading_mode": custom_config.get("base_trading_mode", "balanced"),
+                        "is_custom": True,
+                        "updated_at": custom_config.get("updated_at")
+                    }
+            
+            # Fall back to default based on trading mode
+            user_config = await self._get_user_config(user_id)
+            current_mode = TradingMode(user_config.get("trading_mode", "balanced"))
+            mode_config = self.mode_configs[current_mode]
+            
+            return {
+                "success": True,
+                "ai_model_weights": mode_config.ai_model_weights,
+                "autonomous_frequency_minutes": mode_config.autonomous_frequency_minutes,
+                "base_trading_mode": current_mode.value,
+                "is_custom": False
+            }
+            
+        except Exception as e:
+            self.logger.error("Failed to get AI model weights", user_id=user_id, error=str(e))
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def emergency_stop(self, user_id: str, reason: str = "manual_stop") -> Dict[str, Any]:
+        """
+        Emergency stop for specific user - integrates with EmergencyManager.
+        """
+        
+        try:
+            self.logger.critical(
+                "🚨 EMERGENCY STOP ACTIVATED",
+                user_id=user_id,
+                reason=reason
+            )
+            
+            # Stop autonomous trading for this user
+            self.is_active = False
+            
+            # Set emergency flag in Redis - use both keys for compatibility
+            redis = await self._ensure_redis()
+            if redis:
+                await redis.set(f"emergency_stop:{user_id}", reason, ex=3600)  # 1 hour
+                await redis.set(f"emergency_halt:{user_id}", reason, ex=3600)  # Compatible with emergency_manager
+            
+            # Send WebSocket notification
+            await manager.broadcast({
+                "type": "emergency_stop",
+                "user_id": user_id,
+                "reason": reason,
+                "message": "🚨 Emergency stop activated - all trading halted",
+                "timestamp": datetime.utcnow().isoformat()
+            }, user_id)
+            
+            return {
+                "success": True,
+                "message": "Emergency stop activated",
+                "user_id": user_id,
+                "reason": reason,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error("Emergency stop failed", user_id=user_id, error=str(e))
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def resume_operations(self, user_id: str) -> Dict[str, Any]:
+        """Resume operations after emergency stop."""
+        
+        try:
+            # Remove emergency flag
+            redis = await self._ensure_redis()
+            if redis:
+                await redis.delete(f"emergency_stop:{user_id}")
+            
+            # Resume autonomous trading
+            self.is_active = True
+            
+            self.logger.info("Operations resumed", user_id=user_id)
+            
+            # Send WebSocket notification
+            await manager.broadcast({
+                "type": "operations_resumed",
+                "user_id": user_id,
+                "message": "✅ Operations resumed - trading active",
+                "timestamp": datetime.utcnow().isoformat()
+            }, user_id)
+            
+            return {
+                "success": True,
+                "message": "Operations resumed successfully",
+                "user_id": user_id,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error("Failed to resume operations", user_id=user_id, error=str(e))
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
     async def health_check(self) -> Dict[str, Any]:
         """Health check for master controller."""
         
@@ -2406,7 +2666,7 @@ class MasterSystemController(LoggerMixin):
             }
         except Exception as e:
             return {
-                "service": "master_controller", 
+                "service": "master_controller",
                 "status": "UNHEALTHY",
                 "error": str(e),
                 "timestamp": datetime.utcnow().isoformat()
@@ -2414,7 +2674,7 @@ class MasterSystemController(LoggerMixin):
 
 
 # Global service instance
-master_controller = None
+master_controller = MasterSystemController()
 
 
 # FastAPI dependency

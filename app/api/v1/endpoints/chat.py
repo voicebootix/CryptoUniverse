@@ -7,6 +7,7 @@ Enables comprehensive cryptocurrency money management through natural language c
 
 import asyncio
 import json
+import uuid
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
@@ -226,11 +227,58 @@ async def chat_websocket(
     - Market alerts and opportunities
     """
     try:
-        # TODO: Implement WebSocket authentication via token
-        # For now, we'll use a placeholder user_id
-        user_id = "websocket_user"  # This should be extracted from authenticated token
+        # Implement WebSocket bearer subprotocol authentication 
+        # Use unique per-connection ID to prevent message bleed between unauthenticated clients
+        user_id = f"guest:{uuid.uuid4()}"  # Unique fallback for each connection
+        selected_subprotocol = None  # Initialize to None, only set if safe subprotocol offered
+        token = None
         
-        # Connect to WebSocket manager (this handles websocket.accept())
+        # Read subprotocols from Sec-WebSocket-Protocol header
+        subprotocols = getattr(websocket, 'scope', {}).get('subprotocols', [])
+        
+        # Scan client-offered subprotocols for bearer token format
+        safe_subprotocols = {"json", "jwt"}  # Safe subprotocols we can echo back
+        
+        if subprotocols:
+            # Look for bearer authentication pattern: ["bearer", <token>, "json"]
+            bearer_index = None
+            for i, subprotocol in enumerate(subprotocols):
+                # Check if this is a safe subprotocol we can echo back
+                if subprotocol.lower() in safe_subprotocols:
+                    selected_subprotocol = subprotocol.lower()
+                
+                # Check for bearer indicator
+                if subprotocol.lower() == "bearer":
+                    bearer_index = i
+                    break
+            
+            # If bearer found, look for JWT token in next subprotocol entry
+            if bearer_index is not None and bearer_index + 1 < len(subprotocols):
+                token = subprotocols[bearer_index + 1]
+            
+            # Try to authenticate with extracted bearer token
+            if token:
+                try:
+                    from app.core.security import verify_access_token
+                    from jose import JWTError  # Import specific JWT exception
+                    payload = verify_access_token(token)
+                    if payload and payload.get("sub"):
+                        user_id = payload["sub"]
+                        logger.info("Chat WebSocket user authenticated via bearer subprotocol", user_id=user_id)
+                except JWTError as e:
+                    # Handle JWT-specific errors only, let other exceptions propagate
+                    logger.debug("Chat WebSocket JWT authentication failed, using guest ID", 
+                               guest_id=user_id, 
+                               error=str(e))
+                    # Don't log token details
+        
+        # Accept WebSocket connection - only pass subprotocol if safe one was offered by client
+        if selected_subprotocol:
+            await websocket.accept(subprotocol=selected_subprotocol)
+        else:
+            await websocket.accept()
+        
+        # Connect to WebSocket manager
         await manager.connect(websocket, user_id)
         
         logger.info("Chat WebSocket connected", session_id=session_id, user_id=user_id)
