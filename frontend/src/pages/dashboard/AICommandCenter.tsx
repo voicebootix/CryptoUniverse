@@ -95,8 +95,11 @@ const AICommandCenter: React.FC = () => {
   // Compute AI models from live status instead of hardcoded data
   const aiModels = useMemo(() => {
     const models = Object.entries(AI_MODEL_CONFIG).map(([key, config]) => {
-      const status = aiStatus?.ai_models_status?.[key] || 'inactive';
+      const rawStatus = aiStatus?.ai_models_status?.[key] || 'inactive';
       const performance = aiStatus?.performance_metrics?.[key];
+      
+      // Normalize status using getModelStatus helper
+      const normalizedStatus = rawStatus === 'ONLINE' ? 'active' : 'inactive';
       
       return {
         name: config.name,
@@ -104,12 +107,12 @@ const AICommandCenter: React.FC = () => {
         icon: config.icon,
         color: config.color,
         specialty: config.specialty,
-        status: status,
-        recommendation: status === 'active' ? 'READY' : 'OFFLINE',
+        status: normalizedStatus,
+        recommendation: normalizedStatus === 'active' ? 'READY' : 'OFFLINE',
         confidence: performance?.confidence || 0,
         response_time: performance?.response_time || 0,
         cost: aiStatus?.cost_report?.cost_by_model?.[key] || 0,
-        active: status === 'active',
+        active: normalizedStatus === 'active',
         // Add missing properties for display
         accuracy: performance?.accuracy || Math.floor(Math.random() * 15) + 85,
         latency: performance?.latency || (Math.random() * 2 + 0.5).toFixed(2),
@@ -332,8 +335,9 @@ const AICommandCenter: React.FC = () => {
     if (!aiStatus?.performance_metrics) return 0;
     
     const models = Object.keys(AI_MODEL_CONFIG);
+    // Backend returns 'ONLINE' to indicate active models, not 'active'
     const activeModels = models.filter(model => 
-      aiStatus.ai_models_status?.[model] === 'active'
+      aiStatus.ai_models_status?.[model] === 'ONLINE'
     );
     
     if (activeModels.length === 0) return 0;

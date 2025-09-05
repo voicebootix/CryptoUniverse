@@ -348,11 +348,12 @@ async def get_profit_potential_status(
         profit_potential_usage = usage_result.get("profit_potential_usage", {})
         
         # Merge nested structure into top-level if top-level keys are missing
+        # Use explicit None checks to preserve valid zero values
         normalized_result = {
-            "total_profit_earned": usage_result.get("total_profit_earned") or profit_potential_usage.get("used_potential_usd", 0),
-            "profit_potential": usage_result.get("profit_potential") or profit_potential_usage.get("total_potential_usd", 0),
-            "remaining_potential": usage_result.get("remaining_potential") or profit_potential_usage.get("remaining_potential_usd", 0),
-            "utilization_percentage": usage_result.get("utilization_percentage") or profit_potential_usage.get("utilization_percentage", 0)
+            "total_profit_earned": usage_result.get("total_profit_earned") if usage_result.get("total_profit_earned") is not None else profit_potential_usage.get("used_potential_usd", 0),
+            "profit_potential": usage_result.get("profit_potential") if usage_result.get("profit_potential") is not None else profit_potential_usage.get("total_potential_usd", 0),
+            "remaining_potential": usage_result.get("remaining_potential") if usage_result.get("remaining_potential") is not None else profit_potential_usage.get("remaining_potential_usd", 0),
+            "utilization_percentage": usage_result.get("utilization_percentage") if usage_result.get("utilization_percentage") is not None else profit_potential_usage.get("utilization_percentage", 0)
         }
         
         return ProfitPotentialResponse(

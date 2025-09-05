@@ -224,11 +224,11 @@ async def health_check():
         
         # Return HTTP 503 when overall status is degraded or unhealthy
         if health_status["overall_status"] in ["degraded", "unhealthy"]:
-            from fastapi import Response
-            return Response(
-                content=structlog.stdlib.get_logger().info(health_status) or str(health_status),
-                status_code=503,
-                media_type="application/json"
+            logger.info("Health check returned degraded/unhealthy status", status=health_status["overall_status"])
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                content=health_status,
+                status_code=503
             )
         
         return health_status
@@ -241,9 +241,8 @@ async def health_check():
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "response_time_ms": round((time.perf_counter() - start_time) * 1000, 2)
         }
-        from fastapi import Response
-        return Response(
-            content=str(error_response),
-            status_code=503,
-            media_type="application/json"
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            content=error_response,
+            status_code=503
         )
