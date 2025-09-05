@@ -2649,7 +2649,7 @@ class MasterSystemController(LoggerMixin):
 
 
 # Global service instance
-master_controller = None
+master_controller = MasterSystemController()
 
 
 # FastAPI dependency

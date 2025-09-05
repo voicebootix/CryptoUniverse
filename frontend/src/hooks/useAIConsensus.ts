@@ -101,23 +101,24 @@ export const useAIConsensus = () => {
   const { lastMessage, connectionStatus } = useWebSocket('/ws/ai-consensus', {
     onMessage: (data) => {
       if (data.type === 'ai_consensus_update') {
-        // Update consensus history
+        // Update consensus history - safe property access
+        const consensusData = data.data || {};
         setConsensusHistory(prev => [
           ...prev.slice(-49), // Keep last 49 entries
           {
             time: new Date().toLocaleTimeString(),
-            consensus: data.data.consensus_score,
-            recommendation: data.data.recommendation,
-            function: data.data.function,
-            timestamp: data.data.timestamp
+            consensus: consensusData.consensus_score || 0,
+            recommendation: consensusData.recommendation || 'HOLD',
+            function: consensusData.function || 'unknown',
+            timestamp: consensusData.timestamp || new Date().toISOString()
           }
         ]);
 
-        // Show AI explanation toast
-        if (data.data.explanation) {
+        // Show AI explanation toast - safe property access
+        if (consensusData.explanation) {
           toast({
             title: "🤖 AI Money Manager",
-            description: data.data.explanation,
+            description: consensusData.explanation,
             duration: 5000,
           });
         }

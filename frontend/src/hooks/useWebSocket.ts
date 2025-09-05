@@ -40,14 +40,10 @@ export const useWebSocket = (
 
   const connect = useCallback(() => {
     try {
-      // Construct WebSocket URL
+      // Construct WebSocket URL - match current domain
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsHost = import.meta.env.VITE_WS_URL || 
-        (import.meta.env.PROD 
-          ? 'wss://cryptouniverse.onrender.com' 
-          : `ws://localhost:8000`);
-      
-      const wsUrl = `${wsHost}${url}`;
+      const wsHost = window.location.host;
+      const wsUrl = `${wsProtocol}//${wsHost}${url}`;
       
       // Add authentication token to URL if available
       const urlWithAuth = tokens?.access_token 
