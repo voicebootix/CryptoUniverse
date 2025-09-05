@@ -343,14 +343,25 @@ async def get_profit_potential_status(
             earning_velocity = "slow"
             estimated_days = 60
         
+        # Normalize data structure - handle both top-level and nested shapes
+        profit_potential_usage = usage_result.get("profit_potential_usage", {})
+        
+        # Merge nested structure into top-level if top-level keys are missing
+        normalized_result = {
+            "total_profit_earned": usage_result.get("total_profit_earned") or profit_potential_usage.get("used_potential_usd", 0),
+            "profit_potential": usage_result.get("profit_potential") or profit_potential_usage.get("total_potential_usd", 0),
+            "remaining_potential": usage_result.get("remaining_potential") or profit_potential_usage.get("remaining_potential_usd", 0),
+            "utilization_percentage": usage_result.get("utilization_percentage") or profit_potential_usage.get("utilization_percentage", 0)
+        }
+        
         return ProfitPotentialResponse(
-            current_profit_earned=Decimal(str(usage_result.get("total_profit_earned", 0))),
-            profit_potential=Decimal(str(usage_result.get("profit_potential", 0))),
-            remaining_potential=Decimal(str(usage_result.get("remaining_potential", 0))),
-            utilization_percentage=usage_result.get("utilization_percentage", 0),
+            current_profit_earned=Decimal(str(normalized_result["total_profit_earned"])),
+            profit_potential=Decimal(str(normalized_result["profit_potential"])),
+            remaining_potential=Decimal(str(normalized_result["remaining_potential"])),
+            utilization_percentage=float(normalized_result["utilization_percentage"]),
             active_strategies=active_strategy_count,
             earning_velocity=earning_velocity,
-            estimated_days_to_ceiling=estimated_days if usage_result.get("remaining_potential", 0) > 0 else None
+            estimated_days_to_ceiling=estimated_days if float(normalized_result["remaining_potential"]) > 0 else None
         )
         
     except HTTPException:

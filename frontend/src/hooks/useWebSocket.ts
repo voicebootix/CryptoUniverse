@@ -41,10 +41,18 @@ export const useWebSocket = (
 
   const connect = useCallback(() => {
     try {
-      // Construct WebSocket URL - match current domain
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsHost = window.location.host;
-      const wsUrl = `${wsProtocol}//${wsHost}${url}`;
+      // Construct WebSocket URL with proper protocol and host handling
+      let wsUrl: string;
+      
+      if (import.meta.env.VITE_WS_URL) {
+        // Use environment-specified WebSocket URL
+        wsUrl = `${import.meta.env.VITE_WS_URL}${url}`;
+      } else {
+        // Build from current location
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsHost = window.location.host;
+        wsUrl = `${wsProtocol}//${wsHost}${url}`;
+      }
       
       // Use secure authentication via subprotocol instead of URL params
       const authProtocol = tokens?.access_token 

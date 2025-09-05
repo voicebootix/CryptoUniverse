@@ -281,6 +281,7 @@ class APICostTracker(LoggerMixin):
             # Send real-time cost update via WebSocket
             await self._broadcast_cost_update(api_call)
             
+            # Return call_id on successful tracking
             return call_id
             
         except Exception as e:
@@ -288,8 +289,10 @@ class APICostTracker(LoggerMixin):
                 "Failed to track API call",
                 provider=provider.value,
                 endpoint=endpoint,
+                call_id=call_id,
                 error=str(e)
             )
+            # Return call_id even on failure for consistency
             return call_id
     
     async def _calculate_cost(

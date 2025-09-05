@@ -410,10 +410,13 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
         
         # Handle different WebSocket paths
         if path.startswith("api/v1/trading/ws"):
-            # Market data and trading updates
+            # Market data and trading updates - allow anonymous
             await manager.subscribe_to_market_data(websocket, ["BTC", "ETH", "SOL"])
         elif path.startswith("api/v1/ai-consensus"):
-            # AI consensus updates
+            # AI consensus updates - require authentication
+            if user_id == "anonymous":
+                await websocket.close(code=1008, reason="Authentication required for AI consensus")
+                return
             await manager.subscribe_to_ai_consensus(websocket, user_id)
         
         # Keep connection alive and handle messages
@@ -441,21 +444,24 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
             except WebSocketDisconnect:
                 break
             except Exception as e:
-                logger.error("WebSocket message handling error", error=str(e))
-                await websocket.send_json({
-                    "type": "error",
-                    "message": str(e)
-                })
+                logger.exception("WebSocket message handling error", user_id=user_id, path=path)
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": str(e)
+                    })
+                except Exception:
+                    pass  # Connection might be closed
     
     except WebSocketDisconnect:
-        pass
+        logger.info("WebSocket disconnected normally", user_id=user_id, path=path)
     except Exception as e:
-        logger.error("WebSocket connection error", error=str(e))
+        logger.exception("WebSocket connection error", user_id=user_id, path=path)
     finally:
         try:
             await manager.disconnect(websocket, user_id)
-        except:
-            pass
+        except Exception as e:
+            logger.exception("WebSocket disconnect cleanup failed", user_id=user_id, error=str(e))
 
 
 if __name__ == "__main__":
