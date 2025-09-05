@@ -27,6 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { apiClient } from "@/lib/api/client";
+import { getPublicAssetUrl } from "@/lib/utils/assets";
 import { Container } from "@/components/ui/container";
 
 const loginSchema = z.object({
@@ -275,7 +276,7 @@ const LoginPage: React.FC = () => {
                 label="Continue with Google"
               >
                 <img
-                  src="/google.svg"
+                  src={getPublicAssetUrl('google.svg')}
                   alt="Google"
                   className="w-5 h-5 mr-2"
                   aria-hidden="true"
