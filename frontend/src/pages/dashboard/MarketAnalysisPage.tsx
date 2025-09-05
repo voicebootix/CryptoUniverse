@@ -32,6 +32,12 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 const COLORS = ['#22c55e', '#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4'];
 
+// Safe number formatting helper
+const safeToFixed = (value: any, decimals: number): string | undefined => {
+  const num = typeof value === 'string' ? parseFloat(value) : Number(value);
+  return !isNaN(num) && isFinite(num) ? num.toFixed(decimals) : undefined;
+};
+
 const MarketAnalysisPage: React.FC = () => {
   const {
     realtimePrices,
@@ -686,14 +692,14 @@ const MarketAnalysisPage: React.FC = () => {
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-muted-foreground">Sentiment Score</span>
                             <span className="font-mono">
-                              {analysis.overall_sentiment?.score?.toFixed(3) || '0.000'}
+                              {safeToFixed(analysis.overall_sentiment?.score, 3) || '0.000'}
                             </span>
                           </div>
                           
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-muted-foreground">Confidence</span>
                             <span className="font-mono">
-                              {analysis.overall_sentiment?.confidence?.toFixed(1) || '0.0'}%
+                              {safeToFixed(analysis.overall_sentiment?.confidence, 1) || '0.0'}%
                             </span>
                           </div>
 
@@ -711,7 +717,7 @@ const MarketAnalysisPage: React.FC = () => {
                                     } size="sm">
                                       {data.label}
                                     </Badge>
-                                    <span className="font-mono">{data.score?.toFixed(3)}</span>
+                                    <span className="font-mono">{safeToFixed(data.score, 3) || '-'}</span>
                                   </div>
                                 </div>
                               ))}
