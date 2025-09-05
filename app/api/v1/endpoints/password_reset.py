@@ -16,6 +16,7 @@ from app.core.database import get_database
 from app.core.config import get_settings
 from app.models.user import User
 from app.services.rate_limit import RateLimitService
+from app.services.email_service import email_service
 import structlog
 
 settings = get_settings()
@@ -90,7 +91,31 @@ async def forgot_password(
 
         # Send reset email with raw token
         reset_url = f"{settings.FRONTEND_URL}/auth/reset-password?token={reset_token}"
-        # TODO: Implement email sending
+        
+        # HTML email content
+        html_content = f"""
+        <html>
+            <body>
+                <p>Hello,</p>
+                <p>You requested a password reset. Click the link below to reset your password:</p>
+                <p><a href="{reset_url}">Reset Password</a></p>
+                <p>If you did not request this, please ignore this email.</p>
+            </body>
+        </html>
+        """
+
+        # Send the email
+        email_sent = email_service.send_email(
+            to_email=user.email,
+            subject="Password Reset Request",
+            html_content=html_content
+        )
+
+        if not email_sent:
+            logger.error("Failed to send password reset email", user_id=str(user.id))
+            # Even if email fails, we don't want to reveal that the user exists.
+            # The error is logged for admins to investigate.
+
         # Log with masked token for security
         masked_token = f"{reset_token[:6]}...{reset_token[-4:]}"
         logger.info(
