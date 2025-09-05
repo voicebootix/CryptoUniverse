@@ -378,11 +378,11 @@ class APICostTracker(LoggerMixin):
                 return
             
             # Update real-time counters
-            now = datetime.utcnow()
+            # Use the event time for consistent aggregation
+            now = api_call.timestamp
             date_key = now.strftime("%Y-%m-%d")
             hour_key = now.strftime("%Y-%m-%d-%H")
             minute_key = now.strftime("%Y-%m-%d-%H-%M")
-            
             # Increment counters
             pipe = redis.pipeline()
             
