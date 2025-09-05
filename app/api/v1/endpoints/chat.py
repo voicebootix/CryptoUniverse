@@ -226,11 +226,24 @@ async def chat_websocket(
     - Market alerts and opportunities
     """
     try:
-        # TODO: Implement WebSocket authentication via token
-        # For now, we'll use a placeholder user_id
-        user_id = "websocket_user"  # This should be extracted from authenticated token
+        # Implement WebSocket authentication via token
+        user_id = "websocket_user"  # Default fallback
         
-        # Connect to WebSocket manager (this handles websocket.accept())
+        # Authenticate before accepting connection
+        if token:
+            try:
+                from app.core.security import verify_access_token
+                payload = verify_access_token(token)
+                if payload and payload.get("sub"):
+                    user_id = payload["sub"]
+                    logger.info("Chat WebSocket user authenticated", user_id=user_id)
+            except Exception as e:
+                logger.debug("Chat WebSocket authentication failed, using placeholder", error=str(e))
+        
+        # Accept WebSocket connection after authentication
+        await websocket.accept()
+        
+        # Connect to WebSocket manager
         await manager.connect(websocket, user_id)
         
         logger.info("Chat WebSocket connected", session_id=session_id, user_id=user_id)

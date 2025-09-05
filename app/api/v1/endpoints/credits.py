@@ -174,7 +174,8 @@ async def get_credit_balance(
                 )
             )
             profit_result = await db.execute(profit_stmt)
-            profit_earned = Decimal(str(profit_result.scalar() or 0))
+            scalar_result = profit_result.scalar()
+            profit_earned = Decimal(str(scalar_result if scalar_result is not None else 0))
         except Exception as query_error:
             logger.warning("Profit query failed, using 0", error=str(query_error))
             profit_earned = Decimal("0")
