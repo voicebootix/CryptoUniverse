@@ -118,7 +118,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         setMessages([welcomeMessage]);
       }
     } catch (error) {
-      console.error('Failed to initialize chat session:', error);
+      // Failed to initialize chat session - handled by UI error state
       toast({
         title: 'Connection Error',
         description: 'Failed to initialize chat session. Please refresh the page.',
@@ -135,7 +135,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     
     ws.onopen = () => {
       setIsConnected(true);
-      console.log('Chat WebSocket connected');
+      // WebSocket connected - connection established
     };
     
     ws.onmessage = (event) => {
@@ -156,20 +156,20 @@ Just chat with me naturally! How can I help you manage your crypto investments t
           setMessages(prev => [...prev, newMessage]);
           setIsLoading(false);
         } else if (data.type === 'connection_established') {
-          console.log('Chat connection established:', data.message);
+          // Chat connection established
         }
       } catch (error) {
-        console.error('Failed to parse WebSocket message:', error);
+        // Failed to parse WebSocket message - continue operation
       }
     };
     
     ws.onclose = () => {
       setIsConnected(false);
-      console.log('Chat WebSocket disconnected');
+      // WebSocket disconnected - connection closed
     };
     
     ws.onerror = (error) => {
-      console.error('Chat WebSocket error:', error);
+      // WebSocket error - connection issue handled by state
       setIsConnected(false);
     };
     
@@ -224,13 +224,13 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         setIsLoading(false);
       }
     } catch (error) {
-      console.error('Failed to send message:', error);
-      setIsLoading(false);
+      // Failed to send message - show error to user
       toast({
         title: 'Message Failed',
-        description: 'Failed to send message. Please try again.',
+        description: 'Unable to send message. Please check your connection.',
         variant: 'destructive',
       });
+      setIsLoading(false);
     }
   };
 

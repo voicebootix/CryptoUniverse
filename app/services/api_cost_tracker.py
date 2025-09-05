@@ -588,7 +588,8 @@ class APICostTracker(LoggerMixin):
                         total_calls += int(await redis.get(f"calls:daily:{day_key}") or 0)
                         successful_calls += int(await redis.get(f"success:daily:{day_key}") or 0)
                         failed_calls += int(await redis.get(f"failure:daily:{day_key}") or 0)
-                    except:
+                    except (ValueError, TypeError, AttributeError) as e:
+                        logger.debug(f"Failed to get daily failure stats for {day_key}: {e}")
                         continue
             
             # Get cost by provider
@@ -602,7 +603,8 @@ class APICostTracker(LoggerMixin):
                         try:
                             day_key = now.replace(day=day).strftime("%Y-%m-%d")
                             provider_cost += float(await redis.get(f"cost:provider:{provider.value}:{day_key}") or 0)
-                        except:
+                        except (ValueError, TypeError, AttributeError) as e:
+                            logger.debug(f"Failed to get provider cost for {provider.value} on {day_key}: {e}")
                             continue
                 
                 if provider_cost > 0:

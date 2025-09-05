@@ -4,6 +4,19 @@ import { apiClient } from '@/lib/api/client';
 import { useToast } from '@/components/ui/use-toast';
 import { useWebSocket } from '@/hooks/useWebSocket';
 
+// Enhanced error typing for better type safety
+interface APIError {
+  response?: {
+    data?: {
+      detail?: string;
+      message?: string;
+    };
+    status?: number;
+  };
+  message?: string;
+  name?: string;
+}
+
 export interface AIModelResponse {
   provider: string;
   confidence: number;
@@ -179,8 +192,9 @@ export const useAIConsensus = () => {
         description: `${recommendation} - ${consensusScore}% confidence`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: APIError) => {
       const errorMessage = error?.response?.data?.detail || 
+                          error?.response?.data?.message ||
                           error?.message || 
                           "An unexpected error occurred during analysis";
       
@@ -218,7 +232,7 @@ export const useAIConsensus = () => {
         description: `Status: ${approvalStatus || 'UNKNOWN'} - Score: ${validationScore}%`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: APIError) => {
       const errorMessage = error?.response?.data?.detail || 
                           error?.message || 
                           "An unexpected error occurred during validation";
@@ -252,7 +266,7 @@ export const useAIConsensus = () => {
         description: `Risk Level: ${assessment?.risk_level || 'N/A'} (${assessment?.risk_score || 'N/A'}%)`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: APIError) => {
       toast({
         title: "❌ Risk Assessment Failed",
         description: error.response?.data?.detail || error.message,
@@ -282,7 +296,7 @@ export const useAIConsensus = () => {
         description: `Score: ${review?.portfolio_score || 'N/A'}% - ${review?.rebalancing_urgency || 'N/A'} rebalancing urgency`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: APIError) => {
       toast({
         title: "❌ Portfolio Review Failed",
         description: error.response?.data?.detail || error.message,
@@ -312,7 +326,7 @@ export const useAIConsensus = () => {
         description: `Market Strength: ${analysis?.market_strength || 'N/A'}% - ${analysis?.entry_timing || 'N/A'} timing`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: APIError) => {
       toast({
         title: "❌ Market Analysis Failed",
         description: error.response?.data?.detail || error.message,
@@ -342,7 +356,7 @@ export const useAIConsensus = () => {
         description: `Recommendation: ${decision?.final_recommendation || 'N/A'} - ${decision?.confidence_level || 'N/A'} confidence`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: APIError) => {
       toast({
         title: "❌ Decision Failed",
         description: error.response?.data?.detail || error.message,
@@ -365,7 +379,7 @@ export const useAIConsensus = () => {
       });
       queryClient.invalidateQueries({ queryKey: ['ai-model-weights'] });
     },
-    onError: (error: any) => {
+    onError: (error: APIError) => {
       toast({
         title: "❌ Update Failed",
         description: error.response?.data?.detail || error.message,
@@ -385,7 +399,7 @@ export const useAIConsensus = () => {
       });
       queryClient.invalidateQueries({ queryKey: ['ai-consensus-status'] });
     },
-    onError: (error: any) => {
+    onError: (error: APIError) => {
       toast({
         title: "❌ Emergency Stop Failed",
         description: error.response?.data?.detail || error.message,
@@ -404,7 +418,7 @@ export const useAIConsensus = () => {
       });
       queryClient.invalidateQueries({ queryKey: ['ai-consensus-status'] });
     },
-    onError: (error: any) => {
+    onError: (error: APIError) => {
       toast({
         title: "❌ Resume Failed",
         description: error.response?.data?.detail || error.message,

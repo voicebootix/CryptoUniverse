@@ -69,6 +69,7 @@ const AICommandCenter: React.FC = () => {
   const [isListening, setIsListening] = useState(false);
   const [customWeights, setCustomWeights] = useState<Record<string, number>>({});
   const [autonomousFrequency, setAutonomousFrequency] = useState(10);
+  const [autoMode, setAutoMode] = useState(false);
   const { toast } = useToast();
 
   // Use real AI consensus hook - NO MORE HARDCODED DATA
@@ -184,6 +185,23 @@ const AICommandCenter: React.FC = () => {
     };
 
     recognition.start();
+  };
+
+  const handleAnalyze = async () => {
+    try {
+      await analyzeOpportunity({
+        symbol: 'BTC/USDT',
+        analysis_type: 'opportunity',
+        timeframe: selectedTimeframe,
+        confidence_threshold: 75
+      });
+    } catch (error) {
+      toast({
+        title: "Analysis Failed",
+        description: "Unable to run analysis. Please try again.",
+        variant: "destructive"
+      });
+    }
   };
 
   const handleWeightChange = (model: string, value: number[]) => {
