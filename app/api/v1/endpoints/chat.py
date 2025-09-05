@@ -230,15 +230,14 @@ async def chat_websocket(
         # Implement WebSocket subprotocol authentication 
         # Use unique per-connection ID to prevent message bleed between unauthenticated clients
         user_id = f"guest:{uuid.uuid4()}"  # Unique fallback for each connection
-        selected_subprotocol = None
+        selected_subprotocol = "json"  # Fixed safe value, never echo tokens
         
         # Read subprotocols from Sec-WebSocket-Protocol header
         subprotocols = getattr(websocket, 'scope', {}).get('subprotocols', [])
         
         if subprotocols:
-            # Use the first subprotocol as the token
+            # Extract token candidate from first subprotocol but never echo it back
             token = subprotocols[0]
-            selected_subprotocol = token
             
             try:
                 from app.core.security import verify_access_token
@@ -247,14 +246,17 @@ async def chat_websocket(
                 if payload and payload.get("sub"):
                     user_id = payload["sub"]
                     logger.info("Chat WebSocket user authenticated via subprotocol", user_id=user_id)
+                    # Keep safe subprotocol value - never echo token
+                    selected_subprotocol = "json"
             except JWTError as e:
                 # Handle JWT-specific errors only, let other exceptions propagate
                 logger.debug("Chat WebSocket JWT authentication failed, using guest ID", 
                            guest_id=user_id, 
                            error=str(e))
-                selected_subprotocol = None  # Don't echo back invalid token
+                # Keep safe subprotocol value on failure
+                selected_subprotocol = "json"
         
-        # Accept WebSocket connection with subprotocol after authentication
+        # Accept WebSocket connection with safe subprotocol - never echo raw tokens
         await websocket.accept(subprotocol=selected_subprotocol)
         
         # Connect to WebSocket manager

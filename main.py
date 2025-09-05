@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
+from jose import JWTError
 
 # Core imports
 from app.core.config import get_settings
@@ -391,16 +392,15 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
         # Extract user authentication from subprotocol header
         user_id = "anonymous"
         token = None
-        selected_subprotocol = None
+        selected_subprotocol = "json"  # Fixed safe value, never echo tokens
         
         # Read subprotocols from Sec-WebSocket-Protocol header
         subprotocols = getattr(websocket, 'scope', {}).get('subprotocols', [])
         
-        # Extract token from subprotocol
+        # Extract token from subprotocol but never echo it back
         if subprotocols:
             # Use the first subprotocol as the token
             token = subprotocols[0]
-            selected_subprotocol = token
         
         # Validate token if provided
         if token:
@@ -414,12 +414,13 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
                     # Invalid token - reject connection
                     await websocket.close(code=1008, reason="Invalid authentication token")
                     return
-            except Exception as e:
-                logger.debug("WebSocket auth failed, rejecting connection", error=str(e))
+            except JWTError as e:
+                logger.warning("WebSocket JWT authentication failed, rejecting connection", 
+                             path=path, error=str(e), exc_info=True)
                 await websocket.close(code=1008, reason="Authentication failed")
                 return
         
-        # Accept connection with validated subprotocol after authentication completes
+        # Accept connection with safe subprotocol - never echo raw tokens
         await websocket.accept(subprotocol=selected_subprotocol)
         
         # Connect to WebSocket manager

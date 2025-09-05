@@ -37,6 +37,7 @@ export const useWebSocket = (
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectCountRef = useRef(0);
   const skipNextReconnectRef = useRef(false);
+  const isUnmountingRef = useRef(false);
   const { tokens } = useAuthStore();
 
   const connect = useCallback(() => {
@@ -122,14 +123,17 @@ export const useWebSocket = (
         // Check if this socket was flagged to skip reconnection
         const shouldSkipReconnect = (event.target as any)?._skipReconnect;
         
-        // Attempt to reconnect unless we asked to skip (manual reconnect or flagged socket)
-        if (!skipNextReconnectRef.current && !shouldSkipReconnect && reconnectCountRef.current < reconnectAttempts) {
+        // Attempt to reconnect unless we asked to skip (manual reconnect, flagged socket, or unmounting)
+        if (!skipNextReconnectRef.current && !shouldSkipReconnect && !isUnmountingRef.current && reconnectCountRef.current < reconnectAttempts) {
           reconnectCountRef.current += 1;
           // WebSocket reconnection attempt ${reconnectCountRef.current}/${reconnectAttempts}
           
           reconnectTimeoutRef.current = setTimeout(() => {
-            setConnectionStatus('Connecting');
-            connect();
+            // Double-check unmount flag before actually reconnecting
+            if (!isUnmountingRef.current) {
+              setConnectionStatus('Connecting');
+              connect();
+            }
           }, reconnectInterval);
         } else if (skipNextReconnectRef.current) {
           // Consume the skip flag once
@@ -182,11 +186,25 @@ export const useWebSocket = (
     connect();
 
     return () => {
+      // Set unmounting flag to prevent reconnection attempts
+      isUnmountingRef.current = true;
+      
+      // Clear any pending reconnection timeouts
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
+      
+      // Clean up WebSocket connection
       if (websocketRef.current) {
+        // Optional: Clear event handlers to prevent any callbacks
+        websocketRef.current.onopen = null;
+        websocketRef.current.onmessage = null;
+        websocketRef.current.onclose = null;
+        websocketRef.current.onerror = null;
+        
         websocketRef.current.close();
+        websocketRef.current = null;
       }
     };
   }, [connect]);
