@@ -81,7 +81,7 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
 
 ## 🎯 **ENTERPRISE ARCHITECTURE - FINAL RESULT**
 
-```
+```text
 ┌─────────────────────────────────────────────────────────┐
 │                 CryptoUniverse Platform                 │
 ├─────────────────────────────────────────────────────────┤
@@ -97,7 +97,7 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
 ```
 
 ### **Data Flow Integration:**
-```
+```text
 Market Analysis → AI Consensus → Master Controller → Trade Execution
       ↓               ↓              ↓                    ↓
    Real-time      Voice Commands   System Control    Emergency Protocols
