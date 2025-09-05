@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Container } from '@/components/ui/container';
-import { RegistrationForm } from '@/components/auth/RegistrationForm';
+import { RegistrationForm } from '../../components/auth/RegistrationForm';
 import { useAuthStore } from '@/store/authStore';
 import { apiClient } from '@/lib/api/client';
 
