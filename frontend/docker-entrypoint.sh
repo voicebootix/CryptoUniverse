@@ -10,10 +10,16 @@ echo "🚀 Starting CryptoUniverse Frontend Service..."
 wait_for_backend() {
     echo "⏳ Waiting for backend service to be ready..."
     
-    # Extract host and port from API URL
-    BACKEND_HOST=${VITE_API_URL#http://}
-    BACKEND_HOST=${BACKEND_HOST#https://}
-    BACKEND_HOST=${BACKEND_HOST%%/*}
+    # Use explicit BACKEND_HOST or fallback
+    if [ "${VITE_API_URL:0:1}" = "/" ]; then
+        # Using relative API URL, get host from environment
+        BACKEND_HOST=${BACKEND_HOST:-localhost:8000}
+    else
+        # Extract host from absolute API URL
+        BACKEND_HOST=${VITE_API_URL#http://}
+        BACKEND_HOST=${BACKEND_HOST#https://}
+        BACKEND_HOST=${BACKEND_HOST%%/*}
+    fi
     BACKEND_PORT=${BACKEND_HOST##*:}
     BACKEND_HOST=${BACKEND_HOST%:*}
     
