@@ -72,40 +72,81 @@ const MarketAnalysisPage: React.FC = () => {
     
     return institutionalFlows.reduce((acc: any, flow: any) => {
       const asset = flow.asset || flow.symbol || 'UNKNOWN';
-      const transactions = flow.transactions || [];
       
-      // Calculate summary metrics
-      const netFlow = transactions.reduce((sum: number, tx: any) => 
-        sum + (tx.volume || 0) * (tx.type === 'inflow' ? 1 : -1), 0
-      );
-      const avgSize = transactions.length > 0 
-        ? transactions.reduce((sum: number, tx: any) => sum + Math.abs(tx.volume || 0), 0) / transactions.length 
-        : 0;
+      // Normalize flow into transactions array
+      let transactions: any[];
+      if (Array.isArray(flow.transactions)) {
+        transactions = flow.transactions;
+      } else if (flow.volume !== undefined || flow.amount !== undefined) {
+        // Flow itself is an event-level item, wrap as single transaction
+        transactions = [flow];
+      } else {
+        transactions = [];
+      }
       
-      // Map and sort transactions by volume
-      const largeTransactions = transactions
-        .map((tx: any) => ({
-          direction: tx.type === 'inflow' ? 'inflow' : 'outflow',
-          amount: Math.abs(tx.volume || tx.amount || 0),
+      // Initialize asset accumulator if missing
+      if (!acc[asset]) {
+        acc[asset] = {
+          total_count: 0,
+          running_net_sum: 0,
+          running_abs_sum: 0,
+          all_transactions: []
+        };
+      }
+      
+      // Process each transaction
+      transactions.forEach((tx: any) => {
+        const volume = tx.volume || tx.amount || 0;
+        const isInflow = tx.type === 'inflow' || tx.direction === 'inflow';
+        const absVolume = Math.abs(volume);
+        
+        // Update running totals
+        acc[asset].total_count += 1;
+        acc[asset].running_net_sum += isInflow ? absVolume : -absVolume;
+        acc[asset].running_abs_sum += absVolume;
+        
+        // Add normalized transaction
+        acc[asset].all_transactions.push({
+          direction: isInflow ? 'inflow' : 'outflow',
+          amount: absVolume,
           exchange: tx.exchange || 'Unknown Exchange',
           timestamp: tx.timestamp || tx.time || new Date().toISOString(),
-          market_impact: tx.impact || 'Low'
-        }))
-        .sort((a: any, b: any) => b.amount - a.amount)
-        .slice(0, 5);
-      
-      acc[asset] = {
-        total_flows: transactions.length,
-        summary: {
-          net_flow: netFlow,
-          average_size: avgSize
-        },
-        large_transactions: largeTransactions
-      };
+          market_impact: tx.impact || tx.market_impact || 'Low'
+        });
+      });
       
       return acc;
     }, {});
   }, [institutionalFlows]);
+
+  // Post-process accumulated data
+  const processedFlowsByAsset = useMemo(() => {
+    const processed: any = {};
+    
+    Object.entries(flowsByAsset).forEach(([asset, data]: [string, any]) => {
+      const { total_count, running_net_sum, running_abs_sum, all_transactions } = data;
+      
+      // Compute final metrics
+      const average_size = total_count > 0 ? running_abs_sum / total_count : 0;
+      const net_flow = running_net_sum;
+      
+      // Sort transactions by amount and get top 5
+      const large_transactions = all_transactions
+        .sort((a: any, b: any) => b.amount - a.amount)
+        .slice(0, 5);
+      
+      processed[asset] = {
+        total_flows: total_count,
+        summary: {
+          net_flow,
+          average_size
+        },
+        large_transactions
+      };
+    });
+    
+    return processed;
+  }, [flowsByAsset]);
 
   useEffect(() => {
     // Initial data load
@@ -782,9 +823,9 @@ const MarketAnalysisPage: React.FC = () => {
                 <CardDescription>Monitor whale movements and institutional activity</CardDescription>
               </CardHeader>
               <CardContent>
-                {flowsByAsset && Object.keys(flowsByAsset).length > 0 ? (
+                {processedFlowsByAsset && Object.keys(processedFlowsByAsset).length > 0 ? (
                   <div className="space-y-4">
-                    {Object.entries(flowsByAsset).map(([symbol, flows]: [string, any]) => (
+                    {Object.entries(processedFlowsByAsset).map(([symbol, flows]: [string, any]) => (
                       <div key={symbol} className="p-4 rounded-lg border bg-muted/20">
                         <div className="flex items-center justify-between mb-3">
                           <span className="font-bold text-lg">{symbol}</span>
