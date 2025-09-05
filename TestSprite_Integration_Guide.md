@@ -203,7 +203,11 @@ Mode: Production with optimized performance
 ### 11. Support & Troubleshooting
 
 #### Common Issues
-- **401 Unauthorized**: Check JWT token validity
+- **401 Unauthorized**: 
+  - Ensure JWT token is obtained via `/auth/login` first
+  - Token must be fresh (8 hour expiry) 
+  - Use exact format: `Authorization: Bearer {access_token}`
+  - Verify test user exists and is active
 - **429 Rate Limited**: Implement backoff strategy
 - **500 Server Error**: Check system health endpoint
 

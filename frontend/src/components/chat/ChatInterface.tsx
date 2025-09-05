@@ -31,6 +31,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
+import { apiClient } from '@/lib/api/client';
 
 interface ChatMessage {
   id: string;
@@ -86,20 +87,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const initializeChatSession = async () => {
     try {
       // Create new chat session
-      const response = await fetch('/api/v1/chat/session/new', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // Add auth headers as needed
-        },
-      });
+      const response = await apiClient.post('/chat/session/new', {});
 
-      if (response.ok) {
-        const data = await response.json();
-        setSessionId(data.session_id);
+      if (response.data.success) {
+        setSessionId(response.data.session_id);
         
         // Initialize WebSocket connection
-        initializeWebSocket(data.session_id);
+        initializeWebSocket(response.data.session_id);
         
         // Add welcome message
         const welcomeMessage: ChatMessage = {
@@ -206,27 +200,20 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         }));
       } else {
         // Fallback to REST API
-        const response = await fetch('/api/v1/chat/message', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            message: inputValue,
-            session_id: sessionId
-          }),
+        const response = await apiClient.post('/chat/message', {
+          message: inputValue,
+          session_id: sessionId
         });
 
-        if (response.ok) {
-          const data = await response.json();
+        if (response.data.success) {
           const assistantMessage: ChatMessage = {
-            id: data.message_id,
-            content: data.content,
+            id: response.data.message_id,
+            content: response.data.content,
             type: 'assistant',
-            timestamp: data.timestamp,
-            intent: data.intent,
-            confidence: data.confidence,
-            metadata: data.metadata
+            timestamp: response.data.timestamp,
+            intent: response.data.intent,
+            confidence: response.data.confidence,
+            metadata: response.data.metadata
           };
           
           setMessages(prev => [...prev, assistantMessage]);
