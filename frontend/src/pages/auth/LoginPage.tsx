@@ -336,6 +336,28 @@ const LoginPage: React.FC = () => {
                     <p className="text-muted-foreground">Advanced portfolio protection and position sizing</p>
                 </div>
               </div>
+
+              <div className="grid grid-cols-3 gap-4 mt-8">
+                <div className="text-center">
+                  <p className="text-3xl font-bold text-green-400">99.9%</p>
+                  <p className="text-sm text-muted-foreground">Uptime</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-3xl font-bold text-blue-400">$100M+</p>
+                  <p className="text-sm text-muted-foreground">Assets Under Management</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-3xl font-bold text-green-400">24/7</p>
+                  <p className="text-sm text-muted-foreground">Trading</p>
+                </div>
+              </div>
+
+              <div className="mt-8 p-4 border border-white/10 rounded-lg bg-white/5">
+                <p className="text-sm italic text-muted-foreground">
+                  "CryptoUniverse's AI trading platform has revolutionized our investment strategy. The autonomous features and risk management are unparalleled."
+                </p>
+                <p className="text-sm font-semibold mt-2">— Sarah Chen, Portfolio Manager at Hedge Fund Alpha</p>
+              </div>
             </motion.div>
           </div>
         </div>
