@@ -41,22 +41,29 @@ export interface ButtonProps
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, loading = false, label, children, disabled, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
+    const isNativeButton = Comp === "button";
     
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
-        disabled={disabled || loading}
+        {...(isNativeButton ? {
+          type: "button",
+          disabled: disabled || loading
+        } : {})}
         aria-label={label}
         aria-disabled={disabled || loading}
-        role="button"
-        tabIndex={disabled ? -1 : 0}
-        onKeyPress={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            e.currentTarget.click();
+        aria-busy={loading}
+        {...(!isNativeButton && {
+          role: "button",
+          tabIndex: disabled ? -1 : 0,
+          onKeyDown: (e: React.KeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              e.currentTarget.click();
+            }
           }
-        }}
+        })}
         {...props}
       >
         {loading ? (
