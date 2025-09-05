@@ -132,7 +132,19 @@ const AICommandCenter: React.FC = () => {
 
   // Voice recognition setup
   const startVoiceCommand = () => {
-    if (!('webkitSpeechRecognition' in window)) {
+    // Prevent re-entry while already listening
+    if (isListening) {
+      toast({
+        title: "Already Listening",
+        description: "Voice command is already in progress",
+        variant: "default"
+      });
+      return;
+    }
+
+    // Support both SpeechRecognition and webkitSpeechRecognition
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
       toast({
         title: "Voice Not Supported",
         description: "Voice commands are not supported in this browser",
@@ -141,7 +153,7 @@ const AICommandCenter: React.FC = () => {
       return;
     }
 
-    const recognition = new (window as any).webkitSpeechRecognition();
+    const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = 'en-US';
@@ -183,7 +195,24 @@ const AICommandCenter: React.FC = () => {
             include_sentiment: true
           });
         } else if (command.includes('emergency') || command.includes('stop')) {
-          await emergencyStop();
+          // Add confirmation guard for emergency actions to prevent accidental triggers
+          const confirmed = window.confirm(
+            "⚠️ EMERGENCY STOP CONFIRMATION\n\nThis will immediately halt all trading operations.\n\nAre you sure you want to proceed?"
+          );
+          if (confirmed) {
+            await emergencyStop();
+            toast({
+              title: "🚨 Emergency Stop Activated",
+              description: "All trading operations have been halted",
+              variant: "destructive"
+            });
+          } else {
+            toast({
+              title: "Emergency Stop Cancelled",
+              description: "Operations continue normally",
+              variant: "default"
+            });
+          }
         } else if (command.includes('resume') || command.includes('start')) {
           await resumeOperations();
         } else {
@@ -203,6 +232,7 @@ const AICommandCenter: React.FC = () => {
     };
 
     recognition.onerror = () => {
+      setIsListening(false);  // Clear listening flag on error
       toast({
         title: "Voice Error",
         description: "Could not process voice command",
@@ -237,15 +267,29 @@ const AICommandCenter: React.FC = () => {
   const handleWeightChange = (model: string, value: number[]) => {
     const newWeights = { ...customWeights, [model]: value[0] / 100 };
     
-    // Normalize weights to sum to 1.0
-    const total = Object.values(newWeights).reduce((sum, weight) => sum + weight, 0);
+    // Normalize weights to sum to 1.0 - treat non-numeric or undefined weights as 0
+    const normalizedWeights: Record<string, number> = {};
+    
+    // First, coerce all values to numbers and handle undefined/NaN
+    Object.keys(newWeights).forEach(key => {
+      const weight = newWeights[key];
+      normalizedWeights[key] = (typeof weight === 'number' && !isNaN(weight)) ? weight : 0;
+    });
+    
+    // Calculate total from numeric values only
+    const total = Object.values(normalizedWeights).reduce((sum, weight) => sum + weight, 0);
+    
+    // Handle total === 0 case by leaving weights as zeros
     if (total > 0) {
-      Object.keys(newWeights).forEach(key => {
-        newWeights[key] = newWeights[key] / total;
+      // Only adjust numeric entries, leave explicit zeros intact
+      Object.keys(normalizedWeights).forEach(key => {
+        if (normalizedWeights[key] > 0) {
+          normalizedWeights[key] = normalizedWeights[key] / total;
+        }
       });
     }
     
-    setCustomWeights(newWeights);
+    setCustomWeights(normalizedWeights);
   };
 
   const saveWeights = async () => {

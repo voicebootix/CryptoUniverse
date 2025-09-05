@@ -199,16 +199,32 @@ class ConnectionManager:
             "timestamp": datetime.utcnow().isoformat()
         }
         
-        for websocket in self.ai_consensus_subscribers[user_id]:
+        # Iterate over a snapshot to avoid skipping items when removing failed connections
+        failed_websockets = []
+        for websocket in list(self.ai_consensus_subscribers[user_id]):
             try:
                 await websocket.send_json(message)
             except Exception as e:
-                logger.error(f"AI consensus WebSocket broadcast failed for user {user_id}", error=str(e))
-                # Remove failed connection
-                try:
+                logger.error("AI consensus WebSocket broadcast failed", 
+                           user_id=user_id, 
+                           error=str(e), 
+                           exc_info=True)
+                failed_websockets.append(websocket)
+        
+        # Clean up failed connections after iteration
+        for websocket in failed_websockets:
+            try:
+                if user_id in self.ai_consensus_subscribers and websocket in self.ai_consensus_subscribers[user_id]:
                     self.ai_consensus_subscribers[user_id].remove(websocket)
-                except ValueError:
-                    pass
+                    logger.debug("Removed failed websocket from AI consensus subscribers", user_id=user_id)
+            except (ValueError, KeyError):
+                # Handle cases where the entry was already removed or user_id doesn't exist
+                pass
+        
+        # Clean up empty user entries
+        if user_id in self.ai_consensus_subscribers and not self.ai_consensus_subscribers[user_id]:
+            del self.ai_consensus_subscribers[user_id]
+            logger.debug("Cleaned up empty AI consensus subscriber list", user_id=user_id)
     
     async def broadcast_cost_update(self, cost_data: Dict[str, Any]):
         """Broadcast real-time cost updates to admin dashboard subscribers."""

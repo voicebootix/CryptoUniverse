@@ -5,8 +5,9 @@ This router includes all API endpoints for the enterprise platform.
 """
 
 import time
-from datetime import datetime
-from fastapi import APIRouter
+import asyncio
+from datetime import datetime, timezone
+from fastapi import APIRouter, HTTPException, status as http_status
 import structlog
 
 # Import endpoint routers
@@ -38,9 +39,7 @@ api_router.include_router(ai_consensus.router, prefix="/ai-consensus", tags=["AI
 
 # Add monitoring endpoint that frontend expects
 @api_router.get("/monitoring/alerts")
-async def get_monitoring_alerts(
-    current_user: dict = None  # Make optional for now
-):
+async def get_monitoring_alerts():
     """Get system monitoring alerts."""
     try:
         # Return basic alerts structure that frontend expects
@@ -51,13 +50,12 @@ async def get_monitoring_alerts(
             "last_updated": datetime.utcnow().isoformat()
         }
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "alerts": [],
-            "system_status": "unknown",
-            "last_updated": datetime.utcnow().isoformat()
-        }
+        logger.error("Failed to get monitoring alerts", error=str(e), exc_info=True)
+        from fastapi import HTTPException, status
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve monitoring alerts: {str(e)}"
+        )
 
 @api_router.get("/status")
 async def api_status():
@@ -90,81 +88,127 @@ async def api_status():
 @api_router.get("/health")
 async def health_check():
     """ENTERPRISE comprehensive health check endpoint."""
-    import time
-    from datetime import datetime
+    # Use top-level imports instead of inline imports
+    from app.core.redis import redis_manager
+    from app.core.database import AsyncSessionLocal
+    from sqlalchemy import text
+    from app.services.ai_consensus_core import ai_consensus_service
+    from app.services.market_data_feeds import market_data_feeds
+    
+    # Use perf_counter for precise timing
+    start_time = time.perf_counter()
     
     health_status = {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": "v1",
         "checks": {},
         "overall_status": "healthy",
         "response_time_ms": 0
     }
     
-    start_time = time.time()
-    
     try:
-        # 1. Redis Health Check
+        # 1. Redis Health Check with timeout and per-check timing
+        check_start = time.perf_counter()
         try:
-            from app.core.redis import redis_manager
-            redis_ping = await redis_manager.ping()
+            redis_ping = await asyncio.wait_for(redis_manager.ping(), timeout=2.0)
+            response_time_ms = round((time.perf_counter() - check_start) * 1000, 2)
             health_status["checks"]["redis"] = {
                 "status": "healthy" if redis_ping else "unhealthy",
-                "response_time_ms": round((time.time() - start_time) * 1000, 2)
+                "response_time_ms": response_time_ms
+            }
+        except asyncio.TimeoutError:
+            logger.warning("health.redis_timeout", service="redis")
+            health_status["checks"]["redis"] = {
+                "status": "unhealthy", 
+                "error": "timeout",
+                "response_time_ms": round((time.perf_counter() - check_start) * 1000, 2)
             }
         except Exception as e:
+            logger.warning("health.redis_unhealthy", error=str(e))
             health_status["checks"]["redis"] = {
                 "status": "unhealthy", 
                 "error": str(e),
-                "response_time_ms": round((time.time() - start_time) * 1000, 2)
+                "response_time_ms": round((time.perf_counter() - check_start) * 1000, 2)
             }
         
-        # 2. Database Health Check
+        # 2. Database Health Check with timeout and per-check timing
+        check_start = time.perf_counter()
         try:
-            from app.core.database import AsyncSessionLocal
-            from sqlalchemy import text
-            async with AsyncSessionLocal() as db:
-                await db.execute(text("SELECT 1"))
+            async def db_check():
+                async with AsyncSessionLocal() as db:
+                    await db.execute(text("SELECT 1"))
+            
+            await asyncio.wait_for(db_check(), timeout=2.0)
+            response_time_ms = round((time.perf_counter() - check_start) * 1000, 2)
             health_status["checks"]["database"] = {
                 "status": "healthy",
-                "response_time_ms": round((time.time() - start_time) * 1000, 2)
+                "response_time_ms": response_time_ms
+            }
+        except asyncio.TimeoutError:
+            logger.warning("health.database_timeout", service="database")
+            health_status["checks"]["database"] = {
+                "status": "unhealthy",
+                "error": "timeout",
+                "response_time_ms": round((time.perf_counter() - check_start) * 1000, 2)
             }
         except Exception as e:
+            logger.warning("health.database_unhealthy", error=str(e))
             health_status["checks"]["database"] = {
                 "status": "unhealthy",
                 "error": str(e),
-                "response_time_ms": round((time.time() - start_time) * 1000, 2)
+                "response_time_ms": round((time.perf_counter() - check_start) * 1000, 2)
             }
         
-        # 3. AI Consensus Service Health
+        # 3. AI Consensus Service Health with timeout and per-check timing
+        check_start = time.perf_counter()
         try:
-            from app.services.ai_consensus_core import ai_consensus_service
-            ai_health = await ai_consensus_service.health_check()
+            ai_health = await asyncio.wait_for(ai_consensus_service.health_check(), timeout=2.0)
+            response_time_ms = round((time.perf_counter() - check_start) * 1000, 2)
             health_status["checks"]["ai_consensus"] = {
                 "status": "healthy" if ai_health.get("status") == "HEALTHY" else "degraded",
-                "response_time_ms": round((time.time() - start_time) * 1000, 2)
+                "response_time_ms": response_time_ms
+            }
+        except asyncio.TimeoutError:
+            logger.warning("health.ai_consensus_timeout", service="ai_consensus")
+            health_status["checks"]["ai_consensus"] = {
+                "status": "unhealthy",
+                "error": "timeout",
+                "response_time_ms": round((time.perf_counter() - check_start) * 1000, 2)
             }
         except Exception as e:
+            logger.warning("health.ai_consensus_unhealthy", error=str(e))
             health_status["checks"]["ai_consensus"] = {
                 "status": "unhealthy",
                 "error": str(e),
-                "response_time_ms": round((time.time() - start_time) * 1000, 2)
+                "response_time_ms": round((time.perf_counter() - check_start) * 1000, 2)
             }
         
-        # 4. Market Data Service Health
+        # 4. Market Data Service Health with timeout and per-check timing
+        check_start = time.perf_counter()
         try:
-            from app.services.market_data_feeds import market_data_feeds
-            ping_result = await market_data_feeds.get_real_time_price("BTC")
+            ping_result = await asyncio.wait_for(
+                market_data_feeds.get_real_time_price("BTC"), 
+                timeout=2.0
+            )
+            response_time_ms = round((time.perf_counter() - check_start) * 1000, 2)
             health_status["checks"]["market_data"] = {
                 "status": "healthy" if ping_result.get("success") else "degraded",
-                "response_time_ms": round((time.time() - start_time) * 1000, 2)
+                "response_time_ms": response_time_ms
+            }
+        except asyncio.TimeoutError:
+            logger.warning("health.market_data_timeout", service="market_data")
+            health_status["checks"]["market_data"] = {
+                "status": "unhealthy",
+                "error": "timeout",
+                "response_time_ms": round((time.perf_counter() - check_start) * 1000, 2)
             }
         except Exception as e:
+            logger.warning("health.market_data_unhealthy", error=str(e))
             health_status["checks"]["market_data"] = {
                 "status": "unhealthy",
                 "error": str(e),
-                "response_time_ms": round((time.time() - start_time) * 1000, 2)
+                "response_time_ms": round((time.perf_counter() - check_start) * 1000, 2)
             }
         
         # Determine overall status
@@ -176,13 +220,30 @@ async def health_check():
             health_status["overall_status"] = "degraded" 
             health_status["status"] = "degraded"
         
-        health_status["response_time_ms"] = round((time.time() - start_time) * 1000, 2)
+        health_status["response_time_ms"] = round((time.perf_counter() - start_time) * 1000, 2)
+        
+        # Return HTTP 503 when overall status is degraded or unhealthy
+        if health_status["overall_status"] in ["degraded", "unhealthy"]:
+            from fastapi import Response
+            return Response(
+                content=structlog.stdlib.get_logger().info(health_status) or str(health_status),
+                status_code=503,
+                media_type="application/json"
+            )
+        
         return health_status
         
     except Exception as e:
-        return {
+        logger.error("Health check failed", error=str(e), exc_info=True)
+        error_response = {
             "status": "error",
             "error": str(e),
-            "timestamp": datetime.utcnow().isoformat(),
-            "response_time_ms": round((time.time() - start_time) * 1000, 2)
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "response_time_ms": round((time.perf_counter() - start_time) * 1000, 2)
         }
+        from fastapi import Response
+        return Response(
+            content=str(error_response),
+            status_code=503,
+            media_type="application/json"
+        )

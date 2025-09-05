@@ -241,7 +241,6 @@ class APICostTracker(LoggerMixin):
         
         call_id = f"{provider.value}_{int(datetime.utcnow().timestamp())}_{uuid.uuid4().hex[:8]}"
         timestamp = datetime.utcnow()
-        tracking_successful = False
         
         try:
             # Calculate cost if not provided
@@ -282,9 +281,6 @@ class APICostTracker(LoggerMixin):
             # Send real-time cost update via WebSocket
             await self._broadcast_cost_update(api_call)
             
-            # Mark as successful
-            tracking_successful = True
-            
         except Exception as e:
             self.logger.error(
                 "Failed to track API call",
@@ -294,7 +290,6 @@ class APICostTracker(LoggerMixin):
                 error=str(e),
                 exc_info=True  # Include stack trace
             )
-            tracking_successful = False
         
         # Always return call_id for consistency
         return call_id
