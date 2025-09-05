@@ -19,8 +19,10 @@ import structlog
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
-from app.services.ai_consensus import (
-    AIModelProvider, CircuitBreakerState, AIModelResponse
+from app.services.ai_consensus_types import (
+    AIModelProvider,
+    CircuitBreakerState,
+    AIModelResponse
 )
 
 settings = get_settings()

@@ -21,19 +21,19 @@ logger = structlog.get_logger(__name__)
 # Create the main API router
 api_router = APIRouter()
 
-# Include endpoint routers
+# Include endpoint routers - keep the comprehensive list from HEAD with cleaner tags from main
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(password_reset.router, tags=["Authentication"])  # Add password reset routes
 api_router.include_router(api_keys.router, prefix="/api-keys", tags=["API Keys"])
 api_router.include_router(trading.router, prefix="/trading", tags=["Trading"])
-api_router.include_router(exchanges.router, prefix="/exchanges", tags=["Exchange Management"])
-api_router.include_router(strategies.router, prefix="/strategies", tags=["Trading Strategies"])
-api_router.include_router(credits.router, prefix="/credits", tags=["Credit System"])
-api_router.include_router(telegram.router, prefix="/telegram", tags=["Telegram Integration"])
+api_router.include_router(exchanges.router, prefix="/exchanges", tags=["Exchanges"])
+api_router.include_router(strategies.router, prefix="/strategies", tags=["Strategies"])
+api_router.include_router(credits.router, prefix="/credits", tags=["Credits"])
+api_router.include_router(telegram.router, prefix="/telegram", tags=["Telegram"])
 api_router.include_router(paper_trading.router, prefix="/paper-trading", tags=["Paper Trading"])
 api_router.include_router(market_analysis.router, prefix="/market", tags=["Market Analysis"])
-api_router.include_router(admin.router, prefix="/admin", tags=["Administration"])
-api_router.include_router(chat.router, prefix="/chat", tags=["AI Chat"])
+api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
+api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
 api_router.include_router(ai_consensus.router, prefix="/ai-consensus", tags=["AI Consensus"])
 
 # Add monitoring endpoint that frontend expects

@@ -15,6 +15,10 @@ const buttonVariants = cva(
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
+        profit: "bg-profit text-white hover:bg-profit/90 shadow-profit/20 shadow-lg",
+        loss: "bg-loss text-white hover:bg-loss/90 shadow-loss/20 shadow-lg",
+        warning: "bg-warning text-white hover:bg-warning/90 shadow-warning/20 shadow-lg",
+        trading: "bg-gradient-to-r from-primary to-chart-1 text-white hover:from-primary/90 hover:to-chart-1/90 shadow-lg",
       },
       size: {
         default: "h-10 px-4 py-2",
@@ -57,18 +61,18 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const isNativeButton = Comp === "button";
     const isDisabled = disabled || loading;
     
-    const handleKeyDown = (e: React.KeyboardEvent) => {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
       if (isDisabled) return;
-      if (onKeyDown) onKeyDown(e);
+      if (onKeyDown) onKeyDown(e as any);
       if ((e.key === 'Enter' || e.key === ' ') && !e.defaultPrevented) {
         e.preventDefault();
-        e.currentTarget.click();
+        (e.currentTarget as HTMLElement).click?.();
       }
     };
 
-    const handleClick = (e: React.MouseEvent) => {
+    const handleClick = (e: React.MouseEvent<HTMLElement>) => {
       if (isDisabled) return;
-      onClick?.(e);
+      onClick?.(e as any);
     };
     
     return (
