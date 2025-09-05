@@ -2485,6 +2485,34 @@ class MasterSystemController(LoggerMixin):
                 "error": str(e)
             }
     
+    async def _get_user_config(self, user_id: str) -> Dict[str, Any]:
+        """Get user's cached config from Redis following UnifiedAIManager pattern."""
+        try:
+            # Attempt to get cached config from Redis
+            redis = await self._ensure_redis()
+            if redis:
+                config_data = await redis.get(f"user_ai_config:{user_id}")
+                if config_data:
+                    try:
+                        # Parse JSON config
+                        parsed_config = json.loads(config_data)
+                        return parsed_config
+                    except json.JSONDecodeError:
+                        self.logger.warning("Invalid JSON in user config, using defaults", user_id=user_id)
+        except Exception as e:
+            self.logger.warning("Failed to get user config from Redis", user_id=user_id, error=str(e))
+        
+        # Return default config when Redis unavailable or cache missing/invalid
+        return {
+            "trading_mode": "balanced",
+            "autonomous_frequency_minutes": 10,
+            "ai_model_weights": {
+                "gpt4": 0.33,
+                "claude": 0.34,
+                "gemini": 0.33
+            }
+        }
+    
     async def get_user_ai_model_weights(self, user_id: str) -> Dict[str, Any]:
         """Get user's current AI model weights and autonomous frequency."""
         

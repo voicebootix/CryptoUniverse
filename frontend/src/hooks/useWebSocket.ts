@@ -51,6 +51,8 @@ export const useWebSocket = (
 
       // Clean up existing connection if present
       if (websocketRef.current) {
+        // Set flag on existing socket to skip reconnection logic when it closes
+        (websocketRef.current as any)._skipReconnect = true;
         websocketRef.current.close();
       }
 
@@ -107,7 +109,7 @@ export const useWebSocket = (
         }
       };
 
-      websocketRef.current.onclose = () => {
+      websocketRef.current.onclose = (event) => {
         // Clear any pending reconnection timeouts
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
@@ -117,8 +119,11 @@ export const useWebSocket = (
         setConnectionStatus('Closed');
         onClose?.();
 
-        // Attempt to reconnect unless we asked to skip (manual reconnect)
-        if (!skipNextReconnectRef.current && reconnectCountRef.current < reconnectAttempts) {
+        // Check if this socket was flagged to skip reconnection
+        const shouldSkipReconnect = (event.target as any)?._skipReconnect;
+        
+        // Attempt to reconnect unless we asked to skip (manual reconnect or flagged socket)
+        if (!skipNextReconnectRef.current && !shouldSkipReconnect && reconnectCountRef.current < reconnectAttempts) {
           reconnectCountRef.current += 1;
           // WebSocket reconnection attempt ${reconnectCountRef.current}/${reconnectAttempts}
           

@@ -7,6 +7,7 @@ Enables comprehensive cryptocurrency money management through natural language c
 
 import asyncio
 import json
+import uuid
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
@@ -227,18 +228,23 @@ async def chat_websocket(
     """
     try:
         # Implement WebSocket authentication via token
-        user_id = "websocket_user"  # Default fallback
+        # Use unique per-connection ID to prevent message bleed between unauthenticated clients
+        user_id = f"guest:{uuid.uuid4()}"  # Unique fallback for each connection
         
         # Authenticate before accepting connection
         if token:
             try:
                 from app.core.security import verify_access_token
+                from jose import JWTError  # Import specific JWT exception
                 payload = verify_access_token(token)
                 if payload and payload.get("sub"):
                     user_id = payload["sub"]
                     logger.info("Chat WebSocket user authenticated", user_id=user_id)
-            except Exception as e:
-                logger.debug("Chat WebSocket authentication failed, using placeholder", error=str(e))
+            except JWTError as e:
+                # Handle JWT-specific errors only, let other exceptions propagate
+                logger.debug("Chat WebSocket JWT authentication failed, using guest ID", 
+                           guest_id=user_id, 
+                           error=str(e))
         
         # Accept WebSocket connection after authentication
         await websocket.accept()
