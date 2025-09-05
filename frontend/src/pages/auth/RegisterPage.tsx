@@ -33,7 +33,7 @@ const RegisterPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-slate-800 text-white">
       <Container>
-        <div className="grid grid-cols-1 md:grid-cols-2 min-h-screen">
+        <div className="flex items-center justify-center min-h-screen">
           {/* Left Side: Create Account */}
           <div className="flex flex-col items-center justify-center p-8">
             <motion.div
@@ -100,38 +100,6 @@ const RegisterPage: React.FC = () => {
             </motion.div>
           </div>
 
-          {/* Right Side: Platform Details */}
-          <div className="hidden md:flex flex-col items-center justify-center p-8 bg-slate-800/50">
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5, delay: 0.2 }}
-              className="w-full max-w-md"
-            >
-              <h1 className="text-4xl font-bold">Enterprise AI Trading Platform</h1>
-              <p className="text-muted-foreground mt-4">
-                Automated cryptocurrency trading powered by advanced AI algorithms
-              </p>
-              <div className="space-y-6 mt-8">
-                <div>
-                    <h3 className="text-lg font-semibold">AI-Powered Trading</h3>
-                    <p className="text-muted-foreground">Multi-model consensus with GPT-4, Claude, and Gemini</p>
-                </div>
-                <div>
-                    <h3 className="text-lg font-semibold">Enterprise Security</h3>
-                    <p className="text-muted-foreground">Bank-level encryption with multi-factor authentication</p>
-                </div>
-                <div>
-                    <h3 className="text-lg font-semibold">Real-Time Execution</h3>
-                    <p className="text-muted-foreground">Lightning-fast trades across multiple exchanges</p>
-                </div>
-                <div>
-                    <h3 className="text-lg font-semibold">Risk Management</h3>
-                    <p className="text-muted-foreground">Advanced portfolio protection and position sizing</p>
-                </div>
-              </div>
-            </motion.div>
-          </div>
         </div>
       </Container>
     </div>
