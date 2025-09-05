@@ -43,16 +43,16 @@ const LoginPage: React.FC = () => {
   const [showMfaInput, setShowMfaInput] = useState(false);
   const navigate = useNavigate();
 
-  // Sync MFA input visibility with store state
-  useEffect(() => {
-    setShowMfaInput(mfaRequired);
-  }, [mfaRequired]);
-
   const login = useAuthStore((state) => state.login);
   const clearError = useAuthStore((state) => state.clearError);
   const mfaRequired = useMfaRequired();
   const error = useAuthError();
   const isLoading = useAuthLoading();
+
+  // Sync MFA input visibility with store state
+  useEffect(() => {
+    setShowMfaInput(mfaRequired);
+  }, [mfaRequired]);
 
   const {
     register,
