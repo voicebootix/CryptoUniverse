@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -42,6 +42,11 @@ const LoginPage: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showMfaInput, setShowMfaInput] = useState(false);
   const navigate = useNavigate();
+
+  // Sync MFA input visibility with store state
+  useEffect(() => {
+    setShowMfaInput(mfaRequired);
+  }, [mfaRequired]);
 
   const login = useAuthStore((state) => state.login);
   const clearError = useAuthStore((state) => state.clearError);
@@ -102,9 +107,9 @@ const LoginPage: React.FC = () => {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-slate-800 text-white">
       <Container>
         <div className="min-h-screen flex flex-col items-center justify-center px-4">
-          <motion.div
+        <motion.div
             initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
+          animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
             className="w-full max-w-md"
           >
@@ -116,9 +121,9 @@ const LoginPage: React.FC = () => {
               aria-label="Login Form"
             >
               {/* Error Alert */}
-              <AnimatePresence>
-                {error && (
-                  <motion.div
+                    <AnimatePresence>
+                      {error && (
+                        <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
@@ -128,16 +133,16 @@ const LoginPage: React.FC = () => {
                       className="bg-red-500/10 border-red-500/30"
                       role="alert"
                     >
-                      <AlertCircle className="h-4 w-4" />
-                      <AlertDescription>{error}</AlertDescription>
-                    </Alert>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                        <AlertCircle className="h-4 w-4" />
+                            <AlertDescription>{error}</AlertDescription>
+                          </Alert>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
               {/* Email Input */}
-              <div>
-                <Label htmlFor="email">Email Address</Label>
+                  <div>
+                    <Label htmlFor="email">Email Address</Label>
                 <Input
                   id="email"
                   type="email"
@@ -149,76 +154,76 @@ const LoginPage: React.FC = () => {
                   aria-required="true"
                   aria-invalid={errors.email ? "true" : "false"}
                 />
-              </div>
+                        </div>
 
               {/* Password Input */}
               <div>
                 <Label htmlFor="password">Password</Label>
                 <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="current-password"
-                    {...register("password")}
+                          <Input
+                            id="password"
+                            type={showPassword ? "text" : "password"}
+                            autoComplete="current-password"
+                            {...register("password")}
                     placeholder="••••••••••"
                     label="Password"
                     error={errors.password?.message}
                     aria-required="true"
                     aria-invalid={errors.password ? "true" : "false"}
-                  />
+                          />
                   <Button
-                    type="button"
+                            type="button"
                     variant="ghost"
                     size="icon"
                     className="absolute right-2 top-1/2 -translate-y-1/2"
-                    onClick={() => setShowPassword(!showPassword)}
+                            onClick={() => setShowPassword(!showPassword)}
                     aria-label={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
-                </div>
-              </div>
+                        </div>
+                  </div>
 
               {/* MFA Input */}
-              <AnimatePresence>
-                {showMfaInput && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
+                      <AnimatePresence>
+                        {showMfaInput && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
                   >
                     <Label htmlFor="mfa_code">MFA Code</Label>
-                    <Input
-                      id="mfa_code"
-                      type="text"
+                              <Input
+                                id="mfa_code"
+                                type="text"
                       {...register("mfa_code")}
-                      placeholder="Enter 6-digit code"
+                            placeholder="Enter 6-digit code"
                       label="MFA Code"
                       error={errors.mfa_code?.message}
                       aria-required={showMfaInput}
                       aria-invalid={errors.mfa_code ? "true" : "false"}
                     />
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
 
-              {/* Remember Me & Forgot Password */}
+                      {/* Remember Me & Forgot Password */}
               <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="remember_me"
-                    checked={watch("remember_me")}
-                    onCheckedChange={(checked) => setValue("remember_me", checked as boolean)}
+                    <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="remember_me"
+                            checked={watch("remember_me")}
+                        onCheckedChange={(checked) => setValue("remember_me", checked as boolean)}
                     label="Remember me"
                     aria-label="Remember me on this device"
-                  />
+                      />
                   <Label 
                     htmlFor="remember_me" 
                     className="text-sm text-gray-400"
                   >
-                    Remember me
-                  </Label>
-                </div>
+                            Remember me
+                          </Label>
+                        </div>
                 <Link
                   to="/auth/forgot-password"
                   className="text-sm text-blue-400 hover:text-blue-300"
@@ -226,47 +231,47 @@ const LoginPage: React.FC = () => {
                 >
                   Forgot password?
                 </Link>
-              </div>
+                  </div>
 
               {/* Submit Button */}
-              <Button
-                type="submit"
-                disabled={isLoading}
+                        <Button
+                          type="submit"
+                          disabled={isLoading}
                 className="w-full"
                 loading={isLoading}
                 label={isLoading ? "Signing in..." : "Sign in"}
-              >
-                {isLoading ? (
+                        >
+                          {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    <span>Signing in...</span>
+                              <span>Signing in...</span>
                   </>
-                ) : (
+                          ) : (
                   <>
-                    <span>Sign in</span>
+                              <span>Sign in</span>
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </>
-                )}
-              </Button>
+                          )}
+                        </Button>
 
               {/* OAuth Divider */}
-              <div className="relative my-6">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-white/20" />
+                <div className="relative my-6">
+                      <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-white/20" />
+                      </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-4 bg-slate-800/60 backdrop-blur-sm text-gray-300 rounded-full">
+                          Or continue with
+                        </span>
+                      </div>
                 </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-4 bg-slate-800/60 backdrop-blur-sm text-gray-300 rounded-full">
-                    Or continue with
-                  </span>
-                </div>
-              </div>
 
-              {/* Google Sign In */}
-              <Button
-                type="button"
+                      {/* Google Sign In */}
+                      <Button
+                        type="button"
                 variant="outline"
                 className="w-full"
-                onClick={handleGoogleLogin}
+                        onClick={handleGoogleLogin}
                 label="Continue with Google"
               >
                 <img
@@ -276,24 +281,24 @@ const LoginPage: React.FC = () => {
                   aria-hidden="true"
                 />
                 Continue with Google
-              </Button>
+                      </Button>
 
-              {/* Sign Up Link */}
+                      {/* Sign Up Link */}
               <div className="text-center mt-4">
                 <span className="text-sm text-gray-400">
-                  Don't have an account?{" "}
+                      Don't have an account?{" "}
                   <Link
                     to="/auth/register"
                     className="text-blue-400 hover:text-blue-300"
                     aria-label="Create a new account"
-                  >
-                    Sign up
+                        >
+                        Sign up
                   </Link>
                 </span>
-              </div>
+                      </div>
             </form>
-          </motion.div>
-        </div>
+              </motion.div>
+            </div>
       </Container>
     </div>
   );

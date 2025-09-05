@@ -4,9 +4,11 @@ Password Reset API Endpoints
 
 from datetime import datetime, timedelta
 import secrets
+import hashlib
+import hmac
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, SecretStr, Field, validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -29,7 +31,7 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     """Request model for password reset."""
     token: str
-    new_password: str
+    new_password: SecretStr = Field(..., min_length=8)
 
     class Config:
         json_schema_extra = {
@@ -38,6 +40,14 @@ class ResetPasswordRequest(BaseModel):
                 "new_password": "NewSecurePassword123!"
             }
         }
+
+    @validator("new_password")
+    def password_complexity(cls, v):
+        """Validate password complexity."""
+        password = v.get_secret_value()
+        if len(password) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        return v
 
 @router.post("/forgot-password")
 async def forgot_password(
@@ -68,23 +78,26 @@ async def forgot_password(
             # Return success even if user not found (security)
             return {"message": "If an account exists, reset instructions have been sent."}
 
-        # Generate reset token
+        # Generate reset token and hash it
         reset_token = secrets.token_urlsafe(32)
+        reset_token_hash = hashlib.sha256(reset_token.encode()).hexdigest()
         reset_expires = datetime.utcnow() + timedelta(hours=1)
 
-        # Store reset token
-        user.password_reset_token = reset_token
+        # Store hashed token
+        user.password_reset_token_hash = reset_token_hash
         user.password_reset_expires = reset_expires
         await db.commit()
 
-        # Send reset email
+        # Send reset email with raw token
         reset_url = f"{settings.FRONTEND_URL}/auth/reset-password?token={reset_token}"
         # TODO: Implement email sending
+        # Log with masked token for security
+        masked_token = f"{reset_token[:6]}...{reset_token[-4:]}"
         logger.info(
             "Password reset requested",
             user_id=str(user.id),
             email=user.email,
-            reset_url=reset_url
+            masked_token=masked_token
         )
 
         return {
@@ -107,10 +120,13 @@ async def reset_password(
     Reset password using the reset token.
     """
     try:
-        # Find user with valid reset token
+        # Hash the provided token for comparison
+        provided_token_hash = hashlib.sha256(request.token.encode()).hexdigest()
+        
+        # Find user with valid reset token hash
         result = await db.execute(
             select(User).filter(
-                User.password_reset_token == request.token,
+                User.password_reset_token_hash == provided_token_hash,
                 User.password_reset_expires > datetime.utcnow()
             )
         )
@@ -122,12 +138,12 @@ async def reset_password(
                 detail="Invalid or expired reset token"
             )
 
-        # Update password
+        # Update password using SecretStr
         from app.api.v1.endpoints.auth import auth_service
-        user.hashed_password = auth_service.hash_password(request.new_password)
+        user.hashed_password = auth_service.hash_password(request.new_password.get_secret_value())
         
-        # Clear reset token
-        user.password_reset_token = None
+        # Clear reset token hash
+        user.password_reset_token_hash = None
         user.password_reset_expires = None
         
         await db.commit()
