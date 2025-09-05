@@ -4,7 +4,7 @@ Data API Endpoints for handling special characters and input validation
 
 import html
 import re
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -80,13 +80,13 @@ async def check_duplicate_entry(
             return {
                 "status": "duplicate",
                 "message": "Entry already exists",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
         
         return {
             "status": "unique", 
             "message": "Entry is unique",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
         
     except Exception as e:
@@ -153,7 +153,7 @@ async def handle_special_characters(
             "original_data": request.data,
             "processed_data": clean_data,
             "entry_id": entry.id,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
         
     except HTTPException:
@@ -169,19 +169,4 @@ async def handle_special_characters(
             detail=f"Error processing special characters: {str(e)}"
         )
 
-@router.exception_handler(HTTPException)
-async def special_char_exception_handler(
-    request: Request,
-    exc: HTTPException
-) -> JSONResponse:
-    """
-    Custom exception handler for data processing errors.
-    """
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": exc.detail,
-            "status": "error",
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    )
+# Exception handling moved to main app
