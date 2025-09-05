@@ -169,10 +169,9 @@ const LoginPage: React.FC = () => {
                               autoComplete="current-password"
                               {...register("password")}
                       placeholder="••••••••••"
-                      label="Password"
-                      error={errors.password?.message}
                       aria-required="true"
                       aria-invalid={errors.password ? "true" : "false"}
+                      aria-describedby="password-error"
                             />
                     <Button
                               type="button"
@@ -181,10 +180,16 @@ const LoginPage: React.FC = () => {
                       className="absolute right-2 top-1/2 -translate-y-1/2"
                               onClick={() => setShowPassword(!showPassword)}
                       aria-label={showPassword ? "Hide password" : "Show password"}
+                      aria-pressed={showPassword}
                     >
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </Button>
                           </div>
+                  {errors.password && (
+                    <p id="password-error" className="text-sm text-destructive mt-1">
+                      {errors.password.message}
+                    </p>
+                  )}
                   </div>
 
                 {/* MFA Input */}
@@ -217,9 +222,7 @@ const LoginPage: React.FC = () => {
                               id="remember_me"
                               checked={watch("remember_me")}
                           onCheckedChange={(checked) => setValue("remember_me", checked as boolean)}
-                      label="Remember me"
-                      aria-label="Remember me on this device"
-                        />
+                      />
                     <Label 
                       htmlFor="remember_me" 
                       className="text-sm text-gray-400"
