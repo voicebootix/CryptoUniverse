@@ -170,15 +170,23 @@ export const useAIConsensus = () => {
       });
     },
     onSuccess: (data) => {
+      const analysis = data?.result?.opportunity_analysis;
+      const consensusScore = analysis?.consensus_score ?? 'N/A';
+      const recommendation = analysis?.recommendation ?? 'UNKNOWN';
+      
       toast({
         title: "✅ Analysis Complete",
-        description: `Consensus: ${data?.result?.opportunity_analysis?.consensus_score || 'N/A'}% confidence`,
+        description: `${recommendation} - ${consensusScore}% confidence`,
       });
     },
     onError: (error: any) => {
+      const errorMessage = error?.response?.data?.detail || 
+                          error?.message || 
+                          "An unexpected error occurred during analysis";
+      
       toast({
         title: "❌ Analysis Failed",
-        description: error.response?.data?.detail || error.message,
+        description: errorMessage,
         variant: "destructive"
       });
     },
@@ -200,15 +208,24 @@ export const useAIConsensus = () => {
     },
     onSuccess: (data) => {
       const validation = data?.result?.trade_validation;
+      const approvalStatus = validation?.approval_status;
+      const validationScore = validation?.validation_score ?? 'N/A';
+      
+      const isApproved = approvalStatus === 'APPROVED';
+      
       toast({
-        title: validation?.approval_status === 'APPROVED' ? "✅ Trade Approved" : "⚠️ Trade Needs Review",
-        description: `Validation Score: ${validation?.validation_score || 'N/A'}%`,
+        title: isApproved ? "✅ Trade Approved" : "⚠️ Trade Needs Review",
+        description: `Status: ${approvalStatus || 'UNKNOWN'} - Score: ${validationScore}%`,
       });
     },
     onError: (error: any) => {
+      const errorMessage = error?.response?.data?.detail || 
+                          error?.message || 
+                          "An unexpected error occurred during validation";
+      
       toast({
         title: "❌ Validation Failed",
-        description: error.response?.data?.detail || error.message,
+        description: errorMessage,
         variant: "destructive"
       });
     },

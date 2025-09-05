@@ -139,13 +139,42 @@ class ConnectionManager:
         except Exception as e:
             logger.error(f"Failed to unsubscribe from AI consensus", user_id=user_id, error=str(e))
     
+    async def _is_admin_user(self, user_id: str) -> bool:
+        """Check if a user has admin privileges."""
+        try:
+            from app.core.database import get_database
+            from app.models.user import User, UserRole
+            from sqlalchemy import select
+            
+            async with get_database() as db:
+                result = await db.execute(
+                    select(User).filter(User.id == user_id)
+                )
+                user = result.scalar_one_or_none()
+                
+                if not user:
+                    logger.warning(f"User {user_id} not found for admin check")
+                    return False
+                    
+                return user.role == UserRole.ADMIN
+                
+        except Exception as e:
+            logger.error(f"Failed to check admin role for user {user_id}", error=str(e))
+            return False
+    
     async def subscribe_to_cost_dashboard(self, websocket: WebSocket, user_id: str):
         """Subscribe WebSocket to cost dashboard updates (admin only)."""
         try:
-            # TODO: Add admin role check here
+            # Check if user has admin privileges
+            if not await self._is_admin_user(user_id):
+                logger.warning(f"User {user_id} attempted to access cost dashboard without admin privileges")
+                raise PermissionError(f"User {user_id} does not have admin privileges for cost dashboard access")
+            
             if websocket not in self.cost_dashboard_subscribers:
                 self.cost_dashboard_subscribers.append(websocket)
                 logger.info(f"Admin {user_id} subscribed to cost dashboard updates")
+        except PermissionError:
+            raise
         except Exception as e:
             logger.error(f"Failed to subscribe to cost dashboard", user_id=user_id, error=str(e))
     

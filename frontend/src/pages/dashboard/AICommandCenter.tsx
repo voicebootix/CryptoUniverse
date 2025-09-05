@@ -163,7 +163,11 @@ const AICommandCenter: React.FC = () => {
           });
         }
       } catch (error) {
-        console.error('Voice command failed:', error);
+        toast({
+          title: "Voice Command Error",
+          description: "Failed to process voice command",
+          variant: "destructive"
+        });
       }
     };
 
@@ -200,7 +204,11 @@ const AICommandCenter: React.FC = () => {
     try {
       await updateModelWeights(customWeights as any, autonomousFrequency);
     } catch (error) {
-      console.error('Failed to update weights:', error);
+      toast({
+        title: "Update Failed",
+        description: "Failed to save model weights",
+        variant: "destructive"
+      });
     }
   };
 

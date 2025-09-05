@@ -41,6 +41,16 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
+# Constants for magic numbers
+DEFAULT_CONFIDENCE_THRESHOLD = 75.0
+MIN_CONFIDENCE_THRESHOLD = 50.0
+MAX_CONFIDENCE_THRESHOLD = 95.0
+FINAL_DECISION_MIN_CONFIDENCE = 85.0
+WEIGHT_SUM_TOLERANCE = 0.01
+MIN_MODEL_WEIGHT = 0
+MAX_MODEL_WEIGHT = 1
+EXACT_WEIGHT_SUM = 1.0
+
 
 def flatten_ai_consensus_result(result: Dict[str, Any], function: str) -> Dict[str, Any]:
     """
@@ -74,18 +84,70 @@ def flatten_ai_consensus_result(result: Dict[str, Any], function: str) -> Dict[s
     return flattened
 
 
+async def _track_successful_api_call(
+    endpoint: str,
+    actual_cost: float,
+    user_id: str,
+    response_time_ms: float,
+    metadata: Dict[str, Any]
+) -> None:
+    """Helper function to track successful API calls."""
+    await api_cost_tracker.track_api_call(
+        provider=APIProvider.OPENAI_GPT4,
+        endpoint=endpoint,
+        method="POST",
+        cost_usd=actual_cost,
+        user_id=user_id,
+        response_time_ms=response_time_ms,
+        success=True,
+        metadata=metadata
+    )
+
+
+async def _track_failed_api_call(
+    endpoint: str,
+    user_id: str,
+    error_message: str
+) -> None:
+    """Helper function to track failed API calls."""
+    await api_cost_tracker.track_api_call(
+        provider=APIProvider.OPENAI_GPT4,
+        endpoint=endpoint,
+        method="POST",
+        cost_usd=0.0,
+        user_id=user_id,
+        success=False,
+        error_message=error_message
+    )
+
+
+async def _process_ai_consensus_result(
+    result: Dict[str, Any],
+    function_name: str,
+    user_id: str
+) -> None:
+    """Helper function to process AI consensus results through unified AI manager."""
+    flattened_result = flatten_ai_consensus_result(result, function_name)
+    await unified_ai_manager.process_ai_consensus_result(
+        user_id=user_id,
+        function=function_name,
+        result=flattened_result,
+        interface=InterfaceType.WEB_UI
+    )
+
+
 # Request/Response Models
 class AIConsensusRequest(BaseModel):
     """Base AI consensus request."""
     analysis_request: Optional[str] = None  # JSON string or direct data - made optional
-    confidence_threshold: float = 75.0
+    confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD
     ai_models: str = "all"  # "all", "gpt4_claude", "cost_optimized"
     
     @field_validator('confidence_threshold')
     @classmethod
     def validate_confidence_threshold(cls, v):
-        if not 50.0 <= v <= 95.0:
-            raise ValueError('Confidence threshold must be between 50.0 and 95.0')
+        if not MIN_CONFIDENCE_THRESHOLD <= v <= MAX_CONFIDENCE_THRESHOLD:
+            raise ValueError(f'Confidence threshold must be between {MIN_CONFIDENCE_THRESHOLD} and {MAX_CONFIDENCE_THRESHOLD}')
         return v
     
     @field_validator('ai_models')
@@ -164,15 +226,15 @@ class AIModelWeightsRequest(BaseModel):
     def validate_weights(cls, v):
         # Validate weights sum to 1.0
         total = sum(v.values())
-        if abs(total - 1.0) > 0.01:
-            raise ValueError(f'AI model weights must sum to 1.0, got {total:.3f}')
+        if abs(total - EXACT_WEIGHT_SUM) > WEIGHT_SUM_TOLERANCE:
+            raise ValueError(f'AI model weights must sum to {EXACT_WEIGHT_SUM}, got {total:.3f}')
         
         # Validate individual weights
         for model, weight in v.items():
             if model not in ["gpt4", "claude", "gemini"]:
                 raise ValueError(f'Invalid AI model: {model}. Must be one of: gpt4, claude, gemini')
-            if not 0 <= weight <= 1:
-                raise ValueError(f'Weight for {model} must be between 0 and 1, got {weight}')
+            if not MIN_MODEL_WEIGHT <= weight <= MAX_MODEL_WEIGHT:
+                raise ValueError(f'Weight for {model} must be between {MIN_MODEL_WEIGHT} and {MAX_MODEL_WEIGHT}, got {weight}')
         
         return v
 
@@ -231,16 +293,13 @@ async def analyze_opportunity_endpoint(
         # Calculate response time
         response_time_ms = (datetime.utcnow() - call_start_time).total_seconds() * 1000
         
-        # Track API cost
+        # Track API cost with helper function
         actual_cost = result.get("opportunity_analysis", {}).get("cost_summary", {}).get("total_cost", 0)
-        await api_cost_tracker.track_api_call(
-            provider=APIProvider.OPENAI_GPT4,  # Primary provider
+        await _track_successful_api_call(
             endpoint="/ai-consensus/analyze-opportunity",
-            method="POST",
-            cost_usd=actual_cost,
+            actual_cost=actual_cost,
             user_id=str(current_user.id),
             response_time_ms=response_time_ms,
-            success=True,
             metadata={
                 "symbol": request.symbol,
                 "confidence_threshold": request.confidence_threshold,
@@ -248,15 +307,11 @@ async def analyze_opportunity_endpoint(
             }
         )
         
-        # Flatten result for unified AI manager processing
-        flattened_result = flatten_ai_consensus_result(result, "analyze_opportunity")
-        
-        # Feed to unified AI manager for natural language explanation
-        await unified_ai_manager.process_ai_consensus_result(
-            user_id=str(current_user.id),
-            function="analyze_opportunity", 
-            result=flattened_result,
-            interface=InterfaceType.WEB_UI
+        # Process result through unified AI manager
+        await _process_ai_consensus_result(
+            result=result,
+            function_name="analyze_opportunity",
+            user_id=str(current_user.id)
         )
         
         return {
@@ -272,14 +327,10 @@ async def analyze_opportunity_endpoint(
     except Exception as e:
         logger.error("AI opportunity analysis failed", user_id=str(current_user.id), error=str(e))
         
-        # Track failed API call
-        await api_cost_tracker.track_api_call(
-            provider=APIProvider.OPENAI_GPT4,
+        # Track failed API call with helper function
+        await _track_failed_api_call(
             endpoint="/ai-consensus/analyze-opportunity",
-            method="POST",
-            cost_usd=0.0,
             user_id=str(current_user.id),
-            success=False,
             error_message=str(e)
         )
         
@@ -325,27 +376,21 @@ async def validate_trade_endpoint(
         
         response_time_ms = (datetime.utcnow() - call_start_time).total_seconds() * 1000
         
-        # Track API cost
+        # Track API cost with helper function
         actual_cost = result.get("trade_validation", {}).get("cost_summary", {}).get("total_cost", 0)
-        await api_cost_tracker.track_api_call(
-            provider=APIProvider.ANTHROPIC_CLAUDE,  # Claude specializes in validation
+        await _track_successful_api_call(
             endpoint="/ai-consensus/validate-trade",
-            method="POST",
-            cost_usd=actual_cost,
+            actual_cost=actual_cost,
             user_id=str(current_user.id),
             response_time_ms=response_time_ms,
-            success=True
+            metadata={"trade_data": request.trade_data}
         )
         
-        # Flatten result for unified AI manager processing
-        flattened_result = flatten_ai_consensus_result(result, "validate_trade")
-        
-        # Feed to unified AI manager
-        await unified_ai_manager.process_ai_consensus_result(
-            user_id=str(current_user.id),
-            function="validate_trade",
-            result=flattened_result,
-            interface=InterfaceType.WEB_UI
+        # Process result through unified AI manager
+        await _process_ai_consensus_result(
+            result=result,
+            function_name="validate_trade",
+            user_id=str(current_user.id)
         )
         
         return {
@@ -633,7 +678,7 @@ async def consensus_decision_endpoint(
         # Use existing AI consensus service for final decision
         result = await ai_consensus_service.consensus_decision(
             decision_request=json.dumps(request.decision_context),
-            confidence_threshold=max(request.confidence_threshold, 85.0),  # Higher threshold for final decisions
+            confidence_threshold=max(request.confidence_threshold, FINAL_DECISION_MIN_CONFIDENCE),  # Higher threshold for final decisions
             ai_models=request.ai_models,
             user_id=str(current_user.id)
         )
