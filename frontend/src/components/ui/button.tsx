@@ -39,7 +39,20 @@ export interface ButtonProps
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, loading = false, label, children, disabled, onClick, onKeyDown, ...props }, ref) => {
+  ({ 
+    className, 
+    variant, 
+    size, 
+    type,
+    asChild = false, 
+    loading = false, 
+    label, 
+    children, 
+    disabled, 
+    onClick, 
+    onKeyDown, 
+    ...props 
+  }, ref) => {
     const Comp = asChild ? Slot : "button";
     const isNativeButton = Comp === "button";
     const isDisabled = disabled || loading;
@@ -66,7 +79,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           isDisabled && "pointer-events-none opacity-50"
         )}
         ref={ref}
-        type={isNativeButton ? "button" : undefined}
+        type={isNativeButton ? (type ?? "button") : undefined}
         disabled={isNativeButton ? isDisabled : undefined}
         aria-label={label}
         aria-disabled={isDisabled}
