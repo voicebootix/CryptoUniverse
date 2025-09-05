@@ -13,6 +13,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import LoginPage from '@/pages/auth/LoginPage';
 import RegisterPage from '@/pages/auth/RegisterPage';
 import OAuthCallbackPage from '@/pages/auth/OAuthCallbackPage';
+import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage';
 
 // Dashboard Pages
 import TradingDashboard from '@/pages/dashboard/TradingDashboard';
@@ -119,6 +120,7 @@ const App: React.FC = () => {
             }>
               <Route path="register" element={<RegisterPage />} />
               <Route path="callback" element={<OAuthCallbackPage />} />
+              <Route path="forgot-password" element={<ForgotPasswordPage />} />
               <Route path="*" element={<Navigate to="/auth/login" replace />} />
             </Route>
 
