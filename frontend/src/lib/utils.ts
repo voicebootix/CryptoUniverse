@@ -6,27 +6,51 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatCurrency(amount: number, currency: string = 'USD'): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount)
+  if (typeof amount !== 'number' || !isFinite(amount)) {
+    return '$0.00'
+  }
+  
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount)
+  } catch {
+    return `${currency} ${amount.toFixed(2)}`
+  }
 }
 
 export function formatNumber(value: number, decimals: number = 2): string {
-  return new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  }).format(value)
+  if (typeof value !== 'number' || !isFinite(value)) {
+    return '0'
+  }
+  
+  try {
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }).format(value)
+  } catch {
+    return value.toFixed(decimals)
+  }
 }
 
 export function formatPercentage(value: number, decimals: number = 2): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'percent',
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  }).format(value / 100)
+  if (typeof value !== 'number' || !isFinite(value)) {
+    return '0%'
+  }
+  
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'percent',
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }).format(value / 100)
+  } catch {
+    return `${(value).toFixed(decimals)}%`
+  }
 }
 
 export function formatCompactNumber(value: number): string {
@@ -37,34 +61,52 @@ export function formatCompactNumber(value: number): string {
 }
 
 export function formatRelativeTime(date: Date): string {
-  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
-  const now = new Date()
-  const diffInSeconds = Math.floor((date.getTime() - now.getTime()) / 1000)
-  
-  if (Math.abs(diffInSeconds) < 60) {
-    return rtf.format(diffInSeconds, 'second')
+  if (!date || !(date instanceof Date) || !isFinite(date.getTime())) {
+    return 'Invalid date'
   }
   
-  const diffInMinutes = Math.floor(diffInSeconds / 60)
-  if (Math.abs(diffInMinutes) < 60) {
-    return rtf.format(diffInMinutes, 'minute')
+  try {
+    const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
+    const now = new Date()
+    const diffInSeconds = Math.floor((date.getTime() - now.getTime()) / 1000)
+    
+    if (Math.abs(diffInSeconds) < 60) {
+      return rtf.format(diffInSeconds, 'second')
+    }
+    
+    const diffInMinutes = Math.floor(diffInSeconds / 60)
+    if (Math.abs(diffInMinutes) < 60) {
+      return rtf.format(diffInMinutes, 'minute')
+    }
+    
+    const diffInHours = Math.floor(diffInMinutes / 60)
+    if (Math.abs(diffInHours) < 24) {
+      return rtf.format(diffInHours, 'hour')
+    }
+    
+    const diffInDays = Math.floor(diffInHours / 24)
+    return rtf.format(diffInDays, 'day')
+  } catch {
+    return date.toLocaleDateString()
   }
-  
-  const diffInHours = Math.floor(diffInMinutes / 60)
-  if (Math.abs(diffInHours) < 24) {
-    return rtf.format(diffInHours, 'hour')
-  }
-  
-  const diffInDays = Math.floor(diffInHours / 24)
-  return rtf.format(diffInDays, 'day')
 }
 
 export function getInitials(name: string): string {
-  return name
-    .split(' ')
-    .map(part => part.charAt(0).toUpperCase())
-    .join('')
-    .slice(0, 2)
+  if (!name || typeof name !== 'string') {
+    return '??'
+  }
+  
+  try {
+    return name
+      .trim()
+      .split(' ')
+      .filter(part => part.length > 0)
+      .map(part => part.charAt(0).toUpperCase())
+      .join('')
+      .slice(0, 2) || '??'
+  } catch {
+    return '??'
+  }
 }
 
 export function sleep(ms: number): Promise<void> {

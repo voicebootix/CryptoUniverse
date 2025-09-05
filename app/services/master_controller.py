@@ -53,13 +53,6 @@ class TradingCycle(str, Enum):
     DEEP_ANALYSIS = "deep_analysis"
 
 
-class EmergencyLevel(str, Enum):
-    """Emergency alert levels."""
-    NORMAL = "normal"
-    WARNING = "warning"
-    CRITICAL = "critical"
-    EMERGENCY = "emergency"
-
 
 @dataclass
 class TradingModeConfig:
@@ -106,23 +99,6 @@ class MasterSystemController(LoggerMixin):
         self.start_time = datetime.utcnow()
         self.redis = None  # Will be initialized lazily
         self._redis_initialized = False
-    
-    async def _ensure_redis(self) -> Optional[Any]:
-        """ENTERPRISE: Ensure Redis client is available with graceful degradation."""
-        if not self._redis_initialized:
-            try:
-                from app.core.redis import get_redis_client
-                self.redis = await get_redis_client()
-                self._redis_initialized = True
-                if self.redis:
-                    self.logger.info("Redis client initialized for Master Controller")
-                else:
-                    self.logger.warning("Redis unavailable - operating in degraded mode")
-            except Exception as e:
-                self.logger.error("Failed to initialize Redis client", error=str(e))
-                self.redis = None
-                self._redis_initialized = True
-        return self.redis
         
         # Trading mode configurations with AI model weights and autonomous frequency
         self.mode_configs = {
@@ -191,6 +167,23 @@ class MasterSystemController(LoggerMixin):
                 emergency_stop_loss_pct=25.0     # Beast Mode: Highest risk tolerance
             )
         }
+    
+    async def _ensure_redis(self) -> Optional[Any]:
+        """ENTERPRISE: Ensure Redis client is available with graceful degradation."""
+        if not self._redis_initialized:
+            try:
+                from app.core.redis import get_redis_client
+                self.redis = await get_redis_client()
+                self._redis_initialized = True
+                if self.redis:
+                    self.logger.info("Redis client initialized for Master Controller")
+                else:
+                    self.logger.warning("Redis unavailable - operating in degraded mode")
+            except Exception as e:
+                self.logger.error("Failed to initialize Redis client", error=str(e))
+                self.redis = None
+                self._redis_initialized = True
+        return self.redis
         
         # Timezone strategies
         self.timezone_strategies = {
@@ -2349,33 +2342,6 @@ class MasterSystemController(LoggerMixin):
             self.logger.warning("Sentiment symbol optimization failed", error=str(e))
             return ["BTC", "ETH", "SOL"]
 
-    async def emergency_stop(self) -> Dict[str, Any]:
-        """Execute emergency stop protocol - LEGACY METHOD."""
-        
-        self.logger.warning("🚨 LEGACY EMERGENCY STOP ACTIVATED")
-        
-        # Stop autonomous operation
-        self.is_active = False
-        
-        # Send critical alert
-        try:
-            from app.services.telegram_commander import telegram_commander_service
-            await telegram_commander_service.send_alert(
-                "🚨 EMERGENCY STOP ACTIVATED 🚨\n"
-                "All autonomous operations halted\n"
-                "Manual intervention required",
-                priority="critical"
-            )
-        except Exception as e:
-            self.logger.error("Failed to send emergency alert", error=str(e))
-        
-        return {
-            "success": True,
-            "message": "Emergency stop activated",
-            "autonomous_active": False,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    
     async def performance_metrics(self) -> Dict[str, Any]:
         """Get comprehensive performance metrics."""
         
