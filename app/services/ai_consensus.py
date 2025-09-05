@@ -53,43 +53,12 @@ settings = get_settings()
 logger = structlog.get_logger(__name__)
 
 
-class AIModelProvider(str, Enum):
-    """AI model provider enumeration."""
-    GPT4 = "gpt4"
-    CLAUDE = "claude"
-    GEMINI = "gemini"
-
-
-class ConsensusFunction(str, Enum):
-    """Consensus function types."""
-    ANALYZE_OPPORTUNITY = "analyze_opportunity"
-    VALIDATE_TRADE = "validate_trade"
-    RISK_ASSESSMENT = "risk_assessment"
-    PORTFOLIO_REVIEW = "portfolio_review"
-    MARKET_ANALYSIS = "market_analysis"
-    CONSENSUS_DECISION = "consensus_decision"
-
-
-@dataclass
-class CircuitBreakerState:
-    """Circuit breaker state for AI model."""
-    failures: int = 0
-    last_failure: Optional[datetime] = None
-    is_open: bool = False
-    success_count: int = 0
-
-
-@dataclass
-class AIModelResponse:
-    """AI model response container."""
-    provider: AIModelProvider
-    content: str
-    confidence: float
-    reasoning: str
-    cost: float
-    response_time: float
-    success: bool
-    error: Optional[str] = None
+from app.services.ai_consensus_types import (
+    AIModelProvider,
+    ConsensusFunction,
+    CircuitBreakerState,
+    AIModelResponse
+)
 
 
 # Import the complete AI consensus service implementation
