@@ -674,24 +674,33 @@ async def websocket_endpoint(
     websocket: WebSocket,
     token: Optional[str] = None
 ):
-    # ENTERPRISE: Authentication before accepting connection
+    # ENTERPRISE: Subprotocol authentication before accepting connection
     user_id = "anonymous"  # Default for public market data
+    selected_subprotocol = None
     
-    try:
-        if token:
+    # Read subprotocols from Sec-WebSocket-Protocol header
+    subprotocols = getattr(websocket, 'scope', {}).get('subprotocols', [])
+    
+    if subprotocols:
+        # Use the first subprotocol as the token
+        token = subprotocols[0]
+        selected_subprotocol = token
+        
+        try:
             # Try to authenticate user before accepting connection
             from app.core.security import verify_access_token
             payload = verify_access_token(token)
             if payload and payload.get("sub"):
                 user_id = payload["sub"]
-                logger.info("WebSocket user will be authenticated", user_id=user_id)
-        else:
-            logger.info("WebSocket anonymous user will connect")
-    except Exception as e:
-        logger.debug("WebSocket authentication failed, proceeding as anonymous", error=str(e))
+                logger.info("WebSocket user authenticated via subprotocol", user_id=user_id)
+        except Exception as e:
+            logger.debug("WebSocket authentication failed, proceeding as anonymous", error=str(e))
+            selected_subprotocol = None  # Don't echo back invalid token
+    else:
+        logger.info("WebSocket anonymous user will connect")
     
-    # Accept connection after authentication checks
-    await websocket.accept()
+    # Accept connection with subprotocol after authentication checks
+    await websocket.accept(subprotocol=selected_subprotocol)
     await manager.connect(websocket, user_id)
     
     try:

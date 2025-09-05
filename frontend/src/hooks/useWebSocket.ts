@@ -79,14 +79,12 @@ export const useWebSocket = (
         wsUrl = `${wsProtocol}//${wsHost}${url}`;
       }
       
-      // Use authentication via query parameter instead of subprotocol
-      if (tokens?.access_token) {
-        const urlObj = new URL(wsUrl);
-        urlObj.searchParams.set('token', tokens.access_token);
-        wsUrl = urlObj.toString();
-      }
+      // Use secure authentication via subprotocol instead of URL params
+      const authProtocol = tokens?.access_token 
+        ? tokens.access_token  // Pass token directly as subprotocol
+        : undefined;
 
-      websocketRef.current = new WebSocket(wsUrl);
+      websocketRef.current = new WebSocket(wsUrl, authProtocol);
       
       websocketRef.current.onopen = () => {
         // Clear any pending reconnection timeouts

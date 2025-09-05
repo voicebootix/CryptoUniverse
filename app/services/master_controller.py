@@ -2521,13 +2521,28 @@ class MasterSystemController(LoggerMixin):
             redis = await self._ensure_redis()
             if redis:
                 custom_config_str = await redis.get(f"user_ai_config:{user_id}")
-                if custom_config_str:
-                    custom_config = json.loads(custom_config_str)
-                    return {
-                        "success": True,
-                        "ai_model_weights": custom_config["ai_model_weights"],
-                        "autonomous_frequency_minutes": custom_config["autonomous_frequency_minutes"],
-                        "base_trading_mode": custom_config["base_trading_mode"],
+                if custom_config_str is not None:
+                    # Guard against double-decoding - inspect type and parse accordingly
+                    if isinstance(custom_config_str, bytes):
+                        # Decode bytes to string first, then JSON parse
+                        custom_config = json.loads(custom_config_str.decode('utf-8'))
+                    elif isinstance(custom_config_str, str):
+                        # Parse string as JSON
+                        custom_config = json.loads(custom_config_str)
+                    elif isinstance(custom_config_str, (dict, list)):
+                        # Already deserialized - use directly
+                        custom_config = custom_config_str
+                    else:
+                        # Unknown type - skip and use defaults
+                        custom_config = None
+                    
+                    # Only return custom config if we successfully parsed it
+                    if custom_config and isinstance(custom_config, dict):
+                        return {
+                            "success": True,
+                            "ai_model_weights": custom_config.get("ai_model_weights", {}),
+                            "autonomous_frequency_minutes": custom_config.get("autonomous_frequency_minutes", 10),
+                            "base_trading_mode": custom_config.get("base_trading_mode", "balanced"),
                         "is_custom": True,
                         "updated_at": custom_config.get("updated_at")
                     }

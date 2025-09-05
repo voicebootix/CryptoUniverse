@@ -113,12 +113,12 @@ const AICommandCenter: React.FC = () => {
         response_time: performance?.response_time || 0,
         cost: aiStatus?.cost_report?.cost_by_model?.[key] || 0,
         active: normalizedStatus === 'active',
-        // Add missing properties for display
-        accuracy: performance?.accuracy || Math.floor(Math.random() * 15) + 85,
-        latency: performance?.latency || (Math.random() * 2 + 0.5).toFixed(2),
-        signals: performance?.signals || Math.floor(Math.random() * 50) + 150,
-        wins: performance?.wins || Math.floor(Math.random() * 40) + 130,
-        reasoning: performance?.reasoning || `${config.name} shows ${status === 'active' ? 'strong' : 'limited'} market analysis capabilities with focus on ${config.specialty.toLowerCase()}.`
+        // Add missing properties for display with deterministic defaults
+        accuracy: performance?.accuracy ?? 0,
+        latency: performance?.latency ?? 0.00, 
+        signals: performance?.signals ?? 0,
+        wins: performance?.wins ?? 0,
+        reasoning: performance?.reasoning || `${config.name} shows ${normalizedStatus === 'active' ? 'strong' : 'limited'} market analysis capabilities with focus on ${config.specialty?.toLowerCase() || 'general'}.`
       };
     });
     

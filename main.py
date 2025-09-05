@@ -388,34 +388,39 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
         # Import WebSocket manager
         from app.services.websocket import manager
         
-        # Extract user authentication from subprotocol or query params
+        # Extract user authentication from subprotocol header
         user_id = "anonymous"
         token = None
+        selected_subprotocol = None
         
-        # Try subprotocol first (secure method)
+        # Read subprotocols from Sec-WebSocket-Protocol header
         subprotocols = getattr(websocket, 'scope', {}).get('subprotocols', [])
-        for protocol in subprotocols:
-            if protocol.startswith('Bearer.'):
-                token = protocol[7:]  # Remove 'Bearer.' prefix
-                break
         
-        # Fallback to query params (less secure but compatible)
-        if not token:
-            query_params = dict(websocket.query_params)
-            token = query_params.get('token')
+        # Extract token from subprotocol
+        if subprotocols:
+            # Use the first subprotocol as the token
+            token = subprotocols[0]
+            selected_subprotocol = token
         
+        # Validate token if provided
         if token:
             try:
                 from app.core.security import verify_access_token
                 payload = verify_access_token(token)
                 if payload and payload.get("sub"):
                     user_id = payload["sub"]
-                    logger.info("WebSocket authenticated", user_id=user_id, path=path, auth_method="subprotocol" if subprotocols else "query")
+                    logger.info("WebSocket authenticated via subprotocol", user_id=user_id, path=path)
+                else:
+                    # Invalid token - reject connection
+                    await websocket.close(code=1008, reason="Invalid authentication token")
+                    return
             except Exception as e:
-                logger.debug("WebSocket auth failed, using anonymous", error=str(e))
+                logger.debug("WebSocket auth failed, rejecting connection", error=str(e))
+                await websocket.close(code=1008, reason="Authentication failed")
+                return
         
-        # Accept connection after authentication completes
-        await websocket.accept()
+        # Accept connection with validated subprotocol after authentication completes
+        await websocket.accept(subprotocol=selected_subprotocol)
         
         # Connect to WebSocket manager
         await manager.connect(websocket, user_id)

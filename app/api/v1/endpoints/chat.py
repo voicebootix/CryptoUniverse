@@ -227,27 +227,35 @@ async def chat_websocket(
     - Market alerts and opportunities
     """
     try:
-        # Implement WebSocket authentication via token
+        # Implement WebSocket subprotocol authentication 
         # Use unique per-connection ID to prevent message bleed between unauthenticated clients
         user_id = f"guest:{uuid.uuid4()}"  # Unique fallback for each connection
+        selected_subprotocol = None
         
-        # Authenticate before accepting connection
-        if token:
+        # Read subprotocols from Sec-WebSocket-Protocol header
+        subprotocols = getattr(websocket, 'scope', {}).get('subprotocols', [])
+        
+        if subprotocols:
+            # Use the first subprotocol as the token
+            token = subprotocols[0]
+            selected_subprotocol = token
+            
             try:
                 from app.core.security import verify_access_token
                 from jose import JWTError  # Import specific JWT exception
                 payload = verify_access_token(token)
                 if payload and payload.get("sub"):
                     user_id = payload["sub"]
-                    logger.info("Chat WebSocket user authenticated", user_id=user_id)
+                    logger.info("Chat WebSocket user authenticated via subprotocol", user_id=user_id)
             except JWTError as e:
                 # Handle JWT-specific errors only, let other exceptions propagate
                 logger.debug("Chat WebSocket JWT authentication failed, using guest ID", 
                            guest_id=user_id, 
                            error=str(e))
+                selected_subprotocol = None  # Don't echo back invalid token
         
-        # Accept WebSocket connection after authentication
-        await websocket.accept()
+        # Accept WebSocket connection with subprotocol after authentication
+        await websocket.accept(subprotocol=selected_subprotocol)
         
         # Connect to WebSocket manager
         await manager.connect(websocket, user_id)
