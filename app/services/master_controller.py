@@ -561,6 +561,17 @@ class MasterSystemController(LoggerMixin):
             trade_execution_service = TradeExecutionService()
             telegram_service = TelegramService()
             
+            # Get sentiment analysis for strategy optimization
+            try:
+                from app.services.realtime_sentiment_engine import realtime_sentiment_engine
+                sentiment_result = await realtime_sentiment_engine.get_sentiment_for_strategy_optimization(
+                    symbols=["BTC", "ETH", "SOL", "BNB"], 
+                    user_id=user_id
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to fetch sentiment data: {e}")
+                sentiment_result = {"success": False}  # Fallback for sentiment operations
+            
             # PHASE 0: Emergency Checks & Timezone Strategy
             phase_start = time.time()
             

@@ -54,14 +54,24 @@ export const useWebSocket = (
         websocketRef.current.close();
       }
 
-      // Construct WebSocket URL with proper protocol and host handling
+      // Construct WebSocket URL with robust URL constructor
       let wsUrl: string;
       
-      if (import.meta.env.VITE_WS_URL) {
-        // Use environment-specified WebSocket URL
-        wsUrl = `${import.meta.env.VITE_WS_URL}${url}`;
-      } else {
-        // Build from current location
+      try {
+        if (import.meta.env.VITE_WS_URL) {
+          // Use environment-specified WebSocket URL with URL constructor
+          const baseWsUrl = new URL(import.meta.env.VITE_WS_URL);
+          baseWsUrl.pathname = url;
+          wsUrl = baseWsUrl.toString();
+        } else {
+          // Build from current location using URL constructor
+          const currentUrl = new URL(window.location.href);
+          currentUrl.protocol = currentUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+          currentUrl.pathname = url;
+          wsUrl = currentUrl.toString();
+        }
+      } catch (error) {
+        // Fallback to string concatenation if URL constructor fails
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsHost = window.location.host;
         wsUrl = `${wsProtocol}//${wsHost}${url}`;
