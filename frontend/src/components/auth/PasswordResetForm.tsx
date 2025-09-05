@@ -8,7 +8,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/components/ui/use-toast';
 
 const formSchema = z.object({
-  email: z.string().email('Please enter a valid email address'),
+  email: z.string()
+    .trim()
+    .nonempty('Email is required')
+    .email('Please enter a valid email address'),
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -49,12 +52,18 @@ export function PasswordResetForm() {
         description: 'Password reset link has been sent to your email',
       });
 
-    } catch (err) {
-      setError(err.message);
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error 
+        ? err.message 
+        : typeof err === 'string'
+          ? err
+          : 'An unexpected error occurred';
+      
+      setError(errorMessage);
       toast({
         variant: 'destructive',
         title: 'Error',
-        description: err.message,
+        description: errorMessage,
       });
     } finally {
       setIsLoading(false);
@@ -73,8 +82,8 @@ export function PasswordResetForm() {
       </div>
 
       {error && (
-        <Alert variant="destructive" data-testid="error-message">
-          <AlertDescription>{error}</AlertDescription>
+        <Alert variant="destructive" data-testid="global-error">
+          <AlertDescription data-testid="global-error">{error}</AlertDescription>
         </Alert>
       )}
 
@@ -96,7 +105,7 @@ export function PasswordResetForm() {
             disabled={isLoading}
           />
           {errors.email && (
-            <p className="text-sm text-destructive" data-testid="error-message">
+            <p className="text-sm text-destructive" data-testid="email-error">
               {errors.email.message}
             </p>
           )}
