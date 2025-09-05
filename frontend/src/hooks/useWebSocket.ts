@@ -80,12 +80,12 @@ export const useWebSocket = (
         wsUrl = `${wsProtocol}//${wsHost}${url}`;
       }
       
-      // Use secure authentication via subprotocol instead of URL params
-      const authProtocol = tokens?.access_token 
-        ? tokens.access_token  // Pass token directly as subprotocol
-        : undefined;
+      // Use secure authentication via bearer subprotocol format
+      const authProtocols = tokens?.access_token 
+        ? [`bearer,${tokens.access_token}`, "json"]  // Bearer token + safe subprotocol
+        : ["json"];  // Just safe subprotocol for anonymous
 
-      websocketRef.current = new WebSocket(wsUrl, authProtocol);
+      websocketRef.current = new WebSocket(wsUrl, authProtocols);
       
       websocketRef.current.onopen = () => {
         // Clear any pending reconnection timeouts

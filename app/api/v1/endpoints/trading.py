@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, 
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from jose import JWTError
 
 from app.core.config import get_settings
 from app.core.database import get_database, AsyncSessionLocal
@@ -674,32 +675,42 @@ async def websocket_endpoint(
     websocket: WebSocket,
     token: Optional[str] = None
 ):
-    # ENTERPRISE: Subprotocol authentication before accepting connection
+    # ENTERPRISE: Bearer subprotocol authentication before accepting connection
     user_id = "anonymous"  # Default for public market data
-    selected_subprotocol = "json"  # Fixed safe value, never echo tokens
+    selected_subprotocol = None  # Initialize to None, only set if safe subprotocol offered
+    token = None
     
     # Read subprotocols from Sec-WebSocket-Protocol header
     subprotocols = getattr(websocket, 'scope', {}).get('subprotocols', [])
     
+    # Scan client-offered subprotocols for bearer token format
+    safe_subprotocols = {"json", "jwt"}  # Safe subprotocols we can echo back
+    
     if subprotocols:
-        # Extract token candidate from first subprotocol but never echo it back
-        token = subprotocols[0]
+        for subprotocol in subprotocols:
+            # Check if this is a safe subprotocol we can echo back
+            if subprotocol.lower() in safe_subprotocols:
+                selected_subprotocol = subprotocol.lower()
+            
+            # Check for bearer token format (case-insensitive "bearer," prefix)
+            if subprotocol.lower().startswith("bearer,"):
+                token = subprotocol[7:]  # Extract token part after "bearer,"
+                break
         
-        try:
-            # Try to authenticate user before accepting connection
-            from app.core.security import verify_access_token
-            payload = verify_access_token(token)
-            if payload and payload.get("sub"):
-                user_id = payload["sub"]
-                logger.info("WebSocket user authenticated via subprotocol", user_id=user_id)
-                # Keep safe subprotocol value - never echo token
-                selected_subprotocol = "json"
-        except Exception as e:
-            logger.debug("WebSocket authentication failed, proceeding as anonymous", error=str(e))
-            # Keep safe subprotocol value on failure
-            selected_subprotocol = "json"
-    else:
-        # Fallback: check query string for token
+        # Try to authenticate with extracted bearer token
+        if token:
+            try:
+                from app.core.security import verify_access_token
+                payload = verify_access_token(token)
+                if payload and payload.get("sub"):
+                    user_id = payload["sub"]
+                    logger.info("WebSocket user authenticated via bearer subprotocol", user_id=user_id)
+            except JWTError as e:
+                logger.debug("WebSocket bearer authentication failed, proceeding as anonymous", error=str(e))
+                # Don't log token details
+    
+    # Fallback: check query string for token if no bearer subprotocol found
+    if not token:
         query_params = dict(websocket.query_params)
         token = query_params.get('token')
         
@@ -710,14 +721,17 @@ async def websocket_endpoint(
                 if payload and payload.get("sub"):
                     user_id = payload["sub"]
                     logger.info("WebSocket user authenticated via query param", user_id=user_id)
-            except Exception as e:
+            except JWTError as e:
                 logger.debug("WebSocket query auth failed, proceeding as anonymous", error=str(e))
-        
-        if user_id == "anonymous":
-            logger.info("WebSocket anonymous user will connect")
     
-    # Accept connection with safe subprotocol - never echo raw tokens
-    await websocket.accept(subprotocol=selected_subprotocol)
+    if user_id == "anonymous":
+        logger.info("WebSocket anonymous user will connect")
+    
+    # Accept connection - only pass subprotocol if safe one was offered by client
+    if selected_subprotocol:
+        await websocket.accept(subprotocol=selected_subprotocol)
+    else:
+        await websocket.accept()
     await manager.connect(websocket, user_id)
     
     try:

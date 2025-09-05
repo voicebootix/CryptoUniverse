@@ -389,18 +389,27 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
         # Import WebSocket manager
         from app.services.websocket import manager
         
-        # Extract user authentication from subprotocol header
+        # Extract user authentication from bearer subprotocol header
         user_id = "anonymous"
         token = None
-        selected_subprotocol = "json"  # Fixed safe value, never echo tokens
+        selected_subprotocol = None  # Initialize to None, only set if safe subprotocol offered
         
         # Read subprotocols from Sec-WebSocket-Protocol header
         subprotocols = getattr(websocket, 'scope', {}).get('subprotocols', [])
         
-        # Extract token from subprotocol but never echo it back
+        # Scan client-offered subprotocols for bearer token format
+        safe_subprotocols = {"json", "jwt"}  # Safe subprotocols we can echo back
+        
         if subprotocols:
-            # Use the first subprotocol as the token
-            token = subprotocols[0]
+            for subprotocol in subprotocols:
+                # Check if this is a safe subprotocol we can echo back
+                if subprotocol.lower() in safe_subprotocols:
+                    selected_subprotocol = subprotocol.lower()
+                
+                # Check for bearer token format (case-insensitive "bearer," prefix)
+                if subprotocol.lower().startswith("bearer,"):
+                    token = subprotocol[7:]  # Extract token part after "bearer,"
+                    break
         
         # Validate token if provided
         if token:
@@ -409,7 +418,7 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
                 payload = verify_access_token(token)
                 if payload and payload.get("sub"):
                     user_id = payload["sub"]
-                    logger.info("WebSocket authenticated via subprotocol", user_id=user_id, path=path)
+                    logger.info("WebSocket authenticated via bearer subprotocol", user_id=user_id, path=path)
                 else:
                     # Invalid token - reject connection
                     await websocket.close(code=1008, reason="Invalid authentication token")
@@ -420,8 +429,11 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
                 await websocket.close(code=1008, reason="Authentication failed")
                 return
         
-        # Accept connection with safe subprotocol - never echo raw tokens
-        await websocket.accept(subprotocol=selected_subprotocol)
+        # Accept connection - only pass subprotocol if safe one was offered by client
+        if selected_subprotocol:
+            await websocket.accept(subprotocol=selected_subprotocol)
+        else:
+            await websocket.accept()
         
         # Connect to WebSocket manager
         await manager.connect(websocket, user_id)
