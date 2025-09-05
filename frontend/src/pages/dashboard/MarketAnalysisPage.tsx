@@ -714,7 +714,7 @@ const MarketAnalysisPage: React.FC = () => {
                                     <Badge variant={
                                       data.label === 'VERY_BULLISH' || data.label === 'BULLISH' ? 'default' :
                                       data.label === 'BEARISH' || data.label === 'VERY_BEARISH' ? 'destructive' : 'secondary'
-                                    } size="sm">
+                                    }>
                                       {data.label}
                                     </Badge>
                                     <span className="font-mono">{safeToFixed(data.score, 3) || '-'}</span>
