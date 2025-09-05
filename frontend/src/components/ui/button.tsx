@@ -17,7 +17,6 @@ const buttonVariants = cva(
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
-        // Trading specific variants
         profit: "bg-profit text-white hover:bg-profit/90 shadow-profit/20 shadow-lg",
         loss: "bg-loss text-white hover:bg-loss/90 shadow-loss/20 shadow-lg",
         warning: "bg-warning text-white hover:bg-warning/90 shadow-warning/20 shadow-lg",
@@ -47,10 +46,22 @@ export interface ButtonProps
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button"
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        e.currentTarget.click()
+      }
+      props.onKeyDown?.(e)
+    }
+    const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+      props.onClick?.(e)
+    }
     return (
       <Comp
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
+        onKeyDown={handleKeyDown}
+        onClick={handleClick}
         {...props}
       />
     )
