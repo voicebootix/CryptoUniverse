@@ -240,15 +240,21 @@ async def chat_websocket(
         safe_subprotocols = {"json", "jwt"}  # Safe subprotocols we can echo back
         
         if subprotocols:
-            for subprotocol in subprotocols:
+            # Look for bearer authentication pattern: ["bearer", <token>, "json"]
+            bearer_index = None
+            for i, subprotocol in enumerate(subprotocols):
                 # Check if this is a safe subprotocol we can echo back
                 if subprotocol.lower() in safe_subprotocols:
                     selected_subprotocol = subprotocol.lower()
                 
-                # Check for bearer token format (case-insensitive "bearer," prefix)
-                if subprotocol.lower().startswith("bearer,"):
-                    token = subprotocol[7:]  # Extract token part after "bearer,"
+                # Check for bearer indicator
+                if subprotocol.lower() == "bearer":
+                    bearer_index = i
                     break
+            
+            # If bearer found, look for JWT token in next subprotocol entry
+            if bearer_index is not None and bearer_index + 1 < len(subprotocols):
+                token = subprotocols[bearer_index + 1]
             
             # Try to authenticate with extracted bearer token
             if token:

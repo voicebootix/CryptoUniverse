@@ -57,21 +57,17 @@ export const useWebSocket = (
         websocketRef.current.close();
       }
 
-      // Construct WebSocket URL with robust URL constructor
+      // Construct WebSocket URL preserving query/hash and handling relative paths
       let wsUrl: string;
       
       try {
         if (import.meta.env.VITE_WS_URL) {
-          // Use environment-specified WebSocket URL with URL constructor
-          const baseWsUrl = new URL(import.meta.env.VITE_WS_URL);
-          baseWsUrl.pathname = url;
-          wsUrl = baseWsUrl.toString();
+          // Use environment-specified WebSocket URL as base - preserves path, query, and hash
+          wsUrl = new URL(url, import.meta.env.VITE_WS_URL).toString();
         } else {
-          // Build from current location using URL constructor
-          const currentUrl = new URL(window.location.href);
-          currentUrl.protocol = currentUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-          currentUrl.pathname = url;
-          wsUrl = currentUrl.toString();
+          // Build WebSocket base URL from current location
+          const base = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+          wsUrl = new URL(url, base).toString();
         }
       } catch (error) {
         // Fallback to string concatenation if URL constructor fails
@@ -80,9 +76,9 @@ export const useWebSocket = (
         wsUrl = `${wsProtocol}//${wsHost}${url}`;
       }
       
-      // Use secure authentication via bearer subprotocol format
+      // Use secure authentication via separate subprotocol entries
       const authProtocols = tokens?.access_token 
-        ? [`bearer,${tokens.access_token}`, "json"]  // Bearer token + safe subprotocol
+        ? ["bearer", tokens.access_token, "json"]  // Bearer indicator + JWT token + safe subprotocol
         : ["json"];  // Just safe subprotocol for anonymous
 
       websocketRef.current = new WebSocket(wsUrl, authProtocols);
@@ -136,8 +132,11 @@ export const useWebSocket = (
             }
           }, reconnectInterval);
         } else if (skipNextReconnectRef.current) {
-          // Consume the skip flag once
+          // Consume the skip flag once and reconnect as requested
           skipNextReconnectRef.current = false;
+          // Re-establish connection for manual reconnect
+          setConnectionStatus('Connecting');
+          connect();
         }
       };
 
