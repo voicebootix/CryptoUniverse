@@ -384,8 +384,6 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
     Global WebSocket endpoint that routes to appropriate service handlers.
     Handles authentication and routing for all WebSocket connections.
     """
-    await websocket.accept()
-    
     try:
         # Import WebSocket manager
         from app.services.websocket import manager
@@ -415,6 +413,9 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
                     logger.info("WebSocket authenticated", user_id=user_id, path=path, auth_method="subprotocol" if subprotocols else "query")
             except Exception as e:
                 logger.debug("WebSocket auth failed, using anonymous", error=str(e))
+        
+        # Accept connection after authentication completes
+        await websocket.accept()
         
         # Connect to WebSocket manager
         await manager.connect(websocket, user_id)
@@ -446,6 +447,21 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
                         "path": path
                     })
                 elif message_type == "subscribe_ai_consensus":
+                    # Verify (1) connection path is ai-consensus endpoint and (2) user is authenticated
+                    if not path.startswith("api/v1/ai-consensus"):
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "unauthorized - wrong endpoint for AI consensus subscription"
+                        })
+                        continue
+                    
+                    if user_id == "anonymous":
+                        await websocket.send_json({
+                            "type": "error", 
+                            "message": "unauthorized - authentication required for AI consensus"
+                        })
+                        continue
+                    
                     await manager.subscribe_to_ai_consensus(websocket, user_id)
                     await websocket.send_json({
                         "type": "ai_consensus_subscription_confirmed",
@@ -455,14 +471,18 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
             except WebSocketDisconnect:
                 break
             except Exception as e:
-                logger.exception("WebSocket message handling error", user_id=user_id, path=path)
+                # Log the original exception server-side including traceback
+                logger.exception("WebSocket message handling error", user_id=user_id, path=path, error=str(e))
                 try:
+                    # Send generic error message to client instead of exception string
                     await websocket.send_json({
                         "type": "error",
-                        "message": str(e)
+                        "message": "internal server error"
                     })
-                except Exception:
-                    pass  # Connection might be closed
+                except (ConnectionError, WebSocketDisconnect) as send_error:
+                    # Log send failures rather than silently ignoring
+                    logger.warning("Failed to send error message to WebSocket client", 
+                                 user_id=user_id, path=path, send_error=str(send_error))
     
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected normally", user_id=user_id, path=path)
