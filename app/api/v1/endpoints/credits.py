@@ -344,13 +344,13 @@ async def get_profit_potential_status(
             estimated_days = 60
         
         return ProfitPotentialResponse(
-            current_profit_earned=Decimal(str(usage_result["total_profit_earned"])),
-            profit_potential=Decimal(str(usage_result["profit_potential"])),
-            remaining_potential=Decimal(str(usage_result["remaining_potential"])),
-            utilization_percentage=usage_result["utilization_percentage"],
+            current_profit_earned=Decimal(str(usage_result.get("total_profit_earned", 0))),
+            profit_potential=Decimal(str(usage_result.get("profit_potential", 0))),
+            remaining_potential=Decimal(str(usage_result.get("remaining_potential", 0))),
+            utilization_percentage=usage_result.get("utilization_percentage", 0),
             active_strategies=active_strategy_count,
             earning_velocity=earning_velocity,
-            estimated_days_to_ceiling=estimated_days if usage_result["remaining_potential"] > 0 else None
+            estimated_days_to_ceiling=estimated_days if usage_result.get("remaining_potential", 0) > 0 else None
         )
         
     except HTTPException:

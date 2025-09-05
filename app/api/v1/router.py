@@ -119,8 +119,9 @@ async def health_check():
         # 2. Database Health Check
         try:
             from app.core.database import AsyncSessionLocal
+            from sqlalchemy import text
             async with AsyncSessionLocal() as db:
-                await db.execute("SELECT 1")
+                await db.execute(text("SELECT 1"))
             health_status["checks"]["database"] = {
                 "status": "healthy",
                 "response_time_ms": round((time.time() - start_time) * 1000, 2)

@@ -7,12 +7,13 @@ with native Python implementation and enterprise-grade features.
 """
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import structlog
 import uvicorn
-from fastapi import FastAPI, Request, HTTPException, status
+from fastapi import FastAPI, Request, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -374,6 +375,87 @@ async def metrics():
         return JSONResponse(
             status_code=500, content={"error": "Failed to retrieve metrics", "detail": str(e)}
         )
+
+
+# Global WebSocket endpoint for real-time updates
+@app.websocket("/ws/{path:path}")
+async def global_websocket_endpoint(websocket: WebSocket, path: str):
+    """
+    Global WebSocket endpoint that routes to appropriate service handlers.
+    Handles authentication and routing for all WebSocket connections.
+    """
+    await websocket.accept()
+    
+    try:
+        # Import WebSocket manager
+        from app.services.websocket import manager
+        
+        # Extract user authentication from query params
+        query_params = dict(websocket.query_params)
+        token = query_params.get('token')
+        user_id = "anonymous"
+        
+        if token:
+            try:
+                from app.core.security import verify_access_token
+                payload = verify_access_token(token)
+                if payload and payload.get("sub"):
+                    user_id = payload["sub"]
+                    logger.info("WebSocket authenticated", user_id=user_id, path=path)
+            except Exception as e:
+                logger.debug("WebSocket auth failed, using anonymous", error=str(e))
+        
+        # Connect to WebSocket manager
+        await manager.connect(websocket, user_id)
+        
+        # Handle different WebSocket paths
+        if path.startswith("api/v1/trading/ws"):
+            # Market data and trading updates
+            await manager.subscribe_to_market_data(websocket, ["BTC", "ETH", "SOL"])
+        elif path.startswith("api/v1/ai-consensus"):
+            # AI consensus updates
+            await manager.subscribe_to_ai_consensus(websocket, user_id)
+        
+        # Keep connection alive and handle messages
+        while True:
+            try:
+                data = await websocket.receive_text()
+                message = json.loads(data)
+                message_type = message.get("type")
+                
+                if message_type == "subscribe_market":
+                    symbols = message.get("symbols", [])
+                    await manager.subscribe_to_market_data(websocket, symbols)
+                    await websocket.send_json({
+                        "type": "subscription_confirmed",
+                        "symbols": symbols,
+                        "path": path
+                    })
+                elif message_type == "subscribe_ai_consensus":
+                    await manager.subscribe_to_ai_consensus(websocket, user_id)
+                    await websocket.send_json({
+                        "type": "ai_consensus_subscription_confirmed",
+                        "user_id": user_id
+                    })
+                
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                logger.error("WebSocket message handling error", error=str(e))
+                await websocket.send_json({
+                    "type": "error",
+                    "message": str(e)
+                })
+    
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error("WebSocket connection error", error=str(e))
+    finally:
+        try:
+            await manager.disconnect(websocket, user_id)
+        except:
+            pass
 
 
 if __name__ == "__main__":

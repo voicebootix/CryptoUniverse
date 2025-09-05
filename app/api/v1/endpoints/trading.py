@@ -1223,7 +1223,7 @@ async def get_market_alpha_signals(
     
     try:
         result = await market_analysis.alpha_generation_coordinator(
-            symbols="BTC,ETH,SOL,ADA",
+            universe="BTC,ETH,SOL,ADA",  # Correct parameter name
             strategies="momentum,mean_reversion,breakout",
             user_id=str(current_user.id)
         )

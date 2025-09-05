@@ -156,10 +156,10 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
       return;
     }
 
-    // Use WebSocket URL from environment or derive from window.location
-    const wsUrl = import.meta.env.VITE_WS_URL
-      ? `${import.meta.env.VITE_WS_URL}/api/v1/trading/ws`
-      : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/trading/ws`;
+    // Use correct WebSocket URL - match the API client configuration
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = window.location.host;
+    const wsUrl = `${wsProtocol}//${wsHost}/api/v1/trading/ws`;
     
     console.log('Connecting to WebSocket:', wsUrl);
     socket = new WebSocket(wsUrl);
