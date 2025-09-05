@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   TrendingUp,
@@ -65,6 +65,47 @@ const MarketAnalysisPage: React.FC = () => {
 
   const [selectedSymbols, setSelectedSymbols] = useState('BTC,ETH,SOL,ADA,DOT');
   const [selectedTimeframe, setSelectedTimeframe] = useState('1h');
+
+  // Transform institutional flows array into symbol-keyed object
+  const flowsByAsset = useMemo(() => {
+    if (!Array.isArray(institutionalFlows)) return {};
+    
+    return institutionalFlows.reduce((acc: any, flow: any) => {
+      const asset = flow.asset || flow.symbol || 'UNKNOWN';
+      const transactions = flow.transactions || [];
+      
+      // Calculate summary metrics
+      const netFlow = transactions.reduce((sum: number, tx: any) => 
+        sum + (tx.volume || 0) * (tx.type === 'inflow' ? 1 : -1), 0
+      );
+      const avgSize = transactions.length > 0 
+        ? transactions.reduce((sum: number, tx: any) => sum + Math.abs(tx.volume || 0), 0) / transactions.length 
+        : 0;
+      
+      // Map and sort transactions by volume
+      const largeTransactions = transactions
+        .map((tx: any) => ({
+          direction: tx.type === 'inflow' ? 'inflow' : 'outflow',
+          amount: Math.abs(tx.volume || tx.amount || 0),
+          exchange: tx.exchange || 'Unknown Exchange',
+          timestamp: tx.timestamp || tx.time || new Date().toISOString(),
+          market_impact: tx.impact || 'Low'
+        }))
+        .sort((a: any, b: any) => b.amount - a.amount)
+        .slice(0, 5);
+      
+      acc[asset] = {
+        total_flows: transactions.length,
+        summary: {
+          net_flow: netFlow,
+          average_size: avgSize
+        },
+        large_transactions: largeTransactions
+      };
+      
+      return acc;
+    }, {});
+  }, [institutionalFlows]);
 
   useEffect(() => {
     // Initial data load
@@ -741,9 +782,9 @@ const MarketAnalysisPage: React.FC = () => {
                 <CardDescription>Monitor whale movements and institutional activity</CardDescription>
               </CardHeader>
               <CardContent>
-                {institutionalFlows && Object.keys(institutionalFlows).length > 0 ? (
+                {flowsByAsset && Object.keys(flowsByAsset).length > 0 ? (
                   <div className="space-y-4">
-                    {Object.entries(institutionalFlows).map(([symbol, flows]: [string, any]) => (
+                    {Object.entries(flowsByAsset).map(([symbol, flows]: [string, any]) => (
                       <div key={symbol} className="p-4 rounded-lg border bg-muted/20">
                         <div className="flex items-center justify-between mb-3">
                           <span className="font-bold text-lg">{symbol}</span>
@@ -858,10 +899,10 @@ const MarketAnalysisPage: React.FC = () => {
                               {signal.symbol || `Signal ${index + 1}`}
                             </Badge>
                             <Badge variant={
-                              signal.direction === 'LONG' ? 'default' : 
-                              signal.direction === 'SHORT' ? 'destructive' : 'secondary'
+                              signal.direction?.toLowerCase() === 'long' ? 'default' : 
+                              signal.direction?.toLowerCase() === 'short' ? 'destructive' : 'secondary'
                             }>
-                              {signal.direction || 'NEUTRAL'}
+                              {signal.direction?.toUpperCase() || 'NEUTRAL'}
                             </Badge>
                           </div>
                           <div className="text-right">
@@ -923,10 +964,10 @@ const MarketAnalysisPage: React.FC = () => {
 
                           <div className="flex items-center justify-between text-xs text-muted-foreground">
                             <span>
-                              Generated: {signal.timestamp ? new Date(signal.timestamp).toLocaleString() : 'Recent'}
+                              Generated: {signal.generated_at ? new Date(signal.generated_at).toLocaleString() : 'Recent'}
                             </span>
                             <span>
-                              Expires: {signal.expiry ? new Date(signal.expiry).toLocaleString() : '24h'}
+                              Expires: {signal.expires_at ? new Date(signal.expires_at).toLocaleString() : '24h'}
                             </span>
                           </div>
                         </div>

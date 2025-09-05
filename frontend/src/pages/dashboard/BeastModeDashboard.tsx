@@ -166,14 +166,23 @@ const BeastModeDashboard: React.FC = () => {
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const inFlightRef = useRef(false);
 
   useEffect(() => {
-    fetchSystemData();
+    const safeCall = async () => {
+      if (inFlightRef.current) return;
+      inFlightRef.current = true;
+      try {
+        await fetchSystemData();
+      } finally {
+        inFlightRef.current = false;
+      }
+    };
+
+    safeCall(); // Initial call
     
     // Set up real-time updates every 2 seconds for Beast Mode
-    intervalRef.current = setInterval(() => {
-      fetchSystemData();
-    }, 2000);
+    intervalRef.current = setInterval(safeCall, 2000);
 
     return () => {
       if (intervalRef.current) {
@@ -228,7 +237,19 @@ const BeastModeDashboard: React.FC = () => {
         params: { limit: 20 }
       });
       if (response.data.success) {
-        setRecentTrades(response.data.data.trades || []);
+        const rawTrades = response.data.data.trades || [];
+        const mappedTrades = rawTrades.map((trade: any) => ({
+          id: trade.id || `trade_${Date.now()}_${Math.random()}`,
+          symbol: trade.symbol || 'UNKNOWN',
+          side: trade.side || 'buy',
+          amount: trade.amount || 0,
+          price: trade.price || 0,
+          profit_loss: trade.pnl || trade.profit_loss || 0,
+          timestamp: trade.time || trade.timestamp || new Date().toISOString(),
+          exchange: trade.exchange || 'Unknown',
+          strategy: trade.strategy || 'Auto'
+        }));
+        setRecentTrades(mappedTrades);
       }
     } catch (err: any) {
       console.error('Failed to fetch recent trades:', err);
