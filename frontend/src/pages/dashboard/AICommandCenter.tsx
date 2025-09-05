@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
@@ -91,6 +91,30 @@ const AICommandCenter: React.FC = () => {
     emergencyStop,
     resumeOperations
   } = useAIConsensus();
+
+  // Compute AI models from live status instead of hardcoded data
+  const aiModels = useMemo(() => {
+    const models = Object.entries(AI_MODEL_CONFIG).map(([key, config]) => {
+      const status = aiStatus?.ai_models_status?.[key] || 'inactive';
+      const performance = aiStatus?.performance_metrics?.[key];
+      
+      return {
+        name: config.name,
+        provider: config.provider,
+        icon: config.icon,
+        color: config.color,
+        specialty: config.specialty,
+        status: status,
+        recommendation: status === 'active' ? 'READY' : 'OFFLINE',
+        confidence: performance?.confidence || 0,
+        response_time: performance?.response_time || 0,
+        cost: aiStatus?.cost_report?.cost_by_model?.[key] || 0,
+        active: status === 'active'
+      };
+    });
+    
+    return models;
+  }, [aiStatus]);
 
   // Initialize custom weights from user settings
   useEffect(() => {

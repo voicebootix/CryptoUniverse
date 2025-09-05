@@ -41,6 +41,19 @@ export const useWebSocket = (
 
   const connect = useCallback(() => {
     try {
+      // Prevent double connections
+      if (websocketRef.current && (
+        websocketRef.current.readyState === WebSocket.CONNECTING ||
+        websocketRef.current.readyState === WebSocket.OPEN
+      )) {
+        return;
+      }
+
+      // Clean up existing connection if present
+      if (websocketRef.current) {
+        websocketRef.current.close();
+      }
+
       // Construct WebSocket URL with proper protocol and host handling
       let wsUrl: string;
       
@@ -78,7 +91,7 @@ export const useWebSocket = (
           setLastMessage(data);
           onMessage?.(data);
         } catch (error) {
-          console.error('Failed to parse WebSocket message:', error);
+          // Failed to parse WebSocket message - using raw data as fallback
           setLastMessage(event.data);
           onMessage?.(event.data);
         }
@@ -97,7 +110,7 @@ export const useWebSocket = (
         // Attempt to reconnect unless we asked to skip (manual reconnect)
         if (!skipNextReconnectRef.current && reconnectCountRef.current < reconnectAttempts) {
           reconnectCountRef.current += 1;
-          console.log(`WebSocket reconnection attempt ${reconnectCountRef.current}/${reconnectAttempts}`);
+          // WebSocket reconnection attempt ${reconnectCountRef.current}/${reconnectAttempts}
           
           reconnectTimeoutRef.current = setTimeout(() => {
             setConnectionStatus('Connecting');
@@ -110,12 +123,12 @@ export const useWebSocket = (
       };
 
       websocketRef.current.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        // WebSocket connection error - handled by state
         onError?.(error);
       };
 
     } catch (error) {
-      console.error('Failed to create WebSocket connection:', error);
+      // Failed to create WebSocket connection - connection state updated
       setConnectionStatus('Closed');
     }
   }, [url, tokens, onMessage, onOpen, onClose, onError, reconnectAttempts, reconnectInterval]);
@@ -125,7 +138,7 @@ export const useWebSocket = (
       const messageString = typeof message === 'string' ? message : JSON.stringify(message);
       websocketRef.current.send(messageString);
     } else {
-      console.warn('WebSocket is not open. Cannot send message:', message);
+      // WebSocket not open - message not sent
     }
   }, []);
 

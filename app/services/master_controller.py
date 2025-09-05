@@ -1540,10 +1540,12 @@ class MasterSystemController(LoggerMixin):
             health_status = "normal"
             if system_health:
                 try:
-                    health_data = eval(system_health)
+                    import json
+                    health_data = json.loads(system_health)
                     health_status = "warning" if health_data.get("alerts") else "normal"
-                except:
-                    pass
+                except (json.JSONDecodeError, ValueError, TypeError) as e:
+                    logger.warning(f"Failed to parse system health data: {e}")
+                    health_status = "unknown"
             
             # Mock performance data (would be real in production)
             performance_today = {
@@ -1603,10 +1605,12 @@ class MasterSystemController(LoggerMixin):
             
             if system_health:
                 try:
-                    health_data = eval(system_health)
+                    import json
+                    health_data = json.loads(system_health)
                     health_status = "warning" if health_data.get("alerts") else "normal"
-                except:
-                    pass
+                except (json.JSONDecodeError, ValueError, TypeError) as e:
+                    logger.warning(f"Failed to parse system health data: {e}")
+                    health_status = "unknown"
             
             # Mock system metrics (would be real)
             return {
