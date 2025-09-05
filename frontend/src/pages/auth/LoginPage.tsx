@@ -79,10 +79,19 @@ const LoginPage: React.FC = () => {
 
       // Redirect to Google OAuth
       window.location.href = data.authorization_url;
-    } catch (error) {
+    } catch (error: any) {
       console.error("Google login error:", error);
-      // Show user-friendly error message
-      alert("Backend server is not running. Please start the backend server first.");
+      
+      // Check specific error types
+      if (error.response?.status === 404) {
+        alert("OAuth service is temporarily unavailable. Please try again later.");
+      } else if (error.response?.status === 401) {
+        alert("Authentication failed. Please check your credentials.");
+      } else if (!error.response && error.message.includes('Network Error')) {
+        alert("Unable to connect to the server. Please check your internet connection.");
+      } else {
+        alert("An error occurred during login. Please try again later.");
+      }
     }
   };
 
