@@ -61,18 +61,18 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const isNativeButton = Comp === "button";
     const isDisabled = disabled || loading;
     
-    const handleKeyDown = (e: React.KeyboardEvent) => {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
       if (isDisabled) return;
-      if (onKeyDown) onKeyDown(e);
+      if (onKeyDown) onKeyDown(e as any);
       if ((e.key === 'Enter' || e.key === ' ') && !e.defaultPrevented) {
         e.preventDefault();
-        e.currentTarget.click();
+        (e.currentTarget as HTMLElement).click?.();
       }
     };
 
-    const handleClick = (e: React.MouseEvent) => {
+    const handleClick = (e: React.MouseEvent<HTMLElement>) => {
       if (isDisabled) return;
-      onClick?.(e);
+      onClick?.(e as any);
     };
     
     return (
