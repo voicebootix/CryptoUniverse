@@ -170,15 +170,11 @@ def create_application() -> FastAPI:
     
     logger.info(f"CORS origins configured: {cors_origins}")
     
-    # CORS configuration with specific origins
+    # Use computed CORS origins from settings
+    logger.info(f"CORS origins configured: {cors_origins}")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "https://cryptouniverse-frontend.onrender.com",
-            "https://cryptouniverse.onrender.com",
-            "http://localhost:3000",
-            "http://localhost:8000"
-        ],
+        allow_origins=cors_origins or [],  # Use computed list or empty list as fallback
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -229,19 +225,10 @@ def create_application() -> FastAPI:
         # Log the full traceback for enterprise debugging
         logger.error("Unhandled exception", exc_info=True, method=request.method, path=request.url.path)
         
-        # Get frontend URL from settings
-        frontend_url = settings.FRONTEND_URL
-        
+        # Let CORSMiddleware handle CORS headers
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "An unexpected server error occurred. Please contact support."},
-            headers={
-                'Access-Control-Allow-Origin': frontend_url,
-                'Access-Control-Allow-Credentials': 'true',
-                'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-                'Access-Control-Max-Age': '86400'
-            }
+            content={"detail": "An unexpected server error occurred. Please contact support."}
         )
 
     return app
