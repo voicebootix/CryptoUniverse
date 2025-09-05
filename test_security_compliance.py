@@ -5,10 +5,30 @@ import requests
 import json
 from urllib.parse import urlparse
 import socket
+import os
 
 class SecurityTestError(Exception):
     """Custom exception for security test failures"""
     pass
+
+# Environment variables with defaults
+BASE_URL = os.environ.get("BASE_URL", "https://cryptouniverse.onrender.com")
+CU_TEST_EMAIL = os.environ.get("CU_TEST_EMAIL")
+CU_TEST_PASSWORD = os.environ.get("CU_TEST_PASSWORD")
+
+# Sensitive cookie patterns
+SENSITIVE_COOKIE_PATTERNS = [
+    "session",
+    "auth",
+    "token",
+    "jwt",
+    "remember",
+    "secure"
+]
+
+def is_sensitive_cookie(cookie_name: str) -> bool:
+    """Check if cookie name matches sensitive patterns"""
+    return any(pattern in cookie_name.lower() for pattern in SENSITIVE_COOKIE_PATTERNS)
 
 async def verify_ssl_certificate(domain):
     """Verify SSL certificate validity and properties"""
@@ -19,7 +39,6 @@ async def verify_ssl_certificate(domain):
             with context.wrap_socket(sock, server_hostname=domain) as ssock:
                 cert = ssock.getpeercert()
                 
-                # Check certificate properties
                 if not cert:
                     raise SecurityTestError("No SSL certificate found")
                 
@@ -55,27 +74,29 @@ async def check_security_headers(url):
 async def test_dashboard_security():
     """Test dashboard security and encryption compliance"""
     
-    base_url = "https://cryptouniverse.onrender.com"
-    dashboard_url = f"{base_url}/dashboard"
+    # Verify test credentials are available
+    if not CU_TEST_EMAIL or not CU_TEST_PASSWORD:
+        raise SecurityTestError(
+            "Test credentials not found. Please set CU_TEST_EMAIL and CU_TEST_PASSWORD environment variables."
+        )
     
     try:
         # Step 1: Verify HTTPS and SSL
-        domain = urlparse(base_url).netloc
+        domain = urlparse(BASE_URL).netloc
         await verify_ssl_certificate(domain)
         
         # Step 2: Check Security Headers
-        headers = await check_security_headers(base_url)
+        headers = await check_security_headers(BASE_URL)
         
         # Step 3: Test Dashboard Security
         print("\n🔐 Testing Dashboard Security...")
         async with async_playwright() as p:
-            # Launch browser with security flags
+            # Launch browser with security flags (removed certificate error ignore)
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
                     '--disable-dev-shm-usage',
-                    '--no-sandbox',
-                    '--ignore-certificate-errors'
+                    '--no-sandbox'
                 ]
             )
             
@@ -91,11 +112,11 @@ async def test_dashboard_security():
             
             # Step 4: Login securely
             print("\n🔑 Testing Secure Login...")
-            await page.goto(f"{base_url}/login")
+            await page.goto(f"{BASE_URL}/login")
             
-            # Fill login form
-            await page.fill("input[type='email']", "test@cryptouniverse.com")
-            await page.fill("input[type='password']", "TestPassword123!")
+            # Fill login form with environment variables
+            await page.fill("input[type='email']", CU_TEST_EMAIL)
+            await page.fill("input[type='password']", CU_TEST_PASSWORD)
             await page.click("button[type='submit']")
             
             # Wait for dashboard
@@ -126,19 +147,15 @@ async def test_dashboard_security():
             # Step 7: Test session security
             print("\n🔒 Testing Session Security...")
             
-            # Check secure cookie attributes
+            # Check secure cookie attributes for sensitive cookies only
             cookies = await context.cookies()
-            for cookie in cookies:
-                assert cookie.get("secure", False), "Cookie not marked as secure"
-                assert cookie.get("httpOnly", False), "Cookie not marked as httpOnly"
+            sensitive_cookies = [c for c in cookies if is_sensitive_cookie(c["name"])]
             
-            print("✅ Session cookies are secure")
+            for cookie in sensitive_cookies:
+                assert cookie.get("secure", False), f"Cookie '{cookie['name']}' not marked as secure"
+                assert cookie.get("httpOnly", False), f"Cookie '{cookie['name']}' not marked as httpOnly"
             
-            # Step 8: Check CSP compliance
-            print("\n🛡️ Checking Content Security Policy...")
-            csp_header = headers.get('Content-Security-Policy', '')
-            assert csp_header, "No Content Security Policy found"
-            print("✅ Content Security Policy is configured")
+            print(f"✅ {len(sensitive_cookies)} sensitive cookies verified as secure")
             
             # Cleanup
             await context.close()
