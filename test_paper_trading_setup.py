@@ -1,6 +1,13 @@
 import json
 import requests
+import os
 from datetime import datetime
+
+# Environment variables with defaults
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
+LOGIN_URL = os.environ.get("LOGIN_URL", f"{BASE_URL}/api/v1/auth/login")
+TEST_EMAIL = os.environ.get("TEST_EMAIL", "test@localhost")
+TEST_PASSWORD = os.environ.get("TEST_PASSWORD", "test123")
 
 class TestSetupError(Exception):
     """Custom exception for paper trading setup errors"""
@@ -8,22 +15,30 @@ class TestSetupError(Exception):
 
 def get_auth_token():
     """Get valid authentication token"""
-    login_url = "https://cryptouniverse.onrender.com/api/v1/auth/login"
     login_data = {
-        "email": "test@cryptouniverse.com",
-        "password": "TestPassword123!"
+        "email": TEST_EMAIL,
+        "password": TEST_PASSWORD
     }
     
     try:
         print("🔑 Getting authentication token...")
-        login_response = requests.post(login_url, json=login_data)
-        login_response.raise_for_status()
+        response = requests.post(
+            LOGIN_URL,
+            json=login_data,
+            timeout=5
+        )
+        response.raise_for_status()
         
-        token_data = login_response.json()
+        token_data = response.json()
+        if "access_token" not in token_data:
+            raise TestSetupError("Missing access_token in response")
+            
         print("✅ Authentication successful")
         return token_data["access_token"]
     except requests.exceptions.RequestException as e:
         raise TestSetupError(f"Authentication failed: {str(e)}")
+    except json.JSONDecodeError as e:
+        raise TestSetupError(f"Invalid authentication response: {str(e)}")
 
 def validate_paper_trading_response(response_data):
     """Validate paper trading setup response"""
@@ -48,7 +63,7 @@ def test_setup_paper_trading_account():
         
         # Step 2: Setup paper trading account
         print("\n📈 Setting up paper trading account...")
-        url = "https://cryptouniverse.onrender.com/api/v1/paper-trading/setup"
+        setup_url = f"{BASE_URL}/api/v1/paper-trading/setup"
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
@@ -61,22 +76,30 @@ def test_setup_paper_trading_account():
         }
         
         # Step 3: Send setup request
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(
+            setup_url,
+            headers=headers,
+            json=payload,
+            timeout=5
+        )
+        response.raise_for_status()
         
         # Print response details for debugging
         print(f"\nResponse Status Code: {response.status_code}")
         print(f"Response Body: {response.text}")
         
-        # Step 4: Verify response status
-        assert response.status_code == 200, f"Expected status code 200, but got {response.status_code}. Response: {response.text}"
-        
-        # Step 5: Parse and validate response
+        # Step 4: Parse and validate response
         response_data = response.json()
         validate_paper_trading_response(response_data)
         
-        # Step 6: Verify paper trading account settings
-        verify_url = f"{url}/verify"
-        verify_response = requests.get(verify_url, headers=headers)
+        # Step 5: Verify paper trading account settings
+        verify_url = f"{setup_url}/verify"
+        verify_response = requests.get(
+            verify_url,
+            headers=headers,
+            timeout=5
+        )
+        verify_response.raise_for_status()
         verify_data = verify_response.json()
         
         assert verify_data["is_active"], "Paper trading account not active"
