@@ -39,32 +39,42 @@ export interface ButtonProps
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, loading = false, label, children, disabled, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, loading = false, label, children, disabled, onClick, onKeyDown, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
     const isNativeButton = Comp === "button";
+    const isDisabled = disabled || loading;
+    
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+      if (isDisabled) return;
+      if (onKeyDown) onKeyDown(e);
+      if ((e.key === 'Enter' || e.key === ' ') && !e.defaultPrevented) {
+        e.preventDefault();
+        e.currentTarget.click();
+      }
+    };
+
+    const handleClick = (e: React.MouseEvent) => {
+      if (isDisabled) return;
+      onClick?.(e);
+    };
     
     return (
       <Comp
-        className={cn(buttonVariants({ variant, size, className }))}
-        ref={ref}
-        {...(isNativeButton ? {
-          type: "button",
-          disabled: disabled || loading
-        } : {})}
-        aria-label={label}
-        aria-disabled={disabled || loading}
-        aria-busy={loading}
-        {...(!isNativeButton && {
-          role: "button",
-          tabIndex: disabled ? -1 : 0,
-          onKeyDown: (e: React.KeyboardEvent) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              e.currentTarget.click();
-            }
-          }
-        })}
         {...props}
+        className={cn(
+          buttonVariants({ variant, size, className }),
+          isDisabled && "pointer-events-none opacity-50"
+        )}
+        ref={ref}
+        type={isNativeButton ? "button" : undefined}
+        disabled={isNativeButton ? isDisabled : undefined}
+        aria-label={label}
+        aria-disabled={isDisabled}
+        aria-busy={loading}
+        role={!isNativeButton ? "button" : undefined}
+        tabIndex={!isNativeButton ? (isDisabled ? -1 : 0) : undefined}
+        onClick={!isNativeButton ? handleClick : onClick}
+        onKeyDown={!isNativeButton ? handleKeyDown : onKeyDown}
       >
         {loading ? (
           <>
