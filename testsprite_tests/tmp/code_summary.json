@@ -1,0 +1,160 @@
+{
+  "tech_stack": [
+    "Python 3.11+",
+    "FastAPI",
+    "PostgreSQL 15+",
+    "Redis 7+",
+    "SQLAlchemy 2.0",
+    "Celery",
+    "React 18+ with TypeScript",
+    "Material-UI v5",
+    "Docker + Docker Compose",
+    "Kubernetes",
+    "WebSockets",
+    "JWT Authentication"
+  ],
+  "features": [
+    {
+      "name": "Authentication System",
+      "description": "Complete JWT-based authentication with refresh tokens, MFA, and OAuth2 support",
+      "files": [
+        "app/auth/",
+        "app/routers/auth.py"
+      ],
+      "api_doc": {
+        "paths": {
+          "/auth/login": {
+            "post": {
+              "summary": "User login",
+              "parameters": ["email", "password", "mfa_code"]
+            }
+          },
+          "/auth/register": {
+            "post": {
+              "summary": "User registration",
+              "parameters": ["email", "password", "full_name", "tenant_id"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "AI Trading Engine",
+      "description": "Multi-AI consensus trading system using GPT-4, Claude, and Gemini for automated trading",
+      "files": [
+        "app/trading/",
+        "app/ai/"
+      ],
+      "api_doc": {
+        "paths": {
+          "/trading/execute": {
+            "post": {
+              "summary": "Execute trades",
+              "parameters": ["symbol", "action", "amount", "price", "order_type"]
+            }
+          },
+          "/trading/autonomous/start": {
+            "post": {
+              "summary": "Start autonomous trading",
+              "parameters": ["mode", "max_daily_trades", "risk_level"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Credit System",
+      "description": "Revolutionary credit-based profit potential system instead of subscriptions",
+      "files": [
+        "app/credits/",
+        "app/billing/"
+      ],
+      "api_doc": {
+        "paths": {
+          "/credits/balance": {
+            "get": {
+              "summary": "Get credit balance"
+            }
+          },
+          "/credits/purchase": {
+            "post": {
+              "summary": "Purchase credits",
+              "parameters": ["amount", "payment_method"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Multi-Exchange Integration",
+      "description": "Support for multiple cryptocurrency exchanges (Binance, Kraken, KuCoin, Coinbase)",
+      "files": [
+        "app/exchanges/",
+        "app/integrations/"
+      ],
+      "api_doc": {
+        "paths": {
+          "/exchanges/connect": {
+            "post": {
+              "summary": "Connect exchange account",
+              "parameters": ["exchange", "api_key", "api_secret"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Market Analysis",
+      "description": "Real-time market analysis with technical indicators and sentiment analysis",
+      "files": [
+        "app/market/",
+        "app/analysis/"
+      ],
+      "api_doc": {
+        "paths": {
+          "/market/technical-analysis": {
+            "post": {
+              "summary": "Get technical analysis",
+              "parameters": ["symbols", "timeframes", "indicators"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Telegram Integration",
+      "description": "Complete trading functionality via Telegram bot",
+      "files": [
+        "app/telegram/",
+        "app/bot/"
+      ],
+      "api_doc": {
+        "paths": {
+          "/telegram/connect": {
+            "post": {
+              "summary": "Connect Telegram account",
+              "parameters": ["user_id", "chat_id", "username"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Copy Trading Marketplace",
+      "description": "Platform for sharing and monetizing trading strategies",
+      "files": [
+        "app/marketplace/",
+        "app/strategies/"
+      ],
+      "api_doc": {
+        "paths": {
+          "/strategies/marketplace": {
+            "get": {
+              "summary": "Get strategy marketplace"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

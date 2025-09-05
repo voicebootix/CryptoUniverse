@@ -18,8 +18,9 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 from app.models import (
-    user, tenant, subscription, credit, exchange, 
-    market, trading, copy_trading, ai, analytics, system
+    user, tenant, subscription, credit, exchange,
+    market, trading, copy_trading, ai, analytics, system,
+    data
 )
 from app.core.database import Base
 target_metadata = Base.metadata
