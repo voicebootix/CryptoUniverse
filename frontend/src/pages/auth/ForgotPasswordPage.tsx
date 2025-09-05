@@ -46,14 +46,13 @@ const ForgotPasswordPage: React.FC = () => {
       }
     } catch (error: any) {
       console.error("Password reset request failed:", error);
-      if (error.response?.status === 404) {
-        setError("Email address not found.");
-      } else if (error.response?.status === 429) {
+      if (error.response?.status === 429) {
         setError("Too many requests. Please try again later.");
       } else if (!error.response && error.message.includes("Network Error")) {
         setError("Unable to connect to the server. Please check your connection.");
       } else {
-        setError("An error occurred. Please try again later.");
+        // Generic message for all other cases including 404
+        setSuccess(true); // Show success even for non-existent emails
       }
     } finally {
       setIsLoading(false);
@@ -72,7 +71,7 @@ const ForgotPasswordPage: React.FC = () => {
           >
             {/* Header */}
             <div className="text-center mb-8">
-              <h2 className="text-3xl font-bold mb-2">Reset Password</h2>
+              <h2 className="text-3xl font-bold mb-2">Forgot Password</h2>
               <p className="text-gray-400">
                 Enter your email address and we'll send you instructions to reset your password.
               </p>
