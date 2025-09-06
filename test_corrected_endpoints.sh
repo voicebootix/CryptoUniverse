@@ -1,4 +1,6 @@
 #!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
 
 # Test CryptoUniverse with CORRECT endpoint paths based on router.py
 

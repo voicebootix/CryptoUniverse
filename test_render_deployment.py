@@ -72,11 +72,17 @@ async def run_tests():
         
         # Test 3: Market Prices (Public Endpoint)
         print("\n3️⃣ Testing Market Prices...")
-        result = await test_endpoint(session, "Market Prices", "GET", f"{API_URL}/market/prices")
+        result = await test_endpoint(session, "Market Prices", "GET", f"{API_URL}/market/realtime-prices")
         test_results.append(result)
         print(f"   Status: {'✅ PASS' if result['success'] else '❌ FAIL'} (Code: {result['status_code']})")
         if result['success'] and result['response']:
-            print(f"   Response: Retrieved {len(result['response'].get('prices', []))} prices")
+            # Add type guard for JSON response
+            if isinstance(result['response'], dict) and 'prices' in result['response']:
+                print(f"   Response: Retrieved {len(result['response'].get('prices', []))} prices")
+            elif isinstance(result['response'], dict):
+                print(f"   Response: JSON response with {len(result['response'])} keys")
+            else:
+                print("   Response: Non-JSON or empty response")
         
         # Test 4: Market Analysis for BTC
         print("\n4️⃣ Testing Market Analysis (BTC)...")
@@ -170,7 +176,7 @@ async def run_tests():
                 "results": test_results
             }, f, indent=2)
         
-        print(f"\n💾 Results saved to: {results_file.relative_to(project_root)}"
+        print(f"\n💾 Results saved to: {results_file.relative_to(project_root)}")
         print("\n🎉 Render deployment testing complete!")
         
         return test_results

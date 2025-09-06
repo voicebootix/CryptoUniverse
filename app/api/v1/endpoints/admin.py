@@ -717,7 +717,7 @@ async def get_detailed_metrics(
         
         # Active users (logged in last 24h)
         active_users_result = await db.execute(
-            select(func.count()).select_from(User).filter(
+            select(func.count(User.id)).filter(
                 User.last_login >= now - timedelta(hours=24)
             )
         )
@@ -725,15 +725,15 @@ async def get_detailed_metrics(
         
         # Trades today
         trades_today_result = await db.execute(
-            select(func.count()).select_from(Trade).filter(
+            select(func.count(Trade.id)).filter(
                 Trade.created_at >= today_start
             )
         )
         trades_today = trades_today_result.scalar() or 0
         
-        # Volume 24h
+        # Volume 24h (using total_value instead of quantity)
         volume_result = await db.execute(
-            select(func.sum(Trade.quantity)).filter(
+            select(func.sum(Trade.total_value)).filter(
                 Trade.created_at >= now - timedelta(hours=24)
             )
         )

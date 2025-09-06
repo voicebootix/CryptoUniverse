@@ -36,11 +36,11 @@
 ### Login Response
 ```json
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIs...",
-  "refresh_token": "eyJhbGciOiJIUzI1NiIs...",
+  "access_token": "ACCESS_TOKEN_DUMMY_PLACEHOLDER",
+  "refresh_token": "REFRESH_TOKEN_DUMMY_PLACEHOLDER",
   "token_type": "bearer",
   "expires_in": 28800,
-  "user_id": "7a1ee8cd-bfc9-4e4e-85b2-69c8e91054af",
+  "user_id": "00000000-0000-0000-0000-000000000000",
   "role": "admin",
   "permissions": [
     "admin:read", "admin:write", "admin:delete",
