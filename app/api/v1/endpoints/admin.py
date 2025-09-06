@@ -455,6 +455,9 @@ async def list_users(
     )
     
     try:
+        # TEMPORARY FIX: Return empty response until async conversion is complete
+        logger.warning("Admin endpoints temporarily returning empty data - async conversion needed")
+        return {"users": [], "total": 0, "skip": skip, "limit": limit, "stats": {"total_users": 0, "active_users": 0, "trading_users": 0}}
         query = db.query(User)
         
         # Apply filters
