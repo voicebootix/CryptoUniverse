@@ -15,13 +15,12 @@ from sqlalchemy import select
 from app.core.database import get_database
 from app.core.config import get_settings
 from app.models.user import User
-from app.services.rate_limit import RateLimitService
+from app.services.rate_limit import rate_limiter
 from app.services.email_service import email_service
 import structlog
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
-rate_limiter = RateLimitService()
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 

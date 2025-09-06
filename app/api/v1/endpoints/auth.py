@@ -32,13 +32,12 @@ from app.core.redis import get_redis_client
 from app.models.user import User, UserRole, UserStatus
 from app.models.tenant import Tenant
 from app.models.session import UserSession
-from app.services.rate_limit import RateLimitService
+from app.services.rate_limit import rate_limiter
 from app.services.oauth import OAuthService
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
 security = HTTPBearer()
-rate_limiter = RateLimitService()
 oauth_service = OAuthService()
 
 router = APIRouter()
@@ -254,11 +253,14 @@ async def login(
     
     # Rate limiting
     client_ip = client_request.client.host
-    await rate_limiter.check_rate_limit(
-        key=f"login:{client_ip}",
-        limit=5,
-        window=300  # 5 attempts per 5 minutes
-    )
+    try:
+        await rate_limiter.check_rate_limit(
+            key=f"login:{client_ip}",
+            limit=5,
+            window=300  # 5 attempts per 5 minutes
+        )
+    except Exception as e:
+        logger.warning(f"Rate limiting check failed: {e}, proceeding without rate limit")
     
     logger.info("Login attempt", email=request.email, ip=client_ip)
     
