@@ -14,6 +14,7 @@ import structlog
 from app.core.logging import LoggerMixin
 from app.core.config import get_settings
 from app.core.redis_manager import get_redis_manager
+from app.core.redis import get_redis_client
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from app.models.user import User
@@ -191,8 +192,8 @@ class BackgroundServiceManager(LoggerMixin):
     async def get_system_metrics(self) -> Dict[str, Any]:
         """Get real system metrics."""
         try:
-            # System metrics
-            cpu_percent = psutil.cpu_percent(interval=1)
+            # System metrics (non-blocking)
+            cpu_percent = psutil.cpu_percent(interval=0.1)  # Short non-blocking interval
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
             
@@ -288,8 +289,8 @@ class BackgroundServiceManager(LoggerMixin):
         
         while self.running:
             try:
-                # Check system resources
-                cpu_percent = psutil.cpu_percent()
+                # Check system resources with non-blocking
+                cpu_percent = psutil.cpu_percent(interval=0)  # Non-blocking
                 memory_percent = psutil.virtual_memory().percent
                 disk_percent = psutil.disk_usage('/').percent
                 

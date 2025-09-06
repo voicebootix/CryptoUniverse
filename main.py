@@ -25,6 +25,7 @@ from app.core.config import get_settings
 from app.core.database import engine, db_manager
 from app.core.enterprise_startup import get_application
 from app.core.logging import configure_logging
+from app.core.redis import get_redis_client, close_redis_client
 
 # API routes
 from app.api.v1.router import api_router

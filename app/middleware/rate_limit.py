@@ -147,8 +147,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         
         # If Redis is unavailable, allow the request (fail open)
         if not redis:
-            logger.warning("Redis unavailable for rate limiting - allowing request")
-            return True
+            logger.debug("Redis unavailable for rate limiting - allowing request")
+            return True, 0
         
         # Generate the Redis key
         key = await self.get_redis_key(request, rule)
