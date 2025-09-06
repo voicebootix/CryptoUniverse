@@ -27,7 +27,7 @@ from app.services.ai_consensus_core import AIConsensusService
 from app.services.trade_execution import TradeExecutionService
 from app.services.ai_chat_engine import chat_engine, ChatIntent
 from app.services.chat_service_adapters import chat_adapters
-from app.services.telegram_core import TelegramCore
+from app.services.telegram_core import TelegramCommanderService
 from app.services.websocket import manager
 
 settings = get_settings()
@@ -89,7 +89,7 @@ class UnifiedAIManager(LoggerMixin):
         self.ai_consensus = AIConsensusService()
         self.trade_executor = TradeExecutionService()
         self.adapters = chat_adapters
-        self.telegram_core = TelegramCore()
+        self.telegram_core = TelegramCommanderService()
         
         # Redis for state management - initialize properly for async usage
         self.redis = None
