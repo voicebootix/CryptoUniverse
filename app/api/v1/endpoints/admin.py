@@ -162,7 +162,8 @@ async def get_system_overview(
 async def configure_system(
     request: SystemConfigRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(require_role([UserRole.ADMIN]))
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_database)
 ):
     """Configure system-wide settings."""
     
@@ -225,6 +226,8 @@ async def configure_system(
                 "user_agent": "system"
             }
         )
+        db.add(audit_log)
+        await db.commit()
         
         # Schedule background restart if needed
         if request.autonomous_intervals:
@@ -913,7 +916,8 @@ async def get_audit_logs(
 @router.post("/emergency/stop-all")
 async def emergency_stop_all_trading(
     reason: str,
-    current_user: User = Depends(require_role([UserRole.ADMIN]))
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_database)
 ):
     """Emergency stop all trading across the platform."""
     
@@ -951,6 +955,8 @@ async def emergency_stop_all_trading(
                 "user_agent": "system"
             }
         )
+        db.add(audit_log)
+        await db.commit()
         
         return {
             "status": "emergency_stop_executed",
