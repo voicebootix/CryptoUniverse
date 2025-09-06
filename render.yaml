@@ -7,7 +7,7 @@ services:
     plan: pro  # Professional tier for production workload
     region: oregon  # Choose region closest to your users
     buildCommand: pip install fastapi==0.104.1 uvicorn==0.24.0 pydantic==2.5.1 python-dotenv==1.0.0
-    startCommand: python app-minimal.py
+    startCommand: python main.py
     envVars:
       - key: ENVIRONMENT
         value: production
