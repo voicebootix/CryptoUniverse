@@ -66,40 +66,91 @@ class BackgroundServiceManager(LoggerMixin):
         }
     
     async def async_init(self):
-        self.redis = await get_redis_client()
+        """Initialize Redis client with timeout and error handling."""
+        try:
+            # Add timeout to prevent hanging
+            self.redis = await asyncio.wait_for(get_redis_client(), timeout=5.0)
+            if self.redis:
+                # Test connection
+                await asyncio.wait_for(self.redis.ping(), timeout=3.0)
+                self.logger.info("✅ Redis client initialized successfully")
+        except asyncio.TimeoutError:
+            self.logger.warning("⚠️ Redis connection timeout - services will run without Redis")
+            self.redis = None
+        except Exception as e:
+            self.logger.warning("⚠️ Redis initialization failed - services will run without Redis", error=str(e))
+            self.redis = None
     
     async def start_all(self):
-        """Start all background services with real functionality."""
+        """Start all background services with real functionality - NON-BLOCKING."""
         self.logger.info("🚀 Starting enterprise background services...")
         self.running = True
         self.start_time = datetime.utcnow()
         
-        # Initialize redis client
-        await self.async_init()
+        # Initialize redis client with graceful degradation
+        try:
+            await self.async_init()
+        except Exception as e:
+            self.logger.warning("⚠️ Redis initialization failed - services will run in degraded mode", error=str(e))
+            self.redis = None
         
-        # Start individual services
-        self.tasks["health_monitor"] = asyncio.create_task(self._health_monitor_service())
-        self.tasks["metrics_collector"] = asyncio.create_task(self._metrics_collector_service())
-        self.tasks["cleanup_service"] = asyncio.create_task(self._cleanup_service())
-        self.tasks["autonomous_cycles"] = asyncio.create_task(self._autonomous_cycles_service())
-        self.tasks["market_data_sync"] = asyncio.create_task(self._market_data_sync_service())
-        self.tasks["balance_sync"] = asyncio.create_task(self._balance_sync_service())
-        self.tasks["risk_monitor"] = asyncio.create_task(self._risk_monitor_service())
-        self.tasks["rate_limit_cleanup"] = asyncio.create_task(self._rate_limit_cleanup_service())
+        # Start individual services with error isolation
+        services_to_start = [
+            ("health_monitor", self._health_monitor_service),
+            ("metrics_collector", self._metrics_collector_service), 
+            ("cleanup_service", self._cleanup_service),
+            ("autonomous_cycles", self._autonomous_cycles_service),
+            ("market_data_sync", self._market_data_sync_service),
+            ("balance_sync", self._balance_sync_service),
+            ("risk_monitor", self._risk_monitor_service),
+            ("rate_limit_cleanup", self._rate_limit_cleanup_service)
+        ]
         
-        # Update service status
-        self.services = {
-            "health_monitor": "running",
-            "metrics_collector": "running", 
-            "cleanup_service": "running",
-            "autonomous_cycles": "running",
-            "market_data_sync": "running",
-            "balance_sync": "running",
-            "risk_monitor": "running",
-            "rate_limit_cleanup": "running"
-        }
+        for service_name, service_func in services_to_start:
+            try:
+                self.tasks[service_name] = asyncio.create_task(self._safe_service_wrapper(service_name, service_func))
+                self.services[service_name] = "starting"
+                self.logger.info(f"🚀 {service_name} service started")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to start {service_name} service", error=str(e))
+                self.services[service_name] = "failed"
         
-        self.logger.info("✅ All background services started successfully")
+        # Don't wait for services to initialize - let them start in background
+        # This ensures startup doesn't hang on service failures
+        self.logger.info("✅ All background services initiated (starting in background)")
+    
+    async def _safe_service_wrapper(self, service_name: str, service_func):
+        """Wrap service functions with error handling and recovery."""
+        max_retries = 3
+        retry_delay = 5  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                self.services[service_name] = "running"
+                self.logger.info(f"✅ {service_name} service started successfully")
+                
+                # Run the service function
+                await service_func()
+                
+            except Exception as e:
+                self.services[service_name] = "error"
+                self.logger.error(f"❌ {service_name} service failed", 
+                                attempt=attempt + 1, 
+                                max_retries=max_retries,
+                                error=str(e))
+                
+                if attempt < max_retries - 1:
+                    self.logger.info(f"🔄 Retrying {service_name} in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    self.logger.error(f"💀 {service_name} service permanently failed after {max_retries} attempts")
+                    self.services[service_name] = "failed"
+                    return
+                    
+        # If we get here, service ended normally
+        self.services[service_name] = "stopped"
+        self.logger.warning(f"⚠️ {service_name} service stopped unexpectedly")
     
     async def stop_all(self):
         """Stop all background services gracefully."""
@@ -343,23 +394,58 @@ class BackgroundServiceManager(LoggerMixin):
         
         while self.running:
             try:
-                # This would trigger autonomous trading cycles
-                # Import here to avoid circular imports
+                # Check if Redis is available first
+                if not self.redis:
+                    self.logger.warning("Redis unavailable - skipping autonomous cycle")
+                    await asyncio.sleep(300)  # Wait 5 minutes before trying again
+                    continue
+                
+                # Check if any users are actually active
+                try:
+                    autonomous_keys = await self.redis.keys("autonomous_active:*")
+                    if len(autonomous_keys) == 0:
+                        self.logger.debug("No active autonomous users - skipping cycle")
+                        await asyncio.sleep(60)  # Short wait when no active users
+                        continue
+                        
+                except Exception as e:
+                    self.logger.warning("Failed to check autonomous users", error=str(e))
+                    await asyncio.sleep(60)
+                    continue
+                
+                # Import and run autonomous cycles
                 try:
                     from app.services.master_controller import MasterSystemController
                     master_controller = MasterSystemController()
                     
-                    # Run global autonomous cycle check
-                    await master_controller.run_global_autonomous_cycle()
+                    # Add timeout to prevent hanging
+                    await asyncio.wait_for(
+                        master_controller.run_global_autonomous_cycle(),
+                        timeout=300  # 5 minute timeout
+                    )
                     
                 except ImportError:
                     self.logger.warning("Master controller not available for autonomous cycles")
+                    await asyncio.sleep(300)  # Wait 5 minutes before retrying
+                    continue
+                    
+                except asyncio.TimeoutError:
+                    self.logger.error("Autonomous cycle timed out - this indicates a hanging operation")
+                    await asyncio.sleep(60)  # Shorter wait after timeout
+                    continue
                 
             except Exception as e:
                 self.logger.error("Autonomous cycles error", error=str(e))
+                await asyncio.sleep(30)  # Short wait on error
+                continue
             
             # ADAPTIVE CYCLE TIMING based on market conditions
-            next_interval = await self._calculate_adaptive_cycle_interval()
+            try:
+                next_interval = await self._calculate_adaptive_cycle_interval()
+            except Exception as e:
+                self.logger.warning("Failed to calculate adaptive interval", error=str(e))
+                next_interval = 60  # Default to 1 minute
+                
             await asyncio.sleep(next_interval)
     
     async def _market_data_sync_service(self):
@@ -681,13 +767,16 @@ class BackgroundServiceManager(LoggerMixin):
         """Calculate adaptive cycle interval based on market conditions and activity."""
         try:
             # PERFORMANCE OPTIMIZATION: Check if any users are active first
-            redis = await get_redis_client()
-            if redis:
-                autonomous_keys = await redis.keys("autonomous_active:*")
+            if self.redis:
+                autonomous_keys = await self.redis.keys("autonomous_active:*")
                 if len(autonomous_keys) == 0:
                     # No active users - use very long interval to save CPU
                     self.logger.debug("No active users - using extended cycle interval")
                     return 300  # 5 minutes when no users are active
+            else:
+                # Redis unavailable - use conservative interval
+                self.logger.debug("Redis unavailable - using conservative cycle interval")
+                return 180  # 3 minutes when Redis is unavailable
             
             from app.services.market_analysis_core import MarketAnalysisService
             
