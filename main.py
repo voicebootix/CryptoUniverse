@@ -7,6 +7,7 @@ with native Python implementation and enterprise-grade features.
 """
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -371,7 +372,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host=settings.HOST,
-        port=settings.PORT,
+        port=int(os.getenv("PORT", settings.PORT)),
         reload=settings.ENVIRONMENT == "development",
         log_level=settings.LOG_LEVEL.lower(),
         access_log=True,
