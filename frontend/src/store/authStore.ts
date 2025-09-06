@@ -40,7 +40,29 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null, mfaRequired: false });
 
         try {
-          const response = await apiClient.post('/auth/login', credentials);
+          // Retry logic for slow Render services
+          let response;
+          let retryCount = 0;
+          const maxRetries = 2;
+          
+          while (retryCount <= maxRetries) {
+            try {
+              response = await apiClient.post('/auth/login', credentials);
+              break; // Success, exit retry loop
+            } catch (error: any) {
+              retryCount++;
+              
+              // If it's a timeout and we have retries left, wait and retry
+              if ((error.code === 'ECONNABORTED' || error.message?.includes('timeout')) && retryCount <= maxRetries) {
+                console.log(`Login attempt ${retryCount} failed, retrying...`);
+                await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // Exponential backoff
+                continue;
+              }
+              
+              // If not a timeout or out of retries, throw the error
+              throw error;
+            }
+          }
           
           if (response.data.mfa_required) {
             set({ 
