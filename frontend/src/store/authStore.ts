@@ -44,9 +44,10 @@ export const useAuthStore = create<AuthStore>()(
           let response;
           
           try {
-            // First attempt with extended timeout
+            // First attempt with very long timeout for Render cold starts
+            console.log('Starting first login attempt with 3-minute timeout...');
             response = await apiClient.post('/auth/login', credentials, {
-              timeout: 120000 // 2 minutes timeout for slow Render cold starts
+              timeout: 180000 // 3 minutes timeout for very slow Render cold starts
             });
           } catch (firstError: any) {
             // Log error for debugging
@@ -64,13 +65,15 @@ export const useAuthStore = create<AuthStore>()(
             if (isTimeoutError) {
               console.log('Timeout detected, trying once more with warm service...');
               
-              // Wait 2 seconds for service to warm up
-              await new Promise(resolve => setTimeout(resolve, 2000));
+              // Wait 3 seconds for service to warm up properly
+              console.log('Waiting 3 seconds before retry...');
+              await new Promise(resolve => setTimeout(resolve, 3000));
               
               try {
                 // Second attempt - service should be warm now
+                console.log('Starting second login attempt with 90-second timeout...');
                 response = await apiClient.post('/auth/login', credentials, {
-                  timeout: 60000 // 1 minute for warm service
+                  timeout: 90000 // 90 seconds for warm service
                 });
               } catch (secondError: any) {
                 console.error('Second login attempt also failed:', secondError.message);
