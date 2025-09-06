@@ -14,7 +14,6 @@ import structlog
 
 from app.core.startup_orchestrator import EnterpriseStartupOrchestrator, ServiceDefinition
 from app.core.redis_manager import get_redis_manager
-from app.core.database import get_database_manager
 from app.services.background import BackgroundServiceManager
 
 logger = structlog.get_logger(__name__)
