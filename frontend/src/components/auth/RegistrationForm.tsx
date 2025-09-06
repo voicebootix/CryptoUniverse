@@ -43,8 +43,26 @@ export default function RegistrationForm() {
   });
 
   const onSubmit = async (data: FormData) => {
-    console.log('Form submitted with data:', data);
-    console.log('Form errors:', errors);
+    if (import.meta.env.DEV) {
+      // Sanitize data for development logging - redact sensitive fields
+      const sanitizedData = {
+        ...data,
+        password: '***',
+        confirm_password: '***'
+      };
+      
+      // Sanitize errors - redact any sensitive field errors
+      const sanitizedErrors = { ...errors };
+      if (sanitizedErrors.password) {
+        sanitizedErrors.password = { ...sanitizedErrors.password, message: sanitizedErrors.password.message };
+      }
+      if (sanitizedErrors.confirm_password) {
+        sanitizedErrors.confirm_password = { ...sanitizedErrors.confirm_password, message: sanitizedErrors.confirm_password.message };
+      }
+      
+      console.log('Form submitted with data:', sanitizedData);
+      console.log('Form errors:', sanitizedErrors);
+    }
     
     try {
       setIsLoading(true);
@@ -59,7 +77,14 @@ export default function RegistrationForm() {
         tenant_id: null // Default tenant
       };
 
-      console.log('Sending register data:', registerData);
+      if (import.meta.env.DEV) {
+        // Sanitize register data for development logging - redact password
+        const sanitizedRegisterData = {
+          ...registerData,
+          password: '***'
+        };
+        console.log('Sending register data:', sanitizedRegisterData);
+      }
 
       const response = await fetch('/api/v1/auth/register', {
         method: 'POST',
