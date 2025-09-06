@@ -27,6 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { apiClient } from "@/lib/api/client";
+import { getPublicAssetUrl } from "@/lib/utils/assets";
 import { Container } from "@/components/ui/container";
 
 const loginSchema = z.object({
@@ -106,21 +107,23 @@ const LoginPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-slate-800 text-white">
       <Container>
-        <div className="min-h-screen flex flex-col items-center justify-center px-4">
-        <motion.div
-            initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
-            className="w-full max-w-md"
-          >
-            {/* Form */}
-            <form 
-              onSubmit={handleSubmit(onSubmit)} 
-              className="space-y-6"
-              role="form"
-              aria-label="Login Form"
+        <div className="grid grid-cols-1 md:grid-cols-2 min-h-screen">
+          {/* Left Side: Login Form */}
+          <div className="flex flex-col items-center justify-center p-8">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5 }}
+              className="w-full max-w-md"
             >
-              {/* Error Alert */}
+              {/* Form */}
+              <form 
+                onSubmit={handleSubmit(onSubmit)} 
+                className="space-y-6"
+                role="form"
+                aria-label="Login Form"
+              >
+                {/* Error Alert */}
                     <AnimatePresence>
                       {error && (
                         <motion.div
@@ -140,100 +143,103 @@ const LoginPage: React.FC = () => {
                       )}
                     </AnimatePresence>
 
-              {/* Email Input */}
-                  <div>
-                    <Label htmlFor="email">Email Address</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  {...register("email")}
-                  placeholder="admin@cryptouniverse.com"
-                  label="Email Address"
-                  error={errors.email?.message}
-                  aria-required="true"
-                  aria-invalid={errors.email ? "true" : "false"}
-                />
-                        </div>
-
-              {/* Password Input */}
-              <div>
-                <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                          <Input
-                            id="password"
-                            type={showPassword ? "text" : "password"}
-                            autoComplete="current-password"
-                            {...register("password")}
-                    placeholder="••••••••••"
-                    label="Password"
-                    error={errors.password?.message}
+                {/* Email Input */}
+                    <div>
+                      <Label htmlFor="email">Email Address</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    {...register("email")}
+                    placeholder="admin@cryptouniverse.com"
+                    label="Email Address"
+                    error={errors.email?.message}
                     aria-required="true"
-                    aria-invalid={errors.password ? "true" : "false"}
-                          />
-                  <Button
-                            type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-2 top-1/2 -translate-y-1/2"
-                            onClick={() => setShowPassword(!showPassword)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                        </div>
+                    aria-invalid={errors.email ? "true" : "false"}
+                  />
+                          </div>
+
+                {/* Password Input */}
+                <div>
+                  <Label htmlFor="password">Password</Label>
+                  <div className="relative">
+                            <Input
+                              id="password"
+                              type={showPassword ? "text" : "password"}
+                              autoComplete="current-password"
+                              {...register("password")}
+                      placeholder="••••••••••"
+                      aria-required="true"
+                      aria-invalid={errors.password ? "true" : "false"}
+                      aria-describedby="password-error"
+                            />
+                    <Button
+                              type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-2 top-1/2 -translate-y-1/2"
+                              onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      aria-pressed={showPassword}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                          </div>
+                  {errors.password && (
+                    <p id="password-error" className="text-sm text-destructive mt-1">
+                      {errors.password.message}
+                    </p>
+                  )}
                   </div>
 
-              {/* MFA Input */}
-                      <AnimatePresence>
-                        {showMfaInput && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "auto" }}
-                            exit={{ opacity: 0, height: 0 }}
+                {/* MFA Input */}
+                        <AnimatePresence>
+                          {showMfaInput && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
                   >
                     <Label htmlFor="mfa_code">MFA Code</Label>
-                              <Input
-                                id="mfa_code"
-                                type="text"
-                      {...register("mfa_code")}
-                            placeholder="Enter 6-digit code"
-                      label="MFA Code"
-                      error={errors.mfa_code?.message}
-                      aria-required={showMfaInput}
-                      aria-invalid={errors.mfa_code ? "true" : "false"}
-                    />
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
+                                <Input
+                                  id="mfa_code"
+                                  type="text"
+                        {...register("mfa_code")}
+                              placeholder="Enter 6-digit code"
+                        label="MFA Code"
+                        error={errors.mfa_code?.message}
+                        aria-required={showMfaInput}
+                        aria-invalid={errors.mfa_code ? "true" : "false"}
+                              />
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
 
-                      {/* Remember Me & Forgot Password */}
-              <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                          <Checkbox
-                            id="remember_me"
-                            checked={watch("remember_me")}
-                        onCheckedChange={(checked) => setValue("remember_me", checked as boolean)}
-                    label="Remember me"
-                    aria-label="Remember me on this device"
+                        {/* Remember Me & Forgot Password */}
+                <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                            <Checkbox
+                              id="remember_me"
+                              checked={watch("remember_me")}
+                          onCheckedChange={(checked) => setValue("remember_me", checked as boolean)}
                       />
-                  <Label 
-                    htmlFor="remember_me" 
-                    className="text-sm text-gray-400"
+                    <Label 
+                      htmlFor="remember_me" 
+                      className="text-sm text-gray-400"
+                    >
+                              Remember me
+                            </Label>
+                          </div>
+                  <Link
+                    to="/auth/forgot-password"
+                    className="text-sm text-blue-400 hover:text-blue-300"
+                    aria-label="Forgot your password? Click to reset"
                   >
-                            Remember me
-                          </Label>
-                        </div>
-                <Link
-                  to="/auth/forgot-password"
-                  className="text-sm text-blue-400 hover:text-blue-300"
-                  aria-label="Forgot your password? Click to reset"
-                >
-                  Forgot password?
-                </Link>
-                  </div>
+                    Forgot password?
+                  </Link>
+                    </div>
 
-              {/* Submit Button */}
+                {/* Submit Button */}
                         <Button
                           type="submit"
                           disabled={isLoading}
@@ -254,7 +260,7 @@ const LoginPage: React.FC = () => {
                           )}
                         </Button>
 
-              {/* OAuth Divider */}
+                {/* OAuth Divider */}
                 <div className="relative my-6">
                       <div className="absolute inset-0 flex items-center">
                     <div className="w-full border-t border-white/20" />
@@ -275,7 +281,7 @@ const LoginPage: React.FC = () => {
                 label="Continue with Google"
               >
                 <img
-                  src="/google.svg"
+                  src={getPublicAssetUrl('google.svg')}
                   alt="Google"
                   className="w-5 h-5 mr-2"
                   aria-hidden="true"
@@ -296,9 +302,65 @@ const LoginPage: React.FC = () => {
                   </Link>
                 </span>
                       </div>
-            </form>
-              </motion.div>
-            </div>
+              </form>
+            </motion.div>
+          </div>
+
+          {/* Right Side: Platform Details */}
+          <div className="hidden md:flex flex-col items-center justify-center p-8 bg-slate-800/50">
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+              className="w-full max-w-md"
+            >
+              <h1 className="text-4xl font-bold">Enterprise AI Trading Platform</h1>
+              <p className="text-muted-foreground mt-4">
+                Automated cryptocurrency trading powered by advanced AI algorithms
+              </p>
+              <div className="space-y-6 mt-8">
+                <div>
+                    <h3 className="text-lg font-semibold">AI-Powered Trading</h3>
+                    <p className="text-muted-foreground">Multi-model consensus with GPT-4, Claude, and Gemini</p>
+                </div>
+                <div>
+                    <h3 className="text-lg font-semibold">Enterprise Security</h3>
+                    <p className="text-muted-foreground">Bank-level encryption with multi-factor authentication</p>
+                </div>
+                <div>
+                    <h3 className="text-lg font-semibold">Real-Time Execution</h3>
+                    <p className="text-muted-foreground">Lightning-fast trades across multiple exchanges</p>
+                </div>
+                <div>
+                    <h3 className="text-lg font-semibold">Risk Management</h3>
+                    <p className="text-muted-foreground">Advanced portfolio protection and position sizing</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4 mt-8">
+                <div className="text-center">
+                  <p className="text-3xl font-bold text-green-400">99.9%</p>
+                  <p className="text-sm text-muted-foreground">Uptime</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-3xl font-bold text-blue-400">$100M+</p>
+                  <p className="text-sm text-muted-foreground">Assets Under Management</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-3xl font-bold text-green-400">24/7</p>
+                  <p className="text-sm text-muted-foreground">Trading</p>
+                </div>
+              </div>
+
+              <div className="mt-8 p-4 border border-white/10 rounded-lg bg-white/5">
+                <p className="text-sm italic text-muted-foreground">
+                  "CryptoUniverse's AI trading platform has revolutionized our investment strategy. The autonomous features and risk management are unparalleled."
+                </p>
+                <p className="text-sm font-semibold mt-2">— Sarah Chen, Portfolio Manager at Hedge Fund Alpha</p>
+              </div>
+            </motion.div>
+          </div>
+        </div>
       </Container>
     </div>
   );
