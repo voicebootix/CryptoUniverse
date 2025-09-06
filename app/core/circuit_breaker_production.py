@@ -100,7 +100,12 @@ class CircuitBreaker:
         
         try:
             # Execute the function
-            result = await func(*args, **kwargs) if asyncio.iscoroutinefunction(func) else func(*args, **kwargs)
+            if asyncio.iscoroutinefunction(func):
+                result = await func(*args, **kwargs)
+            else:
+                # Offload synchronous function to thread pool to avoid blocking event loop
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, func, *args, **kwargs)
             
             # Record success
             execution_time_ms = (time.time() - start_time) * 1000
@@ -632,8 +637,14 @@ class ProductionCircuitBreakerManager:
         
         if use_backpressure and self.backpressure_manager:
             # Use both circuit breaker and backpressure
+            # Create a synchronous wrapper that returns a task instead of a coroutine
+            def circuit_breaker_wrapper():
+                return asyncio.create_task(
+                    circuit_breaker.call(func, *args, priority=priority, **kwargs)
+                )
+            
             return await self.backpressure_manager.execute_with_backpressure(
-                lambda: circuit_breaker.call(func, *args, priority=priority, **kwargs),
+                circuit_breaker_wrapper,
                 priority=priority
             )
         else:
