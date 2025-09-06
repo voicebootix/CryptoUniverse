@@ -150,6 +150,9 @@ class Settings(BaseSettings):
     COINGECKO_API_KEY: Optional[str] = Field(default=None, env="COINGECKO_API_KEY", description="CoinGecko API key")
     FINNHUB_API_KEY: Optional[str] = Field(default=None, env="FINNHUB_API_KEY", description="Finnhub API key")
     
+    # Admin settings
+    ADMIN_USERS_MOCK: bool = Field(default=False, env="ADMIN_USERS_MOCK", description="Enable mock admin users response (for testing only)")
+    
     # OAuth settings
     GOOGLE_CLIENT_ID: Optional[str] = Field(default=None, description="Google OAuth client ID")
     GOOGLE_CLIENT_SECRET: Optional[str] = Field(default=None, description="Google OAuth client secret")

@@ -115,27 +115,27 @@ async def get_system_overview(
         # Get database metrics
         # Count active users
         result = await db.execute(
-            select(func.count(User.id)).filter(
+            select(func.count(User.id)).where(
                 User.status == UserStatus.ACTIVE,
                 User.last_login >= datetime.utcnow() - timedelta(days=7)
             )
         )
-        active_users = result.scalar()
+        active_users = result.scalar_one_or_none() or 0
         
         # Count trades today
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         result = await db.execute(
-            select(func.count(Trade.id)).filter(Trade.created_at >= today_start)
+            select(func.count(Trade.id)).where(Trade.created_at >= today_start)
         )
-        trades_today = result.scalar()
+        trades_today = result.scalar_one_or_none() or 0
         
         # Calculate volume
         result = await db.execute(
-            select(func.sum(Trade.amount)).filter(
+            select(func.sum(Trade.amount)).where(
                 Trade.created_at >= datetime.utcnow() - timedelta(hours=24)
             )
         )
-        volume_24h = result.scalar() or 0
+        volume_24h = result.scalar_one_or_none() or 0
         
         return {
             "system_health": system_status.get("health", "unknown"),
@@ -454,38 +454,64 @@ async def list_users(
         user_id=str(current_user.id)
     )
     
+    # Check if mock mode is enabled
+    if settings.ADMIN_USERS_MOCK:
+        logger.warning("⚠️ ADMIN_USERS_MOCK is enabled - returning mock data. This should NOT be used in production!")
+        return UserListResponse(
+            users=[],
+            total_count=0,
+            active_count=0,
+            trading_count=0
+        )
+    
     try:
-        query = db.query(User)
+        # Build the base query using select statement for async
+        stmt = select(User)
         
-        # Apply filters
+        # Apply filters using where clause for async SQLAlchemy
         if status_filter:
-            query = query.filter(User.status == status_filter)
+            stmt = stmt.where(User.status == status_filter)
         
         if role_filter:
-            query = query.filter(User.role == role_filter)
+            stmt = stmt.where(User.role == role_filter)
         
         if search:
-            query = query.filter(
-                or_(
-                    User.email.ilike(f"%{search}%"),
-                    User.full_name.ilike(f"%{search}%")
+            # Fix: full_name is a property, not a DB column
+            # Use email search only (remove full_name search)
+            stmt = stmt.where(
+                User.email.ilike(f"%{search}%")
+            )
+        
+        # Get total count using subquery for accurate filtering
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        count_result = await db.execute(count_stmt)
+        total_count = count_result.scalar_one()
+        
+        # Add deterministic ordering before pagination
+        stmt = stmt.order_by(User.created_at.desc(), User.id)
+        
+        # Apply pagination
+        stmt = stmt.offset(skip).limit(limit)
+        
+        # Execute query
+        result = await db.execute(stmt)
+        users = result.scalars().all()
+        
+        # Count by status using async queries
+        active_count_result = await db.execute(
+            select(func.count()).select_from(User).where(User.status == UserStatus.ACTIVE)
+        )
+        active_count = active_count_result.scalar_one()
+        
+        trading_count_result = await db.execute(
+            select(func.count()).select_from(User).where(
+                and_(
+                    User.status == UserStatus.ACTIVE,
+                    User.role.in_([UserRole.TRADER, UserRole.ADMIN])
                 )
             )
-        
-        # Get total count
-        total_count = query.count()
-        
-        # Get paginated results
-        users = query.offset(skip).limit(limit).all()
-        
-        # Count by status
-        active_count = db.query(User).filter(User.status == UserStatus.ACTIVE).count()
-        trading_count = db.query(User).filter(
-            and_(
-                User.status == UserStatus.ACTIVE,
-                User.role.in_([UserRole.TRADER, UserRole.ADMIN])
-            )
-        ).count()
+        )
+        trading_count = trading_count_result.scalar_one()
         
         # Format user data
         user_list = []
@@ -501,14 +527,18 @@ async def list_users(
                 "tenant_id": str(user.tenant_id) if user.tenant_id else None
             }
             
-            # Get credit balance
-            credit_account = db.query(CreditAccount).filter(
-                CreditAccount.user_id == user.id
-            ).first()
+            # Get credit balance using async query
+            credit_result = await db.execute(
+                select(CreditAccount).where(CreditAccount.user_id == user.id)
+            )
+            credit_account = credit_result.scalar_one_or_none()
             user_data["credits"] = credit_account.available_credits if credit_account else 0
             
-            # Get trading stats
-            trade_count = db.query(Trade).filter(Trade.user_id == user.id).count()
+            # Get trading stats using async query
+            trade_count_result = await db.execute(
+                select(func.count()).select_from(Trade).where(Trade.user_id == user.id)
+            )
+            trade_count = trade_count_result.scalar_one()
             user_data["total_trades"] = trade_count
             
             user_list.append(user_data)
@@ -551,8 +581,11 @@ async def manage_user(
     )
     
     try:
-        # Get target user
-        target_user = db.query(User).filter(User.id == request.user_id).first()
+        # Get target user using async query
+        result = await db.execute(
+            select(User).where(User.id == request.user_id)
+        )
+        target_user = result.scalar_one_or_none()
         if not target_user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -584,10 +617,13 @@ async def manage_user(
                     detail="Credit amount required for reset_credits action"
                 )
             
-            # Get or create credit account
-            credit_account = db.query(CreditAccount).filter(
-                CreditAccount.user_id == target_user.id
-            ).first()
+            # Get or create credit account using async query
+            credit_result = await db.execute(
+                select(CreditAccount).where(
+                    CreditAccount.user_id == target_user.id
+                )
+            )
+            credit_account = credit_result.scalar_one_or_none()
             
             if not credit_account:
                 credit_account = CreditAccount(
@@ -626,7 +662,7 @@ async def manage_user(
         )
         db.add(audit_log)
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "action_completed",
@@ -669,19 +705,28 @@ async def get_detailed_metrics(
         yesterday_start = today_start - timedelta(days=1)
         
         # Active users (logged in last 24h)
-        active_users = db.query(User).filter(
-            User.last_login >= now - timedelta(hours=24)
-        ).count()
+        active_users_result = await db.execute(
+            select(func.count()).select_from(User).where(
+                User.last_login >= now - timedelta(hours=24)
+            )
+        )
+        active_users = active_users_result.scalar_one()
         
         # Trades today
-        trades_today = db.query(Trade).filter(
-            Trade.created_at >= today_start
-        ).count()
+        trades_today_result = await db.execute(
+            select(func.count()).select_from(Trade).where(
+                Trade.created_at >= today_start
+            )
+        )
+        trades_today = trades_today_result.scalar_one()
         
         # Volume 24h
-        volume_24h = db.query(func.sum(Trade.amount)).filter(
-            Trade.created_at >= now - timedelta(hours=24)
-        ).scalar() or 0
+        volume_24h_result = await db.execute(
+            select(func.sum(Trade.amount)).where(
+                Trade.created_at >= now - timedelta(hours=24)
+            )
+        )
+        volume_24h = volume_24h_result.scalar_one_or_none() or 0
         
         # Get system health from master controller
         system_status = await master_controller.get_global_system_status()
@@ -738,31 +783,38 @@ async def get_audit_logs(
     )
     
     try:
-        query = db.query(AuditLog)
+        # Build query using select statement for async
+        stmt = select(AuditLog)
         
-        # Apply filters
+        # Apply filters using where clause
         if user_id:
-            query = query.filter(AuditLog.user_id == user_id)
+            stmt = stmt.where(AuditLog.user_id == user_id)
         
         if action_filter:
-            query = query.filter(AuditLog.action.ilike(f"%{action_filter}%"))
+            stmt = stmt.where(AuditLog.action.ilike(f"%{action_filter}%"))
         
         if start_date:
             start_dt = datetime.fromisoformat(start_date)
-            query = query.filter(AuditLog.created_at >= start_dt)
+            stmt = stmt.where(AuditLog.created_at >= start_dt)
         
         if end_date:
             end_dt = datetime.fromisoformat(end_date)
-            query = query.filter(AuditLog.created_at <= end_dt)
+            stmt = stmt.where(AuditLog.created_at <= end_dt)
         
         # Order by most recent
-        query = query.order_by(AuditLog.created_at.desc())
+        stmt = stmt.order_by(AuditLog.created_at.desc())
         
-        # Get total count
-        total_count = query.count()
+        # Get total count using subquery
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        count_result = await db.execute(count_stmt)
+        total_count = count_result.scalar_one()
+        
+        # Apply pagination
+        stmt = stmt.offset(skip).limit(limit)
         
         # Get paginated results
-        audit_logs = query.offset(skip).limit(limit).all()
+        result = await db.execute(stmt)
+        audit_logs = result.scalars().all()
         
         # Format results
         log_list = []
@@ -777,8 +829,11 @@ async def get_audit_logs(
                 "created_at": log.created_at.isoformat()
             }
             
-            # Get user email
-            user = db.query(User).filter(User.id == log.user_id).first()
+            # Get user email using async query
+            user_result = await db.execute(
+                select(User).where(User.id == log.user_id)
+            )
+            user = user_result.scalar_one_or_none()
             log_data["user_email"] = user.email if user else "unknown"
             
             log_list.append(log_data)
