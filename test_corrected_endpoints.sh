@@ -4,7 +4,13 @@
 
 BASE_URL="https://cryptouniverse.onrender.com"
 API_URL="${BASE_URL}/api/v1"
-TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YTFlZThjZC1iZmM5LTRlNGUtODViMi02OWM4ZTkxMDU0YWYiLCJlbWFpbCI6ImFkbWluQGNyeXB0b3VuaXZlcnNlLmNvbSIsInJvbGUiOiJhZG1pbiIsInRlbmFudF9pZCI6IiIsImV4cCI6MTc1NzEyNjYxMSwiaWF0IjoxNzU3MDk3ODExLCJqdGkiOiI3NTAxYzY1ZmQ4OTEzMWI2ZmE3NzQ2MmI3MDMxOWQ0YiIsInR5cGUiOiJhY2Nlc3MifQ.0FvzG-2j1Anj_OyOgVz97JL-9y8xXtWnjjPtj_Mqo7Y"
+
+# Check if TOKEN environment variable is set
+if [ -z "$TOKEN" ]; then
+    echo "Error: TOKEN environment variable not set"
+    echo "Please set TOKEN with: export TOKEN=your_jwt_token_here"
+    exit 1
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

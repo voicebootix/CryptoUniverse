@@ -3,6 +3,9 @@ Fixed list_users function - Replace lines 439-520 in admin.py with this code
 """
 
 # This is the complete PROPER async version of list_users function
+# This file contains the fixed list_users function
+# DO NOT IMPORT - for reference only
+
 FIXED_FUNCTION = '''@router.get("/users", response_model=UserListResponse)
 async def list_users(
     skip: int = 0,
@@ -123,5 +126,6 @@ async def list_users(
             detail=f"Failed to list users: {str(e)}"
         )'''
 
-print("Replace the list_users function in admin.py with the code above")
-print("This is production-ready async code")
+if __name__ == "__main__":
+    print("Replace the list_users function in admin.py with the code above")
+    print("This is production-ready async code")

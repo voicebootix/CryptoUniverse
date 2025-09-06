@@ -461,20 +461,30 @@ async def list_users(
         
         # Apply filters
         if status_filter:
-            condition = User.status == status_filter
-            stmt = stmt.filter(condition)
-            filter_conditions.append(condition)
+            try:
+                # Convert string to UserStatus enum
+                status_enum = UserStatus(status_filter)
+                condition = User.status == status_enum
+                stmt = stmt.filter(condition)
+                filter_conditions.append(condition)
+            except ValueError:
+                # Invalid status filter, skip it
+                pass
         
         if role_filter:
-            condition = User.role == role_filter
-            stmt = stmt.filter(condition)
-            filter_conditions.append(condition)
+            try:
+                # Convert string to UserRole enum
+                role_enum = UserRole(role_filter)
+                condition = User.role == role_enum
+                stmt = stmt.filter(condition)
+                filter_conditions.append(condition)
+            except ValueError:
+                # Invalid role filter, skip it
+                pass
         
         if search:
-            condition = or_(
-                User.email.ilike(f"%{search}%"),
-                User.full_name.ilike(f"%{search}%")
-            )
+            # Search only by email since User.full_name doesn't exist
+            condition = User.email.ilike(f"%{search}%")
             stmt = stmt.filter(condition)
             filter_conditions.append(condition)
         
