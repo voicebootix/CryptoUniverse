@@ -523,7 +523,7 @@ async def list_users(
             user_data = {
                 "id": str(user.id),
                 "email": user.email,
-                "full_name": user.full_name,
+                "full_name": user.email,  # Using email as full_name doesn't exist
                 "role": user.role.value,
                 "status": user.status.value,
                 "created_at": user.created_at.isoformat(),

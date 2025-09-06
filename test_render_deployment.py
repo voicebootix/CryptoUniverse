@@ -30,17 +30,23 @@ async def test_endpoint(session: aiohttp.ClientSession, name: str, method: str, 
     }
     
     try:
-        async with session.request(method, url, json=data, headers=headers) as response:
-            result["status_code"] = response.status_code
+        timeout = aiohttp.ClientTimeout(total=30)  # 30 second timeout
+        async with session.request(method, url, json=data, headers=headers, timeout=timeout) as response:
+            result["status_code"] = response.status
             result["success"] = response.status in [200, 201, 204]
             
-            if response.headers.get('content-type', '').startswith('application/json'):
+            content_type = response.headers.get('content-type', '').lower()
+            if content_type.startswith('application/json'):
                 result["response"] = await response.json()
             else:
                 result["response"] = await response.text()
                 
+    except asyncio.TimeoutError:
+        result["error"] = "Request timed out after 30 seconds"
+    except aiohttp.ClientError as e:
+        result["error"] = f"HTTP client error: {str(e)}"
     except Exception as e:
-        result["error"] = str(e)
+        result["error"] = f"Unexpected error: {str(e)}"
     
     return result
 
@@ -143,9 +149,17 @@ async def run_tests():
                 print(f"   Error: {result['error']}")
         
         # Save results to file
-        with open('/c/Users/ASUS/CryptoUniverse/testsprite_tests/render_test_results.json', 'w') as f:
+        from pathlib import Path
+        from datetime import datetime
+        
+        project_root = Path(__file__).parent
+        results_dir = project_root / "testsprite_tests"
+        results_dir.mkdir(exist_ok=True)
+        results_file = results_dir / "render_test_results.json"
+        
+        with open(results_file, 'w') as f:
             json.dump({
-                "timestamp": "2025-09-05",
+                "timestamp": datetime.utcnow().isoformat(),
                 "base_url": BASE_URL,
                 "summary": {
                     "passed": passed,
@@ -156,7 +170,7 @@ async def run_tests():
                 "results": test_results
             }, f, indent=2)
         
-        print("\n💾 Results saved to: testsprite_tests/render_test_results.json")
+        print(f"\n💾 Results saved to: {results_file.relative_to(project_root)}"
         print("\n🎉 Render deployment testing complete!")
         
         return test_results

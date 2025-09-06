@@ -81,19 +81,19 @@ The routes exist in code but return 404. Check:
 
 | Category | Endpoint | Expected | Actual | Status |
 |----------|----------|----------|--------|--------|
-| **AI Chat** | POST /chat/message | 200 | 404 | ❌ Missing |
-| | GET /chat/history | 200 | 404 | ❌ Missing |
-| | GET /chat/sessions | 200 | 404 | ❌ Missing |
-| **Market** | GET /market/prices | 200 | 404 | ❌ Missing |
-| | GET /market/analysis/BTC | 200 | 404 | ❌ Missing |
-| | GET /market/sentiment | 200 | 404 | ❌ Missing |
-| **AI Consensus** | POST /ai-consensus/analyze | 200 | 404 | ❌ Missing |
-| | GET /ai/recommendations | 200 | 404 | ❌ Missing |
-| **Admin** | GET /admin/users | 200 | 500 | 🔥 Error |
-| | GET /admin/system/status | 200 | 500 | 🔥 Error |
-| **Telegram** | POST /telegram/connect | 200 | 500 | 🔥 Error |
-| **Trading** | GET /trading/portfolio | 200 | 200 | ✅ Working |
-| **Exchanges** | GET /exchanges/list | 200 | 200 | ✅ Working |
+| **AI Chat** | POST /api/v1/chat/message | 200 | 404 | ❌ Missing |
+| | GET /api/v1/chat/history | 200 | 404 | ❌ Missing |
+| | GET /api/v1/chat/sessions | 200 | 404 | ❌ Missing |
+| **Market** | GET /api/v1/market/prices | 200 | 404 | ❌ Missing |
+| | GET /api/v1/market/analysis/BTC | 200 | 404 | ❌ Missing |
+| | GET /api/v1/market/sentiment | 200 | 404 | ❌ Missing |
+| **AI Consensus** | POST /api/v1/ai-consensus/analyze | 200 | 404 | ❌ Missing |
+| | GET /api/v1/ai/recommendations | 200 | 404 | ❌ Missing |
+| **Admin** | GET /api/v1/admin/users | 200 | 500 | 🔥 Error |
+| | GET /api/v1/admin/system/status | 200 | 500 | 🔥 Error |
+| **Telegram** | POST /api/v1/telegram/connect | 200 | 500 | 🔥 Error |
+| **Trading** | GET /api/v1/trading/portfolio | 200 | 200 | ✅ Working |
+| **Exchanges** | GET /api/v1/exchanges/list | 200 | 200 | ✅ Working |
 
 ## 🚀 Immediate Action Items
 
