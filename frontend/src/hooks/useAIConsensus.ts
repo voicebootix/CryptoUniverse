@@ -111,7 +111,7 @@ export const useAIConsensus = () => {
   const queryClient = useQueryClient();
 
   // Real-time AI consensus updates via WebSocket
-  const { lastMessage, connectionStatus } = useWebSocket('/ws/ai-consensus', {
+  const { lastMessage, connectionStatus } = useWebSocket('/api/v1/ai-consensus/ws', {
     onMessage: (data) => {
       if (data.type === 'ai_consensus_update') {
         // Update consensus history - safe property access

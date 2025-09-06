@@ -25,7 +25,7 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-router = APIRouter(prefix="/chat", tags=["AI Chat"])
+router = APIRouter(tags=["AI Chat"])
 
 
 # Pydantic models for request/response

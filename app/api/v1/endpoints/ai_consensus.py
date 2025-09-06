@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Any
 from decimal import Decimal
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -909,3 +909,40 @@ async def resume_ai_operations(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Resume operations failed: {str(e)}"
         )
+
+
+# WebSocket endpoint for real-time AI consensus updates
+@router.websocket("/ws")
+async def ai_consensus_websocket(
+    websocket: WebSocket
+):
+    """WebSocket endpoint for real-time AI consensus updates."""
+    await websocket.accept()
+    
+    try:
+        while True:
+            # Receive message from client
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            # Handle different message types
+            if message.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+            elif message.get("type") == "subscribe":
+                # Subscribe to AI consensus updates
+                await websocket.send_json({
+                    "type": "subscribed",
+                    "message": "Subscribed to AI consensus updates"
+                })
+            else:
+                # Echo back for now
+                await websocket.send_json({
+                    "type": "ai_consensus_update",
+                    "data": message
+                })
+                
+    except WebSocketDisconnect:
+        logger.info("AI consensus WebSocket disconnected")
+    except Exception as e:
+        logger.error(f"AI consensus WebSocket error: {e}")
+        await websocket.close()

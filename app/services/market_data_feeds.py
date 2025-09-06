@@ -546,7 +546,20 @@ class MarketDataFeeds:
                         # ENTERPRISE: Handle rate limiting specifically
                         retry_after = response.headers.get("Retry-After", "60")
                         error_msg = f"API error: 429 - Rate limited (retry after {retry_after}s)"
-                        logger.warning(f"CoinGecko rate limited", symbol=symbol, retry_after=retry_after)
+                        logger.debug(f"CoinGecko rate limited", symbol=symbol, retry_after=retry_after)
+                        
+                        # Try to return cached data if available
+                        if self.redis:
+                            try:
+                                cached_key = f"market_price:{symbol.lower()}"
+                                cached_data = await self.redis.get(cached_key)
+                                if cached_data:
+                                    price_data = json.loads(cached_data)
+                                    price_data["from_cache"] = True
+                                    return {"success": True, "data": price_data}
+                            except Exception:
+                                pass
+                        
                         return {"success": False, "error": error_msg}
                     
                     return {"success": False, "error": f"API error: {response.status}"}

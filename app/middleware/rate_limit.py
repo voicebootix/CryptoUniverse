@@ -145,6 +145,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         rule = self.get_rule(request)
         redis = await get_redis_client()
         
+        # If Redis is unavailable, allow the request (fail open)
+        if not redis:
+            logger.warning("Redis unavailable for rate limiting - allowing request")
+            return True
+        
         # Generate the Redis key
         key = await self.get_redis_key(request, rule)
         now = int(time.time())
