@@ -217,10 +217,13 @@ async def configure_system(
         # Log audit trail
         audit_log = AuditLog(
             user_id=current_user.id,
-            action="system_configuration",
-            details={"changes": changes_applied},
-            ip_address="admin_api",
-            user_agent="system"
+            event_type="system_configuration",
+            event_data={
+                "changes": changes_applied,
+                "details": {"changes": changes_applied},
+                "ip_address": "admin_api",
+                "user_agent": "system"
+            }
         )
         
         # Schedule background restart if needed
@@ -678,16 +681,23 @@ async def manage_user(
         # Create audit log
         audit_log = AuditLog(
             user_id=current_user.id,
-            action=f"user_management_{request.action}",
-            details={
+            event_type=f"user_management_{request.action}",
+            event_data={
                 "target_user_id": request.user_id,
                 "target_user_email": target_user.email,
                 "action": request.action,
                 "reason": request.reason,
-                "credit_amount": request.credit_amount
-            },
-            ip_address="admin_api",
-            user_agent="system"
+                "credit_amount": request.credit_amount,
+                "details": {
+                    "target_user_id": request.user_id,
+                    "target_user_email": target_user.email,
+                    "action": request.action,
+                    "reason": request.reason,
+                    "credit_amount": request.credit_amount
+                },
+                "ip_address": "admin_api",
+                "user_agent": "system"
+            }
         )
         db.add(audit_log)
         
@@ -820,7 +830,7 @@ async def get_audit_logs(
             stmt = stmt.where(AuditLog.user_id == user_id)
         
         if action_filter:
-            stmt = stmt.where(AuditLog.action.ilike(f"%{action_filter}%"))
+            stmt = stmt.where(AuditLog.event_type.ilike(f"%{action_filter}%"))
         
         if start_date:
             try:
@@ -863,10 +873,12 @@ async def get_audit_logs(
             log_data = {
                 "id": str(log.id),
                 "user_id": str(log.user_id),
-                "action": log.action,
-                "details": log.details,
-                "ip_address": log.ip_address,
-                "user_agent": log.user_agent,
+                "action": log.event_type,  # Keep "action" key for backward compatibility
+                "event_type": log.event_type,
+                "event_data": log.event_data,
+                "details": log.event_data.get("details", {}),
+                "ip_address": log.event_data.get("ip_address", "unknown"),
+                "user_agent": log.event_data.get("user_agent", "unknown"),
                 "created_at": log.created_at.isoformat()
             }
             
@@ -925,14 +937,19 @@ async def emergency_stop_all_trading(
         # Log audit trail
         audit_log = AuditLog(
             user_id=current_user.id,
-            action="platform_emergency_stop",
-            details={
+            event_type="platform_emergency_stop",
+            event_data={
                 "reason": reason,
                 "affected_users": result.get("affected_users", 0),
-                "stopped_sessions": result.get("stopped_sessions", 0)
-            },
-            ip_address="admin_api",
-            user_agent="system"
+                "stopped_sessions": result.get("stopped_sessions", 0),
+                "details": {
+                    "reason": reason,
+                    "affected_users": result.get("affected_users", 0),
+                    "stopped_sessions": result.get("stopped_sessions", 0)
+                },
+                "ip_address": "admin_api",
+                "user_agent": "system"
+            }
         )
         
         return {
