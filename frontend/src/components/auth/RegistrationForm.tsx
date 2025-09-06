@@ -43,14 +43,28 @@ export default function RegistrationForm() {
   });
 
   const onSubmit = async (data: FormData) => {
+    console.log('Form submitted with data:', data);
+    console.log('Form errors:', errors);
+    
     try {
       setIsLoading(true);
       setError('');
 
+      // Transform data to match backend expectations
+      const registerData = {
+        email: data.email,
+        password: data.password,
+        full_name: data.full_name,
+        role: 'trader', // Default role
+        tenant_id: null // Default tenant
+      };
+
+      console.log('Sending register data:', registerData);
+
       const response = await fetch('/api/v1/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(registerData),
       });
 
       if (!response.ok) {
