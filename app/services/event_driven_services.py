@@ -116,6 +116,14 @@ class EventDrivenServiceManager(LoggerMixin):
                 "batch_size": 5,
                 "timeout": 500
             },
+            "risk_alerts_processor": {
+                "stream": "risk_alerts",
+                "handler": self._handle_risk_alerts,
+                "priority": ServicePriority.CRITICAL,
+                "fallback_interval": 1,  # 1 second emergency fallback
+                "batch_size": 1,         # Process alerts immediately one by one
+                "timeout": 200           # 200ms processing timeout for urgent alerts
+            },
             
             # Important services - hybrid event/polling
             "portfolio_sync": {
@@ -261,6 +269,64 @@ class EventDrivenServiceManager(LoggerMixin):
         logger.info("All event-driven services started", 
                    active_tasks=len(self.consumer_tasks))
     
+    async def _recover_pending(self, stream: str, group: str, consumer: str, min_idle_ms: int = 60000, count: int = 100):
+        """Recover pending entries from dead consumers using XAUTOCLAIM."""
+        try:
+            recovered_count = 0
+            start_id = "0-0"
+            
+            while True:
+                try:
+                    # Use XAUTOCLAIM to reclaim messages that have been pending too long
+                    result = await self.redis.xautoclaim(
+                        stream, 
+                        group, 
+                        consumer,
+                        min_idle_time=min_idle_ms,
+                        start_id=start_id,
+                        count=count
+                    )
+                    
+                    if not result or len(result) < 2:
+                        break
+                    
+                    # result[0] is next_id, result[1] is list of [message_id, fields] pairs
+                    next_id, claimed_messages = result[0], result[1]
+                    
+                    if not claimed_messages:
+                        break
+                    
+                    recovered_count += len(claimed_messages)
+                    
+                    # Process claimed messages immediately
+                    for message_id, fields in claimed_messages:
+                        logger.info(f"Recovered pending message from {stream}",
+                                   message_id=message_id,
+                                   consumer=consumer)
+                        
+                        # Acknowledge the recovered message to prevent re-processing
+                        try:
+                            await self.redis.xack(stream, group, message_id)
+                        except Exception as ack_error:
+                            logger.warning(f"Failed to ACK recovered message {message_id}: {ack_error}")
+                    
+                    # If we didn't get the full count, we're done
+                    if len(claimed_messages) < count:
+                        break
+                    
+                    start_id = next_id or "0-0"
+                    
+                except Exception as claim_error:
+                    logger.warning(f"XAUTOCLAIM failed for {stream}: {claim_error}")
+                    break
+            
+            if recovered_count > 0:
+                logger.info(f"Recovered {recovered_count} pending messages from {stream}",
+                           group=group, consumer=consumer)
+            
+        except Exception as e:
+            logger.warning(f"Failed to recover pending entries from {stream}: {e}")
+    
     async def _run_event_consumer(self, service_name: str, config: Dict):
         """Run event consumer for a specific service."""
         stream_name = config["stream"]
@@ -269,6 +335,9 @@ class EventDrivenServiceManager(LoggerMixin):
         
         logger.info(f"Starting event consumer for {service_name}", 
                    stream=stream_name, consumer_group=consumer_group)
+        
+        # Recover any pending entries from dead consumers
+        await self._recover_pending(stream_name, consumer_group, consumer_name)
         
         while self.running:
             try:
@@ -516,6 +585,89 @@ class EventDrivenServiceManager(LoggerMixin):
             logger.debug("Risk monitoring fallback check")
             # TODO: Periodic risk assessment
     
+    async def _handle_risk_alerts(self, data: Optional[Dict], source: str, message_id: Optional[str] = None):
+        """Handle critical risk alerts (critical priority)."""
+        if source == "event" and data:
+            alert_type = data.get("alert_type", "unknown")
+            severity = data.get("severity", "medium")
+            
+            logger.error("CRITICAL RISK ALERT", 
+                        alert_type=alert_type,
+                        severity=severity, 
+                        details=data.get("details"),
+                        message_id=message_id)
+            
+            # Handle different types of risk alerts
+            if alert_type == "position_limit_exceeded":
+                await self._handle_position_limit_alert(data)
+            elif alert_type == "drawdown_limit_reached":
+                await self._handle_drawdown_alert(data)
+            elif alert_type == "margin_call":
+                await self._handle_margin_call_alert(data)
+            elif alert_type == "system_failure":
+                await self._handle_system_failure_alert(data)
+            else:
+                logger.warning("Unknown risk alert type", alert_type=alert_type)
+                
+        elif source == "fallback":
+            logger.debug("Risk alerts fallback check - checking for unprocessed alerts")
+            # TODO: Check for any unprocessed risk alerts
+    
+    async def _handle_position_limit_alert(self, data: Dict):
+        """Handle position limit exceeded alerts."""
+        symbol = data.get("symbol")
+        current_position = data.get("current_position")
+        limit = data.get("position_limit")
+        
+        logger.critical("Position limit exceeded", 
+                       symbol=symbol,
+                       current_position=current_position,
+                       limit=limit)
+        
+        # TODO: Implement automatic position reduction
+        # TODO: Send notifications to risk management team
+        # TODO: Update risk parameters
+    
+    async def _handle_drawdown_alert(self, data: Dict):
+        """Handle drawdown limit alerts."""
+        current_drawdown = data.get("current_drawdown")
+        limit = data.get("drawdown_limit")
+        
+        logger.critical("Drawdown limit reached",
+                       current_drawdown=current_drawdown,
+                       limit=limit)
+        
+        # TODO: Implement emergency stop loss
+        # TODO: Halt new trading
+        # TODO: Send emergency notifications
+    
+    async def _handle_margin_call_alert(self, data: Dict):
+        """Handle margin call alerts."""
+        account = data.get("account")
+        margin_ratio = data.get("margin_ratio")
+        required_margin = data.get("required_margin")
+        
+        logger.critical("Margin call alert",
+                       account=account,
+                       margin_ratio=margin_ratio,
+                       required_margin=required_margin)
+        
+        # TODO: Implement automatic liquidation if needed
+        # TODO: Send urgent notifications
+    
+    async def _handle_system_failure_alert(self, data: Dict):
+        """Handle system failure alerts."""
+        component = data.get("component")
+        error = data.get("error")
+        
+        logger.critical("System failure alert",
+                       component=component,
+                       error=error)
+        
+        # TODO: Implement circuit breaker activation
+        # TODO: Switch to backup systems
+        # TODO: Send emergency notifications to ops team
+    
     async def _handle_portfolio_sync(self, data: Optional[Dict], source: str, message_id: Optional[str] = None):
         """Handle portfolio synchronization (important priority)."""
         if source == "event" and data:
@@ -588,18 +740,29 @@ class EventDrivenServiceManager(LoggerMixin):
             try:
                 # Cleanup old Redis keys
                 if self.redis:
-                    # Clean up expired stream entries (already handled by TTL, but double-check)
+                    # Clean up expired stream entries using both age and length limits
+                    current_time_ms = int(time.time() * 1000)
+                    
                     for stream_name, config in self.streams.items():
                         try:
-                            # Trim streams to max length
+                            # Age-based retention using XTRIM MINID (Redis Streams require this for time-based retention)
+                            max_age_seconds = config.get("ttl", 3600)  # Default 1 hour if not specified
+                            cutoff_ms = current_time_ms - (max_age_seconds * 1000)
+                            min_id = f"{cutoff_ms}-0"
+                            
+                            # Trim by age first
+                            await self.redis.xtrim(stream_name, minid=min_id, approximate=True)
+                            
+                            # Also trim by length to prevent unbounded growth
                             await self.redis.xtrim(stream_name, maxlen=config["max_len"], approximate=True)
+                            
                         except Exception as e:
-                            logger.warning(f"Failed to trim stream {stream_name}", error=str(e))
+                            logger.warning(f"Failed to trim stream {stream_name}: {e}")
                 
                 logger.debug("Cleanup cycle completed")
                 
             except Exception as e:
-                logger.warning("Cleanup failed", error=str(e))
+                logger.warning(f"Cleanup failed: {e}")
     
     async def _handle_metrics_collection(self, data: Optional[Dict], source: str, message_id: Optional[str] = None):
         """Handle metrics collection (background priority)."""
@@ -732,7 +895,11 @@ class ResourceMonitor:
                 await asyncio.sleep(self.update_interval)
                 
             except Exception as e:
-                logger.warning("Resource monitoring error", error=str(e))
+                # Re-raise CancelledError to allow proper task cancellation
+                if isinstance(e, asyncio.CancelledError):
+                    raise
+                
+                logger.warning("Resource monitoring error", error=str(e), exc_info=True)
                 await asyncio.sleep(self.update_interval)
     
     async def _update_stats(self):

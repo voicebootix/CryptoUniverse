@@ -59,29 +59,6 @@ class BackpressureConfig:
     })
 
 
-class CircuitBreaker:
-    """Production-grade circuit breaker with exponential backoff and metrics."""
-    
-    def __init__(self, name: str, config: CircuitBreakerConfig):
-        self.name = name
-        self.config = config
-        self.state = CircuitState.CLOSED
-        self.failure_count = 0
-        self.success_count = 0
-        self.last_failure_time = 0
-        self.state_change_time = time.time()
-        self.timeout_multiplier = 1
-        
-        # Metrics tracking
-        self.request_count = 0
-        self.failure_history = deque(maxlen=1000)
-        self.latency_history = deque(maxlen=1000)
-        self.state_changes = []
-        
-        # Failure tracking within time window
-        self.failure_times = deque()
-
-
 class CircuitBreakerError(Exception):
     """Raised when the circuit is open."""
     def __init__(self, circuit_name: str, retry_after: float):

@@ -91,6 +91,9 @@ class WebSocketMarketDataManager:
             "data_source_stats": {source.value: 0 for source in DataSource}
         }
         
+        # Fallback failure tracking for exponential backoff
+        self.fallback_failures = {}
+        
         # Cache TTL optimized for crypto volatility
         self.cache_ttl = {
             "price_hot": 1,      # 1 second for hot trading pairs
@@ -126,6 +129,7 @@ class WebSocketMarketDataManager:
                 
         except Exception as e:
             logger.error("Failed to initialize market data manager", error=str(e))
+            raise RuntimeError("Market data manager initialization failed") from e
     
     async def start_real_time_feeds(self, symbols: List[str]) -> bool:
         """Start real-time WebSocket feeds for given symbols with REST fallback."""
@@ -366,14 +370,27 @@ class WebSocketMarketDataManager:
                         DataSource.REST_FALLBACK,
                         price_data.get("exchange", "rest_api")
                     )
+                    
+                    # Reset failure count on success
+                    if symbol in self.fallback_failures:
+                        self.fallback_failures[symbol] = max(0, self.fallback_failures[symbol] - 1)
+                else:
+                    # Track failure for exponential backoff
+                    self.fallback_failures[symbol] = self.fallback_failures.get(symbol, 0) + 1
                 
                 # Get appropriate fallback interval based on symbol priority
                 interval = self._get_fallback_interval(symbol)
                 await asyncio.sleep(interval / 1000)  # Convert to seconds
                 
             except Exception as e:
+                # Track failure for exponential backoff
+                self.fallback_failures[symbol] = self.fallback_failures.get(symbol, 0) + 1
+                
                 logger.error(f"REST fallback failed for {symbol}", error=str(e))
-                await asyncio.sleep(1)
+                
+                # Use exponential backoff interval even for exceptions
+                interval = self._get_fallback_interval(symbol)
+                await asyncio.sleep(interval / 1000)
     
     async def _is_websocket_healthy(self, symbol: str) -> bool:
         """Check if WebSocket is providing recent data for symbol."""
@@ -438,13 +455,37 @@ class WebSocketMarketDataManager:
             return self.cache_ttl["price_cold"]
     
     def _get_fallback_interval(self, symbol: str) -> int:
-        """Get REST fallback interval based on symbol priority (in ms)."""
+        """Get REST fallback interval with exponential backoff and jitter (in ms)."""
+        import random
+        
+        # Conservative base intervals (1-5 seconds instead of 50-500ms)
+        base_intervals = {
+            "hot": 1000,    # 1 second for hot symbols
+            "warm": 2000,   # 2 seconds for warm symbols  
+            "cold": 5000    # 5 seconds for cold symbols
+        }
+        
+        # Determine base interval
         if symbol in self.symbol_priorities["hot"]:
-            return 50   # 50ms for hot symbols
+            base_interval = base_intervals["hot"]
         elif symbol in self.symbol_priorities["warm"]:
-            return 100  # 100ms for warm symbols
+            base_interval = base_intervals["warm"]
         else:
-            return 500  # 500ms for cold symbols
+            base_interval = base_intervals["cold"]
+        
+        # Apply exponential backoff based on recent failures
+        failure_count = self.fallback_failures.get(symbol, 0)
+        if failure_count > 0:
+            # Double the interval for each failure, max 8x
+            backoff_multiplier = min(2 ** failure_count, 8)
+            base_interval = base_interval * backoff_multiplier
+        
+        # Add random jitter (±10%) to spread requests
+        jitter = random.uniform(-0.1, 0.1)
+        final_interval = int(base_interval * (1 + jitter))
+        
+        # Clamp between reasonable bounds (1s to 30s)
+        return max(1000, min(final_interval, 30000))
     
     async def subscribe_to_symbol(self, symbol: str, callback: Callable):
         """Subscribe to real-time updates for a specific symbol."""
@@ -455,11 +496,17 @@ class WebSocketMarketDataManager:
         logger.info(f"Subscribed to {symbol} updates")
     
     async def _notify_subscribers(self, symbol: str, price_data: Dict):
-        """Notify all subscribers of price updates."""
+        """Notify all subscribers of price updates (supports both sync and async callbacks)."""
         if symbol in self.subscription_callbacks:
             for callback in self.subscription_callbacks[symbol]:
                 try:
-                    await callback(price_data)
+                    # Call the callback and check if it returns a coroutine
+                    result = callback(price_data)
+                    
+                    # If it's a coroutine, await it; otherwise it's already done
+                    if asyncio.iscoroutine(result):
+                        await result
+                        
                 except Exception as e:
                     logger.warning(f"Subscriber callback failed for {symbol}", error=str(e))
     

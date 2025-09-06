@@ -318,6 +318,9 @@ class BackpressureManager:
             "last_update": 0
         }
         
+        # CPU monitoring initialization
+        self._cpu_initialized = False
+        
         # Metrics
         self.metrics = {
             "requests_queued": 0,
@@ -342,8 +345,15 @@ class BackpressureManager:
             try:
                 import psutil
                 
-                # Non-blocking resource checks
-                cpu_percent = psutil.cpu_percent(interval=0)
+                # Initialize CPU monitoring on first call
+                if not self._cpu_initialized:
+                    psutil.cpu_percent(interval=None)  # Initialize CPU monitoring
+                    self._cpu_initialized = True
+                    await asyncio.sleep(1)  # Wait for initial measurement
+                    continue
+                
+                # Get accurate CPU reading with small blocking interval
+                cpu_percent = psutil.cpu_percent(interval=0.1)
                 memory = psutil.virtual_memory()
                 disk = psutil.disk_usage('/')
                 
