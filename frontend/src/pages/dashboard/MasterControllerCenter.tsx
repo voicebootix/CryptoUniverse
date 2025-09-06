@@ -220,7 +220,8 @@ const MasterControllerCenter: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Failed to fetch system status:', err);
-      setError('Failed to fetch system status');
+      const errorMsg = err.response?.data?.detail || err.message || 'Failed to fetch system status';
+      setError(`API Error: ${errorMsg} (${err.response?.status || 'Network Error'})`);
     }
   };
 

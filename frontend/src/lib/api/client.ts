@@ -2,7 +2,14 @@ import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, AxiosResponse } f
 import { useAuthStore } from '@/store/authStore';
 
 // API configuration
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1';  // Default to relative path
+// In production, always use the backend URL, not relative paths
+const API_BASE_URL = import.meta.env.VITE_API_URL || 
+  (window.location.hostname === 'cryptouniverse-frontend.onrender.com' 
+    ? 'https://cryptouniverse.onrender.com/api/v1'
+    : '/api/v1');  // Use backend URL in production, relative in dev
+
+// Log the API URL being used (for debugging)
+console.log('API Base URL:', API_BASE_URL);
 
 // Create axios instance
 export const apiClient: AxiosInstance = axios.create({
