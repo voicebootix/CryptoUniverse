@@ -1,48 +1,63 @@
 """
-Circuit Breaker pattern implementation for resilient external service calls.
-
-This module provides a CircuitBreaker class that can be used to wrap calls to external
-services, automatically opening the circuit when failures exceed a threshold.
+Production-Grade Circuit Breaker and Backpressure Management for CryptoUniverse
+Multi-layer circuit breakers with priority-based throttling and resource-aware backpressure.
+Based on production crypto trading system patterns.
 """
 
 import asyncio
 import time
-from typing import Any, Callable, Optional, TypeVar, Dict, List, Tuple
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from enum import Enum, auto
-import logging
+from typing import Dict, List, Optional, Any, Callable, Union
+from enum import Enum
+from dataclasses import dataclass, field
+from collections import deque
 
-from app.core.redis import get_redis_client
-from app.core.logging import logger
-from app.core.config import settings
+import structlog
+from app.core.config import get_settings
 
-T = TypeVar('T')
+settings = get_settings()
+logger = structlog.get_logger(__name__)
+
 
 class CircuitState(Enum):
-    """Circuit breaker states."""
-    CLOSED = auto()      # Normal operation, all requests allowed
-    OPEN = auto()        # Circuit is open, all requests fail fast
-    HALF_OPEN = auto()   # Testing if service has recovered
+    CLOSED = "closed"        # Normal operation
+    OPEN = "open"           # Failing, rejecting requests
+    HALF_OPEN = "half_open" # Testing if service recovered
+
+
+class Priority(Enum):
+    CRITICAL = 1    # Trading execution, risk alerts
+    HIGH = 2        # Market data, portfolio sync  
+    MEDIUM = 3      # Balance updates, user requests
+    LOW = 4         # Analytics, background tasks
+
 
 @dataclass
-class CircuitMetrics:
-    """Metrics for circuit breaker state."""
-    failures: int = 0
-    successes: int = 0
-    last_failure: Optional[datetime] = None
-    last_success: Optional[datetime] = None
-    consecutive_failures: int = 0
-    consecutive_successes: int = 0
-
-@dataclass
-class CircuitConfig:
+class CircuitBreakerConfig:
     """Configuration for circuit breaker behavior."""
-    failure_threshold: int = 5           # Number of failures before opening the circuit
-    recovery_timeout: int = 30           # Seconds before trying to close the circuit
-    success_threshold: int = 3           # Number of successful calls to close the circuit
-    failure_timeout: int = 60            # Time window for counting failures (seconds)
-    excluded_exceptions: Tuple[Exception, ...] = ()
+    failure_threshold: int = 5          # Failures before opening
+    success_threshold: int = 3          # Successes to close from half-open
+    timeout_seconds: int = 60          # Time before trying half-open
+    max_timeout_seconds: int = 300     # Maximum timeout (exponential backoff)
+    failure_window_seconds: int = 60   # Time window for failure counting
+    slow_request_threshold_ms: int = 5000  # Requests slower than this count as failures
+    
+
+@dataclass
+class BackpressureConfig:
+    """Configuration for backpressure management."""
+    max_concurrent_requests: int = 100
+    queue_size_limit: int = 1000
+    memory_threshold_percent: int = 85
+    cpu_threshold_percent: int = 90
+    disk_threshold_percent: int = 95
+    priority_queue_sizes: Dict[Priority, int] = field(default_factory=lambda: {
+        Priority.CRITICAL: 200,
+        Priority.HIGH: 150,
+        Priority.MEDIUM: 100,
+        Priority.LOW: 50
+    })
+
 
 class CircuitBreakerError(Exception):
     """Raised when the circuit is open."""
