@@ -14,7 +14,7 @@ console.log('API Base URL:', API_BASE_URL);
 // Create axios instance
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 60000, // Increase to 60 seconds for slow Render services
+  timeout: 120000, // 2 minutes default timeout for Render cold starts
   headers: {
     'Content-Type': 'application/json',
   },
@@ -159,7 +159,8 @@ apiClient.interceptors.response.use(
 
     // Timeout errors
     if (error.code === 'ECONNABORTED') {
-      const timeoutError = new Error('Connection timeout. The server is taking longer than usual to respond. Please wait a moment and try again.');
+      console.error('Request timeout detected:', error.config?.url);
+      const timeoutError = new Error('Server is starting up. This may take up to 2 minutes on first request. Please wait and try again.');
       timeoutError.name = 'TimeoutError';
       return Promise.reject(timeoutError);
     }
