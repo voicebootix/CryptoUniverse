@@ -139,7 +139,7 @@ What would you like me to help you with next?"""
             }
             
         except Exception as e:
-            self.logger.error("Enhanced portfolio analysis failed", error=str(e))
+            self.logger.exception("Enhanced portfolio analysis failed", error=str(e))
             return {
                 "content": "I encountered an error analyzing your portfolio. Please try again or contact support.",
                 "confidence": 0.0,
@@ -250,7 +250,7 @@ Reply with:
             }
             
         except Exception as e:
-            self.logger.error("Enhanced trade execution failed", error=str(e))
+            self.logger.exception("Enhanced trade execution failed", error=str(e))
             return {
                 "content": "I encountered an error analyzing your trade request. Please try again.",
                 "confidence": 0.0,

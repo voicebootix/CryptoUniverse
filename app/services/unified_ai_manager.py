@@ -27,7 +27,7 @@ from app.services.ai_consensus_core import AIConsensusService
 from app.services.trade_execution import TradeExecutionService
 from app.services.ai_chat_engine import chat_engine, ChatIntent
 from app.services.chat_service_adapters import chat_adapters
-from app.services.telegram_core import TelegramCore
+from app.services.telegram_core import TelegramCommanderService
 from app.services.websocket import manager
 
 settings = get_settings()
@@ -89,7 +89,7 @@ class UnifiedAIManager(LoggerMixin):
         self.ai_consensus = AIConsensusService()
         self.trade_executor = TradeExecutionService()
         self.adapters = chat_adapters
-        self.telegram_core = TelegramCore()
+        self.telegram_core = TelegramCommanderService()
         
         # Redis for state management - initialize properly for async usage
         self.redis = None
@@ -966,6 +966,135 @@ class UnifiedAIManager(LoggerMixin):
         ]
         
         return recommendations
+
+
+    async def process_ai_consensus_result(
+        self,
+        user_id: str,
+        function: str,
+        result: Dict[str, Any],
+        interface: InterfaceType
+    ):
+        """
+        Process AI consensus results and broadcast to all interfaces.
+        
+        Args:
+            user_id: User identifier
+            function: AI consensus function name
+            result: AI consensus result
+            interface: Interface that triggered the request
+        """
+        
+        try:
+            # Generate natural language explanation
+            explanation = await self._generate_consensus_explanation(function, result)
+            
+            # Broadcast via WebSocket to Command Center
+            await manager.broadcast_ai_consensus_update(user_id, {
+                "function": function,
+                "result": result,
+                "explanation": explanation,
+                "consensus_score": result.get("consensus_score", 0),
+                "recommendation": result.get("recommendation", "HOLD"),
+                "model_responses": result.get("model_responses", []),
+                "cost_summary": result.get("cost_summary", {}),
+                "confidence_threshold_met": result.get("confidence_threshold_met", False),
+                "timestamp": result.get("timestamp", datetime.utcnow().isoformat())
+            })
+            
+            # Send to chat interface for natural language interaction
+            await self._send_consensus_to_chat(user_id, explanation, result)
+            
+            # Send Telegram notification if high confidence
+            consensus_score = result.get("consensus_score", 0)
+            if consensus_score > 85:
+                await self._send_telegram_consensus_notification(user_id, explanation, result)
+            
+            self.logger.info(
+                "AI consensus result processed",
+                user_id=user_id,
+                function=function,
+                consensus_score=consensus_score,
+                interface=interface.value
+            )
+            
+        except Exception as e:
+            self.logger.error(
+                "Failed to process AI consensus result",
+                user_id=user_id,
+                function=function,
+                error=str(e)
+            )
+    
+    async def _generate_consensus_explanation(self, function: str, result: Dict[str, Any]) -> str:
+        """Generate natural language explanation of AI consensus result."""
+        
+        try:
+            consensus_score = result.get("consensus_score", 0)
+            recommendation = result.get("recommendation", "HOLD")
+            reasoning = result.get("reasoning", "Analysis completed")
+            
+            if function == "analyze_opportunity":
+                return f"🤖 I analyzed the opportunity with {consensus_score}% confidence across GPT-4, Claude, and Gemini. My recommendation is {recommendation}. {reasoning}"
+            
+            elif function == "validate_trade":
+                approval_status = result.get("trade_validation", {}).get("approval_status", "REVIEW_REQUIRED")
+                return f"🤖 Trade validation complete: {approval_status} with {consensus_score}% confidence. {reasoning}"
+            
+            elif function == "risk_assessment":
+                risk_level = result.get("risk_assessment", {}).get("risk_level", "MEDIUM")
+                return f"🤖 Risk assessment: {risk_level} risk level detected with {consensus_score}% confidence. {reasoning}"
+            
+            elif function == "portfolio_review":
+                portfolio_score = result.get("portfolio_review", {}).get("portfolio_score", 0)
+                return f"🤖 Portfolio review: {portfolio_score}% optimization score with {consensus_score}% confidence. {reasoning}"
+            
+            elif function == "market_analysis":
+                market_strength = result.get("market_analysis", {}).get("market_strength", 0)
+                return f"🤖 Market analysis: {market_strength}% market strength with {consensus_score}% confidence. {reasoning}"
+            
+            elif function == "consensus_decision":
+                final_recommendation = result.get("final_recommendation", "HOLD")
+                return f"🤖 Final decision: {final_recommendation} with {consensus_score}% consensus confidence. {reasoning}"
+            
+            else:
+                return f"🤖 AI consensus analysis complete: {recommendation} with {consensus_score}% confidence. {reasoning}"
+                
+        except Exception as e:
+            self.logger.error("Failed to generate consensus explanation", error=str(e))
+            return f"🤖 AI analysis complete with {result.get('consensus_score', 0)}% confidence."
+    
+    async def _send_consensus_to_chat(self, user_id: str, explanation: str, result: Dict[str, Any]):
+        """Send AI consensus result to chat interface."""
+        
+        try:
+            # Send via chat engine
+            chat_message = {
+                "type": "ai_consensus_result",
+                "message": explanation,
+                "consensus_score": result.get("consensus_score", 0),
+                "recommendation": result.get("recommendation", "HOLD"),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            # Send via WebSocket to chat interface
+            await manager.send_personal_message(json.dumps(chat_message), user_id)
+            
+        except Exception as e:
+            self.logger.error("Failed to send consensus to chat", user_id=user_id, error=str(e))
+    
+    async def _send_telegram_consensus_notification(self, user_id: str, explanation: str, result: Dict[str, Any]):
+        """Send high-confidence AI consensus results to Telegram."""
+        
+        try:
+            # Use existing Telegram service
+            telegram_message = f"🤖 AI Money Manager Update:\n\n{explanation}"
+            
+            # This would integrate with your existing Telegram service
+            # await self.telegram_core.send_message_to_user(user_id, telegram_message)
+            
+        except Exception as e:
+            self.logger.error("Failed to send Telegram consensus notification", user_id=user_id, error=str(e))
 
 
 # Global unified AI manager instance

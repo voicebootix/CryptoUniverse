@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   TrendingUp,
@@ -19,7 +19,8 @@ import {
   Signal,
   Brain,
   Layers,
-  PieChart
+  PieChart,
+  Gauge
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,12 @@ import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart as RechartsPieChart, Pie, Cell } from 'recharts';
 
 const COLORS = ['#22c55e', '#ef4444', '#f59e0b', '#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4'];
+
+// Safe number formatting helper
+const safeToFixed = (value: any, decimals: number): string | undefined => {
+  const num = typeof value === 'string' ? parseFloat(value) : Number(value);
+  return !isNaN(num) && isFinite(num) ? num.toFixed(decimals) : undefined;
+};
 
 const MarketAnalysisPage: React.FC = () => {
   const {
@@ -65,6 +72,88 @@ const MarketAnalysisPage: React.FC = () => {
   const [selectedSymbols, setSelectedSymbols] = useState('BTC,ETH,SOL,ADA,DOT');
   const [selectedTimeframe, setSelectedTimeframe] = useState('1h');
 
+  // Transform institutional flows array into symbol-keyed object
+  const flowsByAsset = useMemo(() => {
+    if (!Array.isArray(institutionalFlows)) return {};
+    
+    return institutionalFlows.reduce((acc: any, flow: any) => {
+      const asset = flow.asset || flow.symbol || 'UNKNOWN';
+      
+      // Normalize flow into transactions array
+      let transactions: any[];
+      if (Array.isArray(flow.transactions)) {
+        transactions = flow.transactions;
+      } else if (flow.volume !== undefined || flow.amount !== undefined) {
+        // Flow itself is an event-level item, wrap as single transaction
+        transactions = [flow];
+      } else {
+        transactions = [];
+      }
+      
+      // Initialize asset accumulator if missing
+      if (!acc[asset]) {
+        acc[asset] = {
+          total_count: 0,
+          running_net_sum: 0,
+          running_abs_sum: 0,
+          all_transactions: []
+        };
+      }
+      
+      // Process each transaction
+      transactions.forEach((tx: any) => {
+        const volume = tx.volume || tx.amount || 0;
+        const isInflow = tx.type === 'inflow' || tx.direction === 'inflow';
+        const absVolume = Math.abs(volume);
+        
+        // Update running totals
+        acc[asset].total_count += 1;
+        acc[asset].running_net_sum += isInflow ? absVolume : -absVolume;
+        acc[asset].running_abs_sum += absVolume;
+        
+        // Add normalized transaction
+        acc[asset].all_transactions.push({
+          direction: isInflow ? 'inflow' : 'outflow',
+          amount: absVolume,
+          exchange: tx.exchange || 'Unknown Exchange',
+          timestamp: tx.timestamp || tx.time || new Date().toISOString(),
+          market_impact: tx.impact || tx.market_impact || 'Low'
+        });
+      });
+      
+      return acc;
+    }, {});
+  }, [institutionalFlows]);
+
+  // Post-process accumulated data
+  const processedFlowsByAsset = useMemo(() => {
+    const processed: any = {};
+    
+    Object.entries(flowsByAsset).forEach(([asset, data]: [string, any]) => {
+      const { total_count, running_net_sum, running_abs_sum, all_transactions } = data;
+      
+      // Compute final metrics
+      const average_size = total_count > 0 ? running_abs_sum / total_count : 0;
+      const net_flow = running_net_sum;
+      
+      // Sort transactions by amount and get top 5
+      const large_transactions = all_transactions
+        .sort((a: any, b: any) => b.amount - a.amount)
+        .slice(0, 5);
+      
+      processed[asset] = {
+        total_flows: total_count,
+        summary: {
+          net_flow,
+          average_size
+        },
+        large_transactions
+      };
+    });
+    
+    return processed;
+  }, [flowsByAsset]);
+
   useEffect(() => {
     // Initial data load
     handleRefreshAll();
@@ -91,6 +180,12 @@ const MarketAnalysisPage: React.FC = () => {
         break;
       case 'trending':
         await fetchTrendingCoins();
+        break;
+      case 'flows':
+        await fetchInstitutionalFlows();
+        break;
+      case 'alpha':
+        await fetchAlphaSignals();
         break;
     }
   };
@@ -564,73 +659,391 @@ const MarketAnalysisPage: React.FC = () => {
           )}
         </TabsContent>
 
-        {/* Other tabs would be implemented similarly */}
+        {/* Sentiment Analysis Tab */}
         <TabsContent value="sentiment" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Brain className="h-5 w-5" />
-                Market Sentiment Analysis
-              </CardTitle>
-              <CardDescription>AI-powered sentiment analysis across timeframes</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-8">
-                <Eye className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">
-                  Sentiment analysis data will appear here when available
-                </p>
-                <Button
-                  onClick={() => handleRefreshSpecific('sentiment')}
-                  disabled={isLoading}
-                  variant="outline"
-                  className="mt-4"
-                >
-                  Load Sentiment Data
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Market Sentiment Overview */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Brain className="h-5 w-5" />
+                  Market Sentiment Analysis
+                </CardTitle>
+                <CardDescription>AI-powered sentiment analysis across timeframes</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {sentimentAnalysis && Object.keys(sentimentAnalysis).length > 0 ? (
+                  <div className="space-y-4">
+                    {Object.entries(sentimentAnalysis).map(([symbol, analysis]: [string, any]) => (
+                      <div key={symbol} className="p-4 rounded-lg border bg-muted/20">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="font-bold text-lg">{symbol}</span>
+                          <Badge variant={
+                            analysis.overall_sentiment?.label === 'VERY_BULLISH' ? 'default' :
+                            analysis.overall_sentiment?.label === 'BULLISH' ? 'default' :
+                            analysis.overall_sentiment?.label === 'BEARISH' ? 'destructive' :
+                            analysis.overall_sentiment?.label === 'VERY_BEARISH' ? 'destructive' : 'secondary'
+                          }>
+                            {analysis.overall_sentiment?.label || 'NEUTRAL'}
+                          </Badge>
+                        </div>
+                        
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Sentiment Score</span>
+                            <span className="font-mono">
+                              {safeToFixed(analysis.overall_sentiment?.score, 3) || '0.000'}
+                            </span>
+                          </div>
+                          
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-muted-foreground">Confidence</span>
+                            <span className="font-mono">
+                              {safeToFixed(analysis.overall_sentiment?.confidence, 1) || '0.0'}%
+                            </span>
+                          </div>
+
+                          {/* Timeframe Breakdown */}
+                          {analysis.timeframe_breakdown && (
+                            <div className="space-y-2">
+                              <span className="text-sm font-medium">Timeframe Analysis:</span>
+                              {Object.entries(analysis.timeframe_breakdown).map(([timeframe, data]: [string, any]) => (
+                                <div key={timeframe} className="flex items-center justify-between text-sm">
+                                  <span className="text-muted-foreground">{timeframe}:</span>
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant={
+                                      data.label === 'VERY_BULLISH' || data.label === 'BULLISH' ? 'default' :
+                                      data.label === 'BEARISH' || data.label === 'VERY_BEARISH' ? 'destructive' : 'secondary'
+                                    }>
+                                      {data.label}
+                                    </Badge>
+                                    <span className="font-mono">{safeToFixed(data.score, 3) || '-'}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Brain className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <p className="text-muted-foreground mb-4">
+                      Load AI-powered sentiment analysis
+                    </p>
+                    <Button
+                      onClick={() => handleRefreshSpecific('sentiment')}
+                      disabled={isLoading}
+                      variant="outline"
+                    >
+                      {isLoading ? (
+                        <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Brain className="h-4 w-4 mr-2" />
+                      )}
+                      Analyze Market Sentiment
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Fear & Greed Index */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Gauge className="h-5 w-5" />
+                  Fear & Greed Index
+                </CardTitle>
+                <CardDescription>Market emotion and sentiment indicator</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {sentimentAnalysis?.market_sentiment?.fear_greed_index ? (
+                  <div className="space-y-4">
+                    <div className="text-center">
+                      <div className="text-4xl font-bold mb-2">
+                        {Math.round(sentimentAnalysis.market_sentiment.fear_greed_index.fear_greed_index)}
+                      </div>
+                      <Badge variant={
+                        sentimentAnalysis.market_sentiment.fear_greed_index.label === 'GREED' ? 'default' :
+                        sentimentAnalysis.market_sentiment.fear_greed_index.label === 'FEAR' ? 'destructive' : 'secondary'
+                      }>
+                        {sentimentAnalysis.market_sentiment.fear_greed_index.label}
+                      </Badge>
+                    </div>
+                    
+                    <div className="w-full bg-muted rounded-full h-3">
+                      <div
+                        className={`h-3 rounded-full ${
+                          sentimentAnalysis.market_sentiment.fear_greed_index.fear_greed_index > 50 ? 'bg-green-500' : 'bg-red-500'
+                        }`}
+                        style={{ 
+                          width: `${sentimentAnalysis.market_sentiment.fear_greed_index.fear_greed_index}%` 
+                        }}
+                      />
+                    </div>
+
+                    <div className="text-sm text-muted-foreground text-center">
+                      {sentimentAnalysis.market_sentiment.fear_greed_index.interpretation}
+                    </div>
+
+                    {/* Components Breakdown */}
+                    {sentimentAnalysis.market_sentiment.fear_greed_index.components && (
+                      <div className="space-y-2">
+                        <span className="text-sm font-medium">Components:</span>
+                        {Object.entries(sentimentAnalysis.market_sentiment.fear_greed_index.components).map(([component, value]: [string, any]) => (
+                          <div key={component} className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground capitalize">
+                              {component.replace('_', ' ')}:
+                            </span>
+                            <span className="font-mono">{Math.round(value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Gauge className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <p className="text-muted-foreground">
+                      Fear & Greed data will appear after sentiment analysis
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="flows" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Layers className="h-5 w-5" />
-                Institutional Flow Tracking
-              </CardTitle>
-              <CardDescription>Monitor whale movements and institutional activity</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-8">
-                <Signal className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">
-                  Institutional flow data will appear here when available
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="grid gap-6">
+            {/* Institutional Flows Overview */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Layers className="h-5 w-5" />
+                  Institutional Flow Tracking
+                </CardTitle>
+                <CardDescription>Monitor whale movements and institutional activity</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {processedFlowsByAsset && Object.keys(processedFlowsByAsset).length > 0 ? (
+                  <div className="space-y-4">
+                    {Object.entries(processedFlowsByAsset).map(([symbol, flows]: [string, any]) => (
+                      <div key={symbol} className="p-4 rounded-lg border bg-muted/20">
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="font-bold text-lg">{symbol}</span>
+                          <Badge variant="outline">
+                            {flows.total_flows || 0} flows detected
+                          </Badge>
+                        </div>
+                        
+                        {flows.large_transactions && flows.large_transactions.length > 0 ? (
+                          <div className="space-y-3">
+                            <span className="text-sm font-medium">Large Transactions:</span>
+                            {flows.large_transactions.slice(0, 5).map((tx: any, index: number) => (
+                              <div key={index} className="flex items-center justify-between p-3 rounded border bg-background/50">
+                                <div className="flex items-center gap-3">
+                                  <Badge variant={tx.direction === 'inflow' ? 'default' : 'destructive'}>
+                                    {tx.direction === 'inflow' ? 'IN' : 'OUT'}
+                                  </Badge>
+                                  <div>
+                                    <div className="font-medium">
+                                      {formatCurrency(tx.amount || 0)}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                      {tx.exchange || 'Unknown Exchange'}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-sm font-mono">
+                                    {tx.timestamp ? new Date(tx.timestamp).toLocaleTimeString() : 'Recent'}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Impact: {tx.market_impact || 'Low'}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-sm text-muted-foreground">
+                            No significant institutional flows detected recently
+                          </div>
+                        )}
+
+                        {/* Flow Summary */}
+                        {flows.summary && (
+                          <div className="mt-4 pt-4 border-t">
+                            <div className="grid grid-cols-2 gap-4 text-sm">
+                              <div>
+                                <span className="text-muted-foreground">Net Flow:</span>
+                                <span className={`ml-2 font-mono ${
+                                  flows.summary.net_flow >= 0 ? 'text-green-500' : 'text-red-500'
+                                }`}>
+                                  {formatCurrency(flows.summary.net_flow || 0)}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Avg Size:</span>
+                                <span className="ml-2 font-mono">
+                                  {formatCurrency(flows.summary.average_size || 0)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Layers className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <p className="text-muted-foreground mb-4">
+                      Load institutional flow tracking data
+                    </p>
+                    <Button
+                      onClick={() => handleRefreshSpecific('flows')}
+                      disabled={isLoading}
+                      variant="outline"
+                    >
+                      {isLoading ? (
+                        <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Layers className="h-4 w-4 mr-2" />
+                      )}
+                      Track Institutional Flows
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="alpha" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Zap className="h-5 w-5" />
-                Alpha Generation Signals
-              </CardTitle>
-              <CardDescription>AI-generated trading signals and opportunities</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-8">
-                <Brain className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">
-                  Alpha signals will appear here when available
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="grid gap-6">
+            {/* Alpha Signals Overview */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Zap className="h-5 w-5" />
+                  Alpha Generation Signals
+                </CardTitle>
+                <CardDescription>AI-generated trading signals and opportunities</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {alphaSignals && alphaSignals.length > 0 ? (
+                  <div className="space-y-4">
+                    {alphaSignals.map((signal: any, index: number) => (
+                      <div key={index} className="p-4 rounded-lg border bg-muted/20">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-3">
+                            <Badge variant="outline" className="font-mono">
+                              {signal.symbol || `Signal ${index + 1}`}
+                            </Badge>
+                            <Badge variant={
+                              signal.direction?.toLowerCase() === 'long' ? 'default' : 
+                              signal.direction?.toLowerCase() === 'short' ? 'destructive' : 'secondary'
+                            }>
+                              {signal.direction?.toUpperCase() || 'NEUTRAL'}
+                            </Badge>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-lg font-bold text-green-500">
+                              {signal.confidence ? `${Math.round(signal.confidence)}%` : 'N/A'}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              Confidence
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                              <span className="text-muted-foreground">Entry Price:</span>
+                              <span className="ml-2 font-mono text-blue-500">
+                                {signal.entry_price ? formatCurrency(signal.entry_price) : 'Market'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Target Price:</span>
+                              <span className="ml-2 font-mono text-green-500">
+                                {signal.target_price ? formatCurrency(signal.target_price) : 'N/A'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Stop Loss:</span>
+                              <span className="ml-2 font-mono text-red-500">
+                                {signal.stop_loss ? formatCurrency(signal.stop_loss) : 'N/A'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Risk/Reward:</span>
+                              <span className="ml-2 font-mono">
+                                {signal.risk_reward_ratio ? `1:${signal.risk_reward_ratio.toFixed(2)}` : 'N/A'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {signal.reasoning && (
+                            <div className="pt-3 border-t">
+                              <span className="text-sm font-medium">AI Reasoning:</span>
+                              <p className="text-sm text-muted-foreground mt-1">
+                                {signal.reasoning}
+                              </p>
+                            </div>
+                          )}
+
+                          {signal.strategies && signal.strategies.length > 0 && (
+                            <div className="flex flex-wrap gap-2">
+                              {signal.strategies.map((strategy: string, idx: number) => (
+                                <Badge key={idx} variant="secondary" className="text-xs">
+                                  {strategy}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>
+                              Generated: {signal.generated_at ? new Date(signal.generated_at).toLocaleString() : 'Recent'}
+                            </span>
+                            <span>
+                              Expires: {signal.expires_at ? new Date(signal.expires_at).toLocaleString() : '24h'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <Zap className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <p className="text-muted-foreground mb-4">
+                      Generate AI-powered alpha signals
+                    </p>
+                    <Button
+                      onClick={() => handleRefreshSpecific('alpha')}
+                      disabled={isLoading}
+                      variant="outline"
+                    >
+                      {isLoading ? (
+                        <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Zap className="h-4 w-4 mr-2" />
+                      )}
+                      Generate Alpha Signals
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

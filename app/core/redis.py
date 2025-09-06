@@ -69,9 +69,9 @@ class RedisConnectionManager:
                     pool_kwargs["socket_keepalive_options"] = keepalive_options
                 
                 self.pool = ConnectionPool.from_url(settings.REDIS_URL, **pool_kwargs)
-                logger.info("Redis connection pool created with enterprise settings")
+                logger.info("Redis connection pool created with enterprise settings", url=settings.REDIS_URL[:20] + "...")
             except Exception as e:
-                logger.error("Failed to create Redis connection pool", error=str(e))
+                logger.warning("Redis connection pool creation failed - running without Redis", error=str(e))
                 self.pool = None
         return self.pool
     

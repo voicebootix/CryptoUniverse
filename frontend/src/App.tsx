@@ -13,6 +13,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import LoginPage from '@/pages/auth/LoginPage';
 import RegisterPage from '@/pages/auth/RegisterPage';
 import OAuthCallbackPage from '@/pages/auth/OAuthCallbackPage';
+import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage';
 
 // Dashboard Pages
 import TradingDashboard from '@/pages/dashboard/TradingDashboard';
@@ -33,6 +34,7 @@ import ExchangesPage from '@/pages/dashboard/ExchangesPage';
 import SettingsPage from '@/pages/dashboard/SettingsPage';
 import AdminPage from '@/pages/dashboard/AdminPage';
 import MarketAnalysisPage from '@/pages/dashboard/MarketAnalysisPage';
+import MasterControllerCenter from '@/pages/dashboard/MasterControllerCenter';
 
 // Loading Component
 const LoadingScreen: React.FC = () => (
@@ -103,14 +105,22 @@ const App: React.FC = () => {
             {/* Public Routes */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             
+            {/* Login page with custom layout */}
+            <Route path="/auth/login" element={
+              <PublicRoute>
+                <LoginPage />
+              </PublicRoute>
+            } />
+            
+            {/* Other auth routes with AuthLayout */}
             <Route path="/auth/*" element={
               <PublicRoute>
                 <AuthLayout />
               </PublicRoute>
             }>
-              <Route path="login" element={<LoginPage />} />
               <Route path="register" element={<RegisterPage />} />
               <Route path="callback" element={<OAuthCallbackPage />} />
+              <Route path="forgot-password" element={<ForgotPasswordPage />} />
               <Route path="*" element={<Navigate to="/auth/login" replace />} />
             </Route>
 
@@ -122,6 +132,9 @@ const App: React.FC = () => {
             }>
               {/* Main Dashboard */}
               <Route index element={<TradingDashboard />} />
+              
+              {/* Master Controller */}
+              <Route path="master-controller" element={<MasterControllerCenter />} />
               
               {/* AI Command Center */}
               <Route path="ai-command" element={<AICommandCenter />} />

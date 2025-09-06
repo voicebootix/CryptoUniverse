@@ -7,23 +7,29 @@ with native Python implementation and enterprise-grade features.
 """
 
 import asyncio
+<<<<<<< HEAD
 import os
+=======
+import json
+>>>>>>> b7e85a74faa79cf2ddcf69e417990b6c13619eb7
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import structlog
 import uvicorn
-from fastapi import FastAPI, Request, HTTPException, status
+from fastapi import FastAPI, Request, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
+from jose import JWTError
 
 # Core imports
 from app.core.config import get_settings
 from app.core.database import engine, db_manager
-from app.core.redis import get_redis_client, close_redis_client
+from app.core.enterprise_startup import get_application
 from app.core.logging import configure_logging
+from app.core.redis import get_redis_client, close_redis_client
 
 # API routes
 from app.api.v1.router import api_router
@@ -68,10 +74,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Connect to Redis
         try:
             redis = await get_redis_client()
-            await redis.ping()
-            logger.info("✅ Redis connected")
+            if redis:
+                await redis.ping()
+                logger.info("✅ Redis connected")
+            else:
+                logger.warning("⚠️ Redis not available - running in degraded mode")
         except Exception as e:
             logger.warning("⚠️ Redis connection failed - running in degraded mode", error=str(e))
+
+        # Initialize rate limiter with Redis
+        try:
+            from app.services.rate_limit import rate_limiter
+            await rate_limiter.async_init()
+            logger.info("✅ Rate limiter initialized")
+        except Exception as e:
+            logger.warning("⚠️ Rate limiter initialization failed", error=str(e))
 
         # Start background services
         await background_manager.start_all()
@@ -148,6 +165,12 @@ def create_application() -> FastAPI:
     # CORS FIRST - must be added before other middleware
     cors_origins = settings.cors_origins
     
+    # Always include production frontend URL
+    production_origins = [
+        settings.FRONTEND_URL, # Ensure frontend URL is always included
+        settings.BASE_URL # Ensure base URL is also included
+    ]
+    
     # Add localhost for development
     if settings.ENVIRONMENT == "development":
         dev_origins = [
@@ -158,28 +181,41 @@ def create_application() -> FastAPI:
         ]
         cors_origins.extend(dev_origins)
     
+    # Ensure production origins are always included
+    for origin in production_origins:
+        if origin not in cors_origins:
+            cors_origins.append(origin)
+    
+    logger.info(f"CORS origins configured: {cors_origins}")
+    
+    # Use computed CORS origins from settings
+    logger.info(f"CORS origins configured: {cors_origins}")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins,
+        allow_origins=cors_origins or [],  # Use computed list or empty list as fallback
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=["*"],
-        max_age=86400,  # Cache preflight for 24 hours
+        max_age=86400  # Cache preflight for 24 hours
     )
+    
+    # Note: Health and root endpoints are defined at module scope to avoid duplication
 
     # Add SessionMiddleware for OAuth
     app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
 
     # Security middleware
-    if settings.ALLOWED_HOSTS:
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
+    if settings.allowed_hosts:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
     # Custom middleware (order matters!)
-    app.add_middleware(RequestLoggingMiddleware)
-    app.add_middleware(RateLimitMiddleware)
-    app.add_middleware(TenantMiddleware)
+    # Add middleware in correct order (executed in reverse)
+    # Temporarily disable RateLimitMiddleware until Redis is working
+    # app.add_middleware(RateLimitMiddleware)
     app.add_middleware(AuthMiddleware)
+    app.add_middleware(TenantMiddleware)
+    app.add_middleware(RequestLoggingMiddleware)
 
     # Include API routes
     app.include_router(api_router, prefix="/api/v1")
@@ -211,14 +247,10 @@ def create_application() -> FastAPI:
         # Log the full traceback for enterprise debugging
         logger.error("Unhandled exception", exc_info=True, method=request.method, path=request.url.path)
         
+        # Let CORSMiddleware handle CORS headers
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "An unexpected server error occurred. Please contact support."},
-            headers={
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, PUT, DELETE',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-            }
+            content={"detail": "An unexpected server error occurred. Please contact support."}
         )
 
     return app
@@ -230,6 +262,7 @@ app = create_application()
 
 # Health check endpoint
 @app.get("/health", tags=["System"])
+@app.head("/health", tags=["System"])
 async def health_check():
     """
     Comprehensive health check endpoint for load balancers and monitoring.
@@ -247,12 +280,15 @@ async def health_check():
         health_status["status"] = "unhealthy"
 
     try:
-        # Check Redis
-        redis = await get_redis_client()
-        await redis.ping()
-        health_status["checks"]["redis"] = "connected"
+        # Check enterprise application health
+        app = await get_application()
+        app_health = app.get_health_status()
+        health_status["checks"]["application"] = app_health['status']
+        
+        if app_health['status'] != 'running':
+            health_status["status"] = "unhealthy"
     except Exception as e:
-        health_status["checks"]["redis"] = f"error: {str(e)}"
+        health_status["checks"]["application"] = f"error: {str(e)}"
         health_status["status"] = "unhealthy"
 
     try:
@@ -310,6 +346,7 @@ async def health_check():
 
 # Root endpoint
 @app.get("/", tags=["System"])
+@app.head("/", tags=["System"])
 async def root():
     """
     Welcome endpoint with API information and feature overview.
@@ -364,6 +401,147 @@ async def metrics():
         return JSONResponse(
             status_code=500, content={"error": "Failed to retrieve metrics", "detail": str(e)}
         )
+
+
+# Global WebSocket endpoint for real-time updates
+@app.websocket("/ws/{path:path}")
+async def global_websocket_endpoint(websocket: WebSocket, path: str):
+    """
+    Global WebSocket endpoint that routes to appropriate service handlers.
+    Handles authentication and routing for all WebSocket connections.
+    """
+    try:
+        # Import WebSocket manager
+        from app.services.websocket import manager
+        
+        # Extract user authentication from bearer subprotocol header
+        user_id = "anonymous"
+        token = None
+        selected_subprotocol = None  # Initialize to None, only set if safe subprotocol offered
+        
+        # Read subprotocols from Sec-WebSocket-Protocol header
+        subprotocols = getattr(websocket, 'scope', {}).get('subprotocols', [])
+        
+        # Scan client-offered subprotocols for bearer token format
+        safe_subprotocols = {"json", "jwt"}  # Safe subprotocols we can echo back
+        
+        if subprotocols:
+            # Look for bearer authentication pattern: ["bearer", <token>, "json"]
+            bearer_index = None
+            for i, subprotocol in enumerate(subprotocols):
+                # Check if this is a safe subprotocol we can echo back
+                if subprotocol.lower() in safe_subprotocols:
+                    selected_subprotocol = subprotocol.lower()
+                
+                # Check for bearer indicator
+                if subprotocol.lower() == "bearer":
+                    bearer_index = i
+                    break
+            
+            # If bearer found, look for JWT token in next subprotocol entry
+            if bearer_index is not None and bearer_index + 1 < len(subprotocols):
+                token = subprotocols[bearer_index + 1]
+        
+        # Validate token if provided
+        if token:
+            try:
+                from app.core.security import verify_access_token
+                payload = verify_access_token(token)
+                if payload and payload.get("sub"):
+                    user_id = payload["sub"]
+                    logger.info("WebSocket authenticated via bearer subprotocol", user_id=user_id, path=path)
+                else:
+                    # Invalid token - reject connection
+                    await websocket.close(code=1008, reason="Invalid authentication token")
+                    return
+            except JWTError as e:
+                logger.warning("WebSocket JWT authentication failed, rejecting connection", 
+                             path=path, error=str(e), exc_info=True)
+                await websocket.close(code=1008, reason="Authentication failed")
+                return
+        
+        # Accept connection - only pass subprotocol if safe one was offered by client
+        if selected_subprotocol:
+            await websocket.accept(subprotocol=selected_subprotocol)
+        else:
+            await websocket.accept()
+        
+        # Connect to WebSocket manager
+        await manager.connect(websocket, user_id)
+        
+        # Handle different WebSocket paths
+        if path.startswith("api/v1/trading/ws"):
+            # Market data and trading updates - allow anonymous
+            await manager.subscribe_to_market_data(websocket, ["BTC", "ETH", "SOL"])
+        elif path.startswith("api/v1/ai-consensus"):
+            # AI consensus updates - require authentication
+            if user_id == "anonymous":
+                await websocket.close(code=1008, reason="Authentication required for AI consensus")
+                return
+            await manager.subscribe_to_ai_consensus(websocket, user_id)
+        
+        # Keep connection alive and handle messages
+        while True:
+            try:
+                data = await websocket.receive_text()
+                message = json.loads(data)
+                message_type = message.get("type")
+                
+                if message_type == "subscribe_market":
+                    symbols = message.get("symbols", [])
+                    await manager.subscribe_to_market_data(websocket, symbols)
+                    await websocket.send_json({
+                        "type": "subscription_confirmed",
+                        "symbols": symbols,
+                        "path": path
+                    })
+                elif message_type == "subscribe_ai_consensus":
+                    # Verify (1) connection path is ai-consensus endpoint and (2) user is authenticated
+                    if not path.startswith("api/v1/ai-consensus"):
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "unauthorized - wrong endpoint for AI consensus subscription"
+                        })
+                        continue
+                    
+                    if user_id == "anonymous":
+                        await websocket.send_json({
+                            "type": "error", 
+                            "message": "unauthorized - authentication required for AI consensus"
+                        })
+                        continue
+                    
+                    await manager.subscribe_to_ai_consensus(websocket, user_id)
+                    await websocket.send_json({
+                        "type": "ai_consensus_subscription_confirmed",
+                        "user_id": user_id
+                    })
+                
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                # Log the original exception server-side including traceback
+                logger.exception("WebSocket message handling error", user_id=user_id, path=path, error=str(e))
+                try:
+                    # Send generic error message to client instead of exception string
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "internal server error"
+                    })
+                except (ConnectionError, WebSocketDisconnect) as send_error:
+                    # Log send failures rather than silently ignoring
+                    logger.warning("Failed to send error message to WebSocket client", 
+                                 user_id=user_id, path=path, send_error=str(send_error))
+    
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected normally", user_id=user_id, path=path)
+    except Exception as e:
+        logger.exception("WebSocket connection error", user_id=user_id, path=path)
+    finally:
+        try:
+            await manager.disconnect(websocket, user_id)
+        except Exception as e:
+            logger.exception("WebSocket disconnect cleanup failed", user_id=user_id, error=str(e))
 
 
 if __name__ == "__main__":

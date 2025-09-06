@@ -174,7 +174,8 @@ async def get_credit_balance(
                 )
             )
             profit_result = await db.execute(profit_stmt)
-            profit_earned = Decimal(str(profit_result.scalar() or 0))
+            scalar_result = profit_result.scalar()
+            profit_earned = Decimal(str(scalar_result if scalar_result is not None else 0))
         except Exception as query_error:
             logger.warning("Profit query failed, using 0", error=str(query_error))
             profit_earned = Decimal("0")
@@ -343,14 +344,26 @@ async def get_profit_potential_status(
             earning_velocity = "slow"
             estimated_days = 60
         
+        # Normalize data structure - handle both top-level and nested shapes
+        profit_potential_usage = usage_result.get("profit_potential_usage", {})
+        
+        # Merge nested structure into top-level if top-level keys are missing
+        # Use explicit None checks to preserve valid zero values
+        normalized_result = {
+            "total_profit_earned": usage_result.get("total_profit_earned") if usage_result.get("total_profit_earned") is not None else profit_potential_usage.get("used_potential_usd", 0),
+            "profit_potential": usage_result.get("profit_potential") if usage_result.get("profit_potential") is not None else profit_potential_usage.get("total_potential_usd", 0),
+            "remaining_potential": usage_result.get("remaining_potential") if usage_result.get("remaining_potential") is not None else profit_potential_usage.get("remaining_potential_usd", 0),
+            "utilization_percentage": usage_result.get("utilization_percentage") if usage_result.get("utilization_percentage") is not None else profit_potential_usage.get("utilization_percentage", 0)
+        }
+        
         return ProfitPotentialResponse(
-            current_profit_earned=Decimal(str(usage_result["total_profit_earned"])),
-            profit_potential=Decimal(str(usage_result["profit_potential"])),
-            remaining_potential=Decimal(str(usage_result["remaining_potential"])),
-            utilization_percentage=usage_result["utilization_percentage"],
+            current_profit_earned=Decimal(str(normalized_result["total_profit_earned"])),
+            profit_potential=Decimal(str(normalized_result["profit_potential"])),
+            remaining_potential=Decimal(str(normalized_result["remaining_potential"])),
+            utilization_percentage=float(normalized_result["utilization_percentage"]),
             active_strategies=active_strategy_count,
             earning_velocity=earning_velocity,
-            estimated_days_to_ceiling=estimated_days if usage_result["remaining_potential"] > 0 else None
+            estimated_days_to_ceiling=estimated_days if float(normalized_result["remaining_potential"]) > 0 else None
         )
         
     except HTTPException:

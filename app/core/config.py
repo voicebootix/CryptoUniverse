@@ -30,14 +30,19 @@ class Settings(BaseSettings):
     
     # Server settings
     HOST: str = Field(default="0.0.0.0", description="Server host")
-    PORT: int = Field(default=8000, description="Server port")
+    PORT: int = Field(default=8000, env="PORT", description="Server port")
     BASE_URL: str = Field(default="https://cryptouniverse.onrender.com", description="Base URL for the application")
     FRONTEND_URL: str = Field(default="https://cryptouniverse-frontend.onrender.com", description="Frontend URL for redirects")
-    ALLOWED_HOSTS: List[str] = Field(default=[], description="Allowed hosts for the application")
+    ALLOWED_HOSTS: str = Field(default="localhost,127.0.0.1", env="ALLOWED_HOSTS", description="Allowed hosts for the application (comma-separated or JSON list)")
     
     # Security settings
     SECRET_KEY: str = Field(..., env="SECRET_KEY", description="Secret key for JWT")
     ENCRYPTION_KEY: str = Field(default="", env="ENCRYPTION_KEY", description="Key for encrypting sensitive data like API keys")
+    
+    # JWT settings
+    JWT_ALGORITHM: str = Field(default="HS256", description="JWT signing algorithm")
+    JWT_ACCESS_TOKEN_EXPIRE_HOURS: int = Field(default=8, env="JWT_ACCESS_TOKEN_EXPIRE_HOURS", description="JWT access token expiration in hours")
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=30, env="JWT_REFRESH_TOKEN_EXPIRE_DAYS", description="JWT refresh token expiration in days")
     
     # Database settings
     DATABASE_URL: str = Field(..., env="DATABASE_URL", description="Database connection URL")
@@ -69,7 +74,49 @@ class Settings(BaseSettings):
         if ',' in v:
             return [origin.strip() for origin in v.split(',') if origin.strip()]
         # Single value
-        return [v.strip()] if v.strip() else ["*"]
+        origins = [v.strip()] if v.strip() else ["*"]
+        # Ensure production frontend and base URLs are present
+        for url in [self.FRONTEND_URL, self.BASE_URL]:
+            if url and url not in origins:
+                origins.append(url)
+        # If we have specific origins, drop wildcard to satisfy allow_credentials
+        if len([o for o in origins if o != "*"]) > 0:
+            origins = [o for o in origins if o != "*"]
+        return origins
+    
+    @computed_field
+    @property
+    def allowed_hosts(self) -> List[str]:
+        """Parse allowed hosts from string to list."""
+        v = self.ALLOWED_HOSTS
+        if not v or v == "":
+            hosts = ["localhost", "127.0.0.1"]
+        else:
+            # Handle JSON array format
+            if v.startswith('['):
+                try:
+                    parsed = json.loads(v)
+                    if isinstance(parsed, list):
+                        hosts = parsed
+                    else:
+                        hosts = []
+                except (json.JSONDecodeError, TypeError):
+                    hosts = []
+            elif ',' in v:
+                hosts = [host.strip() for host in v.split(',') if host.strip()]
+            else:
+                hosts = [v.strip()] if v.strip() else ["localhost", "127.0.0.1"]
+        # Ensure backend and frontend hosts are included
+        for url in [self.BASE_URL, self.FRONTEND_URL]:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                host = parsed.netloc or parsed.path
+                if host and host not in hosts:
+                    hosts.append(host)
+            except Exception:
+                pass
+        return hosts
     
     # Supabase settings
     SUPABASE_URL: Optional[str] = Field(default=None, env="SUPABASE_URL", description="Supabase project URL")
@@ -103,10 +150,19 @@ class Settings(BaseSettings):
     COINGECKO_API_KEY: Optional[str] = Field(default=None, env="COINGECKO_API_KEY", description="CoinGecko API key")
     FINNHUB_API_KEY: Optional[str] = Field(default=None, env="FINNHUB_API_KEY", description="Finnhub API key")
     
+    # Admin settings
+    ADMIN_USERS_MOCK: bool = Field(default=False, env="ADMIN_USERS_MOCK", description="Enable mock admin users response (for testing only)")
+    
     # OAuth settings
     GOOGLE_CLIENT_ID: Optional[str] = Field(default=None, description="Google OAuth client ID")
     GOOGLE_CLIENT_SECRET: Optional[str] = Field(default=None, description="Google OAuth client secret")
-    OAUTH_REDIRECT_URL: str = Field(default="https://cryptouniverse-frontend.onrender.com/auth/callback", description="OAuth redirect URL")
+    OAUTH_REDIRECT_URL: str = Field(
+        default=os.environ.get(
+            "OAUTH_REDIRECT_URL",
+            "https://cryptouniverse-frontend.onrender.com/auth/callback"
+        ),
+        description="OAuth redirect URL"
+    )
     API_V1_PREFIX: str = Field(default="https://cryptouniverse.onrender.com/api/v1", description="API v1 prefix URL")
     
     class Config:

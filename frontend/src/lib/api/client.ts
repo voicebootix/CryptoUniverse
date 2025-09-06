@@ -2,16 +2,19 @@ import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, AxiosResponse } f
 import { useAuthStore } from '@/store/authStore';
 
 // API configuration
-const API_BASE_URL = import.meta.env.VITE_API_URL || (
-  import.meta.env.PROD 
-    ? 'https://cryptouniverse.onrender.com/api/v1'  // Production backend URL
-    : 'http://localhost:8000/api/v1'  // Local development
-);
+// In production, always use the backend URL, not relative paths
+const API_BASE_URL = import.meta.env.VITE_API_URL || 
+  (window.location.hostname === 'cryptouniverse-frontend.onrender.com' 
+    ? 'https://cryptouniverse.onrender.com/api/v1'
+    : '/api/v1');  // Use backend URL in production, relative in dev
+
+// Log the API URL being used (for debugging)
+console.log('API Base URL:', API_BASE_URL);
 
 // Create axios instance
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000,
+  timeout: 180000, // 3 minutes default timeout for Render cold starts
   headers: {
     'Content-Type': 'application/json',
   },
@@ -58,7 +61,7 @@ apiClient.interceptors.response.use(
       const startTime = response.config.metadata?.startTime;
       if (startTime) {
         const duration = new Date().getTime() - startTime.getTime();
-        console.log(`API ${response.config.method?.toUpperCase()} ${response.config.url} - ${duration}ms`);
+        // API request timing logged internally
       }
     }
     
@@ -156,8 +159,11 @@ apiClient.interceptors.response.use(
 
     // Timeout errors
     if (error.code === 'ECONNABORTED') {
-      const timeoutError = new Error('Request timeout. Please try again.');
+      console.error('Request timeout detected:', error.config?.url);
+      const timeoutError: any = new Error('Request timeout: Server is starting up. This may take up to 2 minutes on first request. Please wait and try again.');
       timeoutError.name = 'TimeoutError';
+      timeoutError.code = 'ECONNABORTED'; // Preserve original error code
+      timeoutError.isTimeout = true; // Add timeout flag for reliable detection
       return Promise.reject(timeoutError);
     }
 

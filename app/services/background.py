@@ -13,6 +13,7 @@ from typing import Dict, Any, Optional, List, Set
 import structlog
 from app.core.logging import LoggerMixin
 from app.core.config import get_settings
+from app.core.redis_manager import get_redis_manager
 from app.core.redis import get_redis_client
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
@@ -66,40 +67,92 @@ class BackgroundServiceManager(LoggerMixin):
         }
     
     async def async_init(self):
-        self.redis = await get_redis_client()
+        """Initialize Redis client through enterprise manager."""
+        try:
+            # Get Redis manager and client
+            redis_manager = await get_redis_manager()
+            self.redis = await redis_manager.get_client()
+            
+            if self.redis:
+                self.logger.info("✅ Redis client initialized through enterprise manager")
+            else:
+                self.logger.warning("⚠️ Redis client unavailable - circuit breaker may be open")
+        except Exception as e:
+            self.logger.warning("⚠️ Redis manager initialization failed - services will run without Redis", error=str(e))
+            self.redis = None
     
     async def start_all(self):
-        """Start all background services with real functionality."""
+        """Start all background services with real functionality - NON-BLOCKING."""
         self.logger.info("🚀 Starting enterprise background services...")
         self.running = True
         self.start_time = datetime.utcnow()
         
-        # Initialize redis client
-        await self.async_init()
+        # Initialize redis client with graceful degradation
+        try:
+            await self.async_init()
+        except Exception as e:
+            self.logger.warning("⚠️ Redis initialization failed - services will run in degraded mode", error=str(e))
+            self.redis = None
         
-        # Start individual services
-        self.tasks["health_monitor"] = asyncio.create_task(self._health_monitor_service())
-        self.tasks["metrics_collector"] = asyncio.create_task(self._metrics_collector_service())
-        self.tasks["cleanup_service"] = asyncio.create_task(self._cleanup_service())
-        self.tasks["autonomous_cycles"] = asyncio.create_task(self._autonomous_cycles_service())
-        self.tasks["market_data_sync"] = asyncio.create_task(self._market_data_sync_service())
-        self.tasks["balance_sync"] = asyncio.create_task(self._balance_sync_service())
-        self.tasks["risk_monitor"] = asyncio.create_task(self._risk_monitor_service())
-        self.tasks["rate_limit_cleanup"] = asyncio.create_task(self._rate_limit_cleanup_service())
+        # Start individual services with error isolation
+        services_to_start = [
+            ("health_monitor", self._health_monitor_service),
+            ("metrics_collector", self._metrics_collector_service), 
+            ("cleanup_service", self._cleanup_service),
+            ("autonomous_cycles", self._autonomous_cycles_service),
+            ("market_data_sync", self._market_data_sync_service),
+            ("balance_sync", self._balance_sync_service),
+            ("risk_monitor", self._risk_monitor_service),
+            ("rate_limit_cleanup", self._rate_limit_cleanup_service)
+        ]
         
-        # Update service status
-        self.services = {
-            "health_monitor": "running",
-            "metrics_collector": "running", 
-            "cleanup_service": "running",
-            "autonomous_cycles": "running",
-            "market_data_sync": "running",
-            "balance_sync": "running",
-            "risk_monitor": "running",
-            "rate_limit_cleanup": "running"
-        }
+        for service_name, service_func in services_to_start:
+            try:
+                self.tasks[service_name] = asyncio.create_task(self._safe_service_wrapper(service_name, service_func))
+                self.services[service_name] = "starting"
+                self.logger.info(f"🚀 {service_name} service started")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to start {service_name} service", error=str(e))
+                self.services[service_name] = "failed"
         
-        self.logger.info("✅ All background services started successfully")
+        # Don't wait for services to initialize - let them start in background
+        # This ensures startup doesn't hang on service failures
+        self.logger.info("✅ All background services initiated (starting in background)")
+    
+    async def _safe_service_wrapper(self, service_name: str, service_func):
+        """Wrap service functions with error handling and recovery."""
+        max_retries = 3
+        retry_delay = 5  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                self.services[service_name] = "running"
+                self.logger.info(f"✅ {service_name} service started successfully")
+                
+                # Run the service function
+                await service_func()
+                
+            except asyncio.CancelledError:
+                # Re-raise cancellation immediately - don't treat as error
+                raise
+            except Exception as e:
+                self.services[service_name] = "error"
+                self.logger.exception(f"❌ {service_name} service failed", 
+                                    attempt=attempt + 1, 
+                                    max_retries=max_retries)
+                
+                if attempt < max_retries - 1:
+                    self.logger.info(f"🔄 Retrying {service_name} in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    self.logger.exception(f"💀 {service_name} service permanently failed after {max_retries} attempts")
+                    self.services[service_name] = "failed"
+                    return
+                    
+        # If we get here, service ended normally
+        self.services[service_name] = "stopped"
+        self.logger.warning(f"⚠️ {service_name} service stopped unexpectedly")
     
     async def stop_all(self):
         """Stop all background services gracefully."""
@@ -139,8 +192,8 @@ class BackgroundServiceManager(LoggerMixin):
     async def get_system_metrics(self) -> Dict[str, Any]:
         """Get real system metrics."""
         try:
-            # System metrics
-            cpu_percent = psutil.cpu_percent(interval=1)
+            # System metrics (non-blocking)
+            cpu_percent = psutil.cpu_percent(interval=0.1)  # Short non-blocking interval
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
             
@@ -236,8 +289,8 @@ class BackgroundServiceManager(LoggerMixin):
         
         while self.running:
             try:
-                # Check system resources
-                cpu_percent = psutil.cpu_percent()
+                # Check system resources with non-blocking
+                cpu_percent = psutil.cpu_percent(interval=0)  # Non-blocking
                 memory_percent = psutil.virtual_memory().percent
                 disk_percent = psutil.disk_usage('/').percent
                 
@@ -343,23 +396,68 @@ class BackgroundServiceManager(LoggerMixin):
         
         while self.running:
             try:
-                # This would trigger autonomous trading cycles
-                # Import here to avoid circular imports
+                # Check if Redis is available first
+                if not self.redis:
+                    self.logger.warning("Redis unavailable - skipping autonomous cycle")
+                    await asyncio.sleep(300)  # Wait 5 minutes before trying again
+                    continue
+                
+                # Check if any users are actually active (using non-blocking SCAN)
+                try:
+                    # Use SCAN to avoid blocking Redis with KEYS command
+                    has_active_users = False
+                    async for key in self.redis.scan_iter(match="autonomous_active:*", count=10):
+                        has_active_users = True
+                        break  # Short-circuit as soon as we find any matching key
+                    
+                    if not has_active_users:
+                        self.logger.debug("No active autonomous users - skipping cycle")
+                        await asyncio.sleep(60)  # Short wait when no active users
+                        continue
+                        
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    self.logger.warning("Failed to check autonomous users", error=str(e))
+                    await asyncio.sleep(60)
+                    continue
+                
+                # Import and run autonomous cycles
                 try:
                     from app.services.master_controller import MasterSystemController
                     master_controller = MasterSystemController()
                     
-                    # Run global autonomous cycle check
-                    await master_controller.run_global_autonomous_cycle()
+                    # Add timeout to prevent hanging
+                    await asyncio.wait_for(
+                        master_controller.run_global_autonomous_cycle(),
+                        timeout=300  # 5 minute timeout
+                    )
                     
                 except ImportError:
                     self.logger.warning("Master controller not available for autonomous cycles")
+                    await asyncio.sleep(300)  # Wait 5 minutes before retrying
+                    continue
+                    
+                except asyncio.TimeoutError:
+                    self.logger.exception("Autonomous cycle timed out - this indicates a hanging operation")
+                    await asyncio.sleep(60)  # Shorter wait after timeout
+                    continue
                 
             except Exception as e:
-                self.logger.error("Autonomous cycles error", error=str(e))
+                # Re-raise cancellation errors immediately
+                if isinstance(e, asyncio.CancelledError):
+                    raise
+                self.logger.exception("Autonomous cycles error")
+                await asyncio.sleep(30)  # Short wait on error
+                continue
             
             # ADAPTIVE CYCLE TIMING based on market conditions
-            next_interval = await self._calculate_adaptive_cycle_interval()
+            try:
+                next_interval = await self._calculate_adaptive_cycle_interval()
+            except Exception as e:
+                self.logger.warning("Failed to calculate adaptive interval", error=str(e))
+                next_interval = 60  # Default to 1 minute
+                
             await asyncio.sleep(next_interval)
     
     async def _market_data_sync_service(self):
@@ -411,7 +509,10 @@ class BackgroundServiceManager(LoggerMixin):
                     if discovery_result.get("success"):
                         discovered_assets = discovery_result.get("asset_discovery", {}).get("detailed_results", {})
                         for exchange, assets in discovered_assets.items():
-                            all_discovered_symbols.update(assets.get("active_symbols", []))
+                            if isinstance(assets, dict):
+                                all_discovered_symbols.update(assets.get("active_symbols", []))
+                            elif isinstance(assets, (list, set)):
+                                all_discovered_symbols.update(assets)
                         
                         # Inline validation
                         if not discovery_result:
@@ -448,6 +549,7 @@ class BackgroundServiceManager(LoggerMixin):
         # ENTERPRISE: Comprehensive fallback with ALL profitable cryptos
         if len(all_discovered_symbols) < 50:  # Only if discovery seriously failed
             comprehensive_fallback = self._get_comprehensive_crypto_universe()
+            # comprehensive_fallback is already a set, so we can update directly
             all_discovered_symbols.update(comprehensive_fallback)
             self.logger.warning(
                 f"Enhanced fallback: added {len(comprehensive_fallback)} symbols",
@@ -676,6 +778,28 @@ class BackgroundServiceManager(LoggerMixin):
     async def _calculate_adaptive_cycle_interval(self) -> int:
         """Calculate adaptive cycle interval based on market conditions and activity."""
         try:
+            # PERFORMANCE OPTIMIZATION: Check if any users are active first (non-blocking SCAN)
+            if self.redis:
+                try:
+                    # Use SCAN to avoid blocking Redis with KEYS command
+                    has_active_users = False
+                    async for key in self.redis.scan_iter(match="autonomous_active:*", count=10):
+                        has_active_users = True
+                        break  # Short-circuit as soon as we find any matching key
+                    
+                    if not has_active_users:
+                        # No active users - use very long interval to save CPU
+                        self.logger.debug("No active users - using extended cycle interval")
+                        return 300  # 5 minutes when no users are active
+                except Exception as e:
+                    # Redis scan failed - use conservative interval and log warning
+                    self.logger.warning("Failed to scan for active users", error=str(e))
+                    return 180  # 3 minutes when Redis scan fails
+            else:
+                # Redis unavailable - use conservative interval
+                self.logger.debug("Redis unavailable - using conservative cycle interval")
+                return 180  # 3 minutes when Redis is unavailable
+            
             from app.services.market_analysis_core import MarketAnalysisService
             
             # Get current market volatility
@@ -713,8 +837,10 @@ class BackgroundServiceManager(LoggerMixin):
                 redis = await get_redis_client()
                 cache_key = "active_trading_users"
                 
-                # Check cache first
-                cached_users = await redis.get(cache_key)
+                # Check cache first (with Redis resilience)
+                cached_users = None
+                if redis:
+                    cached_users = await redis.get(cache_key)
                 if cached_users:
                     user_ids = json.loads(cached_users)
                     self.logger.debug(f"Using cached active users: {len(user_ids)}")
@@ -734,10 +860,11 @@ class BackgroundServiceManager(LoggerMixin):
                         )
                         
                         result = await db.execute(stmt)
-                        user_ids = [row[0] for row in result.fetchall()]
+                        user_ids = [str(row[0]) for row in result.fetchall()]  # Convert UUID to string
                         
-                        # Cache for 5 minutes
-                        await redis.setex(cache_key, 300, json.dumps(user_ids))
+                        # Cache for 5 minutes (with Redis resilience)
+                        if redis:
+                            await redis.setex(cache_key, 300, json.dumps(user_ids))
                         self.logger.debug(f"Cached {len(user_ids)} active users")
                 
                 # Proceed with sync...

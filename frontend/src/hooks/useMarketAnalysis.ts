@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { tradingAPI, apiClient } from '@/lib/api/client';
-import { ArbitrageOpportunity } from './useArbitrage';
+import { ArbitrageOpportunity } from '@/types/arbitrage';
 
 export interface TechnicalAnalysis {
   symbol: string;
@@ -395,7 +395,7 @@ export const useMarketAnalysis = (): MarketAnalysisHookState => {
     setLoading(true);
     setError(null);
     try {
-      const response = await tradingAPI.get('/market/trending');
+      const response = await apiClient.get('/market/trending-coins');
       
       if (response.data && response.data.success !== false) {
         const coins = Array.isArray(response.data) ? response.data : 

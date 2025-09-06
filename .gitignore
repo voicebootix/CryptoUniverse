@@ -1,0 +1,4 @@
+.env
+.env.local
+.env.render.local
+testsprite_tests/.env.test

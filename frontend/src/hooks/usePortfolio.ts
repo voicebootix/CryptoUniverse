@@ -57,6 +57,10 @@ interface PortfolioState {
 }
 
 let socket: WebSocket | null = null;
+let reconnectAttempts = 0;
+let reconnectTimeout: NodeJS.Timeout | null = null;
+const MAX_RECONNECT_DELAY = 30000; // 30 seconds max
+const INITIAL_RECONNECT_DELAY = 1000; // 1 second initial
 
 export const usePortfolioStore = create<PortfolioState>((set) => ({
   totalValue: 0,
@@ -156,16 +160,27 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
       return;
     }
 
-    // Use backend URL for WebSocket connection
-    const wsUrl = import.meta.env.VITE_API_URL 
-      ? `wss://${import.meta.env.VITE_API_URL.replace('https://', '').replace('/api/v1', '')}/api/v1/trading/ws`
-      : `wss://cryptouniverse.onrender.com/api/v1/trading/ws`;
+    // Use correct WebSocket URL - match the API client configuration
+    // Get the API base URL from environment or default to production backend
+    const apiBaseUrl = import.meta.env.VITE_API_URL || 'https://cryptouniverse.onrender.com/api/v1';
+    // Convert HTTP(S) URL to WS(S) URL
+    const wsUrl = apiBaseUrl
+      .replace('https://', 'wss://')
+      .replace('http://', 'ws://')
+      .replace('/api/v1', '/api/v1/trading/ws');
     
     console.log('Connecting to WebSocket:', wsUrl);
     socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
       console.log('WebSocket connected');
+      
+      // Reset reconnect attempts on successful connection
+      reconnectAttempts = 0;
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+      }
       
       // Subscribe to market data for major cryptocurrencies
       const subscribeMessage = {
@@ -211,10 +226,21 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
       console.log('WebSocket disconnected');
       socket = null;
       
-      // Attempt to reconnect after 5 seconds
-      setTimeout(() => {
+      // Clear any existing reconnect timeout
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
+      
+      // Calculate delay with exponential backoff
+      const delay = Math.min(INITIAL_RECONNECT_DELAY * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
+      reconnectAttempts++;
+      
+      console.log(`Reconnecting in ${delay / 1000} seconds (attempt ${reconnectAttempts})`);
+      
+      // Attempt to reconnect with exponential backoff
+      reconnectTimeout = setTimeout(() => {
         usePortfolioStore.getState().connectWebSocket();
-      }, 5000);
+      }, delay);
     };
 
     socket.onerror = (error) => {

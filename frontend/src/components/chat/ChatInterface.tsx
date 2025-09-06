@@ -31,6 +31,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
+import { apiClient } from '@/lib/api/client';
 
 interface ChatMessage {
   id: string;
@@ -86,20 +87,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const initializeChatSession = async () => {
     try {
       // Create new chat session
-      const response = await fetch('/api/v1/chat/session/new', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // Add auth headers as needed
-        },
-      });
+      const response = await apiClient.post('/chat/session/new', {});
 
-      if (response.ok) {
-        const data = await response.json();
-        setSessionId(data.session_id);
+      if (response.data.success) {
+        setSessionId(response.data.session_id);
         
         // Initialize WebSocket connection
-        initializeWebSocket(data.session_id);
+        initializeWebSocket(response.data.session_id);
         
         // Add welcome message
         const welcomeMessage: ChatMessage = {
@@ -124,7 +118,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         setMessages([welcomeMessage]);
       }
     } catch (error) {
-      console.error('Failed to initialize chat session:', error);
+      // Failed to initialize chat session - handled by UI error state
       toast({
         title: 'Connection Error',
         description: 'Failed to initialize chat session. Please refresh the page.',
@@ -141,7 +135,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     
     ws.onopen = () => {
       setIsConnected(true);
-      console.log('Chat WebSocket connected');
+      // WebSocket connected - connection established
     };
     
     ws.onmessage = (event) => {
@@ -162,20 +156,20 @@ Just chat with me naturally! How can I help you manage your crypto investments t
           setMessages(prev => [...prev, newMessage]);
           setIsLoading(false);
         } else if (data.type === 'connection_established') {
-          console.log('Chat connection established:', data.message);
+          // Chat connection established
         }
       } catch (error) {
-        console.error('Failed to parse WebSocket message:', error);
+        // Failed to parse WebSocket message - continue operation
       }
     };
     
     ws.onclose = () => {
       setIsConnected(false);
-      console.log('Chat WebSocket disconnected');
+      // WebSocket disconnected - connection closed
     };
     
     ws.onerror = (error) => {
-      console.error('Chat WebSocket error:', error);
+      // WebSocket error - connection issue handled by state
       setIsConnected(false);
     };
     
@@ -206,27 +200,20 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         }));
       } else {
         // Fallback to REST API
-        const response = await fetch('/api/v1/chat/message', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            message: inputValue,
-            session_id: sessionId
-          }),
+        const response = await apiClient.post('/chat/message', {
+          message: inputValue,
+          session_id: sessionId
         });
 
-        if (response.ok) {
-          const data = await response.json();
+        if (response.data.success) {
           const assistantMessage: ChatMessage = {
-            id: data.message_id,
-            content: data.content,
+            id: response.data.message_id,
+            content: response.data.content,
             type: 'assistant',
-            timestamp: data.timestamp,
-            intent: data.intent,
-            confidence: data.confidence,
-            metadata: data.metadata
+            timestamp: response.data.timestamp,
+            intent: response.data.intent,
+            confidence: response.data.confidence,
+            metadata: response.data.metadata
           };
           
           setMessages(prev => [...prev, assistantMessage]);
@@ -237,13 +224,13 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         setIsLoading(false);
       }
     } catch (error) {
-      console.error('Failed to send message:', error);
-      setIsLoading(false);
+      // Failed to send message - show error to user
       toast({
         title: 'Message Failed',
-        description: 'Failed to send message. Please try again.',
+        description: 'Unable to send message. Please check your connection.',
         variant: 'destructive',
       });
+      setIsLoading(false);
     }
   };
 

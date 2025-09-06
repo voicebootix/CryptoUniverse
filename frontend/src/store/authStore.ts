@@ -40,7 +40,57 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null, mfaRequired: false });
 
         try {
-          const response = await apiClient.post('/auth/login', credentials);
+          // Simple direct login with extended timeout for Render
+          let response;
+          
+          try {
+            // First attempt with very long timeout for Render cold starts
+            console.log('Starting first login attempt with 3-minute timeout...');
+            response = await apiClient.post('/auth/login', credentials, {
+              timeout: 180000 // 3 minutes timeout for very slow Render cold starts
+            });
+          } catch (firstError: any) {
+            // Log error for debugging
+            console.error('First login attempt failed:', firstError.message);
+            
+            // Enhanced timeout detection with safety checks
+            const isTimeoutError = firstError && (
+              firstError.code === 'ECONNABORTED' || 
+              firstError.name === 'TimeoutError' ||
+              firstError.isTimeout === true ||
+              /timeout/i.test(firstError.message || '') || 
+              /timeouterror/i.test(firstError.message || '')
+            );
+            
+            if (isTimeoutError) {
+              console.log('Timeout detected, trying once more with warm service...');
+              
+              // Wait 3 seconds for service to warm up properly
+              console.log('Waiting 3 seconds before retry...');
+              await new Promise(resolve => setTimeout(resolve, 3000));
+              
+              try {
+                // Second attempt - service should be warm now
+                console.log('Starting second login attempt with 90-second timeout...');
+                response = await apiClient.post('/auth/login', credentials, {
+                  timeout: 90000 // 90 seconds for warm service
+                });
+              } catch (secondError: any) {
+                console.error('Second login attempt also failed:', secondError.message);
+                
+                // If second attempt also fails, throw user-friendly error
+                throw new Error('Unable to connect to login service. The server may be starting up. Please wait a moment and try again.');
+              }
+            } else {
+              // Not a timeout error, throw original error
+              throw firstError;
+            }
+          }
+          
+          // If no response after attempts
+          if (!response) {
+            throw new Error('Login service unavailable. Please try again later.');
+          }
           
           if (response.data.mfa_required) {
             set({ 

@@ -52,6 +52,12 @@ interface NavigationItem {
 const navigation: NavigationItem[] = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   {
+    name: "Master Controller",
+    href: "/dashboard/master-controller",
+    icon: Crown,
+    badge: "CORE",
+  },
+  {
     name: "AI Command",
     href: "/dashboard/ai-command",
     icon: Brain,

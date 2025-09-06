@@ -115,27 +115,27 @@ async def get_system_overview(
         # Get database metrics
         # Count active users
         result = await db.execute(
-            select(func.count(User.id)).filter(
+            select(func.count(User.id)).where(
                 User.status == UserStatus.ACTIVE,
                 User.last_login >= datetime.utcnow() - timedelta(days=7)
             )
         )
-        active_users = result.scalar()
+        active_users = result.scalar_one_or_none() or 0
         
         # Count trades today
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         result = await db.execute(
-            select(func.count(Trade.id)).filter(Trade.created_at >= today_start)
+            select(func.count(Trade.id)).where(Trade.created_at >= today_start)
         )
-        trades_today = result.scalar()
+        trades_today = result.scalar_one_or_none() or 0
         
         # Calculate volume
         result = await db.execute(
-            select(func.sum(Trade.amount)).filter(
+            select(func.sum(Trade.total_value)).where(
                 Trade.created_at >= datetime.utcnow() - timedelta(hours=24)
             )
         )
-        volume_24h = result.scalar() or 0
+        volume_24h = result.scalar_one_or_none() or 0
         
         return {
             "system_health": system_status.get("health", "unknown"),
@@ -162,7 +162,8 @@ async def get_system_overview(
 async def configure_system(
     request: SystemConfigRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(require_role([UserRole.ADMIN]))
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_database)
 ):
     """Configure system-wide settings."""
     
@@ -217,11 +218,16 @@ async def configure_system(
         # Log audit trail
         audit_log = AuditLog(
             user_id=current_user.id,
-            action="system_configuration",
-            details={"changes": changes_applied},
-            ip_address="admin_api",
-            user_agent="system"
+            event_type="system_configuration",
+            event_data={
+                "changes": changes_applied,
+                "details": {"changes": changes_applied},
+                "ip_address": "admin_api",
+                "user_agent": "system"
+            }
         )
+        db.add(audit_log)
+        await db.commit()
         
         # Schedule background restart if needed
         if request.autonomous_intervals:
@@ -454,63 +460,117 @@ async def list_users(
         user_id=str(current_user.id)
     )
     
+    # Check if mock mode is enabled
+    if settings.ADMIN_USERS_MOCK:
+        logger.warning("⚠️ ADMIN_USERS_MOCK is enabled - returning mock data. This should NOT be used in production!")
+        return UserListResponse(
+            users=[],
+            total_count=0,
+            active_count=0,
+            trading_count=0
+        )
+    
     try:
-        query = db.query(User)
+        # Build the base query using select statement for async
+        stmt = select(User)
         
-        # Apply filters
+        # Apply filters using where clause for async SQLAlchemy
         if status_filter:
-            query = query.filter(User.status == status_filter)
+            # Convert string to UserStatus enum
+            try:
+                parsed_status = UserStatus(status_filter)
+                stmt = stmt.where(User.status == parsed_status)
+            except ValueError:
+                logger.warning(f"Invalid status filter: {status_filter}")
+                # Skip applying invalid filter
         
         if role_filter:
-            query = query.filter(User.role == role_filter)
+            # Convert string to UserRole enum
+            try:
+                parsed_role = UserRole(role_filter)
+                stmt = stmt.where(User.role == parsed_role)
+            except ValueError:
+                logger.warning(f"Invalid role filter: {role_filter}")
+                # Skip applying invalid filter
         
         if search:
-            query = query.filter(
-                or_(
-                    User.email.ilike(f"%{search}%"),
-                    User.full_name.ilike(f"%{search}%")
+            # Fix: full_name is a property, not a DB column
+            # Use email search only (remove full_name search)
+            stmt = stmt.where(
+                User.email.ilike(f"%{search}%")
+            )
+        
+        # Get total count using subquery for accurate filtering
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        count_result = await db.execute(count_stmt)
+        total_count = count_result.scalar_one()
+        
+        # Add deterministic ordering before pagination
+        stmt = stmt.order_by(User.created_at.desc(), User.id)
+        
+        # Apply pagination
+        stmt = stmt.offset(skip).limit(limit)
+        
+        # Execute query
+        result = await db.execute(stmt)
+        users = result.scalars().all()
+        
+        # Count by status using async queries
+        active_count_result = await db.execute(
+            select(func.count()).select_from(User).where(User.status == UserStatus.ACTIVE)
+        )
+        active_count = active_count_result.scalar_one()
+        
+        trading_count_result = await db.execute(
+            select(func.count()).select_from(User).where(
+                and_(
+                    User.status == UserStatus.ACTIVE,
+                    User.role.in_([UserRole.TRADER, UserRole.ADMIN])
                 )
             )
+        )
+        trading_count = trading_count_result.scalar_one()
         
-        # Get total count
-        total_count = query.count()
+        # Batch fetch credit accounts for all users to avoid N+1 queries
+        user_ids = [user.id for user in users]
         
-        # Get paginated results
-        users = query.offset(skip).limit(limit).all()
+        # Initialize empty maps
+        credit_map = {}
+        trade_count_map = {}
         
-        # Count by status
-        active_count = db.query(User).filter(User.status == UserStatus.ACTIVE).count()
-        trading_count = db.query(User).filter(
-            and_(
-                User.status == UserStatus.ACTIVE,
-                User.role.in_([UserRole.TRADER, UserRole.ADMIN])
+        # Only query if there are users
+        if user_ids:
+            # Get all credit accounts in one query
+            credit_accounts_result = await db.execute(
+                select(CreditAccount).where(CreditAccount.user_id.in_(user_ids))
             )
-        ).count()
+            credit_accounts = credit_accounts_result.scalars().all()
+            credit_map = {ca.user_id: ca.available_credits for ca in credit_accounts}
+            
+            # Get all trade counts in one aggregated query
+            trade_counts_result = await db.execute(
+                select(Trade.user_id, func.count(Trade.id).label("count"))
+                .where(Trade.user_id.in_(user_ids))
+                .group_by(Trade.user_id)
+            )
+            trade_counts = trade_counts_result.all()
+            trade_count_map = {row.user_id: row.count for row in trade_counts}
         
-        # Format user data
+        # Format user data using the pre-fetched maps
         user_list = []
         for user in users:
             user_data = {
                 "id": str(user.id),
                 "email": user.email,
-                "full_name": user.full_name,
+                "full_name": user.email,  # Using email as full_name doesn't exist
                 "role": user.role.value,
                 "status": user.status.value,
                 "created_at": user.created_at.isoformat(),
                 "last_login": user.last_login.isoformat() if user.last_login else None,
-                "tenant_id": str(user.tenant_id) if user.tenant_id else None
+                "tenant_id": str(user.tenant_id) if user.tenant_id else None,
+                "credits": credit_map.get(user.id, 0),
+                "total_trades": trade_count_map.get(user.id, 0)
             }
-            
-            # Get credit balance
-            credit_account = db.query(CreditAccount).filter(
-                CreditAccount.user_id == user.id
-            ).first()
-            user_data["credits"] = credit_account.available_credits if credit_account else 0
-            
-            # Get trading stats
-            trade_count = db.query(Trade).filter(Trade.user_id == user.id).count()
-            user_data["total_trades"] = trade_count
-            
             user_list.append(user_data)
         
         return UserListResponse(
@@ -551,8 +611,11 @@ async def manage_user(
     )
     
     try:
-        # Get target user
-        target_user = db.query(User).filter(User.id == request.user_id).first()
+        # Get target user using async query
+        result = await db.execute(
+            select(User).where(User.id == request.user_id)
+        )
+        target_user = result.scalar_one_or_none()
         if not target_user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -584,10 +647,13 @@ async def manage_user(
                     detail="Credit amount required for reset_credits action"
                 )
             
-            # Get or create credit account
-            credit_account = db.query(CreditAccount).filter(
-                CreditAccount.user_id == target_user.id
-            ).first()
+            # Get or create credit account using async query
+            credit_result = await db.execute(
+                select(CreditAccount).where(
+                    CreditAccount.user_id == target_user.id
+                )
+            )
+            credit_account = credit_result.scalar_one_or_none()
             
             if not credit_account:
                 credit_account = CreditAccount(
@@ -610,23 +676,30 @@ async def manage_user(
             
             action_taken = f"Credits reset to {request.credit_amount}"
         
-        # Create audit log
+        # Create audit log with proper transaction handling
         audit_log = AuditLog(
             user_id=current_user.id,
-            action=f"user_management_{request.action}",
-            details={
+            event_type=f"user_management_{request.action}",
+            event_data={
                 "target_user_id": request.user_id,
                 "target_user_email": target_user.email,
                 "action": request.action,
                 "reason": request.reason,
-                "credit_amount": request.credit_amount
-            },
-            ip_address="admin_api",
-            user_agent="system"
+                "credit_amount": request.credit_amount,
+                "details": {
+                    "target_user_id": request.user_id,
+                    "target_user_email": target_user.email,
+                    "action": request.action,
+                    "reason": request.reason,
+                    "credit_amount": request.credit_amount
+                },
+                "ip_address": "admin_api",
+                "user_agent": "system"
+            }
         )
         db.add(audit_log)
         
-        db.commit()
+        await db.commit()
         
         return {
             "status": "action_completed",
@@ -639,9 +712,12 @@ async def manage_user(
         }
         
     except HTTPException:
+        # Re-raise HTTP exceptions without rollback
         raise
     except Exception as e:
-        logger.error("User management failed", error=str(e))
+        # Rollback transaction on any other error
+        await db.rollback()
+        logger.error("User management failed", error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"User management failed: {str(e)}"
@@ -669,19 +745,28 @@ async def get_detailed_metrics(
         yesterday_start = today_start - timedelta(days=1)
         
         # Active users (logged in last 24h)
-        active_users = db.query(User).filter(
-            User.last_login >= now - timedelta(hours=24)
-        ).count()
+        active_users_result = await db.execute(
+            select(func.count()).select_from(User).where(
+                User.last_login >= now - timedelta(hours=24)
+            )
+        )
+        active_users = active_users_result.scalar_one()
         
         # Trades today
-        trades_today = db.query(Trade).filter(
-            Trade.created_at >= today_start
-        ).count()
+        trades_today_result = await db.execute(
+            select(func.count()).select_from(Trade).where(
+                Trade.created_at >= today_start
+            )
+        )
+        trades_today = trades_today_result.scalar_one()
         
         # Volume 24h
-        volume_24h = db.query(func.sum(Trade.amount)).filter(
-            Trade.created_at >= now - timedelta(hours=24)
-        ).scalar() or 0
+        volume_24h_result = await db.execute(
+            select(func.sum(Trade.total_value)).where(
+                Trade.created_at >= now - timedelta(hours=24)
+            )
+        )
+        volume_24h = volume_24h_result.scalar_one_or_none() or 0
         
         # Get system health from master controller
         system_status = await master_controller.get_global_system_status()
@@ -738,47 +823,75 @@ async def get_audit_logs(
     )
     
     try:
-        query = db.query(AuditLog)
+        # Build query using select statement for async
+        stmt = select(AuditLog)
         
-        # Apply filters
+        # Apply filters using where clause
         if user_id:
-            query = query.filter(AuditLog.user_id == user_id)
+            stmt = stmt.where(AuditLog.user_id == user_id)
         
         if action_filter:
-            query = query.filter(AuditLog.action.ilike(f"%{action_filter}%"))
+            stmt = stmt.where(AuditLog.event_type.ilike(f"%{action_filter}%"))
         
         if start_date:
-            start_dt = datetime.fromisoformat(start_date)
-            query = query.filter(AuditLog.created_at >= start_dt)
+            try:
+                start_dt = datetime.fromisoformat(start_date)
+                stmt = stmt.where(AuditLog.created_at >= start_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid date format for start_date: {start_date}. Expected ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+                )
         
         if end_date:
-            end_dt = datetime.fromisoformat(end_date)
-            query = query.filter(AuditLog.created_at <= end_dt)
+            try:
+                end_dt = datetime.fromisoformat(end_date)
+                stmt = stmt.where(AuditLog.created_at <= end_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid date format for end_date: {end_date}. Expected ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+                )
         
         # Order by most recent
-        query = query.order_by(AuditLog.created_at.desc())
+        stmt = stmt.order_by(AuditLog.created_at.desc())
         
-        # Get total count
-        total_count = query.count()
+        # Get total count using subquery
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        count_result = await db.execute(count_stmt)
+        total_count = count_result.scalar_one()
+        
+        # Apply pagination
+        stmt = stmt.offset(skip).limit(limit)
         
         # Get paginated results
-        audit_logs = query.offset(skip).limit(limit).all()
+        result = await db.execute(stmt)
+        audit_logs = result.scalars().all()
         
         # Format results
         log_list = []
         for log in audit_logs:
+            # Extract data from event_data JSON field
+            event_data = log.event_data or {}
+            
             log_data = {
                 "id": str(log.id),
                 "user_id": str(log.user_id),
-                "action": log.action,
-                "details": log.details,
-                "ip_address": log.ip_address,
-                "user_agent": log.user_agent,
+                "action": log.event_type,  # Keep "action" key for backward compatibility
+                "event_type": log.event_type,
+                "event_data": log.event_data,
+                "details": log.event_data.get("details", {}),
+                "ip_address": log.event_data.get("ip_address", "unknown"),
+                "user_agent": log.event_data.get("user_agent", "unknown"),
+                "level": log.level.value,
                 "created_at": log.created_at.isoformat()
             }
             
-            # Get user email
-            user = db.query(User).filter(User.id == log.user_id).first()
+            # Get user email using async query
+            user_result = await db.execute(
+                select(User).where(User.id == log.user_id)
+            )
+            user = user_result.scalar_one_or_none()
             log_data["user_email"] = user.email if user else "unknown"
             
             log_list.append(log_data)
@@ -805,7 +918,8 @@ async def get_audit_logs(
 @router.post("/emergency/stop-all")
 async def emergency_stop_all_trading(
     reason: str,
-    current_user: User = Depends(require_role([UserRole.ADMIN]))
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_database)
 ):
     """Emergency stop all trading across the platform."""
     
@@ -829,15 +943,22 @@ async def emergency_stop_all_trading(
         # Log audit trail
         audit_log = AuditLog(
             user_id=current_user.id,
-            action="platform_emergency_stop",
-            details={
+            event_type="platform_emergency_stop",
+            event_data={
                 "reason": reason,
                 "affected_users": result.get("affected_users", 0),
-                "stopped_sessions": result.get("stopped_sessions", 0)
-            },
-            ip_address="admin_api",
-            user_agent="system"
+                "stopped_sessions": result.get("stopped_sessions", 0),
+                "details": {
+                    "reason": reason,
+                    "affected_users": result.get("affected_users", 0),
+                    "stopped_sessions": result.get("stopped_sessions", 0)
+                },
+                "ip_address": "admin_api",
+                "user_agent": "system"
+            }
         )
+        db.add(audit_log)
+        await db.commit()
         
         return {
             "status": "emergency_stop_executed",

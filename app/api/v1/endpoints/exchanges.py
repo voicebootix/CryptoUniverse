@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 
 import structlog
+import aiohttp
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1132,11 +1133,8 @@ async def get_kucoin_prices(currencies: List[str]) -> Dict[str, float]:
 async def fetch_kraken_balances(api_key: str, api_secret: str) -> List[Dict[str, Any]]:
     """Fetch balances from Kraken API with proper signature authentication."""
     try:
-        import aiohttp
         import hmac
         import hashlib
-        import time
-        import base64
         import urllib.parse
         
         base_url = "https://api.kraken.com"

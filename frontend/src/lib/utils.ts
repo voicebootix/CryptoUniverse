@@ -5,28 +5,93 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatCurrency(amount: number, currency: string = 'USD'): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount)
+export function formatCurrency(amount: number, currency: string = 'USD', locale?: string): string {
+  try {
+    // Determine appropriate locale
+    const resolvedLocale = locale || (typeof navigator !== 'undefined' ? navigator.language : 'en-US');
+    
+    // Create formatter to determine currency-native fraction digits
+    const formatter = new Intl.NumberFormat(resolvedLocale, {
+      style: 'currency',
+      currency,
+    });
+    
+    const options = formatter.resolvedOptions();
+    const fractionDigits = options.maximumFractionDigits || 2;
+    
+    // Format with proper fraction digits for the currency
+    return new Intl.NumberFormat(resolvedLocale, {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    }).format(amount);
+  } catch (error) {
+    // Fallback: construct string manually using resolved fraction digits
+    try {
+      const resolvedLocale = locale || 'en-US';
+      const testFormatter = new Intl.NumberFormat(resolvedLocale, {
+        style: 'currency',
+        currency,
+      });
+      const fractionDigits = testFormatter.resolvedOptions().maximumFractionDigits || 2;
+      
+      return amount.toFixed(fractionDigits) + ' ' + currency;
+    } catch (fallbackError) {
+      // Final fallback
+      return amount.toFixed(2) + ' ' + currency;
+    }
+  }
 }
 
 export function formatNumber(value: number, decimals: number = 2): string {
-  return new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  }).format(value)
+  try {
+    // Validate and normalize decimals
+    const normalizedDecimals = Math.max(0, Math.min(20, Math.trunc(decimals || 0)));
+    
+    // Use navigator language when available
+    const locale = (typeof navigator !== 'undefined' ? navigator.language : undefined) || 'en-US';
+    
+    return new Intl.NumberFormat(locale, {
+      minimumFractionDigits: normalizedDecimals,
+      maximumFractionDigits: normalizedDecimals,
+    }).format(value);
+  } catch (error) {
+    // Fallback with sanitized decimals
+    const normalizedDecimals = Math.max(0, Math.min(20, Math.trunc(decimals || 0)));
+    return value.toFixed(normalizedDecimals);
+  }
 }
 
 export function formatPercentage(value: number, decimals: number = 2): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'percent',
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  }).format(value / 100)
+  try {
+    // Validate and normalize decimals
+    const normalizedDecimals = Math.max(0, Math.min(20, Math.trunc(decimals || 0)));
+    
+    // Use navigator language when available  
+    const locale = (typeof navigator !== 'undefined' ? navigator.language : undefined) || 'en-US';
+    
+    return new Intl.NumberFormat(locale, {
+      style: 'percent',
+      minimumFractionDigits: normalizedDecimals,
+      maximumFractionDigits: normalizedDecimals,
+    }).format(value / 100);
+  } catch (error) {
+    // Localized fallback with sanitized decimals
+    const normalizedDecimals = Math.max(0, Math.min(20, Math.trunc(decimals || 0)));
+    const locale = (typeof navigator !== 'undefined' ? navigator.language : undefined) || 'en-US';
+    
+    try {
+      return (value / 100).toLocaleString(locale, {
+        style: 'percent',
+        minimumFractionDigits: normalizedDecimals,
+        maximumFractionDigits: normalizedDecimals,
+      });
+    } catch (fallbackError) {
+      // Final fallback
+      return (value / 100).toFixed(normalizedDecimals) + '%';
+    }
+  }
 }
 
 export function formatCompactNumber(value: number): string {

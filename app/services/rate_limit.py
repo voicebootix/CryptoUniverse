@@ -20,6 +20,12 @@ settings = get_settings()
 logger = structlog.get_logger(__name__)
 
 
+from functools import wraps
+from typing import Callable, Any, Coroutine, TypeVar, Optional
+from fastapi import Request, HTTPException, status
+
+T = TypeVar('T')
+
 class RateLimitService:
     """Enterprise rate limiting service with Redis backend."""
     
@@ -65,6 +71,93 @@ class RateLimitService:
                 "api_key": {"limit": 60, "window": 60}
             }
         }
+    
+    def limit(self, rate_limit: str):
+        """
+        Decorator to apply rate limiting to a FastAPI endpoint.
+        
+        Args:
+            rate_limit: Rate limit string in format "X/period" (e.g., "5/minute")
+            
+        Returns:
+            Decorator function
+        """
+        def decorator(func: Callable[..., Coroutine[Any, Any, T]]) -> Callable[..., Coroutine[Any, Any, T]]:
+            @wraps(func)
+            async def wrapper(*args: Any, **kwargs: Any) -> T:
+                # Extract request from either FastAPI args or kwargs
+                request = None
+                for arg in args:
+                    if isinstance(arg, Request):
+                        request = arg
+                        break
+                if not request:
+                    request = kwargs.get('request')
+                
+                if not request:
+                    logger.warning("Rate limit decorator used without request object")
+                    return await func(*args, **kwargs)
+                
+                # Get client IP
+                client_ip = request.client.host if request.client else "unknown"
+                
+                # Parse rate limit string (e.g., "5/minute")
+                try:
+                    limit, period = rate_limit.split('/')
+                    limit = int(limit)
+                    period = period.lower()
+                    
+                    # Convert period to seconds
+                    if 'second' in period:
+                        window = 1
+                    elif 'minute' in period:
+                        window = 60
+                    elif 'hour' in period:
+                        window = 3600
+                    elif 'day' in period:
+                        window = 86400
+                    else:
+                        window = 60  # Default to 1 minute
+                        
+                    # Create a unique key for this endpoint + IP
+                    endpoint = f"{request.method}:{request.url.path}"
+                    key = f"rate_limit:{endpoint}:{client_ip}"
+                    
+                    # Check rate limit
+                    within_limit = await self.check_rate_limit(
+                        key=key,
+                        limit=limit,
+                        window=window
+                    )
+                    
+                    if not within_limit:
+                        raise HTTPException(
+                            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                            detail={
+                                "error": "rate_limit_exceeded",
+                                "message": f"Rate limit exceeded: {rate_limit}",
+                                "retry_after": window
+                            },
+                            headers={
+                                "Retry-After": str(window),
+                                "X-RateLimit-Limit": str(limit),
+                                "X-RateLimit-Remaining": "0",
+                                "X-RateLimit-Reset": str(int(time.time()) + window)
+                            }
+                        )
+                    
+                    return await func(*args, **kwargs)
+                    
+                except ValueError as e:
+                    logger.error(f"Invalid rate limit format: {rate_limit}", error=str(e))
+                    return await func(*args, **kwargs)
+                except Exception as e:
+                    logger.error(f"Error in rate limit decorator: {str(e)}")
+                    # Fail open - don't block requests if rate limiting fails
+                    return await func(*args, **kwargs)
+                    
+            return wrapper
+        return decorator
     
     async def async_init(self):
         try:
