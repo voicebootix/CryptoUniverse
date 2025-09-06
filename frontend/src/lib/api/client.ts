@@ -160,8 +160,10 @@ apiClient.interceptors.response.use(
     // Timeout errors
     if (error.code === 'ECONNABORTED') {
       console.error('Request timeout detected:', error.config?.url);
-      const timeoutError = new Error('Server is starting up. This may take up to 2 minutes on first request. Please wait and try again.');
+      const timeoutError: any = new Error('Request timeout: Server is starting up. This may take up to 2 minutes on first request. Please wait and try again.');
       timeoutError.name = 'TimeoutError';
+      timeoutError.code = 'ECONNABORTED'; // Preserve original error code
+      timeoutError.isTimeout = true; // Add timeout flag for reliable detection
       return Promise.reject(timeoutError);
     }
 

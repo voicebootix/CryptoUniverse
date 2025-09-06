@@ -52,10 +52,14 @@ export const useAuthStore = create<AuthStore>()(
             // Log error for debugging
             console.error('First login attempt failed:', firstError.message);
             
-            // Check if it's a timeout error
-            const isTimeoutError = firstError.code === 'ECONNABORTED' || 
-                                 /timeout/i.test(firstError.message || '') || 
-                                 /timeouterror/i.test(firstError.message || '');
+            // Enhanced timeout detection with safety checks
+            const isTimeoutError = firstError && (
+              firstError.code === 'ECONNABORTED' || 
+              firstError.name === 'TimeoutError' ||
+              firstError.isTimeout === true ||
+              /timeout/i.test(firstError.message || '') || 
+              /timeouterror/i.test(firstError.message || '')
+            );
             
             if (isTimeoutError) {
               console.log('Timeout detected, trying once more with warm service...');
