@@ -132,6 +132,9 @@ class BackgroundServiceManager(LoggerMixin):
                 # Run the service function
                 await service_func()
                 
+            except asyncio.CancelledError:
+                # Re-raise cancellation immediately - don't treat as error
+                raise
             except Exception as e:
                 self.services[service_name] = "error"
                 self.logger.error(f"❌ {service_name} service failed", 
@@ -400,14 +403,21 @@ class BackgroundServiceManager(LoggerMixin):
                     await asyncio.sleep(300)  # Wait 5 minutes before trying again
                     continue
                 
-                # Check if any users are actually active
+                # Check if any users are actually active (using non-blocking SCAN)
                 try:
-                    autonomous_keys = await self.redis.keys("autonomous_active:*")
-                    if len(autonomous_keys) == 0:
+                    # Use SCAN to avoid blocking Redis with KEYS command
+                    has_active_users = False
+                    async for key in self.redis.scan_iter(match="autonomous_active:*", count=10):
+                        has_active_users = True
+                        break  # Short-circuit as soon as we find any matching key
+                    
+                    if not has_active_users:
                         self.logger.debug("No active autonomous users - skipping cycle")
                         await asyncio.sleep(60)  # Short wait when no active users
                         continue
                         
+                except asyncio.CancelledError:
+                    raise
                 except Exception as e:
                     self.logger.warning("Failed to check autonomous users", error=str(e))
                     await asyncio.sleep(60)
@@ -430,12 +440,15 @@ class BackgroundServiceManager(LoggerMixin):
                     continue
                     
                 except asyncio.TimeoutError:
-                    self.logger.error("Autonomous cycle timed out - this indicates a hanging operation")
+                    self.logger.exception("Autonomous cycle timed out - this indicates a hanging operation")
                     await asyncio.sleep(60)  # Shorter wait after timeout
                     continue
                 
             except Exception as e:
-                self.logger.error("Autonomous cycles error", error=str(e))
+                # Re-raise cancellation errors immediately
+                if isinstance(e, asyncio.CancelledError):
+                    raise
+                self.logger.exception("Autonomous cycles error")
                 await asyncio.sleep(30)  # Short wait on error
                 continue
             
@@ -766,13 +779,23 @@ class BackgroundServiceManager(LoggerMixin):
     async def _calculate_adaptive_cycle_interval(self) -> int:
         """Calculate adaptive cycle interval based on market conditions and activity."""
         try:
-            # PERFORMANCE OPTIMIZATION: Check if any users are active first
+            # PERFORMANCE OPTIMIZATION: Check if any users are active first (non-blocking SCAN)
             if self.redis:
-                autonomous_keys = await self.redis.keys("autonomous_active:*")
-                if len(autonomous_keys) == 0:
-                    # No active users - use very long interval to save CPU
-                    self.logger.debug("No active users - using extended cycle interval")
-                    return 300  # 5 minutes when no users are active
+                try:
+                    # Use SCAN to avoid blocking Redis with KEYS command
+                    has_active_users = False
+                    async for key in self.redis.scan_iter(match="autonomous_active:*", count=10):
+                        has_active_users = True
+                        break  # Short-circuit as soon as we find any matching key
+                    
+                    if not has_active_users:
+                        # No active users - use very long interval to save CPU
+                        self.logger.debug("No active users - using extended cycle interval")
+                        return 300  # 5 minutes when no users are active
+                except Exception as e:
+                    # Redis scan failed - use conservative interval and log warning
+                    self.logger.warning("Failed to scan for active users", error=str(e))
+                    return 180  # 3 minutes when Redis scan fails
             else:
                 # Redis unavailable - use conservative interval
                 self.logger.debug("Redis unavailable - using conservative cycle interval")
