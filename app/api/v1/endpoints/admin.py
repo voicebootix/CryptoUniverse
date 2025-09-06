@@ -470,10 +470,22 @@ async def list_users(
         
         # Apply filters using where clause for async SQLAlchemy
         if status_filter:
-            stmt = stmt.where(User.status == status_filter)
+            # Convert string to UserStatus enum
+            try:
+                parsed_status = UserStatus(status_filter)
+                stmt = stmt.where(User.status == parsed_status)
+            except ValueError:
+                logger.warning(f"Invalid status filter: {status_filter}")
+                # Skip applying invalid filter
         
         if role_filter:
-            stmt = stmt.where(User.role == role_filter)
+            # Convert string to UserRole enum
+            try:
+                parsed_role = UserRole(role_filter)
+                stmt = stmt.where(User.role == parsed_role)
+            except ValueError:
+                logger.warning(f"Invalid role filter: {role_filter}")
+                # Skip applying invalid filter
         
         if search:
             # Fix: full_name is a property, not a DB column
