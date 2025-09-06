@@ -507,16 +507,19 @@ async def refresh_token(
         # Get Redis client for token operations
         redis = await get_redis_client()
         
-        # Check if refresh token is in blacklist
-        is_revoked = await redis.get(f"token:revoked:{request.refresh_token}")
-        if is_revoked:
-            logger.warning("Attempt to use revoked refresh token", 
-                         user_id=user_id, 
-                         client_ip=client_ip)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Refresh token has been revoked"
-            )
+        # Check if refresh token is in blacklist (with Redis resilience)
+        if redis:
+            is_revoked = await redis.get(f"token:revoked:{request.refresh_token}")
+            if is_revoked:
+                logger.warning("Attempt to use revoked refresh token", 
+                             user_id=user_id, 
+                             client_ip=client_ip)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Refresh token has been revoked"
+                )
+        else:
+            logger.warning("Redis unavailable - skipping token revocation check")
             
         # Get user and verify status
         user = await db.get(User, user_id)
@@ -529,41 +532,50 @@ async def refresh_token(
                 detail="User not found or inactive"
             )
             
-        # Verify session is still valid
+        # Verify session is still valid (with Redis resilience)
         session_key = f"user:{user_id}:sessions:{session_id}"
-        session_data = await redis.get(session_key)
-        if not session_data:
-            logger.warning("Session not found or expired", 
-                         user_id=user_id,
-                         session_id=session_id)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Session expired"
-            )
+        if redis:
+            session_data = await redis.get(session_key)
+            if not session_data:
+                logger.warning("Session not found or expired", 
+                             user_id=user_id,
+                             session_id=session_id,
+                             client_ip=client_ip)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Session expired or invalid"
+                )
+        else:
+            logger.warning("Redis unavailable - skipping session validation")
+            
+        # Continue with token refresh logic - session validation complete
             
         # Create new tokens with updated expiration
         new_access_token = auth_service.create_access_token(user, session_id=session_id)
         new_refresh_token = auth_service.create_refresh_token(user, session_id=session_id)
         
-        # Update session in Redis with new refresh token
-        session_ttl = int(auth_service.refresh_token_expire.total_seconds())
-        await redis.setex(
-            session_key,
-            session_ttl,
-            json.dumps({
-                "user_agent": client_request.headers.get("user-agent", "unknown"),
-                "ip_address": client_ip,
-                "last_active": datetime.utcnow().isoformat(),
-                "refresh_token": new_refresh_token
-            })
-        )
-        
-        # Add old refresh token to blacklist with TTL
-        await redis.setex(
-            f"token:revoked:{request.refresh_token}",
-            session_ttl,  # Match session TTL
-            "1"
-        )
+        # Update session in Redis with new refresh token (with Redis resilience)
+        if redis:
+            session_ttl = int(auth_service.refresh_token_expire.total_seconds())
+            await redis.setex(
+                session_key,
+                session_ttl,
+                json.dumps({
+                    "user_agent": client_request.headers.get("user-agent", "unknown"),
+                    "ip_address": client_ip,
+                    "last_active": datetime.utcnow().isoformat(),
+                    "refresh_token": new_refresh_token
+                })
+            )
+            
+            # Add old refresh token to blacklist with TTL
+            await redis.setex(
+                f"token:revoked:{request.refresh_token}",
+                session_ttl,  # Match session TTL
+                "1"
+            )
+        else:
+            logger.warning("Redis unavailable - session and token blacklist updates skipped")
         
         logger.info("Token refresh successful", 
                    user_id=user_id,
