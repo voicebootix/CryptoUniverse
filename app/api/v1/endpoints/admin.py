@@ -823,12 +823,24 @@ async def get_audit_logs(
             stmt = stmt.where(AuditLog.action.ilike(f"%{action_filter}%"))
         
         if start_date:
-            start_dt = datetime.fromisoformat(start_date)
-            stmt = stmt.where(AuditLog.created_at >= start_dt)
+            try:
+                start_dt = datetime.fromisoformat(start_date)
+                stmt = stmt.where(AuditLog.created_at >= start_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid date format for start_date: {start_date}. Expected ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+                )
         
         if end_date:
-            end_dt = datetime.fromisoformat(end_date)
-            stmt = stmt.where(AuditLog.created_at <= end_dt)
+            try:
+                end_dt = datetime.fromisoformat(end_date)
+                stmt = stmt.where(AuditLog.created_at <= end_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid date format for end_date: {end_date}. Expected ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+                )
         
         # Order by most recent
         stmt = stmt.order_by(AuditLog.created_at.desc())
