@@ -1,0 +1,4 @@
+{
+  "email": "${TEST_ADMIN_EMAIL:-admin@example.com}",
+  "password": "${TEST_ADMIN_PASSWORD:-your_password_here}"
+}

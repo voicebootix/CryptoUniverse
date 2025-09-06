@@ -33,8 +33,13 @@ export default function RegistrationForm() {
     register,
     handleSubmit,
     formState: { errors },
+    setValue,
+    watch,
   } = useForm<FormData>({
     resolver: zodResolver(formSchema),
+    defaultValues: {
+      terms_agreed: false,
+    },
   });
 
   const onSubmit = async (data: FormData) => {
@@ -151,7 +156,8 @@ export default function RegistrationForm() {
         <div className="flex items-center space-x-2">
           <Checkbox
             id="terms_agreed"
-            {...register('terms_agreed')}
+            checked={watch('terms_agreed')}
+            onCheckedChange={(checked) => setValue('terms_agreed', checked as boolean)}
             data-testid="terms-checkbox"
             disabled={isLoading}
           />
