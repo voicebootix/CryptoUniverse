@@ -70,8 +70,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Connect to Redis
         try:
             redis = await get_redis_client()
-            await redis.ping()
-            logger.info("✅ Redis connected")
+            if redis:
+                await redis.ping()
+                logger.info("✅ Redis connected")
+            else:
+                logger.warning("⚠️ Redis not available - running in degraded mode")
         except Exception as e:
             logger.warning("⚠️ Redis connection failed - running in degraded mode", error=str(e))
 

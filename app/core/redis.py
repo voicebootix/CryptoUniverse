@@ -68,13 +68,8 @@ class RedisConnectionManager:
                 if keepalive_options:
                     pool_kwargs["socket_keepalive_options"] = keepalive_options
                 
-                # Check if Redis URL is properly configured
-                if not settings.REDIS_URL or settings.REDIS_URL == "redis://localhost:6379":
-                    logger.warning("Redis URL not configured or using default localhost - skipping Redis")
-                    self.pool = None
-                else:
-                    self.pool = ConnectionPool.from_url(settings.REDIS_URL, **pool_kwargs)
-                    logger.info("Redis connection pool created with enterprise settings")
+                self.pool = ConnectionPool.from_url(settings.REDIS_URL, **pool_kwargs)
+                logger.info("Redis connection pool created with enterprise settings", url=settings.REDIS_URL[:20] + "...")
             except Exception as e:
                 logger.warning("Redis connection pool creation failed - running without Redis", error=str(e))
                 self.pool = None
