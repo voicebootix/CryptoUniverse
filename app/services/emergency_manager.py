@@ -539,9 +539,14 @@ class EmergencyManager(LoggerMixin):
             }, user_id)
             
             # Telegram notification
-            from app.services.telegram_core import TelegramCore
-            telegram = TelegramCore()
-            await telegram.send_emergency_alert(user_id, emergency_action)
+            from app.services.telegram_core import TelegramCommanderService
+            telegram = TelegramCommanderService()
+            await telegram.send_alert(
+                message_content=f"Emergency action required: {emergency_action}",
+                message_type="alert",
+                priority="high",
+                recipient="owner"
+            )
             
             # Chat notification
             from app.services.unified_ai_manager import unified_ai_manager
