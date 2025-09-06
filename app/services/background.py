@@ -13,7 +13,7 @@ from typing import Dict, Any, Optional, List, Set
 import structlog
 from app.core.logging import LoggerMixin
 from app.core.config import get_settings
-from app.core.redis import get_redis_client
+from app.core.redis_manager import get_redis_manager
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from app.models.user import User
@@ -66,19 +66,18 @@ class BackgroundServiceManager(LoggerMixin):
         }
     
     async def async_init(self):
-        """Initialize Redis client with timeout and error handling."""
+        """Initialize Redis client through enterprise manager."""
         try:
-            # Add timeout to prevent hanging
-            self.redis = await asyncio.wait_for(get_redis_client(), timeout=5.0)
+            # Get Redis manager and client
+            redis_manager = await get_redis_manager()
+            self.redis = await redis_manager.get_client()
+            
             if self.redis:
-                # Test connection
-                await asyncio.wait_for(self.redis.ping(), timeout=3.0)
-                self.logger.info("✅ Redis client initialized successfully")
-        except asyncio.TimeoutError:
-            self.logger.warning("⚠️ Redis connection timeout - services will run without Redis")
-            self.redis = None
+                self.logger.info("✅ Redis client initialized through enterprise manager")
+            else:
+                self.logger.warning("⚠️ Redis client unavailable - circuit breaker may be open")
         except Exception as e:
-            self.logger.warning("⚠️ Redis initialization failed - services will run without Redis", error=str(e))
+            self.logger.warning("⚠️ Redis manager initialization failed - services will run without Redis", error=str(e))
             self.redis = None
     
     async def start_all(self):

@@ -1,0 +1,59 @@
+{
+  "project": {
+    "name": "CryptoUniverse",
+    "type": "backend",
+    "deployment": "render"
+  },
+  "api": {
+    "base_url": "https://cryptouniverse.onrender.com",
+    "api_prefix": "/api/v1",
+    "full_url": "https://cryptouniverse.onrender.com/api/v1"
+  },
+  "auth": {
+    "login_endpoint": "https://cryptouniverse.onrender.com/api/v1/auth/login",
+    "register_endpoint": "https://cryptouniverse.onrender.com/api/v1/auth/register",
+    "refresh_endpoint": "https://cryptouniverse.onrender.com/api/v1/auth/refresh"
+  },
+  "test_accounts": {
+    "admin": {
+      "email": "admin@cryptouniverse.com",
+      "password": "Admin123!@#",
+      "role": "admin"
+    },
+    "trader": {
+      "email": "trader@cryptouniverse.com", 
+      "password": "Trader123!@#",
+      "role": "trader"
+    },
+    "demo": {
+      "email": "demo@cryptouniverse.com",
+      "password": "Demo123!@#",
+      "role": "demo"
+    }
+  },
+  "test_settings": {
+    "timeout": 30000,
+    "retry_count": 3,
+    "parallel_tests": false,
+    "verbose": true,
+    "skip_auth_tests": false,
+    "test_live_data": true
+  },
+  "endpoints_to_test": [
+    "/health",
+    "/api/v1/status",
+    "/api/v1/auth/login",
+    "/api/v1/auth/register",
+    "/api/v1/market/prices",
+    "/api/v1/market/analysis/BTC",
+    "/api/v1/trading/portfolio",
+    "/api/v1/exchanges/list",
+    "/api/v1/strategies/list",
+    "/api/v1/ai/consensus",
+    "/api/v1/chat/message"
+  ],
+  "skip_endpoints": [
+    "/api/v1/admin/*",
+    "/api/v1/internal/*"
+  ]
+}

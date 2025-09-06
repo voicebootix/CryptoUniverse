@@ -1,0 +1,203 @@
+[0;34m🚀 Comprehensive CryptoUniverse Feature Testing[0m
+[0;34m📍 Testing: https://cryptouniverse.onrender.com[0m
+==================================================
+
+[0;34m=== AUTHENTICATION ===[0m
+[0;32m✅ Login successful[0m
+Token obtained: eyJhbGciOiJIUzI1NiIsInR5cCI6Ik...
+
+[0;34m=== AI CHAT SYSTEM ===[0m
+
+[1;33mTesting: AI Chat Message[0m
+Endpoint: POST https://cryptouniverse.onrender.com/api/v1/chat/message
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: Chat History[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/chat/history
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[0;34m=== MARKET ANALYSIS ===[0m
+
+[1;33mTesting: BTC Analysis[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/market/analysis/BTC
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: ETH Analysis[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/market/analysis/ETH
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: Market Sentiment[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/market/sentiment
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: BTC Indicators[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/market/indicators/BTC
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: Market Predictions[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/market/predictions
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[0;34m=== TRADING STRATEGIES ===[0m
+
+[1;33mTesting: Strategy List[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/strategies/list
+[0;32m✅ PASSED (Status: 200)[0m
+Response preview: []...
+
+[1;33mTesting: Active Strategies[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/strategies/active
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: Strategy Backtest[0m
+Endpoint: POST https://cryptouniverse.onrender.com/api/v1/strategies/backtest
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[0;34m=== AI CONSENSUS SYSTEM ===[0m
+
+[1;33mTesting: AI Consensus Analysis[0m
+Endpoint: POST https://cryptouniverse.onrender.com/api/v1/ai/consensus
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: AI Risk Assessment[0m
+Endpoint: POST https://cryptouniverse.onrender.com/api/v1/ai/risk-assessment
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: AI Recommendations[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/ai/recommendations
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[0;34m=== EXCHANGE INTEGRATION ===[0m
+
+[1;33mTesting: Exchange List[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/exchanges/list
+[0;32m✅ PASSED (Status: 200)[0m
+Response preview: {"connections":[{"id":"14e209f3-b6b4-48b9-9550-269553bef55d","exchange":"binance","nickname":"AR BInance","api_key_masked":"Xf5l********************************************************ndlz","is_active...
+
+[1;33mTesting: Exchange Balances[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/exchanges/balances
+[0;31m❌ FAILED (Status: 405)[0m
+Response: {"detail":"Method Not Allowed"}...
+
+[1;33mTesting: Test Exchange Connection[0m
+Endpoint: POST https://cryptouniverse.onrender.com/api/v1/exchanges/test-connection
+[0;31m❌ FAILED (Status: 405)[0m
+Response: {"detail":"Method Not Allowed"}...
+
+[0;34m=== PAPER TRADING ===[0m
+
+[1;33mTesting: Setup Paper Trading[0m
+Endpoint: POST https://cryptouniverse.onrender.com/api/v1/paper-trading/setup
+[0;32m✅ PASSED (Status: 200)[0m
+Response preview: {"success":true,"message":"Paper trading account created successfully","virtual_portfolio":{"user_id":"7a1ee8cd-bfc9-4e4e-85b2-69c8e91054af","cash_balance":10000.0,"total_value":10000.0,"positions":[]...
+
+[1;33mTesting: Paper Trading Portfolio[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/paper-trading/portfolio
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: Execute Paper Trade[0m
+Endpoint: POST https://cryptouniverse.onrender.com/api/v1/paper-trading/execute
+[0;31m❌ FAILED (Status: 422)[0m
+Response: {"detail":[{"type":"missing","loc":["body","quantity"],"msg":"Field required","input":{"symbol":"BTC","side":"buy","amount":0.01,"order_type":"market"},"url":"https://errors.pydantic.dev/2.5/v/missing...
+
+[0;34m=== TRADING EXECUTION ===[0m
+
+[1;33mTesting: Trading Portfolio[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/trading/portfolio
+[0;32m✅ PASSED (Status: 200)[0m
+Response preview: {"total_value":"3785.88","available_balance":"14.9","positions":[{"symbol":"XRP","name":"XRP","amount":378.962,"value_usd":1075.87,"entry_price":2.8389917722621263,"current_price":2.8389917722621263,"...
+
+[1;33mTesting: Trading History[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/trading/history
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: Open Orders[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/trading/open-orders
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: Simulate Trade[0m
+Endpoint: POST https://cryptouniverse.onrender.com/api/v1/trading/simulate
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[0;34m=== CREDIT & PAYMENT SYSTEM ===[0m
+
+[1;33mTesting: Credit Balance[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/credits/balance
+[0;32m✅ PASSED (Status: 200)[0m
+Response preview: {"available_credits":0,"total_credits":0,"used_credits":0,"profit_potential":"0E+2","profit_earned_to_date":"0","remaining_potential":"0","utilization_percentage":0.0,"needs_more_credits":true}...
+
+[1;33mTesting: Credit History[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/credits/history
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: Pricing Plans[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/credits/pricing
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[0;34m=== TELEGRAM INTEGRATION ===[0m
+
+[1;33mTesting: Telegram Bot Status[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/telegram/status
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: Connect Telegram[0m
+Endpoint: POST https://cryptouniverse.onrender.com/api/v1/telegram/connect
+[0;31m❌ FAILED - Server Error (Status: 500)[0m
+Error: {"error":"Failed to connect Telegram: name 'self' is not defined","status_code":500,"path":"/api/v1/telegram/connect","timestamp":6526735.149}
+
+[1;33mTesting: Telegram Commands[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/telegram/commands
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[0;34m=== ADMIN FUNCTIONS ===[0m
+
+[1;33mTesting: User List[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/admin/users
+[0;31m❌ FAILED - Server Error (Status: 500)[0m
+Error: {"error":"Failed to list users: 'AsyncSession' object has no attribute 'query'","status_code":500,"path":"/api/v1/admin/users","timestamp":6526737.29}
+
+[1;33mTesting: System Status[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/admin/system/status
+[0;31m❌ FAILED - Server Error (Status: 500)[0m
+Error: {"error":"Failed to get system status: type object 'Trade' has no attribute 'amount'","status_code":500,"path":"/api/v1/admin/system/status","timestamp":6526739.491}
+
+[1;33mTesting: System Metrics[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/admin/metrics
+[0;31m❌ FAILED - Server Error (Status: 500)[0m
+Error: {"error":"Failed to get metrics: 'AsyncSession' object has no attribute 'query'","status_code":500,"path":"/api/v1/admin/metrics","timestamp":6526741.036}
+
+[1;33mTesting: Recent Logs[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/admin/logs/recent
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[0;34m=== API KEY MANAGEMENT ===[0m
+
+[1;33mTesting: List API Keys[0m
+Endpoint: GET https://cryptouniverse.onrender.com/api/v1/api-keys
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[1;33mTesting: Generate API Key[0m
+Endpoint: POST https://cryptouniverse.onrender.com/api/v1/api-keys/generate
+[0;31m❌ FAILED - Not Found (Status: 404)[0m
+
+[0;34m=== WEBSOCKET CONNECTION ===[0m
+Testing WebSocket at: wss://cryptouniverse.onrender.com/ws
+[1;33mℹ️  WebSocket endpoint configured at wss://cryptouniverse.onrender.com/ws[0m
+Manual testing required for WebSocket functionality
+
+[0;34m==================================================
+📊 TEST SUMMARY REPORT
+==================================================[0m
+[0;32m✅ Passed: 5[0m
+[0;31m❌ Failed: 30[0m
+[1;33m⚠️  Warnings: 0[0m
+📈 Success Rate: 14%
+
+[0;34m=== CRITICAL ISSUES TO FIX ===[0m
+[0;31mThe following features need immediate attention:[0m
+1. Review failed endpoints in the log above
+2. Check server logs for 500 errors
+3. Verify endpoint routes match implementation
+4. Ensure all required services are running
+
+[0;34mFull report saved to: /c/Users/ASUS/CryptoUniverse/test_results_20250906_001914.json[0m

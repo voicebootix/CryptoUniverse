@@ -1,103 +1,290 @@
 {
   "tech_stack": [
     "Python 3.11+",
-    "FastAPI",
-    "PostgreSQL 15+",
-    "Redis 7+",
-    "SQLAlchemy 2.0",
-    "Celery",
-    "React 18+ with TypeScript",
-    "Material-UI v5",
-    "Docker + Docker Compose",
-    "Kubernetes",
-    "WebSockets",
-    "JWT Authentication"
+    "FastAPI 0.104.1",
+    "SQLAlchemy 2.0.23 (Async ORM)",
+    "PostgreSQL with AsyncPG driver",
+    "Redis 5.0.1 (Caching & Sessions)",
+    "Alembic 1.13.1 (Database Migrations)",
+    "JWT Authentication with python-jose",
+    "OAuth2 with Authlib 1.2.1",
+    "Stripe 7.8.0 (Payment Processing)",
+    "WebSockets 12.0 (Real-time Features)",
+    "Celery 5.3.4 (Background Tasks)",
+    "Structlog 23.2.0 (Structured Logging)",
+    "OpenAI 1.3.8 & Anthropic 0.7.8 (AI Services)",
+    "CCXT 4.2.25 (Cryptocurrency Exchange APIs)",
+    "NumPy 1.24.3 & Pandas 2.0.3 (Financial Calculations)",
+    "Uvicorn 0.24.0 (ASGI Server)",
+    "Docker (Containerization)",
+    "Pydantic 2.5.1 (Data Validation)"
   ],
   "features": [
     {
-      "name": "Authentication System",
-      "description": "Complete JWT-based authentication with refresh tokens, MFA, and OAuth2 support",
+      "name": "Authentication & User Management",
+      "description": "Enterprise-grade authentication system with JWT tokens, OAuth2 integration, MFA support, session management, and role-based access control for multi-tenant trading platform",
       "files": [
-        "app/auth/",
-        "app/routers/auth.py"
+        "app/api/v1/endpoints/auth.py",
+        "app/api/v1/endpoints/password_reset.py",
+        "app/models/user.py",
+        "app/models/session.py",
+        "app/services/oauth.py"
       ],
       "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Authentication API",
+          "version": "1.0.0",
+          "description": "User authentication and session management"
+        },
         "paths": {
           "/auth/login": {
             "post": {
-              "summary": "User login",
-              "parameters": ["email", "password", "mfa_code"]
+              "summary": "User Login",
+              "description": "Authenticate user and return JWT tokens with MFA support",
+              "tags": ["Authentication"],
+              "requestBody": {
+                "required": true,
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "email": {"type": "string", "format": "email"},
+                        "password": {"type": "string", "minLength": 8},
+                        "tenant_id": {"type": "string", "nullable": true},
+                        "remember_me": {"type": "boolean", "default": false},
+                        "mfa_code": {"type": "string", "nullable": true}
+                      },
+                      "required": ["email", "password"]
+                    }
+                  }
+                }
+              }
             }
           },
           "/auth/register": {
             "post": {
-              "summary": "User registration",
-              "parameters": ["email", "password", "full_name", "tenant_id"]
+              "summary": "User Registration",
+              "description": "Register new user with validation and tenant assignment",
+              "tags": ["Authentication"]
+            }
+          },
+          "/auth/refresh": {
+            "post": {
+              "summary": "Token Refresh",
+              "description": "Refresh expired access token using refresh token",
+              "tags": ["Authentication"]
+            }
+          },
+          "/auth/logout": {
+            "post": {
+              "summary": "User Logout",
+              "description": "Invalidate user session and tokens",
+              "tags": ["Authentication"]
+            }
+          },
+          "/auth/me": {
+            "get": {
+              "summary": "Get Current User",
+              "description": "Get current authenticated user profile",
+              "tags": ["Authentication"]
+            }
+          },
+          "/forgot-password": {
+            "post": {
+              "summary": "Forgot Password",
+              "description": "Send password reset email to user",
+              "tags": ["Authentication"]
+            }
+          },
+          "/reset-password": {
+            "post": {
+              "summary": "Reset Password",
+              "description": "Reset user password using reset token",
+              "tags": ["Authentication"]
             }
           }
         }
       }
     },
     {
-      "name": "AI Trading Engine",
-      "description": "Multi-AI consensus trading system using GPT-4, Claude, and Gemini for automated trading",
+      "name": "Trading Engine",
+      "description": "AI-powered cryptocurrency trading engine with manual and autonomous trading, portfolio management, market data integration, arbitrage detection, and simulation mode",
       "files": [
-        "app/trading/",
-        "app/ai/"
+        "app/api/v1/endpoints/trading.py",
+        "app/services/trading_engine.py",
+        "app/services/market_data_feeds.py",
+        "app/models/trade.py"
       ],
       "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Trading API",
+          "version": "1.0.0",
+          "description": "Cryptocurrency trading operations and portfolio management"
+        },
         "paths": {
           "/trading/execute": {
             "post": {
-              "summary": "Execute trades",
-              "parameters": ["symbol", "action", "amount", "price", "order_type"]
+              "summary": "Execute Trade",
+              "description": "Execute manual trading order with risk management and AI validation",
+              "tags": ["Trading"]
             }
           },
           "/trading/autonomous/start": {
             "post": {
-              "summary": "Start autonomous trading",
-              "parameters": ["mode", "max_daily_trades", "risk_level"]
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "Credit System",
-      "description": "Revolutionary credit-based profit potential system instead of subscriptions",
-      "files": [
-        "app/credits/",
-        "app/billing/"
-      ],
-      "api_doc": {
-        "paths": {
-          "/credits/balance": {
-            "get": {
-              "summary": "Get credit balance"
+              "summary": "Start Autonomous Trading",
+              "description": "Activate autonomous trading with AI consensus and strategy execution",
+              "tags": ["Trading"]
             }
           },
-          "/credits/purchase": {
+          "/trading/simulation/toggle": {
             "post": {
-              "summary": "Purchase credits",
-              "parameters": ["amount", "payment_method"]
+              "summary": "Toggle Simulation Mode",
+              "description": "Switch between live and simulation trading modes",
+              "tags": ["Trading"]
+            }
+          },
+          "/trading/portfolio": {
+            "get": {
+              "summary": "Get Portfolio",
+              "description": "Get current portfolio status, balances, and performance metrics",
+              "tags": ["Trading"]
+            }
+          },
+          "/trading/arbitrage/opportunities": {
+            "get": {
+              "summary": "Arbitrage Opportunities",
+              "description": "Detect cross-exchange arbitrage opportunities in real-time",
+              "tags": ["Trading"]
             }
           }
         }
       }
     },
     {
-      "name": "Multi-Exchange Integration",
-      "description": "Support for multiple cryptocurrency exchanges (Binance, Kraken, KuCoin, Coinbase)",
+      "name": "AI Consensus System",
+      "description": "Multi-AI model consensus system for trading decisions, risk assessment, portfolio analysis, and market insights using OpenAI GPT-4 and Anthropic Claude",
       "files": [
-        "app/exchanges/",
-        "app/integrations/"
+        "app/api/v1/endpoints/ai_consensus.py",
+        "app/services/ai_consensus_core.py",
+        "app/services/ai_manager_startup.py"
       ],
       "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "AI Consensus API",
+          "version": "1.0.0",
+          "description": "Multi-AI consensus for trading decisions and market analysis"
+        },
+        "paths": {
+          "/ai-consensus/analyze-opportunity": {
+            "post": {
+              "summary": "Analyze Trading Opportunity",
+              "description": "Get multi-AI consensus analysis for potential trading opportunities",
+              "tags": ["AI Consensus"]
+            }
+          },
+          "/ai-consensus/validate-trade": {
+            "post": {
+              "summary": "Validate Trade Decision",
+              "description": "Validate trading decision using AI consensus before execution",
+              "tags": ["AI Consensus"]
+            }
+          },
+          "/ai-consensus/risk-assessment": {
+            "post": {
+              "summary": "Risk Assessment",
+              "description": "Comprehensive risk assessment using multiple AI models",
+              "tags": ["AI Consensus"]
+            }
+          },
+          "/ai-consensus/portfolio-review": {
+            "post": {
+              "summary": "Portfolio Review",
+              "description": "AI-powered portfolio analysis and optimization recommendations",
+              "tags": ["AI Consensus"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Exchange Integration",
+      "description": "Multi-exchange cryptocurrency trading integration with API key management, balance tracking, and real-time data feeds for Binance, Kraken, KuCoin, and Coinbase",
+      "files": [
+        "app/api/v1/endpoints/exchanges.py",
+        "app/services/exchange_integration.py",
+        "app/models/exchange_api_key.py"
+      ],
+      "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Exchange Integration API",
+          "version": "1.0.0",
+          "description": "Cryptocurrency exchange API integration and management"
+        },
         "paths": {
           "/exchanges/connect": {
             "post": {
-              "summary": "Connect exchange account",
-              "parameters": ["exchange", "api_key", "api_secret"]
+              "summary": "Connect Exchange API",
+              "description": "Connect and validate cryptocurrency exchange API keys",
+              "tags": ["Exchanges"]
+            }
+          },
+          "/exchanges/list": {
+            "get": {
+              "summary": "List Exchange Connections",
+              "description": "Get user's connected exchange accounts and status",
+              "tags": ["Exchanges"]
+            }
+          },
+          "/exchanges/{exchange}/balances": {
+            "get": {
+              "summary": "Get Exchange Balances",
+              "description": "Get current balances from connected exchange",
+              "tags": ["Exchanges"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Trading Strategies",
+      "description": "Advanced trading strategy management with momentum, mean reversion, arbitrage, and HFT strategies, including marketplace for strategy sharing and performance tracking",
+      "files": [
+        "app/api/v1/endpoints/strategies.py",
+        "app/services/strategy_engine.py",
+        "app/models/strategy.py"
+      ],
+      "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Trading Strategies API",
+          "version": "1.0.0",
+          "description": "Trading strategy management and execution"
+        },
+        "paths": {
+          "/strategies/list": {
+            "get": {
+              "summary": "List Strategies",
+              "description": "Get available trading strategies for user",
+              "tags": ["Strategies"]
+            }
+          },
+          "/strategies/execute": {
+            "post": {
+              "summary": "Execute Strategy",
+              "description": "Execute specific trading strategy with parameters",
+              "tags": ["Strategies"]
+            }
+          },
+          "/strategies/marketplace": {
+            "get": {
+              "summary": "Strategy Marketplace",
+              "description": "Browse available strategies in marketplace",
+              "tags": ["Strategies"]
             }
           }
         }
@@ -105,17 +292,86 @@
     },
     {
       "name": "Market Analysis",
-      "description": "Real-time market analysis with technical indicators and sentiment analysis",
+      "description": "Comprehensive market analysis with real-time price tracking, technical analysis, sentiment analysis, volatility monitoring, and institutional flow detection",
       "files": [
-        "app/market/",
-        "app/analysis/"
+        "app/api/v1/endpoints/market_analysis.py",
+        "app/services/market_analysis_service.py",
+        "app/services/market_data_feeds.py"
       ],
       "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Market Analysis API",
+          "version": "1.0.0",
+          "description": "Cryptocurrency market analysis and insights"
+        },
         "paths": {
+          "/market/realtime-prices": {
+            "get": {
+              "summary": "Real-time Prices",
+              "description": "Get real-time cryptocurrency prices from multiple exchanges",
+              "tags": ["Market Analysis"]
+            }
+          },
           "/market/technical-analysis": {
             "post": {
-              "summary": "Get technical analysis",
-              "parameters": ["symbols", "timeframes", "indicators"]
+              "summary": "Technical Analysis",
+              "description": "Perform technical analysis on cryptocurrency pairs",
+              "tags": ["Market Analysis"]
+            }
+          },
+          "/market/sentiment-analysis": {
+            "post": {
+              "summary": "Sentiment Analysis",
+              "description": "Analyze market sentiment using social media and news data",
+              "tags": ["Market Analysis"]
+            }
+          },
+          "/market/arbitrage-opportunities": {
+            "post": {
+              "summary": "Arbitrage Opportunities",
+              "description": "Detect arbitrage opportunities across exchanges",
+              "tags": ["Market Analysis"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Credit & Payment System",
+      "description": "Enterprise credit-based pricing system with Stripe integration, cryptocurrency payments, profit-sharing limits, and transaction history tracking",
+      "files": [
+        "app/api/v1/endpoints/credits.py",
+        "app/services/credit_service.py",
+        "app/models/credit_transaction.py"
+      ],
+      "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Credits & Payments API",
+          "version": "1.0.0",
+          "description": "Credit system and payment processing"
+        },
+        "paths": {
+          "/credits/balance": {
+            "get": {
+              "summary": "Get Credit Balance",
+              "description": "Get user's current credit balance and usage statistics",
+              "tags": ["Credits"]
+            }
+          },
+          "/credits/purchase": {
+            "post": {
+              "summary": "Purchase Credits",
+              "description": "Purchase credits using Stripe or cryptocurrency payments",
+              "tags": ["Credits"]
+            }
+          },
+          "/credits/profit-potential": {
+            "get": {
+              "summary": "Profit Potential",
+              "description": "Calculate potential profits based on current credit balance",
+              "tags": ["Credits"]
             }
           }
         }
@@ -123,34 +379,185 @@
     },
     {
       "name": "Telegram Integration",
-      "description": "Complete trading functionality via Telegram bot",
+      "description": "Telegram bot integration for notifications, command execution, portfolio monitoring, and real-time trading alerts with webhook support",
       "files": [
-        "app/telegram/",
-        "app/bot/"
+        "app/api/v1/endpoints/telegram.py",
+        "app/services/telegram_service.py"
       ],
       "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Telegram Integration API",
+          "version": "1.0.0",
+          "description": "Telegram bot integration and notifications"
+        },
         "paths": {
           "/telegram/connect": {
             "post": {
-              "summary": "Connect Telegram account",
-              "parameters": ["user_id", "chat_id", "username"]
+              "summary": "Connect Telegram",
+              "description": "Connect user account to Telegram bot",
+              "tags": ["Telegram"]
+            }
+          },
+          "/telegram/webhook": {
+            "post": {
+              "summary": "Telegram Webhook",
+              "description": "Handle incoming Telegram webhooks and commands",
+              "tags": ["Telegram"]
             }
           }
         }
       }
     },
     {
-      "name": "Copy Trading Marketplace",
-      "description": "Platform for sharing and monetizing trading strategies",
+      "name": "Chat Assistant",
+      "description": "AI-powered chat assistant for trading guidance, portfolio analysis, market insights, and command execution with session management",
       "files": [
-        "app/marketplace/",
-        "app/strategies/"
+        "app/api/v1/endpoints/chat.py",
+        "app/services/chat_service.py"
       ],
       "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Chat Assistant API",
+          "version": "1.0.0",
+          "description": "AI-powered trading assistant"
+        },
         "paths": {
-          "/strategies/marketplace": {
+          "/chat/message": {
+            "post": {
+              "summary": "Send Chat Message",
+              "description": "Send message to AI trading assistant",
+              "tags": ["Chat"]
+            }
+          },
+          "/chat/history/{session_id}": {
             "get": {
-              "summary": "Get strategy marketplace"
+              "summary": "Get Chat History",
+              "description": "Get chat conversation history for session",
+              "tags": ["Chat"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Paper Trading",
+      "description": "Risk-free paper trading simulation with real market data, performance tracking, what-if analysis, and comparison with live trading results",
+      "files": [
+        "app/api/v1/endpoints/paper_trading.py",
+        "app/services/paper_trading_service.py"
+      ],
+      "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Paper Trading API",
+          "version": "1.0.0",
+          "description": "Simulated trading for testing and learning"
+        },
+        "paths": {
+          "/paper-trading/setup": {
+            "post": {
+              "summary": "Setup Paper Trading",
+              "description": "Initialize paper trading account with virtual balance",
+              "tags": ["Paper Trading"]
+            }
+          },
+          "/paper-trading/execute": {
+            "post": {
+              "summary": "Execute Paper Trade",
+              "description": "Execute simulated trade with real market data",
+              "tags": ["Paper Trading"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "API Key Management",
+      "description": "Secure API key management for external integrations with generation, rotation, usage tracking, and permission scoping",
+      "files": [
+        "app/api/v1/endpoints/api_keys.py",
+        "app/services/api_key_service.py",
+        "app/models/api_key.py"
+      ],
+      "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "API Keys Management",
+          "version": "1.0.0",
+          "description": "API key generation and management"
+        },
+        "paths": {
+          "/api-keys/": {
+            "post": {
+              "summary": "Generate API Key",
+              "description": "Generate new API key with specified permissions",
+              "tags": ["API Keys"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Admin Dashboard",
+      "description": "Enterprise administration panel with system monitoring, user management, credit pricing, audit logs, and emergency controls",
+      "files": [
+        "app/api/v1/endpoints/admin.py",
+        "app/services/admin_service.py"
+      ],
+      "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Admin Dashboard API",
+          "version": "1.0.0",
+          "description": "System administration and monitoring"
+        },
+        "paths": {
+          "/admin/system/status": {
+            "get": {
+              "summary": "System Status",
+              "description": "Get comprehensive system health and status",
+              "tags": ["Admin"]
+            }
+          },
+          "/admin/users": {
+            "get": {
+              "summary": "List Users",
+              "description": "Get paginated list of system users",
+              "tags": ["Admin"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Data Processing",
+      "description": "Data validation and processing system with special character handling, input sanitization, and duplicate detection",
+      "files": [
+        "app/api/v1/endpoints/data.py",
+        "app/models/data.py"
+      ],
+      "api_doc": {
+        "openapi": "3.0.3",
+        "info": {
+          "title": "Data Processing API",
+          "version": "1.0.0",
+          "description": "Data validation and processing utilities"
+        },
+        "paths": {
+          "/data/check-duplicate": {
+            "post": {
+              "summary": "Check Duplicate Entry",
+              "description": "Check if data entry already exists in system",
+              "tags": ["Data"]
+            }
+          },
+          "/data/process": {
+            "post": {
+              "summary": "Process Data",
+              "description": "Process and sanitize input data with special character handling",
+              "tags": ["Data"]
             }
           }
         }

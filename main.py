@@ -23,7 +23,7 @@ from jose import JWTError
 # Core imports
 from app.core.config import get_settings
 from app.core.database import engine, db_manager
-from app.core.redis import get_redis_client, close_redis_client
+from app.core.enterprise_startup import get_application
 from app.core.logging import configure_logging
 
 # API routes
@@ -262,12 +262,15 @@ async def health_check():
         health_status["status"] = "unhealthy"
 
     try:
-        # Check Redis
-        redis = await get_redis_client()
-        await redis.ping()
-        health_status["checks"]["redis"] = "connected"
+        # Check enterprise application health
+        app = await get_application()
+        app_health = app.get_health_status()
+        health_status["checks"]["application"] = app_health['status']
+        
+        if app_health['status'] != 'running':
+            health_status["status"] = "unhealthy"
     except Exception as e:
-        health_status["checks"]["redis"] = f"error: {str(e)}"
+        health_status["checks"]["application"] = f"error: {str(e)}"
         health_status["status"] = "unhealthy"
 
     try:
