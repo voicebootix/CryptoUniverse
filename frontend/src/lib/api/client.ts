@@ -14,7 +14,7 @@ console.log('API Base URL:', API_BASE_URL);
 // Create axios instance
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 120000, // 2 minutes default timeout for Render cold starts
+  timeout: 180000, // 3 minutes default timeout for Render cold starts
   headers: {
     'Content-Type': 'application/json',
   },
