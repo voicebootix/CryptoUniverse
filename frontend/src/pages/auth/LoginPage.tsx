@@ -14,6 +14,10 @@ import {
   Mail,
   KeyRound,
   ArrowRight,
+  Bot,
+  Lock,
+  Zap,
+  BarChart3,
 } from "lucide-react";
 import {
   useAuthStore,
@@ -116,10 +120,18 @@ const LoginPage: React.FC = () => {
               transition={{ duration: 0.5 }}
               className="w-full max-w-md"
             >
-              {/* Form */}
+              {/* Logo and Title */}
+              <div className="text-center mb-8">
+                <h2 className="text-3xl font-bold text-white">
+                  Welcome Back
+                </h2>
+                <p className="text-gray-400 mt-2">Sign in to your account</p>
+              </div>
+
+              {/* Form with styled box */}
               <form 
                 onSubmit={handleSubmit(onSubmit)} 
-                className="space-y-6"
+                className="space-y-6 bg-white/5 backdrop-blur-xl p-8 rounded-2xl border border-white/10 shadow-2xl"
                 role="form"
                 aria-label="Login Form"
               >
@@ -144,8 +156,11 @@ const LoginPage: React.FC = () => {
                     </AnimatePresence>
 
                 {/* Email Input */}
-                    <div>
-                      <Label htmlFor="email">Email Address</Label>
+                    <div className="space-y-2">
+                      <Label htmlFor="email" className="text-gray-300 flex items-center gap-2">
+                        <Mail className="h-4 w-4 text-blue-400" />
+                        Email Address
+                      </Label>
                   <Input
                     id="email"
                     type="email"
@@ -156,12 +171,16 @@ const LoginPage: React.FC = () => {
                     error={errors.email?.message}
                     aria-required="true"
                     aria-invalid={errors.email ? "true" : "false"}
+                    className="bg-white/10 border-white/20 text-white placeholder:text-gray-500 focus:border-blue-400 focus:ring-blue-400"
                   />
                           </div>
 
                 {/* Password Input */}
-                <div>
-                  <Label htmlFor="password">Password</Label>
+                <div className="space-y-2">
+                  <Label htmlFor="password" className="text-gray-300 flex items-center gap-2">
+                    <KeyRound className="h-4 w-4 text-purple-400" />
+                    Password
+                  </Label>
                   <div className="relative">
                             <Input
                               id="password"
@@ -172,6 +191,7 @@ const LoginPage: React.FC = () => {
                       aria-required="true"
                       aria-invalid={errors.password ? "true" : "false"}
                       aria-describedby="password-error"
+                      className="bg-white/10 border-white/20 text-white placeholder:text-gray-500 focus:border-purple-400 focus:ring-purple-400 pr-10"
                             />
                     <Button
                               type="button"
@@ -243,7 +263,7 @@ const LoginPage: React.FC = () => {
                         <Button
                           type="submit"
                           disabled={isLoading}
-                className="w-full"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-all duration-300 transform hover:scale-105"
                 loading={isLoading}
                 label={isLoading ? "Signing in..." : "Sign in"}
                         >
@@ -276,7 +296,7 @@ const LoginPage: React.FC = () => {
                       <Button
                         type="button"
                 variant="outline"
-                className="w-full"
+                className="w-full bg-white/10 border-white/20 hover:bg-white/20 text-white transition-all duration-300"
                         onClick={handleGoogleLogin}
                 label="Continue with Google"
               >
@@ -319,21 +339,41 @@ const LoginPage: React.FC = () => {
                 Automated cryptocurrency trading powered by advanced AI algorithms
               </p>
               <div className="space-y-6 mt-8">
-                <div>
-                    <h3 className="text-lg font-semibold">AI-Powered Trading</h3>
-                    <p className="text-muted-foreground">Multi-model consensus with GPT-4, Claude, and Gemini</p>
+                <div className="flex items-start space-x-3">
+                  <div className="p-2 rounded-lg bg-blue-500/20">
+                    <Bot className="h-6 w-6 text-blue-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-nowrap">AI-Powered Trading</h3>
+                    <p className="text-muted-foreground text-sm text-nowrap">Multi-model consensus with GPT-4, Claude, and Gemini</p>
+                  </div>
                 </div>
-                <div>
-                    <h3 className="text-lg font-semibold">Enterprise Security</h3>
-                    <p className="text-muted-foreground">Bank-level encryption with multi-factor authentication</p>
+                <div className="flex items-start space-x-3">
+                  <div className="p-2 rounded-lg bg-purple-500/20">
+                    <Lock className="h-6 w-6 text-purple-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-nowrap">Enterprise Security</h3>
+                    <p className="text-muted-foreground text-sm text-nowrap">Bank-level encryption with multi-factor authentication</p>
+                  </div>
                 </div>
-                <div>
-                    <h3 className="text-lg font-semibold">Real-Time Execution</h3>
-                    <p className="text-muted-foreground">Lightning-fast trades across multiple exchanges</p>
+                <div className="flex items-start space-x-3">
+                  <div className="p-2 rounded-lg bg-green-500/20">
+                    <Zap className="h-6 w-6 text-green-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-nowrap">Real-Time Execution</h3>
+                    <p className="text-muted-foreground text-sm text-nowrap">Lightning-fast trades across multiple exchanges</p>
+                  </div>
                 </div>
-                <div>
-                    <h3 className="text-lg font-semibold">Risk Management</h3>
-                    <p className="text-muted-foreground">Advanced portfolio protection and position sizing</p>
+                <div className="flex items-start space-x-3">
+                  <div className="p-2 rounded-lg bg-orange-500/20">
+                    <BarChart3 className="h-6 w-6 text-orange-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-nowrap">Risk Management</h3>
+                    <p className="text-muted-foreground text-sm text-nowrap">Advanced portfolio protection and position sizing</p>
+                  </div>
                 </div>
               </div>
 
