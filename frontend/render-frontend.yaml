@@ -6,10 +6,12 @@ services:
     plan: pro  # Professional tier for enterprise
     region: oregon
     buildCommand: |
-      echo "Starting frontend build v2.0.1..."
+      echo "Starting frontend build v2.0.2..."
+      echo "API URL: $VITE_API_URL"
+      echo "Environment: $VITE_ENVIRONMENT"
       npm ci
       npm run build
-      echo "Frontend build complete!"
+      echo "Frontend build complete with API: $VITE_API_URL"
     staticPublishPath: ./dist
     pullRequestPreviewsEnabled: true
     buildFilter:
