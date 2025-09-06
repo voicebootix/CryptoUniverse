@@ -131,7 +131,7 @@ async def get_system_overview(
         
         # Calculate volume
         result = await db.execute(
-            select(func.sum(Trade.amount)).filter(
+            select(func.sum(Trade.quantity)).filter(
                 Trade.created_at >= datetime.utcnow() - timedelta(hours=24)
             )
         )
@@ -679,7 +679,7 @@ async def get_detailed_metrics(
         ).count()
         
         # Volume 24h
-        volume_24h = db.query(func.sum(Trade.amount)).filter(
+        volume_24h = db.query(func.sum(Trade.quantity)).filter(
             Trade.created_at >= now - timedelta(hours=24)
         ).scalar() or 0
         

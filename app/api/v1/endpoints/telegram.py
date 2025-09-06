@@ -150,7 +150,7 @@ async def connect_telegram_account(
             max_trade_amount_usd=request.max_trade_amount,
             auth_token=auth_token,
             auth_expires_at=auth_expires,
-            allowed_commands=self._get_default_allowed_commands(request.enable_trading)
+            allowed_commands=_get_default_allowed_commands(request.enable_trading)
         )
         
         db.add(connection)
@@ -158,8 +158,8 @@ async def connect_telegram_account(
         await db.refresh(connection)
         
         # Generate setup instructions
-        bot_username = await self._get_bot_username()
-        setup_instructions = self._generate_setup_instructions(auth_token, bot_username)
+        bot_username = await _get_bot_username()
+        setup_instructions = _generate_setup_instructions(auth_token, bot_username)
         
         logger.info(
             "Telegram connection created",
@@ -242,7 +242,7 @@ async def telegram_webhook(
     
     try:
         # Verify webhook authenticity
-        if not await self._verify_telegram_webhook(request):
+        if not await _verify_telegram_webhook(request):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid webhook signature"
