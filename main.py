@@ -183,6 +183,8 @@ def create_application() -> FastAPI:
         expose_headers=["*"],
         max_age=86400  # Cache preflight for 24 hours
     )
+    
+    # Note: Health and root endpoints are defined at module scope to avoid duplication
 
     # Add SessionMiddleware for OAuth
     app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
