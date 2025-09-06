@@ -7,11 +7,8 @@ with native Python implementation and enterprise-grade features.
 """
 
 import asyncio
-<<<<<<< HEAD
 import os
-=======
 import json
->>>>>>> b7e85a74faa79cf2ddcf69e417990b6c13619eb7
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
