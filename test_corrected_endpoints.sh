@@ -7,17 +7,17 @@ IFS=$'\n\t'
 BASE_URL="https://cryptouniverse.onrender.com"
 API_URL="${BASE_URL}/api/v1"
 
-# Check if TOKEN environment variable is set
-if [ -z "$TOKEN" ]; then
-    echo "Error: TOKEN environment variable not set"
-    echo "Please set TOKEN with: export TOKEN=your_jwt_token_here"
-    exit 1
-fi
-
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
+
+# Check if TOKEN environment variable is set (safe under set -u)
+if [ -z "${TOKEN:-}" ]; then
+    echo -e "${RED}Error: TOKEN environment variable not set${NC}"
+    echo -e "${YELLOW}Please set TOKEN with: export TOKEN=your_jwt_token_here${NC}"
+    exit 1
+fi
 
 echo -e "${GREEN}Testing CORRECTED Endpoints${NC}"
 echo "================================"
