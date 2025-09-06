@@ -40,7 +40,80 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null, mfaRequired: false });
 
         try {
-          const response = await apiClient.post('/auth/login', credentials);
+          // Retry logic for slow Render services with proper exponential backoff
+          let response;
+          let retryCount = 0;
+          const maxRetries = 3;
+          const baseDelay = 1000; // 1 second base delay
+          const maxBackoff = 8000; // Maximum 8 seconds per retry
+          const overallTimeout = 45000; // 45 seconds total timeout
+          const startTime = Date.now();
+          
+          while (retryCount <= maxRetries) {
+            // Calculate remaining budget before each attempt
+            const elapsedTime = Date.now() - startTime;
+            const remainingBudget = overallTimeout - elapsedTime;
+            
+            if (remainingBudget <= 0) {
+              throw new Error('Login request exceeded maximum timeout. Please try again later.');
+            }
+            
+            try {
+              // Use remaining budget as per-request timeout
+              const requestTimeout = Math.max(1000, remainingBudget); // Minimum 1 second
+              response = await apiClient.post('/auth/login', credentials, {
+                timeout: requestTimeout
+              });
+              break; // Success, exit retry loop
+            } catch (error: any) {
+              retryCount++;
+              
+              // Check remaining budget after failed attempt
+              const elapsedAfterAttempt = Date.now() - startTime;
+              const remainingAfterAttempt = overallTimeout - elapsedAfterAttempt;
+              
+              if (remainingAfterAttempt <= 0) {
+                throw new Error('Login request exceeded maximum timeout. Please try again later.');
+              }
+              
+              // Enhanced timeout detection (case-insensitive)
+              const isTimeoutError = error.code === 'ECONNABORTED' || 
+                                   /timeout/i.test(error.message || '') || 
+                                   /timeouterror/i.test(error.message || '');
+              
+              // If it's a timeout error and we have retries left
+              if (isTimeoutError && retryCount <= maxRetries) {
+                // Calculate exponential backoff with jitter
+                const exponentialDelay = Math.min(baseDelay * Math.pow(2, retryCount - 1), maxBackoff);
+                const jitterFactor = 0.5 + Math.random(); // Random between 0.5 and 1.5
+                const actualDelay = Math.floor(exponentialDelay * jitterFactor);
+                
+                // Only log in development
+                if (import.meta.env.DEV) {
+                  console.log(`Login attempt ${retryCount} failed, retrying in ${actualDelay}ms...`);
+                }
+                
+                // Wait for the calculated delay
+                await new Promise(resolve => setTimeout(resolve, actualDelay));
+                
+                // Check timeout again after wait
+                const elapsedAfterWait = Date.now() - startTime;
+                if (elapsedAfterWait >= overallTimeout) {
+                  throw new Error('Login request exceeded maximum timeout. Please try again later.');
+                }
+                
+                continue;
+              }
+              
+              // If not a timeout or out of retries, throw the error
+              throw error;
+            }
+          }
+          
+          // If we exhausted retries without success
+          if (!response) {
+            throw new Error('Login failed after maximum retry attempts. Please try again later.');
+          }
           
           if (response.data.mfa_required) {
             set({ 
