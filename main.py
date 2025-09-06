@@ -244,6 +244,7 @@ app = create_application()
 
 # Health check endpoint
 @app.get("/health", tags=["System"])
+@app.head("/health", tags=["System"])
 async def health_check():
     """
     Comprehensive health check endpoint for load balancers and monitoring.
@@ -324,6 +325,7 @@ async def health_check():
 
 # Root endpoint
 @app.get("/", tags=["System"])
+@app.head("/", tags=["System"])
 async def root():
     """
     Welcome endpoint with API information and feature overview.
