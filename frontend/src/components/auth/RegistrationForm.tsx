@@ -43,14 +43,53 @@ export default function RegistrationForm() {
   });
 
   const onSubmit = async (data: FormData) => {
+    if (import.meta.env.DEV) {
+      // Sanitize data for development logging - redact sensitive fields
+      const sanitizedData = {
+        ...data,
+        password: '***',
+        confirm_password: '***'
+      };
+      
+      // Sanitize errors - redact any sensitive field errors
+      const sanitizedErrors = { ...errors };
+      if (sanitizedErrors.password) {
+        sanitizedErrors.password = { ...sanitizedErrors.password, message: sanitizedErrors.password.message };
+      }
+      if (sanitizedErrors.confirm_password) {
+        sanitizedErrors.confirm_password = { ...sanitizedErrors.confirm_password, message: sanitizedErrors.confirm_password.message };
+      }
+      
+      console.log('Form submitted with data:', sanitizedData);
+      console.log('Form errors:', sanitizedErrors);
+    }
+    
     try {
       setIsLoading(true);
       setError('');
 
+      // Transform data to match backend expectations
+      const registerData = {
+        email: data.email,
+        password: data.password,
+        full_name: data.full_name,
+        role: 'trader', // Default role
+        tenant_id: null // Default tenant
+      };
+
+      if (import.meta.env.DEV) {
+        // Sanitize register data for development logging - redact password
+        const sanitizedRegisterData = {
+          ...registerData,
+          password: '***'
+        };
+        console.log('Sending register data:', sanitizedRegisterData);
+      }
+
       const response = await fetch('/api/v1/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(registerData),
       });
 
       if (!response.ok) {
