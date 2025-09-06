@@ -154,9 +154,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         key = await self.get_redis_key(request, rule)
         now = int(time.time())
         
-        # Use Redis pipeline for atomic operations
-        async with redis.pipeline() as pipe:
-            try:
+        try:
+            # Use Redis pipeline for atomic operations
+            async with redis.pipeline() as pipe:
                 # Remove old timestamps outside the window
                 pipe.zremrangebyscore(key, 0, now - rule.window)
                 
@@ -188,10 +188,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 
                 return True, remaining
                 
-            except Exception as e:
-                logger.error(f"Rate limit error: {str(e)}")
-                # Fail open in case of Redis errors
-                return True, 0
+        except Exception as e:
+            logger.error(f"Rate limit error: {str(e)}")
+            # Fail open in case of Redis errors
+            return True, 0
     
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         """Process request with rate limiting."""
