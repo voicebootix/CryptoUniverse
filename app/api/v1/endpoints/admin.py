@@ -455,37 +455,57 @@ async def list_users(
     )
     
     try:
-        query = db.query(User)
+        # Build the base query
+        stmt = select(User)
+        filter_conditions = []
         
         # Apply filters
         if status_filter:
-            query = query.filter(User.status == status_filter)
+            condition = User.status == status_filter
+            stmt = stmt.filter(condition)
+            filter_conditions.append(condition)
         
         if role_filter:
-            query = query.filter(User.role == role_filter)
+            condition = User.role == role_filter
+            stmt = stmt.filter(condition)
+            filter_conditions.append(condition)
         
         if search:
-            query = query.filter(
-                or_(
-                    User.email.ilike(f"%{search}%"),
-                    User.full_name.ilike(f"%{search}%")
-                )
+            condition = or_(
+                User.email.ilike(f"%{search}%"),
+                User.full_name.ilike(f"%{search}%")
             )
+            stmt = stmt.filter(condition)
+            filter_conditions.append(condition)
         
-        # Get total count
-        total_count = query.count()
+        # Get total count with filters
+        count_stmt = select(func.count()).select_from(User)
+        if filter_conditions:
+            count_stmt = count_stmt.filter(and_(*filter_conditions))
+        
+        total_result = await db.execute(count_stmt)
+        total_count = total_result.scalar() or 0
         
         # Get paginated results
-        users = query.offset(skip).limit(limit).all()
+        stmt = stmt.offset(skip).limit(limit)
+        result = await db.execute(stmt)
+        users = result.scalars().all()
         
         # Count by status
-        active_count = db.query(User).filter(User.status == UserStatus.ACTIVE).count()
-        trading_count = db.query(User).filter(
-            and_(
-                User.status == UserStatus.ACTIVE,
-                User.role.in_([UserRole.TRADER, UserRole.ADMIN])
+        active_count_result = await db.execute(
+            select(func.count()).select_from(User).filter(User.status == UserStatus.ACTIVE)
+        )
+        active_count = active_count_result.scalar() or 0
+        
+        trading_count_result = await db.execute(
+            select(func.count()).select_from(User).filter(
+                and_(
+                    User.status == UserStatus.ACTIVE,
+                    User.role.in_([UserRole.TRADER, UserRole.ADMIN])
+                )
             )
-        ).count()
+        )
+        trading_count = trading_count_result.scalar() or 0
         
         # Format user data
         user_list = []
@@ -502,13 +522,17 @@ async def list_users(
             }
             
             # Get credit balance
-            credit_account = db.query(CreditAccount).filter(
-                CreditAccount.user_id == user.id
-            ).first()
+            credit_result = await db.execute(
+                select(CreditAccount).filter(CreditAccount.user_id == user.id)
+            )
+            credit_account = credit_result.scalar_one_or_none()
             user_data["credits"] = credit_account.available_credits if credit_account else 0
             
             # Get trading stats
-            trade_count = db.query(Trade).filter(Trade.user_id == user.id).count()
+            trade_count_result = await db.execute(
+                select(func.count()).select_from(Trade).filter(Trade.user_id == user.id)
+            )
+            trade_count = trade_count_result.scalar() or 0
             user_data["total_trades"] = trade_count
             
             user_list.append(user_data)
@@ -552,7 +576,10 @@ async def manage_user(
     
     try:
         # Get target user
-        target_user = db.query(User).filter(User.id == request.user_id).first()
+        user_result = await db.execute(
+            select(User).filter(User.id == request.user_id)
+        )
+        target_user = user_result.scalar_one_or_none()
         if not target_user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -585,9 +612,10 @@ async def manage_user(
                 )
             
             # Get or create credit account
-            credit_account = db.query(CreditAccount).filter(
-                CreditAccount.user_id == target_user.id
-            ).first()
+            credit_result = await db.execute(
+                select(CreditAccount).filter(CreditAccount.user_id == target_user.id)
+            )
+            credit_account = credit_result.scalar_one_or_none()
             
             if not credit_account:
                 credit_account = CreditAccount(
@@ -669,19 +697,28 @@ async def get_detailed_metrics(
         yesterday_start = today_start - timedelta(days=1)
         
         # Active users (logged in last 24h)
-        active_users = db.query(User).filter(
-            User.last_login >= now - timedelta(hours=24)
-        ).count()
+        active_users_result = await db.execute(
+            select(func.count()).select_from(User).filter(
+                User.last_login >= now - timedelta(hours=24)
+            )
+        )
+        active_users = active_users_result.scalar() or 0
         
         # Trades today
-        trades_today = db.query(Trade).filter(
-            Trade.created_at >= today_start
-        ).count()
+        trades_today_result = await db.execute(
+            select(func.count()).select_from(Trade).filter(
+                Trade.created_at >= today_start
+            )
+        )
+        trades_today = trades_today_result.scalar() or 0
         
         # Volume 24h
-        volume_24h = db.query(func.sum(Trade.quantity)).filter(
-            Trade.created_at >= now - timedelta(hours=24)
-        ).scalar() or 0
+        volume_result = await db.execute(
+            select(func.sum(Trade.quantity)).filter(
+                Trade.created_at >= now - timedelta(hours=24)
+            )
+        )
+        volume_24h = volume_result.scalar() or 0
         
         # Get system health from master controller
         system_status = await master_controller.get_global_system_status()
@@ -738,31 +775,47 @@ async def get_audit_logs(
     )
     
     try:
-        query = db.query(AuditLog)
+        stmt = select(AuditLog)
         
         # Apply filters
         if user_id:
-            query = query.filter(AuditLog.user_id == user_id)
+            stmt = stmt.filter(AuditLog.user_id == user_id)
         
         if action_filter:
-            query = query.filter(AuditLog.action.ilike(f"%{action_filter}%"))
+            stmt = stmt.filter(AuditLog.action.ilike(f"%{action_filter}%"))
         
         if start_date:
             start_dt = datetime.fromisoformat(start_date)
-            query = query.filter(AuditLog.created_at >= start_dt)
+            stmt = stmt.filter(AuditLog.created_at >= start_dt)
         
         if end_date:
             end_dt = datetime.fromisoformat(end_date)
-            query = query.filter(AuditLog.created_at <= end_dt)
+            stmt = stmt.filter(AuditLog.created_at <= end_dt)
         
         # Order by most recent
-        query = query.order_by(AuditLog.created_at.desc())
+        stmt = stmt.order_by(AuditLog.created_at.desc())
         
         # Get total count
-        total_count = query.count()
+        count_stmt = select(func.count()).select_from(AuditLog)
+        # Apply same filters to count
+        if user_id:
+            count_stmt = count_stmt.filter(AuditLog.user_id == user_id)
+        if action_filter:
+            count_stmt = count_stmt.filter(AuditLog.action.ilike(f"%{action_filter}%"))
+        if start_date:
+            start_dt = datetime.fromisoformat(start_date)
+            count_stmt = count_stmt.filter(AuditLog.created_at >= start_dt)
+        if end_date:
+            end_dt = datetime.fromisoformat(end_date)
+            count_stmt = count_stmt.filter(AuditLog.created_at <= end_dt)
+        
+        total_result = await db.execute(count_stmt)
+        total_count = total_result.scalar() or 0
         
         # Get paginated results
-        audit_logs = query.offset(skip).limit(limit).all()
+        stmt = stmt.offset(skip).limit(limit)
+        result = await db.execute(stmt)
+        audit_logs = result.scalars().all()
         
         # Format results
         log_list = []
@@ -778,7 +831,10 @@ async def get_audit_logs(
             }
             
             # Get user email
-            user = db.query(User).filter(User.id == log.user_id).first()
+            user_result = await db.execute(
+                select(User).filter(User.id == log.user_id)
+            )
+            user = user_result.scalar_one_or_none()
             log_data["user_email"] = user.email if user else "unknown"
             
             log_list.append(log_data)
