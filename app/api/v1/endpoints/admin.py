@@ -525,7 +525,32 @@ async def list_users(
         )
         trading_count = trading_count_result.scalar_one()
         
-        # Format user data
+        # Batch fetch credit accounts for all users to avoid N+1 queries
+        user_ids = [user.id for user in users]
+        
+        # Initialize empty maps
+        credit_map = {}
+        trade_count_map = {}
+        
+        # Only query if there are users
+        if user_ids:
+            # Get all credit accounts in one query
+            credit_accounts_result = await db.execute(
+                select(CreditAccount).where(CreditAccount.user_id.in_(user_ids))
+            )
+            credit_accounts = credit_accounts_result.scalars().all()
+            credit_map = {ca.user_id: ca.available_credits for ca in credit_accounts}
+            
+            # Get all trade counts in one aggregated query
+            trade_counts_result = await db.execute(
+                select(Trade.user_id, func.count(Trade.id).label("count"))
+                .where(Trade.user_id.in_(user_ids))
+                .group_by(Trade.user_id)
+            )
+            trade_counts = trade_counts_result.all()
+            trade_count_map = {row.user_id: row.count for row in trade_counts}
+        
+        # Format user data using the pre-fetched maps
         user_list = []
         for user in users:
             user_data = {
@@ -539,19 +564,11 @@ async def list_users(
                 "tenant_id": str(user.tenant_id) if user.tenant_id else None
             }
             
-            # Get credit balance using async query
-            credit_result = await db.execute(
-                select(CreditAccount).where(CreditAccount.user_id == user.id)
-            )
-            credit_account = credit_result.scalar_one_or_none()
-            user_data["credits"] = credit_account.available_credits if credit_account else 0
+            # Use pre-fetched credit data
+            user_data["credits"] = credit_map.get(user.id, 0)
             
-            # Get trading stats using async query
-            trade_count_result = await db.execute(
-                select(func.count()).select_from(Trade).where(Trade.user_id == user.id)
-            )
-            trade_count = trade_count_result.scalar_one()
-            user_data["total_trades"] = trade_count
+            # Use pre-fetched trade count
+            user_data["total_trades"] = trade_count_map.get(user.id, 0)
             
             user_list.append(user_data)
         
