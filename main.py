@@ -78,6 +78,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning("⚠️ Redis connection failed - running in degraded mode", error=str(e))
 
+        # Initialize rate limiter with Redis
+        try:
+            from app.services.rate_limit import rate_limiter
+            await rate_limiter.async_init()
+            logger.info("✅ Rate limiter initialized")
+        except Exception as e:
+            logger.warning("⚠️ Rate limiter initialization failed", error=str(e))
+
         # Start background services
         await background_manager.start_all()
         logger.info("✅ Background services started") 
