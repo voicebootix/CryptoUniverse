@@ -137,17 +137,16 @@ class BackgroundServiceManager(LoggerMixin):
                 raise
             except Exception as e:
                 self.services[service_name] = "error"
-                self.logger.error(f"❌ {service_name} service failed", 
-                                attempt=attempt + 1, 
-                                max_retries=max_retries,
-                                error=str(e))
+                self.logger.exception(f"❌ {service_name} service failed", 
+                                    attempt=attempt + 1, 
+                                    max_retries=max_retries)
                 
                 if attempt < max_retries - 1:
                     self.logger.info(f"🔄 Retrying {service_name} in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2  # Exponential backoff
                 else:
-                    self.logger.error(f"💀 {service_name} service permanently failed after {max_retries} attempts")
+                    self.logger.exception(f"💀 {service_name} service permanently failed after {max_retries} attempts")
                     self.services[service_name] = "failed"
                     return
                     
