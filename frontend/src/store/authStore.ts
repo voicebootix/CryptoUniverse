@@ -50,26 +50,48 @@ export const useAuthStore = create<AuthStore>()(
           const startTime = Date.now();
           
           while (retryCount <= maxRetries) {
+            // Calculate remaining budget before each attempt
+            const elapsedTime = Date.now() - startTime;
+            const remainingBudget = overallTimeout - elapsedTime;
+            
+            if (remainingBudget <= 0) {
+              throw new Error('Login request exceeded maximum timeout. Please try again later.');
+            }
+            
             try {
-              response = await apiClient.post('/auth/login', credentials);
+              // Use remaining budget as per-request timeout
+              const requestTimeout = Math.max(1000, remainingBudget); // Minimum 1 second
+              response = await apiClient.post('/auth/login', credentials, {
+                timeout: requestTimeout
+              });
               break; // Success, exit retry loop
             } catch (error: any) {
               retryCount++;
               
-              // Check overall timeout before attempting retry
-              const elapsedTime = Date.now() - startTime;
-              if (elapsedTime >= overallTimeout) {
+              // Check remaining budget after failed attempt
+              const elapsedAfterAttempt = Date.now() - startTime;
+              const remainingAfterAttempt = overallTimeout - elapsedAfterAttempt;
+              
+              if (remainingAfterAttempt <= 0) {
                 throw new Error('Login request exceeded maximum timeout. Please try again later.');
               }
               
+              // Enhanced timeout detection (case-insensitive)
+              const isTimeoutError = error.code === 'ECONNABORTED' || 
+                                   /timeout/i.test(error.message || '') || 
+                                   /timeouterror/i.test(error.message || '');
+              
               // If it's a timeout error and we have retries left
-              if ((error.code === 'ECONNABORTED' || error.message?.includes('timeout')) && retryCount <= maxRetries) {
-                console.log(`Login attempt ${retryCount} failed, retrying...`);
-                
+              if (isTimeoutError && retryCount <= maxRetries) {
                 // Calculate exponential backoff with jitter
                 const exponentialDelay = Math.min(baseDelay * Math.pow(2, retryCount - 1), maxBackoff);
                 const jitterFactor = 0.5 + Math.random(); // Random between 0.5 and 1.5
                 const actualDelay = Math.floor(exponentialDelay * jitterFactor);
+                
+                // Only log in development
+                if (import.meta.env.DEV) {
+                  console.log(`Login attempt ${retryCount} failed, retrying in ${actualDelay}ms...`);
+                }
                 
                 // Wait for the calculated delay
                 await new Promise(resolve => setTimeout(resolve, actualDelay));
