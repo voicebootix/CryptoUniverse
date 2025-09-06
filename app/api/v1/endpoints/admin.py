@@ -804,29 +804,53 @@ async def get_audit_logs(
             stmt = stmt.filter(AuditLog.event_type.ilike(f"%{action_filter}%"))
         
         if start_date:
-            start_dt = datetime.fromisoformat(start_date)
-            stmt = stmt.filter(AuditLog.created_at >= start_dt)
+            try:
+                start_dt = datetime.fromisoformat(start_date)
+                stmt = stmt.filter(AuditLog.created_at >= start_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid date format for start_date. Use ISO format (YYYY-MM-DDTHH:MM:SS)"
+                )
         
         if end_date:
-            end_dt = datetime.fromisoformat(end_date)
-            stmt = stmt.filter(AuditLog.created_at <= end_dt)
+            try:
+                end_dt = datetime.fromisoformat(end_date)
+                stmt = stmt.filter(AuditLog.created_at <= end_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid date format for end_date. Use ISO format (YYYY-MM-DDTHH:MM:SS)"
+                )
         
         # Order by most recent
         stmt = stmt.order_by(AuditLog.created_at.desc())
         
         # Get total count
-        count_stmt = select(func.count()).select_from(AuditLog)
+        count_stmt = select(func.count(AuditLog.id)).select_from(AuditLog)
         # Apply same filters to count
         if user_id:
             count_stmt = count_stmt.filter(AuditLog.user_id == user_id)
         if action_filter:
             count_stmt = count_stmt.filter(AuditLog.event_type.ilike(f"%{action_filter}%"))
         if start_date:
-            start_dt = datetime.fromisoformat(start_date)
-            count_stmt = count_stmt.filter(AuditLog.created_at >= start_dt)
+            try:
+                start_dt = datetime.fromisoformat(start_date)
+                count_stmt = count_stmt.filter(AuditLog.created_at >= start_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid date format for start_date. Use ISO format (YYYY-MM-DDTHH:MM:SS)"
+                )
         if end_date:
-            end_dt = datetime.fromisoformat(end_date)
-            count_stmt = count_stmt.filter(AuditLog.created_at <= end_dt)
+            try:
+                end_dt = datetime.fromisoformat(end_date)
+                count_stmt = count_stmt.filter(AuditLog.created_at <= end_dt)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid date format for end_date. Use ISO format (YYYY-MM-DDTHH:MM:SS)"
+                )
         
         total_result = await db.execute(count_stmt)
         total_count = total_result.scalar() or 0
