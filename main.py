@@ -183,6 +183,22 @@ def create_application() -> FastAPI:
         expose_headers=["*"],
         max_age=86400  # Cache preflight for 24 hours
     )
+    
+    # Add root health endpoint for easier debugging
+    @app.get("/health")
+    async def root_health():
+        """Simple root health check."""
+        return {"status": "healthy", "service": "CryptoUniverse Enterprise API"}
+    
+    @app.get("/")
+    async def root():
+        """Root endpoint."""
+        return {
+            "message": "CryptoUniverse Enterprise API",
+            "version": settings.PROJECT_VERSION,
+            "status": "operational",
+            "docs": f"{settings.BASE_URL}/api/docs"
+        }
 
     # Add SessionMiddleware for OAuth
     app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY)
