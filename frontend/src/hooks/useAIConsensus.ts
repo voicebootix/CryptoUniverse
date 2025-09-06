@@ -132,7 +132,6 @@ export const useAIConsensus = () => {
           toast({
             title: "🤖 AI Money Manager",
             description: consensusData.explanation,
-            duration: 5000,
           });
         }
 
