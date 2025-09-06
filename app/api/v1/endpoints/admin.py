@@ -517,6 +517,24 @@ async def list_users(
         )
         trading_count = trading_count_result.scalar() or 0
         
+        # Batch fetch credit accounts and trade counts to avoid N+1 queries
+        user_ids = [user.id for user in users]
+        
+        # Batch fetch credit accounts
+        credit_result = await db.execute(
+            select(CreditAccount.user_id, CreditAccount.available_credits)
+            .filter(CreditAccount.user_id.in_(user_ids))
+        )
+        credit_map = {user_id: credits for user_id, credits in credit_result.fetchall()}
+        
+        # Batch fetch trade counts
+        trade_count_result = await db.execute(
+            select(Trade.user_id, func.count(Trade.id))
+            .filter(Trade.user_id.in_(user_ids))
+            .group_by(Trade.user_id)
+        )
+        trade_count_map = {user_id: count for user_id, count in trade_count_result.fetchall()}
+        
         # Format user data
         user_list = []
         for user in users:
@@ -528,23 +546,10 @@ async def list_users(
                 "status": user.status.value,
                 "created_at": user.created_at.isoformat(),
                 "last_login": user.last_login.isoformat() if user.last_login else None,
-                "tenant_id": str(user.tenant_id) if user.tenant_id else None
+                "tenant_id": str(user.tenant_id) if user.tenant_id else None,
+                "credits": credit_map.get(user.id, 0),
+                "total_trades": trade_count_map.get(user.id, 0)
             }
-            
-            # Get credit balance
-            credit_result = await db.execute(
-                select(CreditAccount).filter(CreditAccount.user_id == user.id)
-            )
-            credit_account = credit_result.scalar_one_or_none()
-            user_data["credits"] = credit_account.available_credits if credit_account else 0
-            
-            # Get trading stats
-            trade_count_result = await db.execute(
-                select(func.count()).select_from(Trade).filter(Trade.user_id == user.id)
-            )
-            trade_count = trade_count_result.scalar() or 0
-            user_data["total_trades"] = trade_count
-            
             user_list.append(user_data)
         
         return UserListResponse(
@@ -648,23 +653,24 @@ async def manage_user(
             
             action_taken = f"Credits reset to {request.credit_amount}"
         
-        # Create audit log
+        # Create audit log with proper transaction handling
         audit_log = AuditLog(
             user_id=current_user.id,
-            action=f"user_management_{request.action}",
-            details={
+            event_type=f"user_management_{request.action}",
+            event_data={
                 "target_user_id": request.user_id,
                 "target_user_email": target_user.email,
                 "action": request.action,
                 "reason": request.reason,
-                "credit_amount": request.credit_amount
-            },
-            ip_address="admin_api",
-            user_agent="system"
+                "credit_amount": request.credit_amount,
+                "ip_address": "admin_api",
+                "user_agent": "system"
+            }
         )
         db.add(audit_log)
         
-        db.commit()
+        # Commit transaction
+        await db.commit()
         
         return {
             "status": "action_completed",
@@ -677,9 +683,12 @@ async def manage_user(
         }
         
     except HTTPException:
+        # Re-raise HTTP exceptions without rollback
         raise
     except Exception as e:
-        logger.error("User management failed", error=str(e))
+        # Rollback transaction on any other error
+        await db.rollback()
+        logger.error("User management failed", error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"User management failed: {str(e)}"
@@ -792,7 +801,7 @@ async def get_audit_logs(
             stmt = stmt.filter(AuditLog.user_id == user_id)
         
         if action_filter:
-            stmt = stmt.filter(AuditLog.action.ilike(f"%{action_filter}%"))
+            stmt = stmt.filter(AuditLog.event_type.ilike(f"%{action_filter}%"))
         
         if start_date:
             start_dt = datetime.fromisoformat(start_date)
@@ -811,7 +820,7 @@ async def get_audit_logs(
         if user_id:
             count_stmt = count_stmt.filter(AuditLog.user_id == user_id)
         if action_filter:
-            count_stmt = count_stmt.filter(AuditLog.action.ilike(f"%{action_filter}%"))
+            count_stmt = count_stmt.filter(AuditLog.event_type.ilike(f"%{action_filter}%"))
         if start_date:
             start_dt = datetime.fromisoformat(start_date)
             count_stmt = count_stmt.filter(AuditLog.created_at >= start_dt)
@@ -830,13 +839,17 @@ async def get_audit_logs(
         # Format results
         log_list = []
         for log in audit_logs:
+            # Extract data from event_data JSON field
+            event_data = log.event_data or {}
+            
             log_data = {
                 "id": str(log.id),
                 "user_id": str(log.user_id),
-                "action": log.action,
-                "details": log.details,
-                "ip_address": log.ip_address,
-                "user_agent": log.user_agent,
+                "action": log.event_type,
+                "details": event_data.get('details', 'No details available'),
+                "ip_address": event_data.get('ip_address', 'Unknown'),
+                "user_agent": event_data.get('user_agent', 'Unknown'),
+                "level": log.level.value,
                 "created_at": log.created_at.isoformat()
             }
             

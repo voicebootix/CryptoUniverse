@@ -13,8 +13,8 @@ async def list_users(
     status_filter: Optional[str] = None,
     role_filter: Optional[str] = None,
     search: Optional[str] = None,
-    db: AsyncSession = Depends(get_session),
-    current_user: User = Depends(require_admin)
+    db: AsyncSession = Depends(get_database),
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
 ) -> UserListResponse:
     """
     List all users with filtering and pagination.

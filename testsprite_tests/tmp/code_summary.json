@@ -38,7 +38,7 @@
           "description": "User authentication and session management"
         },
         "paths": {
-          "/auth/login": {
+          "/api/v1/auth/login": {
             "post": {
               "summary": "User Login",
               "description": "Authenticate user and return JWT tokens with MFA support",
@@ -63,42 +63,42 @@
               }
             }
           },
-          "/auth/register": {
+          "/api/v1/auth/register": {
             "post": {
               "summary": "User Registration",
               "description": "Register new user with validation and tenant assignment",
               "tags": ["Authentication"]
             }
           },
-          "/auth/refresh": {
+          "/api/v1/auth/refresh": {
             "post": {
               "summary": "Token Refresh",
               "description": "Refresh expired access token using refresh token",
               "tags": ["Authentication"]
             }
           },
-          "/auth/logout": {
+          "/api/v1/auth/logout": {
             "post": {
               "summary": "User Logout",
               "description": "Invalidate user session and tokens",
               "tags": ["Authentication"]
             }
           },
-          "/auth/me": {
+          "/api/v1/auth/me": {
             "get": {
               "summary": "Get Current User",
               "description": "Get current authenticated user profile",
               "tags": ["Authentication"]
             }
           },
-          "/forgot-password": {
+          "/api/v1/forgot-password": {
             "post": {
               "summary": "Forgot Password",
               "description": "Send password reset email to user",
               "tags": ["Authentication"]
             }
           },
-          "/reset-password": {
+          "/api/v1/reset-password": {
             "post": {
               "summary": "Reset Password",
               "description": "Reset user password using reset token",
@@ -125,35 +125,35 @@
           "description": "Cryptocurrency trading operations and portfolio management"
         },
         "paths": {
-          "/trading/execute": {
+          "/api/v1/trading/execute": {
             "post": {
               "summary": "Execute Trade",
               "description": "Execute manual trading order with risk management and AI validation",
               "tags": ["Trading"]
             }
           },
-          "/trading/autonomous/start": {
+          "/api/v1/trading/autonomous/start": {
             "post": {
               "summary": "Start Autonomous Trading",
               "description": "Activate autonomous trading with AI consensus and strategy execution",
               "tags": ["Trading"]
             }
           },
-          "/trading/simulation/toggle": {
+          "/api/v1/trading/simulation/toggle": {
             "post": {
               "summary": "Toggle Simulation Mode",
               "description": "Switch between live and simulation trading modes",
               "tags": ["Trading"]
             }
           },
-          "/trading/portfolio": {
+          "/api/v1/trading/portfolio": {
             "get": {
               "summary": "Get Portfolio",
               "description": "Get current portfolio status, balances, and performance metrics",
               "tags": ["Trading"]
             }
           },
-          "/trading/arbitrage/opportunities": {
+          "/api/v1/trading/arbitrage/opportunities": {
             "get": {
               "summary": "Arbitrage Opportunities",
               "description": "Detect cross-exchange arbitrage opportunities in real-time",
@@ -179,28 +179,28 @@
           "description": "Multi-AI consensus for trading decisions and market analysis"
         },
         "paths": {
-          "/ai-consensus/analyze-opportunity": {
+          "/api/v1/ai-consensus/analyze-opportunity": {
             "post": {
               "summary": "Analyze Trading Opportunity",
               "description": "Get multi-AI consensus analysis for potential trading opportunities",
               "tags": ["AI Consensus"]
             }
           },
-          "/ai-consensus/validate-trade": {
+          "/api/v1/ai-consensus/validate-trade": {
             "post": {
               "summary": "Validate Trade Decision",
               "description": "Validate trading decision using AI consensus before execution",
               "tags": ["AI Consensus"]
             }
           },
-          "/ai-consensus/risk-assessment": {
+          "/api/v1/ai-consensus/risk-assessment": {
             "post": {
               "summary": "Risk Assessment",
               "description": "Comprehensive risk assessment using multiple AI models",
               "tags": ["AI Consensus"]
             }
           },
-          "/ai-consensus/portfolio-review": {
+          "/api/v1/ai-consensus/portfolio-review": {
             "post": {
               "summary": "Portfolio Review",
               "description": "AI-powered portfolio analysis and optimization recommendations",
@@ -226,21 +226,21 @@
           "description": "Cryptocurrency exchange API integration and management"
         },
         "paths": {
-          "/exchanges/connect": {
+          "/api/v1/exchanges/connect": {
             "post": {
               "summary": "Connect Exchange API",
               "description": "Connect and validate cryptocurrency exchange API keys",
               "tags": ["Exchanges"]
             }
           },
-          "/exchanges/list": {
+          "/api/v1/exchanges/list": {
             "get": {
               "summary": "List Exchange Connections",
               "description": "Get user's connected exchange accounts and status",
               "tags": ["Exchanges"]
             }
           },
-          "/exchanges/{exchange}/balances": {
+          "/api/v1/exchanges/{exchange}/balances": {
             "get": {
               "summary": "Get Exchange Balances",
               "description": "Get current balances from connected exchange",
@@ -266,21 +266,21 @@
           "description": "Trading strategy management and execution"
         },
         "paths": {
-          "/strategies/list": {
+          "/api/v1/strategies/list": {
             "get": {
               "summary": "List Strategies",
               "description": "Get available trading strategies for user",
               "tags": ["Strategies"]
             }
           },
-          "/strategies/execute": {
+          "/api/v1/strategies/execute": {
             "post": {
               "summary": "Execute Strategy",
               "description": "Execute specific trading strategy with parameters",
               "tags": ["Strategies"]
             }
           },
-          "/strategies/marketplace": {
+          "/api/v1/strategies/marketplace": {
             "get": {
               "summary": "Strategy Marketplace",
               "description": "Browse available strategies in marketplace",
@@ -306,28 +306,28 @@
           "description": "Cryptocurrency market analysis and insights"
         },
         "paths": {
-          "/market/realtime-prices": {
+          "/api/v1/market/realtime-prices": {
             "get": {
               "summary": "Real-time Prices",
               "description": "Get real-time cryptocurrency prices from multiple exchanges",
               "tags": ["Market Analysis"]
             }
           },
-          "/market/technical-analysis": {
+          "/api/v1/market/technical-analysis": {
             "post": {
               "summary": "Technical Analysis",
               "description": "Perform technical analysis on cryptocurrency pairs",
               "tags": ["Market Analysis"]
             }
           },
-          "/market/sentiment-analysis": {
+          "/api/v1/market/sentiment-analysis": {
             "post": {
               "summary": "Sentiment Analysis",
               "description": "Analyze market sentiment using social media and news data",
               "tags": ["Market Analysis"]
             }
           },
-          "/market/arbitrage-opportunities": {
+          "/api/v1/market/arbitrage-opportunities": {
             "post": {
               "summary": "Arbitrage Opportunities",
               "description": "Detect arbitrage opportunities across exchanges",
@@ -353,21 +353,21 @@
           "description": "Credit system and payment processing"
         },
         "paths": {
-          "/credits/balance": {
+          "/api/v1/credits/balance": {
             "get": {
               "summary": "Get Credit Balance",
               "description": "Get user's current credit balance and usage statistics",
               "tags": ["Credits"]
             }
           },
-          "/credits/purchase": {
+          "/api/v1/credits/purchase": {
             "post": {
               "summary": "Purchase Credits",
               "description": "Purchase credits using Stripe or cryptocurrency payments",
               "tags": ["Credits"]
             }
           },
-          "/credits/profit-potential": {
+          "/api/v1/credits/profit-potential": {
             "get": {
               "summary": "Profit Potential",
               "description": "Calculate potential profits based on current credit balance",
@@ -392,14 +392,14 @@
           "description": "Telegram bot integration and notifications"
         },
         "paths": {
-          "/telegram/connect": {
+          "/api/v1/telegram/connect": {
             "post": {
               "summary": "Connect Telegram",
               "description": "Connect user account to Telegram bot",
               "tags": ["Telegram"]
             }
           },
-          "/telegram/webhook": {
+          "/api/v1/telegram/webhook": {
             "post": {
               "summary": "Telegram Webhook",
               "description": "Handle incoming Telegram webhooks and commands",
@@ -424,14 +424,14 @@
           "description": "AI-powered trading assistant"
         },
         "paths": {
-          "/chat/message": {
+          "/api/v1/chat/message": {
             "post": {
               "summary": "Send Chat Message",
               "description": "Send message to AI trading assistant",
               "tags": ["Chat"]
             }
           },
-          "/chat/history/{session_id}": {
+          "/api/v1/chat/history/{session_id}": {
             "get": {
               "summary": "Get Chat History",
               "description": "Get chat conversation history for session",
@@ -456,14 +456,14 @@
           "description": "Simulated trading for testing and learning"
         },
         "paths": {
-          "/paper-trading/setup": {
+          "/api/v1/paper-trading/setup": {
             "post": {
               "summary": "Setup Paper Trading",
               "description": "Initialize paper trading account with virtual balance",
               "tags": ["Paper Trading"]
             }
           },
-          "/paper-trading/execute": {
+          "/api/v1/paper-trading/execute": {
             "post": {
               "summary": "Execute Paper Trade",
               "description": "Execute simulated trade with real market data",
@@ -489,7 +489,7 @@
           "description": "API key generation and management"
         },
         "paths": {
-          "/api-keys/": {
+          "/api/v1/api-keys/": {
             "post": {
               "summary": "Generate API Key",
               "description": "Generate new API key with specified permissions",
@@ -514,14 +514,14 @@
           "description": "System administration and monitoring"
         },
         "paths": {
-          "/admin/system/status": {
+          "/api/v1/admin/system/status": {
             "get": {
               "summary": "System Status",
               "description": "Get comprehensive system health and status",
               "tags": ["Admin"]
             }
           },
-          "/admin/users": {
+          "/api/v1/admin/users": {
             "get": {
               "summary": "List Users",
               "description": "Get paginated list of system users",
@@ -546,14 +546,14 @@
           "description": "Data validation and processing utilities"
         },
         "paths": {
-          "/data/check-duplicate": {
+          "/api/v1/data/check-duplicate": {
             "post": {
               "summary": "Check Duplicate Entry",
               "description": "Check if data entry already exists in system",
               "tags": ["Data"]
             }
           },
-          "/data/process": {
+          "/api/v1/data/process": {
             "post": {
               "summary": "Process Data",
               "description": "Process and sanitize input data with special character handling",
