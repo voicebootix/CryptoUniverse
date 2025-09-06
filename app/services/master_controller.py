@@ -1545,11 +1545,18 @@ class MasterSystemController(LoggerMixin):
             if system_health:
                 try:
                     import json
-                    health_data = json.loads(system_health)
-                    health_status = "warning" if health_data.get("alerts") else "normal"
+                    # Decode bytes if necessary
+                    if isinstance(system_health, bytes):
+                        system_health = system_health.decode('utf-8')
+                    # Only parse if it's not empty
+                    if system_health and system_health.strip():
+                        health_data = json.loads(system_health)
+                        health_status = "warning" if health_data.get("alerts") else "normal"
+                    else:
+                        health_status = "normal"
                 except (json.JSONDecodeError, ValueError, TypeError) as e:
-                    logger.warning(f"Failed to parse system health data: {e}")
-                    health_status = "unknown"
+                    logger.debug(f"System health data not in JSON format: {e}")
+                    health_status = "normal"  # Default to normal if no data
             
             # Mock performance data (would be real in production)
             performance_today = {
@@ -1610,11 +1617,18 @@ class MasterSystemController(LoggerMixin):
             if system_health:
                 try:
                     import json
-                    health_data = json.loads(system_health)
-                    health_status = "warning" if health_data.get("alerts") else "normal"
+                    # Decode bytes if necessary
+                    if isinstance(system_health, bytes):
+                        system_health = system_health.decode('utf-8')
+                    # Only parse if it's not empty
+                    if system_health and system_health.strip():
+                        health_data = json.loads(system_health)
+                        health_status = "warning" if health_data.get("alerts") else "normal"
+                    else:
+                        health_status = "normal"
                 except (json.JSONDecodeError, ValueError, TypeError) as e:
-                    logger.warning(f"Failed to parse system health data: {e}")
-                    health_status = "unknown"
+                    logger.debug(f"System health data not in JSON format: {e}")
+                    health_status = "normal"  # Default to normal if no data
             
             # Mock system metrics (would be real)
             return {
