@@ -37,7 +37,7 @@ class SystemAlert:
 class MetricsCollector:
     """Enterprise metrics collection and aggregation."""
     
-    def __init__(self, max_points: int = 1000):
+    def __init__(self, max_points: int = 100):  # PRODUCTION: Reduced from 1000 for memory efficiency
         self.metrics = {}
         self.max_points = max_points
         
@@ -106,7 +106,7 @@ class SystemMonitoringService:
             "error_rate_pct": {"warning": 5.0, "critical": 10.0}
         }
     
-    async def start_monitoring(self, interval_seconds: int = 30):
+    async def start_monitoring(self, interval_seconds: int = 120):  # PRODUCTION: 2 minutes instead of 30s
         """Start continuous monitoring."""
         if self.monitoring_active:
             logger.warning("Monitoring already active")

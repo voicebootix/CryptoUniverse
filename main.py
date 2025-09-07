@@ -8,6 +8,7 @@ with native Python implementation and enterprise-grade features.
 
 import asyncio
 import json
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -124,39 +125,69 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    # Shutdown
+    # Shutdown - PHASE 5: Enhanced graceful shutdown
     logger.info("🔄 CryptoUniverse Enterprise shutting down...")
+    shutdown_start = time.time()
 
     try:
-        # Stop background services gracefully
+        # Stop system monitoring first
         try:
-            await background_manager.stop_all()
+            from app.services.system_monitoring import system_monitoring_service
+            if system_monitoring_service.monitoring_active:
+                await asyncio.wait_for(
+                    system_monitoring_service.stop_monitoring(),
+                    timeout=5.0
+                )
+                logger.info("📊 System monitoring stopped")
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ System monitoring shutdown timed out")
+        except Exception as e:
+            logger.warning("⚠️ System monitoring shutdown failed", error=str(e))
+
+        # Stop background services gracefully with timeout
+        try:
+            await asyncio.wait_for(
+                background_manager.stop_all(),
+                timeout=10.0  # 10 second timeout for all services
+            )
             logger.info("✅ Background services stopped")
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ Background services shutdown timed out after 10s")
         except Exception as e:
             logger.warning("⚠️ Background services cleanup failed", error=str(e))
 
         # AI Manager was not started during temporary fixes
-        # # Shutdown Unified AI Manager System
-        # try:
-        #     from app.services.ai_manager_startup import shutdown_ai_manager
-        #     await shutdown_ai_manager()
-        #     logger.info("🧠 Unified AI Manager shutdown complete")
-        # except Exception as e:
-        #     logger.warning("⚠️ AI Manager shutdown failed", error=str(e))
         logger.info("🧠 AI Manager was not started - no shutdown needed")
 
-        # Disconnect from database
-        await db_manager.disconnect()
-        logger.info("✅ Database disconnected")
+        # Disconnect from database with timeout
+        try:
+            await asyncio.wait_for(
+                db_manager.disconnect(),
+                timeout=5.0
+            )
+            logger.info("✅ Database disconnected")
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ Database disconnect timed out")
+        except Exception as e:
+            logger.warning("⚠️ Database disconnect failed", error=str(e))
 
-        # Close Redis connection
-        await close_redis_client()
-        logger.info("✅ Redis disconnected")
+        # Close Redis connection with timeout
+        try:
+            await asyncio.wait_for(
+                close_redis_client(),
+                timeout=3.0
+            )
+            logger.info("✅ Redis disconnected")
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ Redis disconnect timed out")
+        except Exception as e:
+            logger.warning("⚠️ Redis disconnect failed", error=str(e))
 
     except Exception as e:
-        logger.error("❌ Error during shutdown", error=str(e))
+        logger.error("❌ Critical error during shutdown", error=str(e))
 
-    logger.info("👋 Shutdown complete")
+    shutdown_time = time.time() - shutdown_start
+    logger.info(f"👋 Shutdown complete in {shutdown_time:.2f}s")
 
 
 # Create FastAPI application
