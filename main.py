@@ -85,6 +85,57 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Connect to database
         await db_manager.connect()
         logger.info("✅ Database connected")
+        
+        # Ensure tables exist (in case startup.py failed during build)
+        try:
+            from app.core.database import engine, Base
+            from sqlalchemy import inspect
+            
+            async with engine.connect() as conn:
+                # Check if tables exist
+                def check_tables(connection):
+                    inspector = inspect(connection)
+                    return len(inspector.get_table_names()) > 0
+                
+                tables_exist = await conn.run_sync(check_tables)
+                
+                if not tables_exist:
+                    logger.warning("⚠️ No database tables found - creating now...")
+                    await conn.run_sync(Base.metadata.create_all)
+                    logger.info("✅ Database tables created")
+                    
+                    # Also create admin user
+                    from app.models.user import User, UserRole, UserStatus
+                    from sqlalchemy.ext.asyncio import AsyncSession
+                    from sqlalchemy import select
+                    import bcrypt
+                    import uuid
+                    from datetime import datetime
+                    
+                    async with AsyncSession(engine) as session:
+                        result = await session.execute(
+                            select(User).where(User.email == "admin@cryptouniverse.com")
+                        )
+                        if not result.scalar_one_or_none():
+                            password = "AdminPass123!"
+                            password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                            admin_user = User(
+                                id=uuid.uuid4(),
+                                email="admin@cryptouniverse.com",
+                                hashed_password=password_hash,
+                                role=UserRole.ADMIN,
+                                status=UserStatus.ACTIVE,
+                                is_active=True,
+                                is_verified=True,
+                                created_at=datetime.utcnow(),
+                                updated_at=datetime.utcnow()
+                            )
+                            session.add(admin_user)
+                            await session.commit()
+                            logger.info("✅ Admin user created")
+        except Exception as e:
+            logger.warning(f"⚠️ Table check/creation failed: {e}")
+            # Continue anyway - tables might already exist
 
         # Connect to Redis
         try:

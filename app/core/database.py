@@ -24,17 +24,24 @@ def get_async_database_url() -> str:
     """Convert database URL to async version."""
     db_url = settings.DATABASE_URL
     if db_url.startswith("postgresql://"):
-        return db_url.replace("postgresql://", "postgresql+asyncpg://")
+        # Convert to asyncpg format
+        async_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+        # Supabase requires SSL - add sslmode if not present
+        if "supabase" in async_url.lower() and "sslmode" not in async_url:
+            separator = "&" if "?" in async_url else "?"
+            async_url += f"{separator}sslmode=require"
+        return async_url
     elif db_url.startswith("sqlite://"):
         return db_url.replace("sqlite://", "sqlite+aiosqlite://")
     return db_url
 
 # ENTERPRISE SQLAlchemy async engine optimized for Render production
+# Reduced pool size for multi-worker deployment (4 workers × 3 connections = 12 total)
 engine = create_async_engine(
     get_async_database_url(),
     poolclass=QueuePool,  # ENTERPRISE: Use proper connection pooling
-    pool_size=10,         # PRODUCTION: Optimized for Render starter plan
-    max_overflow=15,      # PRODUCTION: Reasonable overflow for cloud environment
+    pool_size=3,          # PRODUCTION: Reduced for multi-worker (was 10)
+    max_overflow=2,       # PRODUCTION: Reduced overflow (was 15)
     pool_pre_ping=True,   # ENTERPRISE: Health check connections
     pool_recycle=1800,    # PRODUCTION: Faster recycle for cloud (30 min)
     pool_timeout=30,      # PRODUCTION: Increased for cold starts on Render
@@ -45,18 +52,15 @@ engine = create_async_engine(
         "isolation_level": "READ_COMMITTED",
         "compiled_cache": {},  # Enable query compilation cache
     },
-    # PRODUCTION: Optimized settings for Render → Supabase
+    # PRODUCTION: Optimized settings for asyncpg driver
     connect_args={
-        "command_timeout": 30,  # Increased for stability
+        "command_timeout": 30,  # Command timeout in seconds
+        "timeout": 60,  # Connection timeout in seconds
+        "ssl": "require" if "supabase" in get_async_database_url().lower() else None,  # SSL for Supabase
+        # Server settings for asyncpg
         "server_settings": {
-            "statement_timeout": "45s",  # Increased for complex queries
-            "lock_timeout": "10s",       # Prevent long locks
-            "idle_in_transaction_session_timeout": "60s",  # Clean up idle connections
-            "jit": "off",  # Disable JIT for predictable performance
             "application_name": "cryptouniverse_production",
-            "tcp_keepalives_idle": "300",     # Keep connections alive
-            "tcp_keepalives_interval": "30",  # Ping every 30s
-            "tcp_keepalives_count": "3",      # Max 3 failed pings
+            "jit": "off"
         }
     } if "postgresql" in get_async_database_url() else {}
 )
