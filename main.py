@@ -225,12 +225,11 @@ def create_application() -> FastAPI:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
     # Custom middleware (order matters!)
-    # Add middleware in correct order (executed in reverse)
-    # Temporarily disable RateLimitMiddleware until Redis is working
-    # app.add_middleware(RateLimitMiddleware)
-    app.add_middleware(AuthMiddleware)
-    app.add_middleware(TenantMiddleware)
-    app.add_middleware(RequestLoggingMiddleware)
+    # TEMPORARILY DISABLE ALL CUSTOM MIDDLEWARE TO DIAGNOSE HANGING
+    # # app.add_middleware(RateLimitMiddleware)
+    # # app.add_middleware(AuthMiddleware)
+    # # app.add_middleware(TenantMiddleware)
+    # # app.add_middleware(RequestLoggingMiddleware)
 
     # Include API routes
     app.include_router(api_router, prefix="/api/v1")
