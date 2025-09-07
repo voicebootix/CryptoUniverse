@@ -38,7 +38,7 @@ services:
         value: INFO
       - key: PYTHONPATH
         value: /opt/render/project/src
-    healthCheckPath: /api/v1/status
+    healthCheckPath: /health
     autoDeploy: true
     
   # Redis Cache Service
