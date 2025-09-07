@@ -68,22 +68,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await db_manager.connect()
         logger.info("✅ Database connected")
 
-        # Connect to Redis
+        # Initialize Redis connection pool
         try:
-            redis = await get_redis_client()
-            if redis:
-                await redis.ping()
-                logger.info("✅ Redis connected")
+            from app.core.redis_pool import initialize_redis_pool, get_redis_status
+            redis_initialized = await initialize_redis_pool()
+            if redis_initialized:
+                logger.info("✅ Redis connection pool initialized", status=get_redis_status())
             else:
-                logger.warning("⚠️ Redis not available - running in degraded mode")
+                logger.warning("⚠️ Redis not available - running in degraded mode", status=get_redis_status())
         except Exception as e:
-            logger.warning("⚠️ Redis connection failed - running in degraded mode", error=str(e))
+            logger.warning("⚠️ Redis pool initialization failed - running in degraded mode", error=str(e))
+            # Fallback to legacy Redis client
+            try:
+                redis = await get_redis_client()
+                if redis:
+                    await redis.ping()
+                    logger.info("✅ Redis connected (legacy)")
+                else:
+                    logger.warning("⚠️ Redis not available - running in degraded mode")
+            except Exception as e:
+                logger.warning("⚠️ Redis connection failed - running in degraded mode", error=str(e))
 
         # Initialize rate limiter with Redis
         try:
             from app.services.rate_limit import rate_limiter
             await rate_limiter.async_init()
-            logger.info("✅ Rate limiter initialized")
+            logger.info("✅ Rate limiter initialized", has_redis=rate_limiter.redis is not None)
         except Exception as e:
             logger.warning("⚠️ Rate limiter initialization failed", error=str(e))
 
@@ -139,7 +149,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await db_manager.disconnect()
         logger.info("✅ Database disconnected")
 
-        # Close Redis connection
+        # Close Redis connections
+        try:
+            from app.core.redis_pool import close_redis_pool
+            await close_redis_pool()
+            logger.info("✅ Redis pool disconnected")
+        except Exception as e:
+            logger.warning("⚠️ Redis pool cleanup failed", error=str(e))
+        
+        # Close legacy Redis connection
         await close_redis_client()
         logger.info("✅ Redis disconnected")
 

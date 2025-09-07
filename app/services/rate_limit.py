@@ -160,12 +160,29 @@ class RateLimitService:
         return decorator
     
     async def async_init(self):
+        """Initialize rate limiter with Redis connection."""
         try:
-            self.redis = await get_redis_client()
+            # Try to get Redis client
+            from app.core.redis_pool import get_redis_pool_client
+            self.redis = await get_redis_pool_client()
+            
             if self.redis:
+                # Test the connection
+                await self.redis.ping()
                 logger.info("Rate limiter initialized with Redis backend")
             else:
                 logger.warning("Rate limiter initialized WITHOUT Redis - will fail open")
+        except ImportError:
+            # Fallback to old Redis client if pool not available
+            try:
+                self.redis = await get_redis_client()
+                if self.redis:
+                    logger.info("Rate limiter initialized with Redis backend (legacy)")
+                else:
+                    logger.warning("Rate limiter initialized WITHOUT Redis - will fail open")
+            except Exception as e:
+                logger.warning("Rate limiter Redis initialization failed", error=str(e))
+                self.redis = None
         except Exception as e:
             logger.warning("Rate limiter Redis initialization failed", error=str(e))
             self.redis = None
@@ -252,8 +269,11 @@ class RateLimitService:
             
             return True
             
+        except HTTPException:
+            # Re-raise HTTP exceptions (rate limit exceeded)
+            raise
         except Exception as e:
-            logger.error("Rate limit check failed", error=str(e), key=key)
+            logger.error("Rate limit check failed", error=str(e), key=key, exc_info=True)
             # On error, allow request to proceed (fail open)
             return True
     

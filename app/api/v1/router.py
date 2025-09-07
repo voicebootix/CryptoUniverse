@@ -14,7 +14,7 @@ import structlog
 from app.api.v1.endpoints import (
     auth, trading, admin, exchanges, strategies, credits,
     telegram, paper_trading, chat, market_analysis, api_keys, ai_consensus,
-    password_reset, health  # Add health endpoints for debugging
+    password_reset, health, diagnostics  # Add health and diagnostic endpoints
 )
 
 logger = structlog.get_logger(__name__)
@@ -24,6 +24,7 @@ api_router = APIRouter()
 
 # Include endpoint routers - keep the comprehensive list from HEAD with cleaner tags from main
 api_router.include_router(health.router, prefix="/health", tags=["Health"])  # Add health check endpoints first
+api_router.include_router(diagnostics.router, prefix="/diagnostics", tags=["Diagnostics"])  # Add diagnostic endpoints
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(password_reset.router, tags=["Authentication"])  # Add password reset routes
 api_router.include_router(api_keys.router, prefix="/api-keys", tags=["API Keys"])
