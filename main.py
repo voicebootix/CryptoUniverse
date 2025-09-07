@@ -243,6 +243,31 @@ def create_application() -> FastAPI:
 app = create_application()
 
 
+# TEST: Simple login endpoint to bypass all complexity
+@app.post("/test-login")
+async def test_login():
+    """Direct test endpoint to verify POST requests work."""
+    return {"status": "success", "message": "POST request received", "token": "test-token-123"}
+
+# TEST: Another direct login endpoint that mimics the real one
+@app.post("/api/v1/auth/login")
+async def direct_login(request: Request):
+    """Direct login endpoint bypassing auth router."""
+    import json
+    try:
+        body = await request.body()
+        data = json.loads(body) if body else {}
+        return {
+            "access_token": "direct-test-token",
+            "refresh_token": "direct-refresh-token",
+            "token_type": "bearer",
+            "message": "Direct login endpoint working",
+            "received_data": data
+        }
+    except Exception as e:
+        return {"error": str(e), "message": "Direct login endpoint error"}
+
+
 # Health check endpoint
 @app.get("/health", tags=["System"])
 @app.head("/health", tags=["System"])
