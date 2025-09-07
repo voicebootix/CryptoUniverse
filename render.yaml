@@ -30,8 +30,9 @@ services:
         value: https://cryptouniverse.onrender.com
       - key: HOST
         value: 0.0.0.0
-      - key: PORT
-        value: 8000
+      # PORT is automatically provided by Render, don't override it
+      # - key: PORT
+      #   value: 8000
       - key: WORKERS
         value: 4
       - key: LOG_LEVEL
