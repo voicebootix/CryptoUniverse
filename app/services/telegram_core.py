@@ -59,11 +59,16 @@ class TelegramAPIConnector(LoggerMixin):
         else:
             self.api_base_url = None
         self.rate_limiter = {}
-        self.message_queue = asyncio.Queue()
+        self.message_queue = None
         self.webhook_url = None
+        self._worker_task = None
         
-        # Start message sender worker
-        asyncio.create_task(self._message_sender_worker())
+    async def _ensure_initialized(self):
+        """Initialize async components when event loop is available."""
+        if self.message_queue is None:
+            self.message_queue = asyncio.Queue()
+        if self._worker_task is None and self.bot_token:
+            self._worker_task = asyncio.create_task(self._message_sender_worker())
     
     async def send_message(
         self,
@@ -74,6 +79,9 @@ class TelegramAPIConnector(LoggerMixin):
         priority: MessagePriority = MessagePriority.NORMAL
     ) -> Dict[str, Any]:
         """Send message via Telegram Bot API with rate limiting."""
+        
+        # Initialize async components if needed
+        await self._ensure_initialized()
         
         # Skip if telegram is not configured
         if not self.bot_token or not self.api_base_url:
