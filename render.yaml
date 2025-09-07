@@ -6,8 +6,8 @@ services:
     runtime: python
     plan: pro  # Professional tier for production workload
     region: oregon  # Choose region closest to your users
-    buildCommand: pip install fastapi==0.104.1 uvicorn==0.24.0 pydantic==2.5.1 python-dotenv==1.0.0
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers ${WORKERS:-4} --log-level ${LOG_LEVEL:-info}
+    buildCommand: pip install fastapi==0.104.1 uvicorn==0.24.0 pydantic==2.5.1 python-dotenv==1.0.0 gunicorn==21.2.0
+    startCommand: gunicorn main:app -w ${WORKERS:-4} -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --access-logfile - --error-logfile - --log-level ${LOG_LEVEL:-info}
     envVars:
       - key: ENVIRONMENT
         value: production
