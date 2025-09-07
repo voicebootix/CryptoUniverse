@@ -37,7 +37,7 @@ engine = create_async_engine(
     max_overflow=15,      # PRODUCTION: Reasonable overflow for cloud environment
     pool_pre_ping=True,   # ENTERPRISE: Health check connections
     pool_recycle=1800,    # PRODUCTION: Faster recycle for cloud (30 min)
-    pool_timeout=10,      # PRODUCTION: Faster timeout for cloud latency
+    pool_timeout=30,      # PRODUCTION: Increased for cold starts on Render
     echo=getattr(settings, 'DATABASE_ECHO', False),
     future=True,
     # ENTERPRISE: Production performance settings

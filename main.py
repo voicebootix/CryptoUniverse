@@ -32,7 +32,7 @@ from app.api.v1.router import api_router
 
 # Middleware
 from app.middleware.auth import AuthMiddleware
-# from app.middleware.tenant import TenantMiddleware  # TODO: Re-enable after testing
+from app.middleware.tenant import TenantMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.logging import RequestLoggingMiddleware
 
@@ -50,6 +50,17 @@ logger = structlog.get_logger()
 
 # Background service manager
 background_manager = BackgroundServiceManager()
+
+
+async def start_monitoring_delayed(delay: int):
+    """Start system monitoring after a delay to reduce initial memory load."""
+    await asyncio.sleep(delay)
+    try:
+        from app.services.system_monitoring import system_monitoring_service
+        await system_monitoring_service.start_monitoring()
+        logger.info("✅ System monitoring started (delayed)")
+    except Exception as e:
+        logger.warning("System monitoring failed to start", error=str(e))
 
 
 @asynccontextmanager
@@ -88,14 +99,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.warning("⚠️ Background services failed to start - running without them", error=str(e)) 
 
 
-        # Temporarily disable system monitoring to reduce memory usage
-        # try:
-        #     from app.services.system_monitoring import system_monitoring_service
-        #     await system_monitoring_service.start_monitoring()
-        #     logger.info("✅ System monitoring started")
-        # except Exception as e:
-        #     logger.warning("System monitoring startup failed", error=str(e))
-        logger.info("🔧 System monitoring temporarily disabled")
+        # Start lightweight system monitoring with delayed initialization
+        try:
+            from app.services.system_monitoring import system_monitoring_service
+            # Start with reduced interval for memory efficiency
+            system_monitoring_service.monitoring_interval = 60  # 1 minute instead of 30s
+            system_monitoring_service.max_metric_points = 100  # Reduced from 1000
+            
+            # Schedule monitoring to start after services are stable
+            asyncio.create_task(start_monitoring_delayed(45))  # Start after 45 seconds
+            logger.info("📊 System monitoring scheduled for delayed startup")
+        except Exception as e:
+            logger.warning("System monitoring scheduling failed", error=str(e))
 
 
         logger.info(
@@ -201,7 +216,7 @@ def create_application() -> FastAPI:
     # Custom middleware - Order matters! Applied in reverse order
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(RateLimitMiddleware)  # Re-enabled with Redis failover
-    # app.add_middleware(TenantMiddleware)  # TODO: Re-enable after testing
+    app.add_middleware(TenantMiddleware)  # Re-enabled for multi-tenant isolation
     app.add_middleware(AuthMiddleware)
 
     # Include API routes
@@ -265,12 +280,29 @@ async def health_check():
         health_status["checks"]["database"] = f"error: {str(e)}"
         health_status["status"] = "unhealthy"
 
-    # Skip enterprise application check - was hanging
-    health_status["checks"]["application"] = "operational"
-
-    # SIMPLIFIED HEALTH CHECKS - Background services temporarily disabled
-    health_status["checks"]["background_services"] = "disabled_temporarily"
-    health_status["checks"]["system_health"] = "basic_check_ok"
+    # Check Redis health
+    try:
+        redis = await get_redis_client()
+        if redis:
+            await redis.ping()
+            health_status["checks"]["redis"] = "connected"
+        else:
+            health_status["checks"]["redis"] = "unavailable"
+            health_status["status"] = "degraded"
+    except Exception as e:
+        health_status["checks"]["redis"] = f"error: {str(e)}"
+        health_status["status"] = "degraded"
+    
+    # Check background services
+    try:
+        services_health = await background_manager.health_check()
+        running_services = sum(1 for status in services_health.values() if status == "running")
+        total_services = len(services_health)
+        health_status["checks"]["background_services"] = f"{running_services}/{total_services} running"
+        if running_services < total_services / 2:
+            health_status["status"] = "degraded"
+    except Exception as e:
+        health_status["checks"]["background_services"] = f"error: {str(e)}"
 
     # Add system information
     health_status.update(
