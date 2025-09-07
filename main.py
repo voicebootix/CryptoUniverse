@@ -75,17 +75,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning("⚠️ Redis connection failed - running in degraded mode", error=str(e))
 
-        # Start background services
-        await background_manager.start_all()
-        logger.info("✅ Background services started") 
+        # Start background services - temporarily disabled for diagnosis
+        # await background_manager.start_all()
+        # logger.info("✅ Background services started")
+        logger.info("🔧 Background services temporarily disabled") 
 
 
-        try:
-            from app.services.system_monitoring import system_monitoring_service
-            await system_monitoring_service.start_monitoring()
-            logger.info("✅ System monitoring started")
-        except Exception as e:
-            logger.warning("System monitoring startup failed", error=str(e))
+        # Temporarily disable system monitoring to reduce memory usage
+        # try:
+        #     from app.services.system_monitoring import system_monitoring_service
+        #     await system_monitoring_service.start_monitoring()
+        #     logger.info("✅ System monitoring started")
+        # except Exception as e:
+        #     logger.warning("System monitoring startup failed", error=str(e))
+        logger.info("🔧 System monitoring temporarily disabled")
 
 
         logger.info(
