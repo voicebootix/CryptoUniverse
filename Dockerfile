@@ -56,12 +56,13 @@ RUN mkdir -p logs && chown -R appuser:appuser logs
 # Switch to non-root user
 USER appuser
 
-# Expose port
-EXPOSE 8000
+# Expose port (Render uses 10000)
+EXPOSE 10000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:10000/health || exit 1
 
-# Command to run the application
-CMD ["gunicorn", "main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "info"]
+# Command to run the application - use direct uvicorn instead of gunicorn
+# Gunicorn with workers was causing issues with async middleware
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-10000} --log-level info"]
