@@ -200,8 +200,8 @@ def create_application() -> FastAPI:
     # app.add_middleware(TenantMiddleware)
     # app.add_middleware(AuthMiddleware)
 
-    # Include API routes
-    app.include_router(api_router, prefix="/api/v1")
+    # TEMPORARILY COMMENT OUT API ROUTER TO TEST IF IT'S CAUSING HANG
+    # app.include_router(api_router, prefix="/api/v1")
 
     # Exception handlers
     @app.exception_handler(HTTPException)
