@@ -67,11 +67,18 @@ async def start_monitoring_delayed(delay: int):
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager."""
+    # Detect if we're running in Gunicorn with multiple workers
+    import os
+    worker_id = os.environ.get("APP_WORKER_ID", os.getpid())
+    is_primary_worker = worker_id == os.getpid() or str(worker_id) == "1"
+    
     # Startup
     logger.info(
         "🚀 CryptoUniverse Enterprise starting up...",
         version="2.0.0",
         environment=settings.ENVIRONMENT,
+        worker_id=worker_id,
+        is_primary=is_primary_worker
     )
 
     try:
@@ -87,31 +94,34 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning("⚠️ Redis connection failed - running in degraded mode", error=str(e))
 
-        # Start background services with staged initialization
-        try:
-            # Start only essential services initially
-            await background_manager.start_essential_services()
-            logger.info("✅ Essential background services started")
-            
-            # Schedule heavy services to start after 30 seconds
-            asyncio.create_task(background_manager.start_deferred_services(delay=30))
-            logger.info("📅 Heavy services scheduled for deferred startup")
-        except Exception as e:
-            logger.warning("⚠️ Background services failed to start - running without them", error=str(e)) 
+        # Only start background services on the primary worker to avoid conflicts
+        if is_primary_worker:
+            # Start background services with staged initialization
+            try:
+                # Start only essential services initially
+                await background_manager.start_essential_services()
+                logger.info("✅ Essential background services started")
+                
+                # Schedule heavy services to start after 30 seconds
+                asyncio.create_task(background_manager.start_deferred_services(delay=30))
+                logger.info("📅 Heavy services scheduled for deferred startup")
+            except Exception as e:
+                logger.warning("⚠️ Background services failed to start - running without them", error=str(e)) 
 
-
-        # Start lightweight system monitoring with delayed initialization
-        try:
-            from app.services.system_monitoring import system_monitoring_service
-            # Start with reduced interval for memory efficiency
-            system_monitoring_service.monitoring_interval = 60  # 1 minute instead of 30s
-            system_monitoring_service.max_metric_points = 100  # Reduced from 1000
-            
-            # Schedule monitoring to start after services are stable
-            asyncio.create_task(start_monitoring_delayed(45))  # Start after 45 seconds
-            logger.info("📊 System monitoring scheduled for delayed startup")
-        except Exception as e:
-            logger.warning("System monitoring scheduling failed", error=str(e))
+            # Start lightweight system monitoring with delayed initialization
+            try:
+                from app.services.system_monitoring import system_monitoring_service
+                # Start with reduced interval for memory efficiency
+                system_monitoring_service.monitoring_interval = 60  # 1 minute instead of 30s
+                system_monitoring_service.max_metric_points = 100  # Reduced from 1000
+                
+                # Schedule monitoring to start after services are stable
+                asyncio.create_task(start_monitoring_delayed(45))  # Start after 45 seconds
+                logger.info("📊 System monitoring scheduled for delayed startup")
+            except Exception as e:
+                logger.warning("System monitoring scheduling failed", error=str(e))
+        else:
+            logger.info("📋 Secondary worker - skipping background services initialization")
 
 
         logger.info(
@@ -126,35 +136,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # Shutdown - PHASE 5: Enhanced graceful shutdown
-    logger.info("🔄 CryptoUniverse Enterprise shutting down...")
+    logger.info("🔄 CryptoUniverse Enterprise shutting down...", worker_id=worker_id)
     shutdown_start = time.time()
 
     try:
-        # Stop system monitoring first
-        try:
-            from app.services.system_monitoring import system_monitoring_service
-            if system_monitoring_service.monitoring_active:
-                await asyncio.wait_for(
-                    system_monitoring_service.stop_monitoring(),
-                    timeout=5.0
-                )
-                logger.info("📊 System monitoring stopped")
-        except asyncio.TimeoutError:
-            logger.warning("⚠️ System monitoring shutdown timed out")
-        except Exception as e:
-            logger.warning("⚠️ System monitoring shutdown failed", error=str(e))
+        # Only stop background services on primary worker
+        if is_primary_worker:
+            # Stop system monitoring first
+            try:
+                from app.services.system_monitoring import system_monitoring_service
+                if system_monitoring_service.monitoring_active:
+                    await asyncio.wait_for(
+                        system_monitoring_service.stop_monitoring(),
+                        timeout=5.0
+                    )
+                    logger.info("📊 System monitoring stopped")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ System monitoring shutdown timed out")
+            except Exception as e:
+                logger.warning("⚠️ System monitoring shutdown failed", error=str(e))
 
-        # Stop background services gracefully with timeout
-        try:
-            await asyncio.wait_for(
-                background_manager.stop_all(),
-                timeout=10.0  # 10 second timeout for all services
-            )
-            logger.info("✅ Background services stopped")
-        except asyncio.TimeoutError:
-            logger.warning("⚠️ Background services shutdown timed out after 10s")
-        except Exception as e:
-            logger.warning("⚠️ Background services cleanup failed", error=str(e))
+            # Stop background services gracefully with timeout
+            try:
+                await asyncio.wait_for(
+                    background_manager.stop_all(),
+                    timeout=10.0  # 10 second timeout for all services
+                )
+                logger.info("✅ Background services stopped")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ Background services shutdown timed out after 10s")
+            except Exception as e:
+                logger.warning("⚠️ Background services cleanup failed", error=str(e))
 
         # AI Manager was not started during temporary fixes
         logger.info("🧠 AI Manager was not started - no shutdown needed")
