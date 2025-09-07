@@ -26,10 +26,12 @@ def get_async_database_url() -> str:
     if db_url.startswith("postgresql://"):
         # Convert to asyncpg format
         async_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
-        # Supabase requires SSL - add sslmode if not present
-        if "supabase" in async_url.lower() and "sslmode" not in async_url:
-            separator = "&" if "?" in async_url else "?"
-            async_url += f"{separator}sslmode=require"
+        # Remove sslmode from URL if present (will be handled in connect_args)
+        if "?sslmode=" in async_url:
+            async_url = async_url.split("?sslmode=")[0]
+        elif "&sslmode=" in async_url:
+            parts = async_url.split("&sslmode=")
+            async_url = parts[0] + ("&" + "&".join(parts[1].split("&")[1:]) if "&" in parts[1] else "")
         return async_url
     elif db_url.startswith("sqlite://"):
         return db_url.replace("sqlite://", "sqlite+aiosqlite://")
