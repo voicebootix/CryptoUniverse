@@ -39,16 +39,16 @@ class BackgroundServiceManager(LoggerMixin):
         self._cleanup_lock = asyncio.Lock()
         self._last_cleanup: float = 0
         self._cleanup_cooldown = 300  # 5 minutes cooldown
-        # Configurable service intervals (seconds)
+        # Optimized service intervals for production (seconds)
         self.intervals = {
-            "health_monitor": 60,        # 1 minute
-            "metrics_collector": 300,    # 5 minutes
-            "cleanup_service": 3600,     # 1 hour
-            "autonomous_cycles": 60,     # 1 minute base (adaptive based on market conditions)
-            "market_data_sync": 60,      # 1 minute
-            "balance_sync": 300,         # 5 minutes
-            "risk_monitor": 30,          # 30 seconds
-            "rate_limit_cleanup": 1800   # 30 minutes
+            "health_monitor": 120,        # 2 minutes (reduced frequency)
+            "metrics_collector": 600,     # 10 minutes (reduced frequency)
+            "cleanup_service": 7200,      # 2 hours (reduced frequency)
+            "autonomous_cycles": 120,     # 2 minutes base (adaptive)
+            "market_data_sync": 180,      # 3 minutes (reduced frequency)
+            "balance_sync": 600,          # 10 minutes (reduced frequency)
+            "risk_monitor": 60,           # 1 minute (increased from 30s)
+            "rate_limit_cleanup": 3600    # 1 hour (reduced frequency)
         }
         
         # Dynamic service configurations (no hardcoded restrictions)
@@ -80,6 +80,62 @@ class BackgroundServiceManager(LoggerMixin):
         except Exception as e:
             self.logger.warning("⚠️ Redis manager initialization failed - services will run without Redis", error=str(e))
             self.redis = None
+    
+    async def start_essential_services(self):
+        """Start only essential services for quick startup."""
+        self.logger.info("🚀 Starting essential background services...")
+        self.running = True
+        self.start_time = datetime.utcnow()
+        
+        # Initialize redis client with graceful degradation
+        try:
+            await self.async_init()
+        except Exception as e:
+            self.logger.warning("⚠️ Redis initialization failed - services will run in degraded mode", error=str(e))
+            self.redis = None
+        
+        # Start only critical services
+        essential_services = [
+            ("health_monitor", self._health_monitor_service),
+            ("rate_limit_cleanup", self._rate_limit_cleanup_service),  # Essential for rate limiter
+        ]
+        
+        for service_name, service_func in essential_services:
+            try:
+                self.tasks[service_name] = asyncio.create_task(self._safe_service_wrapper(service_name, service_func))
+                self.services[service_name] = "starting"
+                self.logger.info(f"🚀 {service_name} service started")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to start {service_name} service", error=str(e))
+                self.services[service_name] = "failed"
+    
+    async def start_deferred_services(self, delay: int = 30):
+        """Start heavy services after a delay to reduce initial memory load."""
+        await asyncio.sleep(delay)
+        self.logger.info("🚀 Starting deferred background services...")
+        
+        # Start resource-intensive services
+        deferred_services = [
+            ("metrics_collector", self._metrics_collector_service),
+            ("cleanup_service", self._cleanup_service),
+            ("autonomous_cycles", self._autonomous_cycles_service),
+            ("market_data_sync", self._market_data_sync_service),
+            ("balance_sync", self._balance_sync_service),
+            ("risk_monitor", self._risk_monitor_service),
+        ]
+        
+        for service_name, service_func in deferred_services:
+            if service_name not in self.services:  # Don't start if already running
+                try:
+                    self.tasks[service_name] = asyncio.create_task(self._safe_service_wrapper(service_name, service_func))
+                    self.services[service_name] = "starting"
+                    self.logger.info(f"🚀 {service_name} service started (deferred)")
+                    
+                    # Add small delay between starting heavy services
+                    await asyncio.sleep(2)
+                except Exception as e:
+                    self.logger.error(f"❌ Failed to start {service_name} service", error=str(e))
+                    self.services[service_name] = "failed"
     
     async def start_all(self):
         """Start all background services with real functionality - NON-BLOCKING."""

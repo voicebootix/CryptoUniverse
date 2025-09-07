@@ -30,10 +30,10 @@ from app.core.redis import get_redis_client, close_redis_client
 # API routes
 from app.api.v1.router import api_router
 
-# Middleware - temporarily simplified
+# Middleware
 from app.middleware.auth import AuthMiddleware
-# from app.middleware.tenant import TenantMiddleware  # DISABLED temporarily
-# from app.middleware.rate_limit import RateLimitMiddleware  # DISABLED temporarily
+# from app.middleware.tenant import TenantMiddleware  # TODO: Re-enable after testing
+from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.logging import RequestLoggingMiddleware
 
 # Background services
@@ -75,10 +75,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning("⚠️ Redis connection failed - running in degraded mode", error=str(e))
 
-        # Start background services - temporarily disabled for diagnosis
-        # await background_manager.start_all()
-        # logger.info("✅ Background services started")
-        logger.info("🔧 Background services temporarily disabled") 
+        # Start background services with staged initialization
+        try:
+            # Start only essential services initially
+            await background_manager.start_essential_services()
+            logger.info("✅ Essential background services started")
+            
+            # Schedule heavy services to start after 30 seconds
+            asyncio.create_task(background_manager.start_deferred_services(delay=30))
+            logger.info("📅 Heavy services scheduled for deferred startup")
+        except Exception as e:
+            logger.warning("⚠️ Background services failed to start - running without them", error=str(e)) 
 
 
         # Temporarily disable system monitoring to reduce memory usage
@@ -106,19 +113,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("🔄 CryptoUniverse Enterprise shutting down...")
 
     try:
-        # Background services were disabled temporarily
-        # # Stop enhanced system monitoring  
-        # try:
-        #     from app.services.system_monitoring import system_monitoring_service
-        #     await system_monitoring_service.stop_monitoring()
-        #     logger.info("✅ Enhanced system monitoring stopped")
-        # except Exception as e:
-        #     logger.warning("⚠️ System monitoring cleanup failed", error=str(e))
-
-        # # Stop background services
-        # await background_manager.stop_all()
-        # logger.info("✅ Background services stopped")
-        logger.info("✅ Background services were already disabled - shutdown clean")
+        # Stop background services gracefully
+        try:
+            await background_manager.stop_all()
+            logger.info("✅ Background services stopped")
+        except Exception as e:
+            logger.warning("⚠️ Background services cleanup failed", error=str(e))
 
         # AI Manager was not started during temporary fixes
         # # Shutdown Unified AI Manager System
@@ -179,9 +179,6 @@ def create_application() -> FastAPI:
             cors_origins.append(origin)
     
     logger.info(f"CORS origins configured: {cors_origins}")
-    
-    # Use computed CORS origins from settings
-    logger.info(f"CORS origins configured: {cors_origins}")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins or [],  # Use computed list or empty list as fallback
@@ -201,10 +198,10 @@ def create_application() -> FastAPI:
     if settings.allowed_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
-    # Custom middleware (simplified temporarily)
+    # Custom middleware - Order matters! Applied in reverse order
     app.add_middleware(RequestLoggingMiddleware)
-    # app.add_middleware(RateLimitMiddleware)  # DISABLED temporarily
-    # app.add_middleware(TenantMiddleware)  # DISABLED temporarily  
+    app.add_middleware(RateLimitMiddleware)  # Re-enabled with Redis failover
+    # app.add_middleware(TenantMiddleware)  # TODO: Re-enable after testing
     app.add_middleware(AuthMiddleware)
 
     # Include API routes
@@ -248,32 +245,6 @@ def create_application() -> FastAPI:
 
 # Create application instance
 app = create_application()
-
-
-# TEST: Simple login endpoint to bypass all complexity
-@app.post("/test-login")
-async def test_login():
-    """Direct test endpoint to verify POST requests work."""
-    return {"status": "success", "message": "POST request received", "token": "test-token-123"}
-
-# TEST: Another direct login endpoint that mimics the real one
-@app.post("/api/v1/auth/login")
-async def direct_login(request: Request):
-    """Direct login endpoint bypassing auth router."""
-    import json
-    try:
-        body = await request.body()
-        data = json.loads(body) if body else {}
-        return {
-            "access_token": "direct-test-token",
-            "refresh_token": "direct-refresh-token",
-            "token_type": "bearer",
-            "message": "Direct login endpoint working",
-            "received_data": data
-        }
-    except Exception as e:
-        return {"error": str(e), "message": "Direct login endpoint error"}
-
 
 # Health check endpoint
 @app.get("/health", tags=["System"])
