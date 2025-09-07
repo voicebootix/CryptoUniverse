@@ -36,8 +36,8 @@ from app.middleware.auth import AuthMiddleware
 # from app.middleware.rate_limit import RateLimitMiddleware  # DISABLED temporarily
 from app.middleware.logging import RequestLoggingMiddleware
 
-# Background services - DISABLED temporarily
-# from app.services.background import BackgroundServiceManager
+# Background services
+from app.services.background import BackgroundServiceManager
 
 # Global exception handler
 from fastapi import status
@@ -48,8 +48,8 @@ settings = get_settings()
 configure_logging(settings.LOG_LEVEL, settings.ENVIRONMENT)
 logger = structlog.get_logger()
 
-# Background service manager - DISABLED temporarily
-# background_manager = BackgroundServiceManager()
+# Background service manager
+background_manager = BackgroundServiceManager()
 
 
 @asynccontextmanager
@@ -75,20 +75,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning("⚠️ Redis connection failed - running in degraded mode", error=str(e))
 
-        # TEMPORARILY DISABLE background services to fix 502 errors
-        # The background services are consuming too much memory causing worker crashes
-        # await background_manager.start_all()
-        logger.info("✅ Background services disabled temporarily - fixing worker crashes") 
+        # Start background services
+        await background_manager.start_all()
+        logger.info("✅ Background services started") 
 
 
-        # TEMPORARILY DISABLE system monitoring to reduce memory usage
-        # try:
-        #     from app.services.system_monitoring import system_monitoring_service
-        #     await system_monitoring_service.start_monitoring()
-        #     logger.info("✅ System monitoring started")
-        # except Exception as e:
-        #     logger.warning("System monitoring startup failed", error=str(e))
-        logger.info("✅ System monitoring disabled temporarily - reducing startup load")
+        try:
+            from app.services.system_monitoring import system_monitoring_service
+            await system_monitoring_service.start_monitoring()
+            logger.info("✅ System monitoring started")
+        except Exception as e:
+            logger.warning("System monitoring startup failed", error=str(e))
 
 
         logger.info(
