@@ -946,9 +946,12 @@ class TelegramCommanderService(LoggerMixin):
             "alerts_sent": 0,
             "active_users": 0
         }
+        self._background_task = None
         
-        # Start background services
-        asyncio.create_task(self._start_background_services())
+    async def _ensure_background_services(self):
+        """Start background services when event loop is available."""
+        if self._background_task is None:
+            self._background_task = asyncio.create_task(self._start_background_services())
     
     async def send_message(
         self,
@@ -957,6 +960,8 @@ class TelegramCommanderService(LoggerMixin):
         priority: str = "normal",
         recipient: str = "owner"
     ) -> Dict[str, Any]:
+        # Ensure background services are started
+        await self._ensure_background_services()
         """Send message via Telegram with specified type and priority."""
         
         request_id = self._generate_request_id()
