@@ -23,21 +23,21 @@ from jose import JWTError
 # Core imports
 from app.core.config import get_settings
 from app.core.database import engine, db_manager
-from app.core.enterprise_startup import get_application
+# from app.core.enterprise_startup import get_application  # DISABLED temporarily
 from app.core.logging import configure_logging
 from app.core.redis import get_redis_client, close_redis_client
 
 # API routes
 from app.api.v1.router import api_router
 
-# Middleware
+# Middleware - temporarily simplified
 from app.middleware.auth import AuthMiddleware
-from app.middleware.tenant import TenantMiddleware
-from app.middleware.rate_limit import RateLimitMiddleware
+# from app.middleware.tenant import TenantMiddleware  # DISABLED temporarily
+# from app.middleware.rate_limit import RateLimitMiddleware  # DISABLED temporarily
 from app.middleware.logging import RequestLoggingMiddleware
 
-# Background services
-from app.services.background import BackgroundServiceManager
+# Background services - DISABLED temporarily
+# from app.services.background import BackgroundServiceManager
 
 # Global exception handler
 from fastapi import status
@@ -48,8 +48,8 @@ settings = get_settings()
 configure_logging(settings.LOG_LEVEL, settings.ENVIRONMENT)
 logger = structlog.get_logger()
 
-# Background service manager
-background_manager = BackgroundServiceManager()
+# Background service manager - DISABLED temporarily
+# background_manager = BackgroundServiceManager()
 
 
 @asynccontextmanager
@@ -201,10 +201,10 @@ def create_application() -> FastAPI:
     if settings.allowed_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
-    # Custom middleware (order matters!)
+    # Custom middleware (simplified temporarily)
     app.add_middleware(RequestLoggingMiddleware)
-    app.add_middleware(RateLimitMiddleware)
-    app.add_middleware(TenantMiddleware)
+    # app.add_middleware(RateLimitMiddleware)  # DISABLED temporarily
+    # app.add_middleware(TenantMiddleware)  # DISABLED temporarily  
     app.add_middleware(AuthMiddleware)
 
     # Include API routes
