@@ -194,14 +194,14 @@ def create_application() -> FastAPI:
     if settings.allowed_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
 
-    # TEMPORARILY DISABLE ALL MIDDLEWARE - GET/POST hanging while HEAD works
-    # app.add_middleware(RequestLoggingMiddleware)
-    # app.add_middleware(RateLimitMiddleware) 
-    # app.add_middleware(TenantMiddleware)
-    # app.add_middleware(AuthMiddleware)
+    # Custom middleware (order matters!)
+    app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(TenantMiddleware)
+    app.add_middleware(AuthMiddleware)
 
-    # TEMPORARILY COMMENT OUT API ROUTER TO TEST IF IT'S CAUSING HANG
-    # app.include_router(api_router, prefix="/api/v1")
+    # Include API routes
+    app.include_router(api_router, prefix="/api/v1")
 
     # Exception handlers
     @app.exception_handler(HTTPException)
