@@ -13,7 +13,11 @@ import { apiClient } from '@/lib/api/client';
 const formSchema = z.object({
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
   email: z.string().email('Please enter a valid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  password: z.string()
+    .min(8, 'Password must be at least 8 characters')
+    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+    .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+    .regex(/[0-9]/, 'Password must contain at least one number'),
   confirm_password: z.string(),
   terms_agreed: z.boolean().refine((val) => val === true, {
     message: 'You must agree to the terms of service',
@@ -146,6 +150,9 @@ export default function RegistrationForm() {
             data-testid="password-input"
             disabled={isLoading}
           />
+          <p className="text-xs text-muted-foreground">
+            Password must be at least 8 characters with uppercase, lowercase, and number
+          </p>
           {errors.password && (
             <p className="text-sm text-destructive" data-testid="password-error">
               {errors.password.message}
