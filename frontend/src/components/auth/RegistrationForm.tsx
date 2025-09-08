@@ -101,6 +101,11 @@ export default function RegistrationForm() {
         if (err.response?.status === 422 && err.response?.data?.detail) {
           const validationErrors = err.response.data.detail;
           
+          // TEMPORARY: Force log validation errors for debugging (will remove after fix)
+          console.error('=== REGISTRATION VALIDATION ERROR DEBUG ===');
+          console.error('Full validation errors:', validationErrors);
+          console.error('=== END DEBUG ===');
+          
           // Dev-only: log validation error details (safe metadata only)
           if (import.meta.env.DEV) {
             console.error('Validation errors:', validationErrors.map((error: any) => ({
