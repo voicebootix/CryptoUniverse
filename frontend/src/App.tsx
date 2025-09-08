@@ -17,28 +17,13 @@ import RegisterPage from '@/pages/auth/RegisterPage';
 import OAuthCallbackPage from '@/pages/auth/OAuthCallbackPage';
 import ForgotPasswordPage from '@/pages/auth/ForgotPasswordPage';
 
-// Dashboard Pages
-import TradingDashboard from '@/pages/dashboard/TradingDashboard';
-import AICommandCenter from '@/pages/dashboard/AICommandCenter';
-import AIChatPage from '@/pages/dashboard/AIChatPage';
-import BeastModeDashboard from '@/pages/dashboard/BeastModeDashboard';
+// Dashboard Pages - Consolidated Architecture
+import AIMoneyManager from '@/pages/dashboard/AIMoneyManager';
 import StrategyMarketplace from '@/pages/dashboard/StrategyMarketplace';
-import MultiExchangeHub from '@/pages/dashboard/MultiExchangeHub';
-import CreditBillingCenter from '@/pages/dashboard/CreditBillingCenter';
-import ProfitSharingCenter from '@/pages/dashboard/ProfitSharingCenter';
+import PerformanceHub from '@/pages/dashboard/PerformanceHub';
 import CopyTradingNetwork from '@/pages/dashboard/CopyTradingNetwork';
-import TelegramCenter from '@/pages/dashboard/TelegramCenter';
-import AdvancedAnalytics from '@/pages/dashboard/AdvancedAnalytics';
-import TradingPage from '@/pages/dashboard/TradingPage';
-import PortfolioPage from '@/pages/dashboard/PortfolioPage';
-import AutonomousPage from '@/pages/dashboard/AutonomousPage';
-import ExchangesPage from '@/pages/dashboard/ExchangesPage';
 import SettingsPage from '@/pages/dashboard/SettingsPage';
 import AdminPage from '@/pages/dashboard/AdminPage';
-import MarketAnalysisPage from '@/pages/dashboard/MarketAnalysisPage';
-import MasterControllerCenter from '@/pages/dashboard/MasterControllerCenter';
-import TrustJourneyDashboard from '@/pages/dashboard/TrustJourneyDashboard';
-import EvidenceReportingDashboard from '@/pages/dashboard/EvidenceReportingDashboard';
 
 // Loading Component
 const LoadingScreen: React.FC = () => (
@@ -136,60 +121,18 @@ const App: React.FC = () => {
                 <DashboardLayout />
               </ProtectedRoute>
             }>
-              {/* Main Dashboard */}
-              <Route index element={<TradingDashboard />} />
+              {/* AI Money Manager - Main Dashboard */}
+              <Route index element={<AIMoneyManager />} />
+              <Route path="ai" element={<AIMoneyManager />} />
               
-              {/* Master Controller */}
-              <Route path="master-controller" element={<MasterControllerCenter />} />
+              {/* Strategy Marketplace */}
+              <Route path="strategies" element={<StrategyMarketplace />} />
               
-              {/* AI Command Center */}
-              <Route path="ai-command" element={<AICommandCenter />} />
+              {/* Performance Hub */}
+              <Route path="performance" element={<PerformanceHub />} />
               
-              {/* AI Chat Manager */}
-              <Route path="ai-chat" element={<AIChatPage />} />
-              
-              {/* Beast Mode Dashboard */}
-              <Route path="beast-mode" element={<BeastModeDashboard />} />
-              
-                          {/* Strategy Marketplace */}
-            <Route path="strategies" element={<StrategyMarketplace />} />
-            
-            {/* Trust Journey */}
-            <Route path="trust-journey" element={<TrustJourneyDashboard />} />
-            
-            {/* Evidence Reporting */}
-            <Route path="evidence" element={<EvidenceReportingDashboard />} />
-            
-            {/* Multi-Exchange Hub */}
-            <Route path="exchanges-hub" element={<MultiExchangeHub />} />
-            
-            {/* Credit & Billing */}
-            <Route path="billing" element={<ProfitSharingCenter />} />
-            <Route path="credits" element={<ProfitSharingCenter />} />
-            
-            {/* Copy Trading Network */}
-            <Route path="copy-trading" element={<CopyTradingNetwork />} />
-            
-            {/* Telegram Center */}
-            <Route path="telegram" element={<TelegramCenter />} />
-            
-            {/* Advanced Analytics */}
-            <Route path="analytics" element={<AdvancedAnalytics />} />
-            
-            {/* Market Analysis */}
-            <Route path="market-analysis" element={<MarketAnalysisPage />} />
-            
-            {/* Trading */}
-            <Route path="trading" element={<TradingPage />} />
-              
-              {/* Portfolio */}
-              <Route path="portfolio" element={<PortfolioPage />} />
-              
-              {/* Autonomous Trading */}
-              <Route path="autonomous" element={<AutonomousPage />} />
-              
-              {/* Exchange Management */}
-              <Route path="exchanges" element={<ExchangesPage />} />
+              {/* Copy Trading Network */}
+              <Route path="copy-trading" element={<CopyTradingNetwork />} />
               
               {/* Settings */}
               <Route path="settings" element={<SettingsPage />} />
