@@ -421,17 +421,47 @@ const EvidenceReportingDashboard: React.FC = () => {
                       <Clock className="h-3 w-3" />
                       {new Date(decision.timestamp).toLocaleString()}
                     </span>
-                    {decision.outcome && (
-                      <span className={cn(
-                        'flex items-center gap-1 font-medium',
-                        decision.outcome.result === 'profit' ? 'text-green-500' : 'text-red-500'
-                      )}>
-                        <DollarSign className="h-3 w-3" />
-                        {decision.outcome.result === 'profit' ? '+' : '-'}
-                        {formatCurrency(Math.abs(decision.outcome.amount))}
-                        ({formatPercentage(decision.outcome.percentage)})
-                      </span>
-                    )}
+                    {decision.outcome && (() => {
+                      const result = decision.outcome.result;
+                      let className = 'flex items-center gap-1 font-medium ';
+                      let sign = '';
+                      let percentageDisplay = '';
+
+                      switch (result) {
+                        case 'profit':
+                          className += 'text-green-500';
+                          sign = '+';
+                          percentageDisplay = `(${formatPercentage(decision.outcome.percentage)})`;
+                          break;
+                        case 'loss':
+                          className += 'text-red-500';
+                          sign = '-';
+                          percentageDisplay = `(${formatPercentage(decision.outcome.percentage)})`;
+                          break;
+                        case 'breakeven':
+                          className += 'text-gray-500';
+                          sign = '';
+                          percentageDisplay = '(0%)';
+                          break;
+                        case 'pending':
+                          className += 'text-gray-500';
+                          sign = '';
+                          percentageDisplay = 'Pending';
+                          break;
+                        default:
+                          className += 'text-gray-500';
+                          sign = '';
+                          percentageDisplay = '—';
+                      }
+
+                      return (
+                        <span className={cn(className)}>
+                          <DollarSign className="h-3 w-3" />
+                          {sign}{formatCurrency(Math.abs(decision.outcome.amount))}
+                          {percentageDisplay && ` ${percentageDisplay}`}
+                        </span>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>

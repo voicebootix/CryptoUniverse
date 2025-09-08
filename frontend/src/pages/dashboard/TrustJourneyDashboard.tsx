@@ -102,6 +102,18 @@ const trustLevelConfig = {
 };
 
 // Milestones
+interface ApiMilestone {
+  id: string;
+  title: string;
+  description: string;
+  requirement: string;
+  progress: number;
+  target: number;
+  completed: boolean;
+  reward: string;
+  iconKey: string;
+}
+
 interface Milestone {
   id: string;
   title: string;
@@ -113,6 +125,31 @@ interface Milestone {
   reward: string;
   icon: React.ReactNode;
 }
+
+// Icon mapping for milestones
+const iconByKey: Record<string, React.ReactNode> = {
+  'trophy': <Trophy className="h-5 w-5" />,
+  'target': <Target className="h-5 w-5" />,
+  'shield': <Shield className="h-5 w-5" />,
+  'zap': <Zap className="h-5 w-5" />,
+  'star': <Star className="h-5 w-5" />,
+  'activity': <Activity className="h-5 w-5" />,
+  'trending-up': <TrendingUp className="h-5 w-5" />,
+  'dollar-sign': <DollarSign className="h-5 w-5" />,
+  'bar-chart': <BarChart3 className="h-5 w-5" />,
+  'users': <Users className="h-5 w-5" />,
+  'sparkles': <Sparkles className="h-5 w-5" />,
+  'award': <Award className="h-5 w-5" />,
+  'check-circle': <CheckCircle className="h-5 w-5" />
+};
+
+// Map API milestones to UI milestones with proper icons
+const mapMilestones = (apiMilestones: ApiMilestone[]): Milestone[] => {
+  return apiMilestones.map(m => ({
+    ...m,
+    icon: iconByKey[m.iconKey] || <Target className="h-5 w-5" />
+  }));
+};
 
 // Performance Metrics
 interface PerformanceMetrics {
@@ -161,7 +198,7 @@ const TrustJourneyDashboard: React.FC = () => {
     queryKey: ['trust-milestones'],
     queryFn: async () => {
       const response = await apiClient.get('/api/v1/user/milestones');
-      return response.data.data || [];
+      return mapMilestones(response.data.data || []);
     }
   });
 
@@ -393,7 +430,7 @@ const TrustJourneyDashboard: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {formatPercentage(performanceMetrics.winRate)}
+              {formatPercentage(performanceMetrics.winRate * 100)}
             </div>
             <Progress value={performanceMetrics.winRate * 100} className="h-1 mt-2" />
             <p className="text-xs text-muted-foreground mt-2">
