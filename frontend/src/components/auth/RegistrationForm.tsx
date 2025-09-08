@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/components/ui/use-toast';
 import { Link } from 'react-router-dom';
+import { apiClient } from '@/lib/api/client';
 
 const formSchema = z.object({
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
@@ -47,15 +48,29 @@ export default function RegistrationForm() {
       setIsLoading(true);
       setError('');
 
-      const response = await fetch('/api/v1/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
+      // Send only the data that backend expects
+      const registrationData = {
+        email: data.email,
+        password: data.password,
+        full_name: data.full_name,
+        role: 'TRADER' // Default role
+      };
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to register');
+      // Debug logging (dev only) - mask sensitive data
+      if (import.meta.env.DEV) {
+        console.log('Registration attempt:', {
+          email: registrationData.email,
+          full_name: registrationData.full_name,
+          role: registrationData.role,
+          password: '****' // Never log actual password
+        });
+      }
+      
+      const response = await apiClient.post('/auth/register', registrationData);
+      
+      // Success logging without sensitive response data
+      if (import.meta.env.DEV) {
+        console.log('Registration successful for user:', registrationData.email);
       }
 
       toast({
