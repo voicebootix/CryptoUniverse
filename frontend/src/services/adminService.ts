@@ -1,11 +1,9 @@
 import axios from 'axios';
 import { getAuthToken } from './authService';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
 // Create axios instance with auth interceptor
 const adminApi = axios.create({
-  baseURL: `${API_URL}/api/v1/admin`,
+  baseURL: `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/admin`,
 });
 
 // Add auth token to requests

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import {
   Send,
   Bot,
@@ -59,7 +60,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [websocket, setWebsocket] = useState<WebSocket | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -92,8 +92,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       if (response.data.success) {
         setSessionId(response.data.session_id);
         
-        // Initialize WebSocket connection
-        initializeWebSocket(response.data.session_id);
+        // Session created, WebSocket will connect automatically via hook
         
         // Add welcome message
         const welcomeMessage: ChatMessage = {
@@ -127,21 +126,17 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     }
   };
 
-  const initializeWebSocket = (sessionId: string) => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/api/v1/chat/ws/${sessionId}`;
-    
-    const ws = new WebSocket(wsUrl);
-    
-    ws.onopen = () => {
-      setIsConnected(true);
-      // WebSocket connected - connection established
-    };
-    
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        
+  // Use the shared WebSocket hook with proper authentication and reconnection
+  const { lastMessage, connectionStatus, sendMessage: sendWsMessage } = useWebSocket(
+    sessionId ? `/chat/ws/${sessionId}` : '',
+    {
+      onOpen: () => {
+        setIsConnected(true);
+      },
+      onClose: () => {
+        setIsConnected(false);
+      },
+      onMessage: (data) => {
         if (data.type === 'chat_response') {
           const newMessage: ChatMessage = {
             id: data.message_id,
@@ -158,23 +153,19 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         } else if (data.type === 'connection_established') {
           // Chat connection established
         }
-      } catch (error) {
-        // Failed to parse WebSocket message - continue operation
-      }
-    };
-    
-    ws.onclose = () => {
-      setIsConnected(false);
-      // WebSocket disconnected - connection closed
-    };
-    
-    ws.onerror = (error) => {
-      // WebSocket error - connection issue handled by state
-      setIsConnected(false);
-    };
-    
-    setWebsocket(ws);
-  };
+      },
+      onError: () => {
+        setIsConnected(false);
+      },
+      reconnectAttempts: 3,
+      reconnectInterval: 2000
+    }
+  );
+
+  // Update connection status based on WebSocket hook
+  useEffect(() => {
+    setIsConnected(connectionStatus === 'Open');
+  }, [connectionStatus]);
 
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading || !sessionId) return;
@@ -191,13 +182,13 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     setIsLoading(true);
 
     try {
-      if (websocket && websocket.readyState === WebSocket.OPEN) {
+      if (isConnected && sendWsMessage) {
         // Send via WebSocket for real-time response
-        websocket.send(JSON.stringify({
+        sendWsMessage({
           type: 'chat_message',
           message: inputValue,
           session_id: sessionId
-        }));
+        });
       } else {
         // Fallback to REST API
         const response = await apiClient.post('/chat/message', {

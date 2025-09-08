@@ -161,13 +161,13 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
     }
 
     // Use correct WebSocket URL - match the API client configuration
-    // Get the API base URL from environment or default to production backend
-    const apiBaseUrl = import.meta.env.VITE_API_URL || 'https://cryptouniverse.onrender.com/api/v1';
-    // Convert HTTP(S) URL to WS(S) URL
+    // Get the API base URL from environment
+    const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+    // Convert HTTP(S) URL to WS(S) URL and add the WebSocket endpoint
     const wsUrl = apiBaseUrl
       .replace('https://', 'wss://')
       .replace('http://', 'ws://')
-      .replace('/api/v1', '/api/v1/trading/ws');
+      + '/trading/ws';
     
     console.log('Connecting to WebSocket:', wsUrl);
     socket = new WebSocket(wsUrl);
