@@ -686,6 +686,20 @@ async def verify_user(
                 detail="User not found"
             )
         
+        # SECURITY: Check tenant isolation - prevent cross-tenant operations
+        if target_user.tenant_id != current_user.tenant_id:
+            logger.warning(
+                "Attempted cross-tenant verification blocked",
+                admin_user=str(current_user.id),
+                admin_tenant=str(current_user.tenant_id),
+                target_user=str(target_user.id),
+                target_tenant=str(target_user.tenant_id)
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot verify users from different tenant"
+            )
+        
         # Check if already verified
         if target_user.status == UserStatus.ACTIVE and target_user.is_verified:
             return {
@@ -694,6 +708,20 @@ async def verify_user(
                 "user_email": target_user.email,
                 "timestamp": datetime.utcnow().isoformat()
             }
+        
+        # SECURITY: Only verify users in PENDING_VERIFICATION status
+        # Prevent reactivation of suspended/inactive users
+        if target_user.status != UserStatus.PENDING_VERIFICATION:
+            logger.warning(
+                "Attempted to verify user with invalid status",
+                admin_user=str(current_user.id),
+                target_user=str(target_user.id),
+                current_status=target_user.status.value
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot verify user with status {target_user.status.value}. User must be in PENDING_VERIFICATION status."
+            )
         
         # Capture previous status before mutation
         previous_status = str(target_user.status.value) if target_user.status else "PENDING_VERIFICATION"
@@ -780,6 +808,7 @@ async def verify_users_batch(
     verified_users = []
     already_verified = []
     not_found = []
+    skipped = []
     errors = []
     
     try:
@@ -795,6 +824,25 @@ async def verify_users_batch(
                     not_found.append(user_id)
                     continue
                 
+                # SECURITY: Check tenant isolation - prevent cross-tenant operations
+                if target_user.tenant_id != current_user.tenant_id:
+                    skipped.append({
+                        "user_id": str(target_user.id),
+                        "email": target_user.email,
+                        "reason": "cross_tenant",
+                        "message": "Cannot verify users from different tenant"
+                    })
+                    
+                    # Log attempted cross-tenant operation for security audit
+                    logger.warning(
+                        "Attempted cross-tenant verification blocked",
+                        admin_user=str(current_user.id),
+                        admin_tenant=str(current_user.tenant_id),
+                        target_user=str(target_user.id),
+                        target_tenant=str(target_user.tenant_id)
+                    )
+                    continue
+                
                 # Check if already verified
                 if target_user.status == UserStatus.ACTIVE and target_user.is_verified:
                     already_verified.append({
@@ -803,7 +851,23 @@ async def verify_users_batch(
                     })
                     continue
                 
-                # Verify the user
+                # SECURITY: Only verify users in PENDING_VERIFICATION status
+                # Prevent reactivation of suspended/inactive users
+                if target_user.status != UserStatus.PENDING_VERIFICATION:
+                    skipped.append({
+                        "user_id": str(target_user.id),
+                        "email": target_user.email,
+                        "reason": "invalid_status",
+                        "message": f"User status is {target_user.status.value}, not PENDING_VERIFICATION",
+                        "current_status": target_user.status.value
+                    })
+                    continue
+                
+                # Capture previous state for audit
+                previous_status = target_user.status.value
+                previous_verified = target_user.is_verified
+                
+                # Verify the user - only if all checks pass
                 target_user.status = UserStatus.ACTIVE
                 target_user.is_verified = True
                 target_user.updated_at = datetime.utcnow()
@@ -813,7 +877,7 @@ async def verify_users_batch(
                     "email": target_user.email
                 })
                 
-                # Create audit log
+                # Create audit log with security context
                 audit_log = AuditLog(
                     user_id=current_user.id,
                     event_type="batch_user_verification",
@@ -822,6 +886,11 @@ async def verify_users_batch(
                         "target_user_email": target_user.email,
                         "action": "verify",
                         "batch_operation": True,
+                        "previous_status": previous_status,
+                        "previous_verified": previous_verified,
+                        "new_status": "ACTIVE",
+                        "new_verified": True,
+                        "tenant_id": str(target_user.tenant_id) if target_user.tenant_id else None,
                         "details": {
                             "target_user_id": user_id,
                             "target_user_email": target_user.email,
@@ -849,6 +918,7 @@ async def verify_users_batch(
             admin_user=str(current_user.id),
             verified_count=len(verified_users),
             already_verified_count=len(already_verified),
+            skipped_count=len(skipped),
             not_found_count=len(not_found),
             error_count=len(errors)
         )
@@ -859,11 +929,13 @@ async def verify_users_batch(
                 "total_requested": len(request.user_ids),
                 "successfully_verified": len(verified_users),
                 "already_verified": len(already_verified),
+                "skipped": len(skipped),
                 "not_found": len(not_found),
                 "errors": len(errors)
             },
             "verified_users": verified_users,
             "already_verified": already_verified,
+            "skipped": skipped,
             "not_found": not_found,
             "errors": errors,
             "timestamp": datetime.utcnow().isoformat(),
