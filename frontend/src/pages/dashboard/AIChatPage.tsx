@@ -21,63 +21,39 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ChatInterface from '@/components/chat/ChatInterface';
+import ConversationalTradingInterface from '@/components/chat/ConversationalTradingInterface';
+import PhaseProgressVisualizer, { ExecutionPhase } from '@/components/trading/PhaseProgressVisualizer';
+import PaperTradingToggle from '@/components/trading/PaperTradingToggle';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 
-// Mock data for AI chat statistics
-const chatStats = {
-  totalConversations: 1247,
-  todayConversations: 23,
-  avgResponseTime: 1.2,
-  successfulTrades: 89,
-  portfolioOptimizations: 34,
-  riskAssessments: 156,
-  totalProfit: 15420.50,
-  aiAccuracy: 94.2
-};
-
-// Recent AI actions
-const recentActions = [
-  {
-    id: 1,
-    type: 'trade_execution',
-    action: 'Bought 0.5 BTC',
-    amount: '$25,000',
-    timestamp: '2 minutes ago',
-    status: 'completed',
-    profit: '+$1,250'
-  },
-  {
-    id: 2,
-    type: 'portfolio_rebalance',
-    action: 'Rebalanced portfolio allocation',
-    amount: '$50,000',
-    timestamp: '15 minutes ago',
-    status: 'completed',
-    profit: '+$2,100'
-  },
-  {
-    id: 3,
-    type: 'risk_assessment',
-    action: 'Risk analysis completed',
-    amount: 'Portfolio',
-    timestamp: '32 minutes ago',
-    status: 'completed',
-    profit: 'Risk reduced by 12%'
-  },
-  {
-    id: 4,
-    type: 'opportunity_discovery',
-    action: 'Found SOL opportunity',
-    amount: '$10,000',
-    timestamp: '1 hour ago',
-    status: 'pending',
-    profit: 'Potential +15%'
-  }
-];
+import { useQuery } from '@tanstack/react-query';
+import { apiClient } from '@/lib/api/client';
 
 const AIChatPage: React.FC = () => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [selectedTab, setSelectedTab] = useState('chat');
+  const [selectedTab, setSelectedTab] = useState('conversational');
+  const [isPaperTrading, setIsPaperTrading] = useState(true);
+  const [currentPhase, setCurrentPhase] = useState<ExecutionPhase>(ExecutionPhase.IDLE);
+  
+  // Fetch real chat statistics
+  const { data: chatStats, isLoading: statsLoading } = useQuery({
+    queryKey: ['chat-stats'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/v1/chat/stats');
+      return response.data;
+    },
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+  
+  // Fetch recent AI actions
+  const { data: recentActions, isLoading: actionsLoading } = useQuery({
+    queryKey: ['recent-actions'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/v1/chat/recent-actions');
+      return response.data.actions || [];
+    },
+    refetchInterval: 10000, // Refresh every 10 seconds
+  });
 
   const getActionIcon = (type: string) => {
     switch (type) {
@@ -122,14 +98,22 @@ const AIChatPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
-          <Badge variant="secondary" className="gap-1">
-            <Activity className="h-3 w-3" />
-            {chatStats.todayConversations} conversations today
-          </Badge>
-          <Badge variant="secondary" className="gap-1">
-            <Zap className="h-3 w-3" />
-            {chatStats.avgResponseTime}s avg response
-          </Badge>
+          <PaperTradingToggle 
+            isCompact 
+            onModeChange={setIsPaperTrading}
+          />
+          {chatStats && (
+            <>
+              <Badge variant="secondary" className="gap-1">
+                <Activity className="h-3 w-3" />
+                {chatStats.todayConversations || 0} conversations today
+              </Badge>
+              <Badge variant="secondary" className="gap-1">
+                <Zap className="h-3 w-3" />
+                {chatStats.avgResponseTime || 0}s avg response
+              </Badge>
+            </>
+          )}
         </div>
       </div>
 
@@ -141,9 +125,11 @@ const AIChatPage: React.FC = () => {
             <MessageSquare className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{chatStats.totalConversations.toLocaleString()}</div>
+            <div className="text-2xl font-bold">
+              {statsLoading ? '-' : (chatStats?.totalConversations || 0).toLocaleString()}
+            </div>
             <p className="text-xs text-muted-foreground">
-              +{chatStats.todayConversations} today
+              +{chatStats?.todayConversations || 0} today
             </p>
           </CardContent>
         </Card>
@@ -154,7 +140,9 @@ const AIChatPage: React.FC = () => {
             <Target className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-500">{chatStats.aiAccuracy}%</div>
+            <div className="text-2xl font-bold text-green-500">
+              {statsLoading ? '-' : `${chatStats?.aiAccuracy || 0}%`}
+            </div>
             <p className="text-xs text-muted-foreground">
               Prediction accuracy
             </p>
@@ -168,7 +156,7 @@ const AIChatPage: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-500">
-              {formatCurrency(chatStats.totalProfit)}
+              {statsLoading ? '-' : formatCurrency(chatStats?.totalProfit || 0)}
             </div>
             <p className="text-xs text-muted-foreground">
               From AI recommendations
@@ -182,7 +170,9 @@ const AIChatPage: React.FC = () => {
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{chatStats.avgResponseTime}s</div>
+            <div className="text-2xl font-bold">
+              {statsLoading ? '-' : `${chatStats?.avgResponseTime || 0}s`}
+            </div>
             <p className="text-xs text-muted-foreground">
               Average AI response
             </p>
@@ -190,17 +180,45 @@ const AIChatPage: React.FC = () => {
         </Card>
       </div>
 
+      {/* Phase Progress Visualizer */}
+      {currentPhase !== ExecutionPhase.IDLE && (
+        <PhaseProgressVisualizer
+          currentPhase={currentPhase}
+          phaseHistory={[]}
+          isCompact
+          showMetrics={false}
+        />
+      )}
+
       {/* Main Content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Chat Interface */}
+        {/* Chat Interface with Tabs */}
         <div className={`${isExpanded ? 'lg:col-span-3' : 'lg:col-span-2'} transition-all duration-300`}>
-          <div className={`${isExpanded ? 'h-[80vh]' : 'h-[600px]'}`}>
-            <ChatInterface
-              isExpanded={isExpanded}
-              onToggleExpand={() => setIsExpanded(!isExpanded)}
-              className="h-full"
-            />
-          </div>
+          <Tabs value={selectedTab} onValueChange={setSelectedTab}>
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="conversational">Conversational Trading</TabsTrigger>
+              <TabsTrigger value="basic">Basic Chat</TabsTrigger>
+            </TabsList>
+            <TabsContent value="conversational" className="mt-4">
+              <div className={`${isExpanded ? 'h-[80vh]' : 'h-[600px]'}`}>
+                <ConversationalTradingInterface
+                  isExpanded={isExpanded}
+                  onToggleExpand={() => setIsExpanded(!isExpanded)}
+                  isPaperTrading={isPaperTrading}
+                  className="h-full"
+                />
+              </div>
+            </TabsContent>
+            <TabsContent value="basic" className="mt-4">
+              <div className={`${isExpanded ? 'h-[80vh]' : 'h-[600px]'}`}>
+                <ChatInterface
+                  isExpanded={isExpanded}
+                  onToggleExpand={() => setIsExpanded(!isExpanded)}
+                  className="h-full"
+                />
+              </div>
+            </TabsContent>
+          </Tabs>
         </div>
 
         {/* Side Panel */}
@@ -268,7 +286,12 @@ const AIChatPage: React.FC = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                {recentActions.map((action) => (
+                {actionsLoading ? (
+                  <div className="text-sm text-muted-foreground text-center py-4">
+                    Loading recent actions...
+                  </div>
+                ) : recentActions && recentActions.length > 0 ? (
+                  recentActions.map((action: any) => (
                   <div key={action.id} className="flex items-start gap-3 p-3 rounded-lg border">
                     <div className="flex-shrink-0">
                       {getActionIcon(action.type)}
@@ -293,7 +316,12 @@ const AIChatPage: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                ))}
+                  ))
+                ) : (
+                  <div className="text-sm text-muted-foreground text-center py-4">
+                    No recent actions
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -305,19 +333,19 @@ const AIChatPage: React.FC = () => {
               <CardContent className="space-y-4">
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Successful Trades</span>
-                  <span className="font-medium">{chatStats.successfulTrades}</span>
+                  <span className="font-medium">{chatStats?.successfulTrades || 0}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Portfolio Optimizations</span>
-                  <span className="font-medium">{chatStats.portfolioOptimizations}</span>
+                  <span className="font-medium">{chatStats?.portfolioOptimizations || 0}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Risk Assessments</span>
-                  <span className="font-medium">{chatStats.riskAssessments}</span>
+                  <span className="font-medium">{chatStats?.riskAssessments || 0}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">AI Accuracy</span>
-                  <span className="font-medium text-green-500">{chatStats.aiAccuracy}%</span>
+                  <span className="font-medium text-green-500">{chatStats?.aiAccuracy || 0}%</span>
                 </div>
               </CardContent>
             </Card>
