@@ -25,6 +25,7 @@ import {
   Globe,
   CreditCard,
   MessageSquare,
+  FileText,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -108,6 +109,18 @@ const navigation: NavigationItem[] = [
   },
   { name: "Trading", href: "/dashboard/trading", icon: TrendingUp },
   { name: "Portfolio", href: "/dashboard/portfolio", icon: Wallet },
+  {
+    name: "Trust Journey",
+    href: "/dashboard/trust-journey",
+    icon: Shield,
+    badge: "NEW",
+  },
+  {
+    name: "Evidence Report",
+    href: "/dashboard/evidence",
+    icon: FileText,
+    badge: "PRO",
+  },
   { name: "Billing", href: "/dashboard/billing", icon: CreditCard },
   { name: "Autonomous", href: "/dashboard/autonomous", icon: Bot },
   { name: "Exchanges", href: "/dashboard/exchanges", icon: BarChart3 },

@@ -35,6 +35,8 @@ import SettingsPage from '@/pages/dashboard/SettingsPage';
 import AdminPage from '@/pages/dashboard/AdminPage';
 import MarketAnalysisPage from '@/pages/dashboard/MarketAnalysisPage';
 import MasterControllerCenter from '@/pages/dashboard/MasterControllerCenter';
+import TrustJourneyDashboard from '@/pages/dashboard/TrustJourneyDashboard';
+import EvidenceReportingDashboard from '@/pages/dashboard/EvidenceReportingDashboard';
 
 // Loading Component
 const LoadingScreen: React.FC = () => (
@@ -147,6 +149,12 @@ const App: React.FC = () => {
               
                           {/* Strategy Marketplace */}
             <Route path="strategies" element={<StrategyMarketplace />} />
+            
+            {/* Trust Journey */}
+            <Route path="trust-journey" element={<TrustJourneyDashboard />} />
+            
+            {/* Evidence Reporting */}
+            <Route path="evidence" element={<EvidenceReportingDashboard />} />
             
             {/* Multi-Exchange Hub */}
             <Route path="exchanges-hub" element={<MultiExchangeHub />} />
