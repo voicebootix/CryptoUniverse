@@ -9,7 +9,8 @@ import {
   X,
   TrendingUp,
   Shield,
-  Sparkles
+  Sparkles,
+  CheckCircle
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
