@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers
 revision = 'add_chat_memory_001'
-down_revision = None  # Update with actual previous revision
+down_revision = '004_targeted_performance_fix'
 branch_labels = None
 depends_on = None
 
@@ -23,14 +23,14 @@ def upgrade():
     op.create_table('chat_sessions',
         sa.Column('session_id', postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column('user_id', postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('last_activity', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('context', sa.JSON, nullable=True),
-        sa.Column('portfolio_state', sa.JSON, nullable=True),
-        sa.Column('active_strategies', sa.JSON, nullable=True),
-        sa.Column('is_active', sa.String, nullable=False, default='true'),
-        sa.Column('session_type', sa.String, nullable=False, default='general'),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column('last_activity', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True, onupdate=sa.func.now()),
+        sa.Column('context', postgresql.JSONB, nullable=True),
+        sa.Column('portfolio_state', postgresql.JSONB, nullable=True),
+        sa.Column('active_strategies', postgresql.JSONB, nullable=True),
+        sa.Column('is_active', sa.Boolean, nullable=False, server_default=sa.text('true')),
+        sa.Column('session_type', sa.String, nullable=False, server_default=sa.text("'general'")),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
         sa.PrimaryKeyConstraint('session_id')
     )
@@ -47,11 +47,11 @@ def upgrade():
         sa.Column('user_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('content', sa.Text, nullable=False),
         sa.Column('message_type', sa.String, nullable=False),
-        sa.Column('timestamp', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('timestamp', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column('intent', sa.String, nullable=True),
         sa.Column('confidence', sa.Float, nullable=True),
-        sa.Column('metadata', sa.JSON, nullable=True),
-        sa.Column('processed', sa.String, nullable=False, default='true'),
+        sa.Column('metadata', postgresql.JSONB, nullable=True),
+        sa.Column('processed', sa.Boolean, nullable=False, server_default=sa.text('true')),
         sa.Column('error_message', sa.Text, nullable=True),
         sa.Column('model_used', sa.String, nullable=True),
         sa.Column('processing_time_ms', sa.Float, nullable=True),
@@ -75,14 +75,15 @@ def upgrade():
         sa.Column('session_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('user_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('summary_text', sa.Text, nullable=False),
-        sa.Column('messages_summarized', sa.Float, nullable=False),
-        sa.Column('summary_type', sa.String, nullable=False, default='conversation'),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('messages_summarized', sa.Integer, nullable=False),
+        sa.Column('summary_type', sa.String, nullable=False, server_default=sa.text("'conversation'")),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column('start_timestamp', sa.DateTime(timezone=True), nullable=False),
         sa.Column('end_timestamp', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('key_decisions', sa.JSON, nullable=True),
-        sa.Column('trade_actions', sa.JSON, nullable=True),
-        sa.Column('portfolio_changes', sa.JSON, nullable=True),
+        sa.Column('key_decisions', postgresql.JSONB, nullable=True),
+        sa.Column('trade_actions', postgresql.JSONB, nullable=True),
+        sa.Column('portfolio_changes', postgresql.JSONB, nullable=True),
+        sa.ForeignKeyConstraint(['session_id'], ['chat_sessions.session_id'], ),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
         sa.PrimaryKeyConstraint('summary_id')
     )

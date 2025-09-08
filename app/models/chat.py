@@ -5,7 +5,7 @@ This module defines the database models for storing chat sessions and messages,
 enabling persistent conversation memory across server restarts.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from sqlalchemy import Column, String, DateTime, Text, JSON, Float, ForeignKey, Index
 from sqlalchemy.orm import relationship
@@ -29,9 +29,9 @@ class ChatSession(Base):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     
     # Session metadata
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    last_activity = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    last_activity = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Session context and state
     context = Column(JSON, default=dict)  # User preferences, active strategies, etc.
@@ -87,7 +87,7 @@ class ChatMessage(Base):
     message_type = Column(String, nullable=False)  # user, assistant, system, trade_notification, etc.
     
     # Message metadata
-    timestamp = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     intent = Column(String)  # trade_execution, portfolio_analysis, etc.
     confidence = Column(Float)  # AI confidence score (0.0 - 1.0)
     metadata = Column(JSON)  # Additional message-specific data
@@ -153,7 +153,7 @@ class ChatSessionSummary(Base):
     summary_type = Column(String, default="conversation")  # conversation, trading_activity, etc.
     
     # Summary metadata
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     start_timestamp = Column(DateTime(timezone=True), nullable=False)  # First message timestamp
     end_timestamp = Column(DateTime(timezone=True), nullable=False)  # Last message timestamp
     

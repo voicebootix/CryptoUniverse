@@ -429,7 +429,7 @@ const EvidenceReportingDashboard: React.FC = () => {
                         <DollarSign className="h-3 w-3" />
                         {decision.outcome.result === 'profit' ? '+' : '-'}
                         {formatCurrency(Math.abs(decision.outcome.amount))}
-                        ({formatPercentage(decision.outcome.percentage / 100)})
+                        ({formatPercentage(decision.outcome.percentage)})
                       </span>
                     )}
                   </div>
@@ -664,7 +664,7 @@ const EvidenceReportingDashboard: React.FC = () => {
             <div className="text-2xl font-bold text-green-500">
               {formatPercentage(performanceSummary.successRate)}
             </div>
-            <Progress value={performanceSummary.successRate * 100} className="h-1 mt-2" />
+            <Progress value={performanceSummary.successRate} className="h-1 mt-2" />
           </CardContent>
         </Card>
         
@@ -693,7 +693,7 @@ const EvidenceReportingDashboard: React.FC = () => {
             <div className="text-2xl font-bold">
               {formatPercentage(performanceSummary.avgConfidence)}
             </div>
-            <Progress value={performanceSummary.avgConfidence * 100} className="h-1 mt-2" />
+            <Progress value={performanceSummary.avgConfidence} className="h-1 mt-2" />
           </CardContent>
         </Card>
         
@@ -805,6 +805,7 @@ const EvidenceReportingDashboard: React.FC = () => {
                       outerRadius={80}
                       fill="#8884d8"
                       dataKey="value"
+                      nameKey="type"
                     >
                       {decisionDistribution.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
