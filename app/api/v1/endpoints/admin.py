@@ -8,6 +8,7 @@ system configuration, and monitoring for the AI money manager platform.
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
@@ -75,8 +76,40 @@ class UserManagementRequest(BaseModel):
 
 
 class BatchVerifyRequest(BaseModel):
-    user_ids: List[str]
+    user_ids: List[str]  # Will be validated to UUIDs
     reason: Optional[str] = None
+    
+    @field_validator('user_ids')
+    @classmethod
+    def validate_user_ids(cls, v):
+        """Validate, dedupe, and limit user IDs."""
+        if not v:
+            raise ValueError("At least one user ID is required")
+        
+        # Parse and validate UUIDs
+        valid_uuids = []
+        seen = set()
+        
+        for user_id in v:
+            try:
+                # Parse to UUID to validate format
+                uuid_obj = UUID(user_id)
+                uuid_str = str(uuid_obj)
+                
+                # Deduplicate
+                if uuid_str not in seen:
+                    valid_uuids.append(uuid_str)
+                    seen.add(uuid_str)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Invalid UUID format: {user_id}")
+        
+        # Check batch size limits
+        if len(valid_uuids) == 0:
+            raise ValueError("No valid user IDs provided after deduplication")
+        if len(valid_uuids) > 100:
+            raise ValueError(f"Batch size exceeds maximum of 100 users (got {len(valid_uuids)})")
+        
+        return valid_uuids
 
 
 class SystemMetricsResponse(BaseModel):
@@ -156,11 +189,11 @@ async def get_system_overview(
         }
         
     except Exception as e:
-        logger.error("System status retrieval failed", error=str(e))
+        logger.exception("System status retrieval failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get system status: {str(e)}"
-        )
+            detail="Failed to get system status"
+        ) from e
 
 
 @router.post("/system/configure")
@@ -248,11 +281,11 @@ async def configure_system(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("System configuration failed", error=str(e))
+        logger.exception("System configuration failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"System configuration failed: {str(e)}"
-    )
+                    detail="System configuration failed"
+    ) from e
 
 
 @router.get("/credit-pricing")
@@ -283,10 +316,10 @@ async def get_credit_pricing_config(
         }
         
     except Exception as e:
-        logger.exception("Failed to get credit pricing config: %s", e)
+        logger.exception("Failed to get credit pricing config")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get pricing config: {str(e)}"
+            detail="Failed to get pricing config"
         ) from e
 
 
@@ -378,10 +411,10 @@ async def update_credit_pricing_config(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Failed to update credit pricing: %s", e)
+        logger.exception("Failed to update credit pricing")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update pricing: {str(e)}"
+            detail="Failed to update pricing"
         ) from e
 
 
@@ -439,10 +472,10 @@ async def update_strategy_pricing(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Failed to update strategy pricing: %s", e)
+        logger.exception("Failed to update strategy pricing")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update strategy pricing: {str(e)}"
+            detail="Failed to update strategy pricing"
         ) from e
 
 
@@ -710,11 +743,11 @@ async def list_users(
         )
         
     except Exception as e:
-        logger.error("User listing failed", error=str(e))
+        logger.exception("User listing failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list users: {str(e)}"
-        )
+            detail="Failed to list users"
+        ) from e
 
 
 @router.post("/users/verify/{user_id}")
@@ -751,7 +784,10 @@ async def verify_user(
             )
         
         # SECURITY: Check tenant isolation - prevent cross-tenant operations
-        if target_user.tenant_id != current_user.tenant_id:
+        # Allow global admins (tenant_id=None) to verify any user
+        if (current_user.tenant_id is not None and 
+            target_user.tenant_id is not None and 
+            current_user.tenant_id != target_user.tenant_id):
             logger.warning(
                 "Attempted cross-tenant verification blocked",
                 admin_user=str(current_user.id),
@@ -889,7 +925,10 @@ async def verify_users_batch(
                     continue
                 
                 # SECURITY: Check tenant isolation - prevent cross-tenant operations
-                if target_user.tenant_id != current_user.tenant_id:
+                # Allow global admins (tenant_id=None) to verify any user
+                if (current_user.tenant_id is not None and 
+                    target_user.tenant_id is not None and 
+                    current_user.tenant_id != target_user.tenant_id):
                     skipped.append({
                         "user_id": str(target_user.id),
                         "email": target_user.email,
@@ -968,11 +1007,18 @@ async def verify_users_batch(
                 db.add(audit_log)
                 
             except Exception as e:
+                # Sanitize error for client response
                 errors.append({
                     "user_id": user_id,
-                    "error": str(e)
+                    "error": "verification_failed"  # Generic error for client
                 })
-                logger.error(f"Failed to verify user {user_id}: {e}")
+                # Log full exception details for debugging
+                logger.exception(
+                    "Failed to verify user in batch operation",
+                    user_id=user_id,
+                    admin_user=str(current_user.id),
+                    error_type=type(e).__name__
+                )
         
         # Commit all changes
         await db.commit()
@@ -1008,11 +1054,11 @@ async def verify_users_batch(
         
     except Exception as e:
         await db.rollback()
-        logger.error("Batch verification failed", error=str(e), exc_info=True)
+        logger.exception("Batch verification failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Batch verification failed: {str(e)}"
-        )
+            detail="Batch verification failed"
+        ) from e
 
 
 @router.post("/users/manage")
@@ -1144,11 +1190,11 @@ async def manage_user(
     except Exception as e:
         # Rollback transaction on any other error
         await db.rollback()
-        logger.error("User management failed", error=str(e), exc_info=True)
+        logger.exception("User management failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"User management failed: {str(e)}"
-        )
+            detail="User management failed"
+        ) from e
 
 
 @router.get("/metrics", response_model=SystemMetricsResponse)
@@ -1222,11 +1268,11 @@ async def get_detailed_metrics(
         )
         
     except Exception as e:
-        logger.error("Metrics retrieval failed", error=str(e))
+        logger.exception("Metrics retrieval failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get metrics: {str(e)}"
-        )
+            detail="Failed to get metrics"
+        ) from e
 
 
 @router.get("/audit-logs")
@@ -1335,11 +1381,11 @@ async def get_audit_logs(
         }
         
     except Exception as e:
-        logger.error("Audit logs retrieval failed", error=str(e))
+        logger.exception("Audit logs retrieval failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get audit logs: {str(e)}"
-        )
+            detail="Failed to get audit logs"
+        ) from e
 
 
 @router.post("/emergency/stop-all")
@@ -1398,11 +1444,11 @@ async def emergency_stop_all_trading(
         }
         
     except Exception as e:
-        logger.error("Emergency stop failed", error=str(e))
+        logger.exception("Emergency stop failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Emergency stop failed: {str(e)}"
-        )
+            detail="Emergency stop failed"
+        ) from e
 
 
 # Helper Functions
