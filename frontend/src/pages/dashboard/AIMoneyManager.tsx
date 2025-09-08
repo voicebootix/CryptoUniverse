@@ -366,8 +366,8 @@ const AIMoneyManager: React.FC = () => {
         {/* Left Panel - Conversational Interface & Trading Modes */}
         <div className="col-span-7">
           <Card className="h-full">
-            <CardHeader>
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
+              <CardHeader>
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="conversation" className="flex items-center gap-2">
                     <MessageSquare className="h-4 w-4" />
@@ -382,11 +382,9 @@ const AIMoneyManager: React.FC = () => {
                     Auto Settings
                   </TabsTrigger>
                 </TabsList>
-              </Tabs>
-            </CardHeader>
+              </CardHeader>
 
-            <CardContent className="h-[600px] overflow-hidden">
-              <AnimatePresence mode="wait">
+              <CardContent className="flex-1 overflow-hidden">
                 <TabsContent value="conversation" className="h-full mt-0">
                   <ConversationalTradingInterface
                     isPaperTrading={isPaperMode}
@@ -410,8 +408,8 @@ const AIMoneyManager: React.FC = () => {
                     onToggle={toggleAutonomousMode}
                   />
                 </TabsContent>
-              </AnimatePresence>
-            </CardContent>
+              </CardContent>
+            </Tabs>
           </Card>
         </div>
 
