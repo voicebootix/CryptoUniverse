@@ -1,5 +1,5 @@
-import React from "react";
-import { Bell, Check, X, AlertTriangle, Info, AlertCircle } from "lucide-react";
+import React, { useState } from "react";
+import { Bell, Check, X, AlertTriangle, Info, AlertCircle, MoreHorizontal } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,6 +12,7 @@ import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { ScrollArea } from "../ui/scroll-area";
 import { useNotifications, Notification } from "../../hooks/useNotifications";
+import GlobalNotificationCenter from "./GlobalNotificationCenter";
 
 const NotificationIcon: React.FC<{
   severity: Notification["severity"];
@@ -88,6 +89,8 @@ const NotificationItem: React.FC<{
 };
 
 const NotificationDropdown: React.FC = () => {
+  const [showNotificationCenter, setShowNotificationCenter] = useState(false);
+  
   const {
     notifications,
     unreadCount,
@@ -201,17 +204,25 @@ const NotificationDropdown: React.FC = () => {
                 variant="ghost"
                 size="sm"
                 className="w-full h-8 text-xs"
-                onClick={() => {
-                  // In a real app, this would navigate to a full notifications page
-                  console.log("View all notifications");
-                }}
+                onClick={() => setShowNotificationCenter(true)}
               >
+                <MoreHorizontal className="h-3 w-3 mr-2" />
                 View all notifications
               </Button>
             </div>
           </>
         )}
       </DropdownMenuContent>
+
+      {/* Global Notification Center */}
+      <GlobalNotificationCenter
+        isOpen={showNotificationCenter}
+        onClose={() => setShowNotificationCenter(false)}
+        onNotificationClick={(notification) => {
+          console.log('Notification clicked:', notification);
+          // Handle notification click actions
+        }}
+      />
     </DropdownMenu>
   );
 };
