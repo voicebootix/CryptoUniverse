@@ -283,11 +283,21 @@ async def login(
                 detail="Invalid credentials"
             )
         
-        # Check user status
-        if user.status != UserStatus.ACTIVE:
+        # Check user status and verification
+        if user.status == UserStatus.PENDING_VERIFICATION:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Account is not active"
+                detail="Account pending admin verification. Please wait for admin approval to login."
+            )
+        elif not user.is_verified:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account not verified. Please contact admin for verification."
+            )
+        elif user.status != UserStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Account is {user.status.value}. Please contact admin."
             )
         
         # Handle MFA if enabled
@@ -389,13 +399,22 @@ async def register(
                 detail="Invalid tenant"
             )
     
-    # Create user
+    # Create user with all required fields
+    import uuid
+    current_time = datetime.utcnow()
     user = User(
+        id=uuid.uuid4(),  # Explicitly set UUID
         email=request.email,
         hashed_password=auth_service.hash_password(request.password),
         role=request.role,
-        tenant_id=request.tenant_id,
-        status=UserStatus.PENDING_VERIFICATION
+        tenant_id=request.tenant_id if request.tenant_id else None,
+        status=UserStatus.PENDING_VERIFICATION,  # Admin must approve before login
+        is_active=True,  # Account is active but needs verification
+        is_verified=False,  # Admin verification required
+        two_factor_enabled=False,
+        failed_login_attempts=0,
+        created_at=current_time,
+        updated_at=current_time
     )
     
     db.add(user)

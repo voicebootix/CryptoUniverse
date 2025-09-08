@@ -74,6 +74,11 @@ class UserManagementRequest(BaseModel):
         return v.lower()
 
 
+class BatchVerifyRequest(BaseModel):
+    user_ids: List[str]
+    reason: Optional[str] = None
+
+
 class SystemMetricsResponse(BaseModel):
     active_users: int
     total_trades_today: int
@@ -441,6 +446,62 @@ async def update_strategy_pricing(
         ) from e
 
 
+@router.get("/users/pending-verification")
+async def get_pending_verification_users(
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_database)
+):
+    """Get all users pending verification."""
+    
+    await rate_limiter.check_rate_limit(
+        key="admin:pending_users",
+        limit=100,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # Query for pending verification users
+        result = await db.execute(
+            select(User).where(
+                or_(
+                    User.status == UserStatus.PENDING_VERIFICATION,
+                    User.is_verified == False
+                )
+            ).order_by(User.created_at.desc())
+        )
+        pending_users = result.scalars().all()
+        
+        # Format user data
+        user_list = []
+        for user in pending_users:
+            user_data = {
+                "id": str(user.id),
+                "email": user.email,
+                "role": user.role.value,
+                "status": user.status.value,
+                "is_verified": user.is_verified,
+                "created_at": user.created_at.isoformat(),
+                "registration_age": str(datetime.utcnow() - user.created_at)
+            }
+            user_list.append(user_data)
+        
+        return {
+            "status": "success",
+            "pending_users": user_list,
+            "total_pending": len(user_list),
+            "message": f"{len(user_list)} users awaiting verification",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error("Failed to get pending users", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get pending users: {str(e)}"
+        )
+
+
 @router.get("/users", response_model=UserListResponse)
 async def list_users(
     skip: int = 0,
@@ -459,16 +520,6 @@ async def list_users(
         window=60,
         user_id=str(current_user.id)
     )
-    
-    # Check if mock mode is enabled
-    if settings.ADMIN_USERS_MOCK:
-        logger.warning("⚠️ ADMIN_USERS_MOCK is enabled - returning mock data. This should NOT be used in production!")
-        return UserListResponse(
-            users=[],
-            total_count=0,
-            active_count=0,
-            trading_count=0
-        )
     
     try:
         # Build the base query using select statement for async
@@ -585,6 +636,225 @@ async def list_users(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list users: {str(e)}"
+        )
+
+
+@router.post("/users/verify/{user_id}")
+async def verify_user(
+    user_id: str,
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_database)
+):
+    """Verify a pending user account to allow login."""
+    
+    await rate_limiter.check_rate_limit(
+        key="admin:verify_user",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    logger.info(
+        "User verification requested",
+        admin_user=str(current_user.id),
+        target_user=user_id
+    )
+    
+    try:
+        # Get target user
+        result = await db.execute(
+            select(User).where(User.id == user_id)
+        )
+        target_user = result.scalar_one_or_none()
+        if not target_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Check if already verified
+        if target_user.status == UserStatus.ACTIVE and target_user.is_verified:
+            return {
+                "status": "already_verified",
+                "message": "User is already verified and active",
+                "user_email": target_user.email,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        # Verify the user
+        target_user.status = UserStatus.ACTIVE
+        target_user.is_verified = True
+        target_user.updated_at = datetime.utcnow()
+        
+        # Create audit log
+        audit_log = AuditLog(
+            user_id=current_user.id,
+            event_type="user_verification",
+            event_data={
+                "target_user_id": user_id,
+                "target_user_email": target_user.email,
+                "action": "verify",
+                "previous_status": str(target_user.status.value) if target_user.status else "PENDING_VERIFICATION",
+                "details": {
+                    "target_user_id": user_id,
+                    "target_user_email": target_user.email,
+                    "verified_by": current_user.email
+                },
+                "ip_address": "admin_api",
+                "user_agent": "system"
+            }
+        )
+        db.add(audit_log)
+        
+        await db.commit()
+        
+        logger.info(
+            "User verified successfully",
+            admin_user=str(current_user.id),
+            target_user=user_id,
+            target_email=target_user.email
+        )
+        
+        return {
+            "status": "verified",
+            "message": "User has been verified and can now login",
+            "user_email": target_user.email,
+            "user_id": str(target_user.id),
+            "timestamp": datetime.utcnow().isoformat(),
+            "verified_by": current_user.email
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.error("User verification failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"User verification failed: {str(e)}"
+        )
+
+
+@router.post("/users/verify-batch")
+async def verify_users_batch(
+    request: BatchVerifyRequest,
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_database)
+):
+    """Verify multiple pending user accounts at once."""
+    
+    await rate_limiter.check_rate_limit(
+        key="admin:verify_batch",
+        limit=10,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    logger.info(
+        "Batch user verification requested",
+        admin_user=str(current_user.id),
+        user_count=len(request.user_ids)
+    )
+    
+    verified_users = []
+    already_verified = []
+    not_found = []
+    errors = []
+    
+    try:
+        for user_id in request.user_ids:
+            try:
+                # Get target user
+                result = await db.execute(
+                    select(User).where(User.id == user_id)
+                )
+                target_user = result.scalar_one_or_none()
+                
+                if not target_user:
+                    not_found.append(user_id)
+                    continue
+                
+                # Check if already verified
+                if target_user.status == UserStatus.ACTIVE and target_user.is_verified:
+                    already_verified.append({
+                        "user_id": str(target_user.id),
+                        "email": target_user.email
+                    })
+                    continue
+                
+                # Verify the user
+                target_user.status = UserStatus.ACTIVE
+                target_user.is_verified = True
+                target_user.updated_at = datetime.utcnow()
+                
+                verified_users.append({
+                    "user_id": str(target_user.id),
+                    "email": target_user.email
+                })
+                
+                # Create audit log
+                audit_log = AuditLog(
+                    user_id=current_user.id,
+                    event_type="batch_user_verification",
+                    event_data={
+                        "target_user_id": user_id,
+                        "target_user_email": target_user.email,
+                        "action": "verify",
+                        "batch_operation": True,
+                        "details": {
+                            "target_user_id": user_id,
+                            "target_user_email": target_user.email,
+                            "verified_by": current_user.email,
+                            "reason": request.reason
+                        },
+                        "ip_address": "admin_api",
+                        "user_agent": "system"
+                    }
+                )
+                db.add(audit_log)
+                
+            except Exception as e:
+                errors.append({
+                    "user_id": user_id,
+                    "error": str(e)
+                })
+                logger.error(f"Failed to verify user {user_id}: {e}")
+        
+        # Commit all changes
+        await db.commit()
+        
+        logger.info(
+            "Batch verification completed",
+            admin_user=str(current_user.id),
+            verified_count=len(verified_users),
+            already_verified_count=len(already_verified),
+            not_found_count=len(not_found),
+            error_count=len(errors)
+        )
+        
+        return {
+            "status": "batch_verification_completed",
+            "summary": {
+                "total_requested": len(request.user_ids),
+                "successfully_verified": len(verified_users),
+                "already_verified": len(already_verified),
+                "not_found": len(not_found),
+                "errors": len(errors)
+            },
+            "verified_users": verified_users,
+            "already_verified": already_verified,
+            "not_found": not_found,
+            "errors": errors,
+            "timestamp": datetime.utcnow().isoformat(),
+            "verified_by": current_user.email
+        }
+        
+    except Exception as e:
+        await db.rollback()
+        logger.error("Batch verification failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Batch verification failed: {str(e)}"
         )
 
 
