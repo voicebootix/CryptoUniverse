@@ -460,16 +460,6 @@ async def list_users(
         user_id=str(current_user.id)
     )
     
-    # Check if mock mode is enabled - DISABLED for now to show real users
-    # if settings.ADMIN_USERS_MOCK:
-    #     logger.warning("⚠️ ADMIN_USERS_MOCK is enabled - returning mock data. This should NOT be used in production!")
-    #     return UserListResponse(
-    #         users=[],
-    #         total_count=0,
-    #         active_count=0,
-    #         trading_count=0
-    #     )
-    
     try:
         # Build the base query using select statement for async
         stmt = select(User)
