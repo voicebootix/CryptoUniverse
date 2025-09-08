@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { apiClient } from '@/lib/api/client';
-import { toast } from '@/components/ui/use-toast';
+// Note: Toast notifications removed from store - should be handled in components
 
 interface PaperModeState {
   isPaperMode: boolean;
@@ -50,11 +50,7 @@ export const usePaperModeStore = create<PaperModeState>()(
                 paperBalance: response.data.data.balance || 10000
               });
               
-              toast({
-                title: "Paper Mode Activated",
-                description: "You're now trading with virtual funds. Perfect for practice!",
-                duration: 3000,
-              });
+              // Toast notification handled in component
               
               // Fetch initial stats
               await get().fetchPaperStats();
@@ -63,20 +59,11 @@ export const usePaperModeStore = create<PaperModeState>()(
             // Switching to real mode
             set({ isPaperMode: false });
             
-            toast({
-              title: "Real Trading Mode",
-              description: "You're now trading with real funds. Trade carefully!",
-              variant: "destructive",
-              duration: 3000,
-            });
+            // Toast notification handled in component
           }
         } catch (error) {
           console.error('Failed to toggle paper mode:', error);
-          toast({
-            title: "Error",
-            description: "Failed to change trading mode. Please try again.",
-            variant: "destructive",
-          });
+          // Toast notification handled in component
         } finally {
           set({ isLoading: false });
         }
@@ -109,21 +96,13 @@ export const usePaperModeStore = create<PaperModeState>()(
               paperStats: null
             });
             
-            toast({
-              title: "Paper Account Reset",
-              description: "Your paper trading account has been reset to $10,000",
-              duration: 3000,
-            });
+            // Toast notification handled in component
             
             await get().fetchPaperStats();
           }
         } catch (error) {
           console.error('Failed to reset paper account:', error);
-          toast({
-            title: "Error",
-            description: "Failed to reset paper account. Please try again.",
-            variant: "destructive",
-          });
+          // Toast notification handled in component
         } finally {
           set({ isLoading: false });
         }

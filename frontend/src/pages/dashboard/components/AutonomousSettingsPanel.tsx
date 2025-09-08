@@ -120,7 +120,7 @@ const AutonomousSettingsPanel: React.FC<AutonomousSettingsPanelProps> = ({
         toast({
           title: "Settings Saved",
           description: "Your autonomous trading settings have been updated",
-          duration: 3000
+          // duration: 3000
         });
       }
     } catch (error) {
@@ -154,7 +154,7 @@ const AutonomousSettingsPanel: React.FC<AutonomousSettingsPanelProps> = ({
     toast({
       title: "Settings Reset",
       description: "Settings have been reset to defaults",
-      duration: 3000
+      // duration: 3000
     });
   };
 

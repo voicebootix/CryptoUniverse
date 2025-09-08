@@ -29,9 +29,9 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 
 // Import existing components
-import { ConversationalTradingInterface } from '@/components/chat/ConversationalTradingInterface';
-import { PhaseProgressVisualizer, ExecutionPhase } from '@/components/trading/PhaseProgressVisualizer';
-import { PaperTradingToggle } from '@/components/trading/PaperTradingToggle';
+import ConversationalTradingInterface from '@/components/chat/ConversationalTradingInterface';
+import PhaseProgressVisualizer, { ExecutionPhase } from '@/components/trading/PhaseProgressVisualizer';
+import PaperTradingToggle from '@/components/trading/PaperTradingToggle';
 
 // Import stores
 import { usePaperModeStore, useIsPaperMode } from '@/store/paperModeStore';
@@ -133,7 +133,7 @@ const AIMoneyManager: React.FC = () => {
   const handleWebSocketMessage = (data: any) => {
     if (data.type === 'phase_update') {
       setCurrentPhase(data.phase);
-      setPhaseDetails(prev => ({
+      setPhaseDetails((prev: any) => ({
         ...prev,
         [data.phase]: data.details
       }));
@@ -155,12 +155,12 @@ const AIMoneyManager: React.FC = () => {
     };
 
     setCurrentExecution(execution);
-    setRecentExecutions(prev => [execution, ...prev].slice(0, 10));
+    setRecentExecutions((prev: TradeExecution[]) => [execution, ...prev].slice(0, 10));
 
     toast({
       title: "Trade Executed Successfully",
       description: `${data.details.symbol} - ${data.details.side} ${data.details.quantity}`,
-      duration: 5000,
+      // duration: 5000,
     });
 
     // Reset after delay
@@ -182,7 +182,7 @@ const AIMoneyManager: React.FC = () => {
         paperMode: isPaperMode
       });
 
-      setPhaseDetails(prev => ({
+      setPhaseDetails((prev: any) => ({
         ...prev,
         analysis: analysisResponse.data.data
       }));
@@ -194,7 +194,7 @@ const AIMoneyManager: React.FC = () => {
         paperMode: isPaperMode
       });
 
-      setPhaseDetails(prev => ({
+      setPhaseDetails((prev: any) => ({
         ...prev,
         consensus: consensusResponse.data.data
       }));
@@ -206,7 +206,7 @@ const AIMoneyManager: React.FC = () => {
         paperMode: isPaperMode
       });
 
-      setPhaseDetails(prev => ({
+      setPhaseDetails((prev: any) => ({
         ...prev,
         validation: validationResponse.data.data
       }));
@@ -227,7 +227,7 @@ const AIMoneyManager: React.FC = () => {
         ...tradeParams
       });
 
-      setPhaseDetails(prev => ({
+      setPhaseDetails((prev: any) => ({
         ...prev,
         execution: executionResponse.data.data
       }));
@@ -251,7 +251,7 @@ const AIMoneyManager: React.FC = () => {
         title: "Trade Execution Failed",
         description: error.message || "An error occurred during trade execution",
         variant: "destructive",
-        duration: 5000,
+        // duration: 5000,
       });
     }
   };
@@ -287,7 +287,7 @@ const AIMoneyManager: React.FC = () => {
           description: newState 
             ? "AI will now execute trades automatically based on your settings"
             : "Autonomous trading has been paused",
-          duration: 3000,
+          // duration: 3000,
         });
       }
     } catch (error) {
@@ -412,7 +412,7 @@ const AIMoneyManager: React.FC = () => {
             currentPhase={currentPhase}
             phaseDetails={phaseDetails}
             isPaperMode={isPaperMode}
-            onOverride={(phase) => {
+            onOverride={(phase: any) => {
               console.log('Phase override:', phase);
               // Handle manual phase override if needed
             }}

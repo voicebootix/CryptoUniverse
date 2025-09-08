@@ -170,7 +170,7 @@ const ManualTradingPanel: React.FC<ManualTradingPanelProps> = ({
     toast({
       title: "AI Suggestion Applied",
       description: "Trade parameters updated with AI recommendations",
-      duration: 3000
+      // duration: 3000
     });
   };
 
