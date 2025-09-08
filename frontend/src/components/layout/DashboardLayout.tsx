@@ -51,42 +51,22 @@ interface NavigationItem {
 }
 
 const navigation: NavigationItem[] = [
-  { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  {
-    name: "Master Controller",
-    href: "/dashboard/master-controller",
-    icon: Crown,
-    badge: "CORE",
-  },
-  {
-    name: "AI Command",
-    href: "/dashboard/ai-command",
+  { 
+    name: "AI Money Manager", 
+    href: "/dashboard", 
     icon: Brain,
-    badge: "AI",
-  },
-  {
-    name: "AI Chat",
-    href: "/dashboard/ai-chat",
-    icon: MessageSquare,
-    badge: "NEW",
-  },
-  {
-    name: "Beast Mode",
-    href: "/dashboard/beast-mode",
-    icon: Flame,
-    badge: "PRO",
+    badge: "AI"
   },
   {
     name: "Strategies",
     href: "/dashboard/strategies",
-    icon: Crown,
+    icon: Zap,
     badge: "25+",
   },
   {
-    name: "Exchange Hub",
-    href: "/dashboard/exchanges-hub",
-    icon: Globe,
-    badge: "8",
+    name: "Performance",
+    href: "/dashboard/performance",
+    icon: BarChart3,
   },
   {
     name: "Copy Trading",
@@ -94,38 +74,17 @@ const navigation: NavigationItem[] = [
     icon: Users,
     badge: "HOT",
   },
-  { name: "Telegram", href: "/dashboard/telegram", icon: MessageSquare },
   {
-    name: "Analytics",
-    href: "/dashboard/analytics",
-    icon: BarChart3,
-    badge: "PRO",
+    name: "Settings",
+    href: "/dashboard/settings",
+    icon: Settings,
   },
-  {
-    name: "Market Analysis",
-    href: "/dashboard/market-analysis",
-    icon: Activity,
-    badge: "LIVE",
+  { 
+    name: "Admin", 
+    href: "/dashboard/admin", 
+    icon: Shield, 
+    adminOnly: true 
   },
-  { name: "Trading", href: "/dashboard/trading", icon: TrendingUp },
-  { name: "Portfolio", href: "/dashboard/portfolio", icon: Wallet },
-  {
-    name: "Trust Journey",
-    href: "/dashboard/trust-journey",
-    icon: Shield,
-    badge: "NEW",
-  },
-  {
-    name: "Evidence Report",
-    href: "/dashboard/evidence",
-    icon: FileText,
-    badge: "PRO",
-  },
-  { name: "Billing", href: "/dashboard/billing", icon: CreditCard },
-  { name: "Autonomous", href: "/dashboard/autonomous", icon: Bot },
-  { name: "Exchanges", href: "/dashboard/exchanges", icon: BarChart3 },
-  { name: "Settings", href: "/dashboard/settings", icon: Settings },
-  { name: "Admin", href: "/dashboard/admin", icon: Users, adminOnly: true },
 ];
 
 const DashboardLayout: React.FC = () => {
