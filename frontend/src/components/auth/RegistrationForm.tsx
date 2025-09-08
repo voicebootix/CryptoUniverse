@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/components/ui/use-toast';
 import { Link } from 'react-router-dom';
 import { apiClient } from '@/lib/api/client';
+import { isAxiosError, type AxiosError } from 'axios';
 
 const formSchema = z.object({
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
@@ -83,11 +84,60 @@ export default function RegistrationForm() {
       });
 
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
+      let errorMessage = 'An unexpected error occurred';
+      
+      // Type-safe axios error handling
+      if (isAxiosError(err)) {
+        // Dev-only logging - never log full error in production
+        if (import.meta.env.DEV) {
+          console.error('Registration request failed:', {
+            status: err.response?.status,
+            statusText: err.response?.statusText,
+            url: err.config?.url
+          });
+        }
+        
+        // Handle 422 validation errors specifically
+        if (err.response?.status === 422 && err.response?.data?.detail) {
+          const validationErrors = err.response.data.detail;
+          
+          // Dev-only: log validation error details (safe metadata only)
+          if (import.meta.env.DEV) {
+            console.error('Validation errors:', validationErrors.map((error: any) => ({
+              field: error.loc ? error.loc.join('.') : 'unknown',
+              message: error.msg
+            })));
+          }
+          
+          // Extract user-friendly validation messages
+          if (Array.isArray(validationErrors) && validationErrors.length > 0) {
+            errorMessage = validationErrors.map((error: any) => 
+              `${error.loc ? error.loc.join('.') + ': ' : ''}${error.msg}`
+            ).join(', ');
+          } else {
+            errorMessage = 'Validation failed';
+          }
+        } else if (err.response?.data?.detail) {
+          // Other API errors with detail
+          errorMessage = typeof err.response.data.detail === 'string' 
+            ? err.response.data.detail 
+            : 'Server error occurred';
+        } else if (err.message) {
+          // Network or other axios errors
+          errorMessage = err.message;
+        }
+      } else {
+        // Non-axios errors
+        if (import.meta.env.DEV) {
+          console.error('Non-axios error during registration:', String(err));
+        }
+        errorMessage = 'Registration failed. Please try again.';
+      }
+      
       setError(errorMessage);
       toast({
         variant: 'destructive',
-        title: 'Error',
+        title: 'Registration Failed',
         description: errorMessage,
       });
     } finally {
