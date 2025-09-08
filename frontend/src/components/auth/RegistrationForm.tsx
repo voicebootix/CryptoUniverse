@@ -56,11 +56,22 @@ export default function RegistrationForm() {
         role: 'TRADER' // Default role
       };
 
-      console.log('Sending registration data:', registrationData);
+      // Debug logging (dev only) - mask sensitive data
+      if (import.meta.env.DEV) {
+        console.log('Registration attempt:', {
+          email: registrationData.email,
+          full_name: registrationData.full_name,
+          role: registrationData.role,
+          password: '****' // Never log actual password
+        });
+      }
       
       const response = await apiClient.post('/auth/register', registrationData);
       
-      console.log('Registration successful:', response.data);
+      // Success logging without sensitive response data
+      if (import.meta.env.DEV) {
+        console.log('Registration successful for user:', registrationData.email);
+      }
 
       toast({
         title: 'Success',
