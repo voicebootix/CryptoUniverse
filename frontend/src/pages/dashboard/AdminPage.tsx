@@ -45,6 +45,7 @@ import { adminService } from '@/services/adminService';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/authStore';
 import { useNavigate } from 'react-router-dom';
+import { UserRole } from '@/types/auth';
 
 // State for real data
 interface User {
@@ -135,7 +136,7 @@ const AdminPage: React.FC = () => {
     }
     
     // Check if user has admin role
-    if (user.role !== 'admin' && user.role !== 'ADMIN') {
+    if (user.role !== UserRole.ADMIN) {
       toast.error('Access denied. Admin privileges required.');
       navigate('/dashboard');
       return;
@@ -145,7 +146,7 @@ const AdminPage: React.FC = () => {
   // Fetch real data from backend
   useEffect(() => {
     // Only fetch data if authenticated and authorized
-    if (isAuthenticated && user && (user.role === 'admin' || user.role === 'ADMIN')) {
+    if (isAuthenticated && user && user.role === UserRole.ADMIN) {
       fetchData();
     }
   }, [isAuthenticated, user]);
@@ -261,7 +262,7 @@ const AdminPage: React.FC = () => {
   }
 
   // Show access denied for non-admin users
-  if (user.role !== 'admin' && user.role !== 'ADMIN') {
+  if (user.role !== UserRole.ADMIN) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
