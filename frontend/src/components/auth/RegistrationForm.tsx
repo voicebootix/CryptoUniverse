@@ -58,7 +58,7 @@ export default function RegistrationForm() {
         email: data.email,
         password: data.password,
         full_name: data.full_name,
-        role: 'TRADER' // Default role
+        role: 'trader' // Backend expects lowercase role
       };
 
       // Debug logging (dev only) - mask sensitive data
@@ -100,11 +100,6 @@ export default function RegistrationForm() {
         // Handle 422 validation errors specifically
         if (err.response?.status === 422 && err.response?.data?.detail) {
           const validationErrors = err.response.data.detail;
-          
-          // TEMPORARY: Force log validation errors for debugging (will remove after fix)
-          console.error('=== REGISTRATION VALIDATION ERROR DEBUG ===');
-          console.error('Full validation errors:', validationErrors);
-          console.error('=== END DEBUG ===');
           
           // Dev-only: log validation error details (safe metadata only)
           if (import.meta.env.DEV) {
