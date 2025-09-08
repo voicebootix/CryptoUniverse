@@ -111,7 +111,13 @@ export const useAIConsensus = () => {
   const queryClient = useQueryClient();
 
   // Real-time AI consensus updates via WebSocket
-  const { lastMessage, connectionStatus } = useWebSocket('/api/v1/ai-consensus/ws', {
+  const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+  const wsUrl = apiBaseUrl
+    .replace('https://', 'wss://')
+    .replace('http://', 'ws://')
+    + '/ai-consensus/ws';
+  
+  const { lastMessage, connectionStatus } = useWebSocket(wsUrl, {
     onMessage: (data) => {
       if (data.type === 'ai_consensus_update') {
         // Update consensus history - safe property access

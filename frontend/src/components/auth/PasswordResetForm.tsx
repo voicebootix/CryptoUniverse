@@ -35,7 +35,8 @@ export function PasswordResetForm() {
       setIsLoading(true);
       setError('');
       
-      const response = await fetch('/api/v1/auth/forgot-password', {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+      const response = await fetch(`${apiUrl}/auth/forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),

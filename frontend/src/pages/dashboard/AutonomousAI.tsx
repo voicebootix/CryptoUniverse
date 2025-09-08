@@ -149,7 +149,7 @@ const AutonomousAI: React.FC = () => {
     try {
       // API call to start autonomous trading
       setIsActive(true);
-      // Real implementation would call /api/v1/autonomous/start
+      // Real implementation would call ${import.meta.env.VITE_API_URL}/autonomous/start
     } catch (error) {
       console.error('Failed to start autonomous trading:', error);
     }
@@ -158,7 +158,7 @@ const AutonomousAI: React.FC = () => {
   const stopAutonomousTrading = async () => {
     try {
       setIsActive(false);
-      // Real implementation would call /api/v1/autonomous/stop
+      // Real implementation would call ${import.meta.env.VITE_API_URL}/autonomous/stop
     } catch (error) {
       console.error('Failed to stop autonomous trading:', error);
     }

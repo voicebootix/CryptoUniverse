@@ -128,8 +128,13 @@ Just chat with me naturally! How can I help you manage your crypto investments t
   };
 
   const initializeWebSocket = (sessionId: string) => {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}/api/v1/chat/ws/${sessionId}`;
+    // Get the API base URL from environment
+    const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+    // Convert HTTP(S) URL to WS(S) URL and add the WebSocket endpoint
+    const wsUrl = apiBaseUrl
+      .replace('https://', 'wss://')
+      .replace('http://', 'ws://')
+      + `/chat/ws/${sessionId}`;
     
     const ws = new WebSocket(wsUrl);
     
