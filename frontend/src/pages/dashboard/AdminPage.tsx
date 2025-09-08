@@ -43,6 +43,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { formatCurrency, formatPercentage, formatNumber, formatRelativeTime } from '@/lib/utils';
 import { adminService } from '@/services/adminService';
 import { toast } from 'sonner';
+import { useAuthStore } from '@/store/authStore';
+import { useNavigate } from 'react-router-dom';
 
 // State for real data
 interface User {
@@ -111,6 +113,8 @@ const auditLogs = [
 ];
 
 const AdminPage: React.FC = () => {
+  const navigate = useNavigate();
+  const { isAuthenticated, user } = useAuthStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRole, setSelectedRole] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
@@ -122,10 +126,29 @@ const AdminPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
+  // Check authentication
+  useEffect(() => {
+    if (!isAuthenticated || !user) {
+      toast.error('Please login to access admin panel');
+      navigate('/login');
+      return;
+    }
+    
+    // Check if user has admin role
+    if (user.role !== 'admin' && user.role !== 'ADMIN') {
+      toast.error('Access denied. Admin privileges required.');
+      navigate('/dashboard');
+      return;
+    }
+  }, [isAuthenticated, user, navigate]);
+
   // Fetch real data from backend
   useEffect(() => {
-    fetchData();
-  }, []);
+    // Only fetch data if authenticated and authorized
+    if (isAuthenticated && user && (user.role === 'admin' || user.role === 'ADMIN')) {
+      fetchData();
+    }
+  }, [isAuthenticated, user]);
 
   const fetchData = async () => {
     try {
@@ -224,6 +247,30 @@ const AdminPage: React.FC = () => {
         return 'text-muted-foreground';
     }
   };
+
+  // Show loading while checking authentication
+  if (!isAuthenticated || !user) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p>Checking authentication...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show access denied for non-admin users
+  if (user.role !== 'admin' && user.role !== 'ADMIN') {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-4" />
+          <p>Access denied. Admin privileges required.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
