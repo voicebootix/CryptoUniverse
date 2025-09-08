@@ -28,10 +28,10 @@ export interface RecentAction {
   id: number | string;
   type: 'trade_execution' | 'portfolio_rebalance' | 'risk_assessment' | 'opportunity_discovery';
   action: string;
-  amount: string | number;
+  amount: number;
   timestamp: string;
   status: 'completed' | 'pending' | 'failed';
-  profit?: string | number;
+  profit?: number;
 }
 
 // Paper Trading Statistics
@@ -75,11 +75,14 @@ export interface TradeExecutionRequest {
   metadata?: Record<string, any>;
 }
 
-// Trade Execution Response
-export interface TradeExecutionResponse {
+// Action Type Union
+export type ActionType = 'buy' | 'sell' | 'hold';
+
+// Trade Execution Response DTO (from API)
+export interface TradeExecutionResponseDTO {
   success: boolean;
   trade_id: string;
-  action: string;
+  action: ActionType;
   symbol: string;
   amount: number;
   price: number;
@@ -89,8 +92,22 @@ export interface TradeExecutionResponse {
   error?: string;
 }
 
-// Position
-export interface Position {
+// Trade Execution Response (frontend)
+export interface TradeExecutionResponse {
+  success: boolean;
+  tradeId: string;
+  action: ActionType;
+  symbol: string;
+  amount: number;
+  price: number;
+  fees: number;
+  timestamp: string;
+  status: 'executed' | 'pending' | 'failed';
+  error?: string;
+}
+
+// Position DTO (from API)
+export interface PositionDTO {
   id: string;
   symbol: string;
   amount: number;
@@ -103,8 +120,22 @@ export interface Position {
   take_profit?: number;
 }
 
-// Market Data
-export interface MarketData {
+// Position (frontend)
+export interface Position {
+  id: string;
+  symbol: string;
+  amount: number;
+  entryPrice: number;
+  currentPrice: number;
+  pnl: number;
+  pnlPercentage: number;
+  openedAt: string;
+  stopLoss?: number;
+  takeProfit?: number;
+}
+
+// Market Data DTO (from API)
+export interface MarketDataDTO {
   symbol: string;
   price: number;
   change_24h: number;
@@ -116,8 +147,21 @@ export interface MarketData {
   last_updated: string;
 }
 
-// Market Opportunity
-export interface MarketOpportunity {
+// Market Data (frontend)
+export interface MarketData {
+  symbol: string;
+  price: number;
+  change24h: number;
+  changePercentage24h: number;
+  volume24h: number;
+  high24h: number;
+  low24h: number;
+  marketCap?: number;
+  lastUpdated: string;
+}
+
+// Market Opportunity DTO (from API)
+export interface MarketOpportunityDTO {
   id: string;
   type: 'arbitrage' | 'trend' | 'breakout' | 'reversal';
   symbol: string;
@@ -129,8 +173,21 @@ export interface MarketOpportunity {
   signals: string[];
 }
 
-// AI Consensus Result
-export interface AIConsensusResult {
+// Market Opportunity (frontend)
+export interface MarketOpportunity {
+  id: string;
+  type: 'arbitrage' | 'trend' | 'breakout' | 'reversal';
+  symbol: string;
+  confidence: number;
+  expectedProfit: number;
+  riskLevel: 'low' | 'medium' | 'high';
+  timeWindow: string;
+  description: string;
+  signals: string[];
+}
+
+// AI Consensus Result DTO (from API)
+export interface AIConsensusResultDTO {
   consensus: 'strong_buy' | 'buy' | 'hold' | 'sell' | 'strong_sell';
   confidence: number;
   models: {
@@ -155,9 +212,46 @@ export interface AIConsensusResult {
   recommended_position_size: number;
 }
 
+// AI Consensus Result (frontend)
+export interface AIConsensusResult {
+  consensus: 'strong_buy' | 'buy' | 'hold' | 'sell' | 'strong_sell';
+  confidence: number;
+  models: {
+    gpt4: {
+      recommendation: string;
+      confidence: number;
+      reasoning: string;
+    };
+    claude: {
+      recommendation: string;
+      confidence: number;
+      reasoning: string;
+    };
+    gemini: {
+      recommendation: string;
+      confidence: number;
+      reasoning: string;
+    };
+  };
+  weightedScore: number;
+  riskAssessment: string;
+  recommendedPositionSize: number;
+}
+
+// WebSocket Message Types
+export type WSMessageType = 
+  | 'priceUpdate' 
+  | 'orderUpdate' 
+  | 'trade' 
+  | 'phaseUpdate' 
+  | 'tradeProposal' 
+  | 'systemStatus'
+  | 'user_message'
+  | 'execute_trade';
+
 // WebSocket Message
-export interface WSMessage<T = any> {
-  type: string;
+export interface WSMessage<K extends WSMessageType = WSMessageType, T = any> {
+  type: K;
   data: T;
   timestamp: string;
   id?: string;
@@ -170,7 +264,7 @@ export interface PhaseUpdateEvent {
   progress: number;
   metrics?: {
     timeSpent: number;
-    decisionsM made: number;
+    decisionsMade: number;
     confidence: number;
   };
 }

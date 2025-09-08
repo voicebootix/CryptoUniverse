@@ -83,7 +83,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
   const [personality, setPersonality] = useState<AIPersonality>(AIPersonality.BALANCED);
   const [memory, setMemory] = useState<ConversationMemory | null>(null);
   const [activeProposal, setActiveProposal] = useState<TradeProposal | null>(null);
-  const [websocket, setWebsocket] = useState<WebSocket | null>(null);
+  // WebSocket state managed via ref to prevent stale closures
   const [isConnected, setIsConnected] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -99,12 +99,15 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  // WebSocket ref for cleanup
+  const websocketRef = useRef<WebSocket | null>(null);
+
   // Initialize session with memory
   useEffect(() => {
     initializeSession();
     return () => {
-      if (websocket) {
-        websocket.close();
+      if (websocketRef.current) {
+        websocketRef.current.close();
       }
     };
   }, []);
@@ -113,14 +116,14 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     try {
       // Load conversation memory
       const memoryResponse = await conversationalTradingApi.getMemory();
-      if (memoryResponse.data.memory) {
-        setMemory(memoryResponse.data.memory);
+      if (memoryResponse.memory) {
+        setMemory(memoryResponse.memory);
         
         // Add continuation message
         const continuationMsg: Message = {
           id: 'continuation',
-          content: `Welcome back! I remember our last conversation about ${memoryResponse.data.memory.context.lastTopic || 'your portfolio'}. Your trust score is ${memoryResponse.data.memory.trustScore}/100. Let's continue where we left off.`,
-          type: 'ai',
+          content: `Welcome back! I remember our last conversation about ${memoryResponse.memory.context.lastTopic || 'your portfolio'}. Your trust score is ${memoryResponse.memory.trustScore}/100. Let's continue where we left off.`,
+          type: MessageType.AI,
           timestamp: new Date().toISOString()
         };
         setMessages([continuationMsg]);
@@ -181,7 +184,7 @@ How would you like to start? You can:
       setIsConnected(false);
     };
     
-    setWebsocket(ws);
+    websocketRef.current = ws;
   };
 
   const handleWebSocketMessage = (data: any) => {
@@ -211,7 +214,7 @@ How would you like to start? You can:
     const message: Message = {
       id: `phase-${Date.now()}`,
       content: `**${phaseInfo.title}**\n${details}`,
-      type: 'phase',
+      type: MessageType.PHASE,
       phase,
       timestamp: new Date().toISOString()
     };
@@ -222,7 +225,7 @@ How would you like to start? You can:
     const message: Message = {
       id: `proposal-${proposal.id}`,
       content: `**Trade Proposal Ready**\n${proposal.action.toUpperCase()} ${proposal.amount} ${proposal.symbol} at $${proposal.price}`,
-      type: 'trade',
+      type: MessageType.TRADE,
       tradeProposal: proposal,
       timestamp: new Date().toISOString()
     };
@@ -233,7 +236,7 @@ How would you like to start? You can:
     const message: Message = {
       id: `ai-${Date.now()}`,
       content,
-      type: 'ai',
+      type: MessageType.AI,
       metadata,
       timestamp: new Date().toISOString()
     };
@@ -246,7 +249,7 @@ How would you like to start? You can:
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       content: inputValue,
-      type: 'user',
+      type: MessageType.USER,
       timestamp: new Date().toISOString()
     };
 
@@ -254,8 +257,8 @@ How would you like to start? You can:
     setInputValue('');
     setIsLoading(true);
 
-    if (websocket && websocket.readyState === WebSocket.OPEN) {
-      websocket.send(JSON.stringify({
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      websocketRef.current.send(JSON.stringify({
         type: 'user_message',
         content: inputValue,
         personality,
@@ -287,8 +290,8 @@ How would you like to start? You can:
   const executeTradeProposal = async (proposal: TradeProposal) => {
     setCurrentPhase(ExecutionPhase.EXECUTION);
     
-    if (websocket && websocket.readyState === WebSocket.OPEN) {
-      websocket.send(JSON.stringify({
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      websocketRef.current.send(JSON.stringify({
         type: 'execute_trade',
         proposal,
         isPaperTrading
@@ -320,7 +323,7 @@ How would you like to start? You can:
       <div className="flex-1">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            {phaseConfig[currentPhase].icon}
+            {React.createElement(phaseConfig[currentPhase].icon, { className: 'h-4 w-4' })}
             <span className={`text-sm font-medium ${phaseConfig[currentPhase].color}`}>
               {phaseConfig[currentPhase].title}
             </span>
@@ -434,7 +437,7 @@ How would you like to start? You can:
       return renderTradeProposal(message.tradeProposal);
     }
 
-    const isUser = message.type === 'user';
+    const isUser = message.type === MessageType.USER;
     const icon = isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />;
     
     return (
@@ -445,7 +448,7 @@ How would you like to start? You can:
       >
         {!isUser && (
           <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-            {message.type === 'phase' ? phaseConfig[message.phase!].icon : icon}
+            {message.type === MessageType.PHASE ? React.createElement(phaseConfig[message.phase!].icon, { className: 'h-4 w-4' }) : icon}
           </div>
         )}
         

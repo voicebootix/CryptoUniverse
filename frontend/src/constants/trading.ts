@@ -11,7 +11,8 @@ import {
   Activity,
   MessageSquare,
   Clock,
-  CheckCircle
+  CheckCircle,
+  LucideIcon
 } from 'lucide-react';
 import { ReactNode } from 'react';
 
@@ -81,7 +82,7 @@ export interface PhaseData {
   phase: ExecutionPhase;
   title: string;
   description: string;
-  icon: ReactNode;
+  icon: LucideIcon;
   color: string;
   details?: string[];
   metrics?: PhaseMetrics;

@@ -16,8 +16,8 @@ import {
   TradeExecutionRequest,
   TradeExecutionResponse,
   AIConsensusResult,
-  ConversationMemory
 } from '@/types/trading';
+import { ConversationMemory } from '@/constants/trading';
 
 // Paper Trading API
 export const paperTradingApi = {
@@ -182,7 +182,7 @@ export const conversationalTradingApi = {
       console.error('Trade execution failed:', error);
       return {
         success: false,
-        trade_id: '',
+        tradeId: '',
         action: proposal.action,
         symbol: proposal.symbol,
         amount: proposal.amount,
