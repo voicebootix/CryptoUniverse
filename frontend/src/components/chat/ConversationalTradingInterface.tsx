@@ -54,6 +54,21 @@ import {
   TIMEOUTS
 } from '@/constants/trading';
 
+// Server phase string to enum mapping
+const serverPhaseToEnum = (serverPhase: string): ExecutionPhase => {
+  const phaseMap: Record<string, ExecutionPhase> = {
+    'idle': ExecutionPhase.IDLE,
+    'analysis': ExecutionPhase.ANALYSIS,
+    'consensus': ExecutionPhase.CONSENSUS,
+    'validation': ExecutionPhase.VALIDATION,
+    'execution': ExecutionPhase.EXECUTION,
+    'monitoring': ExecutionPhase.MONITORING,
+    'completed': ExecutionPhase.COMPLETED,
+  };
+
+  return phaseMap[serverPhase?.toLowerCase()] || ExecutionPhase.IDLE;
+};
+
 // Component-specific interfaces only
 interface Message extends ChatMessage {
   // Additional fields if needed
@@ -99,6 +114,18 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  // Notify server of config changes
+  useEffect(() => {
+    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN && user?.id) {
+      websocketRef.current.send(JSON.stringify({
+        type: 'config_update',
+        personality,
+        isPaperTrading,
+        userId: user.id
+      }));
+    }
+  }, [personality, isPaperTrading, user?.id]);
+
   // WebSocket ref for cleanup
   const websocketRef = useRef<WebSocket | null>(null);
 
@@ -106,9 +133,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
   useEffect(() => {
     initializeSession();
     return () => {
-      if (websocketRef.current) {
-        websocketRef.current.close();
-      }
+      cleanupWebSocket();
     };
   }, []);
 
@@ -160,7 +185,32 @@ How would you like to start? You can:
     }
   };
 
+  const cleanupWebSocket = () => {
+    if (websocketRef.current) {
+      websocketRef.current.onopen = null;
+      websocketRef.current.onmessage = null;
+      websocketRef.current.onclose = null;
+      websocketRef.current.onerror = null;
+      
+      if (websocketRef.current.readyState === WebSocket.OPEN || 
+          websocketRef.current.readyState === WebSocket.CONNECTING) {
+        websocketRef.current.close();
+      }
+      
+      websocketRef.current = null;
+    }
+  };
+
   const initializeWebSocket = () => {
+    // Check for existing connection and clean it up
+    if (websocketRef.current) {
+      if (websocketRef.current.readyState === WebSocket.OPEN || 
+          websocketRef.current.readyState === WebSocket.CONNECTING) {
+        return; // Already have an active connection
+      }
+      cleanupWebSocket();
+    }
+
     const wsUrl = getWebSocketUrl('/chat/ws');
     
     const ws = new WebSocket(wsUrl);
@@ -182,6 +232,12 @@ How would you like to start? You can:
     
     ws.onclose = () => {
       setIsConnected(false);
+      websocketRef.current = null;
+    };
+    
+    ws.onerror = () => {
+      setIsConnected(false);
+      websocketRef.current = null;
     };
     
     websocketRef.current = ws;
@@ -190,8 +246,9 @@ How would you like to start? You can:
   const handleWebSocketMessage = (data: any) => {
     switch (data.type) {
       case 'phase_update':
-        setCurrentPhase(data.phase);
-        addPhaseMessage(data.phase, data.details);
+        const mappedPhase = serverPhaseToEnum(data.phase);
+        setCurrentPhase(mappedPhase);
+        addPhaseMessage(mappedPhase, data.details);
         break;
       
       case 'trade_proposal':
@@ -200,11 +257,16 @@ How would you like to start? You can:
         break;
       
       case 'ai_response':
+      case WS_EVENTS.CHAT_RESPONSE:
         addAIMessage(data.content, data.metadata);
+        setIsLoading(false); // Stop loading after AI response
         break;
       
       case 'execution_result':
         handleExecutionResult(data);
+        if (data.success) {
+          setActiveProposal(null);
+        }
         break;
     }
   };
@@ -276,6 +338,7 @@ How would you like to start? You can:
         
         handleWebSocketMessage(response);
       } catch (error) {
+        setIsLoading(false); // Stop loading on error
         toast({
           title: 'Error',
           description: 'Failed to send message',
@@ -283,22 +346,46 @@ How would you like to start? You can:
         });
       }
     }
-    
-    setIsLoading(false);
   };
 
   const executeTradeProposal = async (proposal: TradeProposal) => {
     setCurrentPhase(ExecutionPhase.EXECUTION);
     
-    if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-      websocketRef.current.send(JSON.stringify({
-        type: 'execute_trade',
-        proposal,
-        isPaperTrading
-      }));
+    try {
+      if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+        websocketRef.current.send(JSON.stringify({
+          type: 'execute_trade',
+          proposal,
+          isPaperTrading
+        }));
+      } else {
+        // REST fallback
+        const tradeRequest = {
+          symbol: proposal.symbol,
+          action: proposal.action as 'buy' | 'sell',
+          amount: proposal.amount,
+          price: proposal.price,
+          order_type: 'market' as const,
+          stop_loss: proposal.stopLoss,
+          take_profit: proposal.takeProfit
+        };
+        const response = await conversationalTradingApi.executeTrade(tradeRequest, isPaperTrading);
+        
+        if (response.success) {
+          handleExecutionResult(response);
+          setActiveProposal(null);
+        } else {
+          throw new Error(response.error || 'Trade execution failed');
+        }
+      }
+    } catch (error: any) {
+      setCurrentPhase(ExecutionPhase.IDLE);
+      toast({
+        title: 'Trade Execution Failed',
+        description: error.message || 'Failed to execute trade',
+        variant: 'destructive'
+      });
     }
-    
-    setActiveProposal(null);
   };
 
   const handleExecutionResult = (result: any) => {

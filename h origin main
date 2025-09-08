@@ -1,0 +1,21 @@
+[33mcommit e98fdac418631cac790bd50284b82bf7be8abeae[m
+Author: kopi03 <navakokilan@gmail.com>
+Date:   Sat Sep 6 12:12:01 2025 +0530
+
+    Enhance login page UI styling and layout
+    
+    - Added glass morphism effect to login form with backdrop blur and transparency
+    - Enhanced input fields with icons (Mail, KeyRound) and focus effects
+    - Added professional styled feature cards on right side with colored icon boxes
+    - Improved button styling with blue gradient and hover effects
+    - Added single-line text layout for better readability
+    - Installed missing @radix-ui/react-scroll-area dependency
+    
+    🤖 Generated with [Claude Code](https://claude.ai/code)
+    
+    Co-Authored-By: Claude <noreply@anthropic.com>
+
+ frontend/package-lock.json            | 13 [32m+++++[m[31m-[m
+ frontend/package.json                 |  6 [32m+[m[31m--[m
+ frontend/src/pages/auth/LoginPage.tsx | 80 [32m++++++++++++++++++++++++++[m[31m---------[m
+ 3 files changed, 75 insertions(+), 24 deletions(-)

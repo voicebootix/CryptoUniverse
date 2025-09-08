@@ -2,6 +2,8 @@
  * Trading TypeScript Type Definitions
  */
 
+import { ExecutionPhase, TradeProposal } from '@/constants/trading';
+
 // API Response Types
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -238,28 +240,41 @@ export interface AIConsensusResult {
   recommendedPositionSize: number;
 }
 
-// WebSocket Message Types
+// WebSocket Message Types - normalized with server events
 export type WSMessageType = 
-  | 'priceUpdate' 
-  | 'orderUpdate' 
-  | 'trade' 
-  | 'phaseUpdate' 
-  | 'tradeProposal' 
-  | 'systemStatus'
+  | 'connect'
+  | 'disconnect' 
+  | 'error'
+  | 'chat_message'
+  | 'chat_response'
+  | 'phase_update'
+  | 'trade_proposal'
+  | 'trade_executed'
+  | 'trade_failed'
+  | 'price_update'
+  | 'market_alert'
+  | 'system_status'
+  | 'emergency_stop'
   | 'user_message'
-  | 'execute_trade';
+  | 'execute_trade'
+  | 'config_update'
+  | 'ai_response'
+  | 'execution_result';
 
-// WebSocket Message
-export interface WSMessage<K extends WSMessageType = WSMessageType, T = any> {
-  type: K;
-  data: T;
-  timestamp: string;
-  id?: string;
-}
+// WebSocket Message - Discriminated Union
+export type WSMessage = 
+  | { type: 'phase_update'; phase: ExecutionPhase; details: string; timestamp: string; id?: string; }
+  | { type: 'trade_proposal'; proposal: TradeProposal; timestamp: string; id?: string; }
+  | { type: 'ai_response' | 'chat_response'; content: string; metadata?: any; timestamp: string; id?: string; }
+  | { type: 'execution_result'; success: boolean; trade_id?: string; action?: string; symbol?: string; amount?: number; price?: number; error?: string; timestamp: string; id?: string; }
+  | { type: 'price_update'; symbol: string; price: number; change?: number; timestamp: string; id?: string; }
+  | { type: 'system_status'; status: 'healthy' | 'degraded' | 'down'; services?: Record<string, boolean>; timestamp: string; id?: string; }
+  | { type: 'market_alert'; symbol: string; alertType: string; message: string; timestamp: string; id?: string; }
+  | { type: 'user_message' | 'execute_trade' | 'config_update'; [key: string]: any; timestamp: string; id?: string; };
 
 // Phase Update Event
 export interface PhaseUpdateEvent {
-  phase: string;
+  phase: ExecutionPhase;
   details: string;
   progress: number;
   metrics?: {
