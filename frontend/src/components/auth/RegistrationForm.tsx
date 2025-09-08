@@ -8,11 +8,17 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/components/ui/use-toast';
 import { Link } from 'react-router-dom';
+import { apiClient } from '@/lib/api/client';
+import { isAxiosError, type AxiosError } from 'axios';
 
 const formSchema = z.object({
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
   email: z.string().email('Please enter a valid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  password: z.string()
+    .min(8, 'Password must be at least 8 characters')
+    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+    .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+    .regex(/[0-9]/, 'Password must contain at least one number'),
   confirm_password: z.string(),
   terms_agreed: z.boolean().refine((val) => val === true, {
     message: 'You must agree to the terms of service',
@@ -47,15 +53,29 @@ export default function RegistrationForm() {
       setIsLoading(true);
       setError('');
 
-      const response = await fetch('/api/v1/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
+      // Send only the data that backend expects
+      const registrationData = {
+        email: data.email,
+        password: data.password,
+        full_name: data.full_name,
+        role: 'trader' // Backend expects lowercase role
+      };
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to register');
+      // Debug logging (dev only) - mask sensitive data
+      if (import.meta.env.DEV) {
+        console.log('Registration attempt:', {
+          email: registrationData.email,
+          full_name: registrationData.full_name,
+          role: registrationData.role,
+          password: '****' // Never log actual password
+        });
+      }
+      
+      const response = await apiClient.post('/auth/register', registrationData);
+      
+      // Success logging without sensitive response data
+      if (import.meta.env.DEV) {
+        console.log('Registration successful for user:', registrationData.email);
       }
 
       toast({
@@ -64,11 +84,60 @@ export default function RegistrationForm() {
       });
 
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
+      let errorMessage = 'An unexpected error occurred';
+      
+      // Type-safe axios error handling
+      if (isAxiosError(err)) {
+        // Dev-only logging - never log full error in production
+        if (import.meta.env.DEV) {
+          console.error('Registration request failed:', {
+            status: err.response?.status,
+            statusText: err.response?.statusText,
+            url: err.config?.url
+          });
+        }
+        
+        // Handle 422 validation errors specifically
+        if (err.response?.status === 422 && err.response?.data?.detail) {
+          const validationErrors = err.response.data.detail;
+          
+          // Dev-only: log validation error details (safe metadata only)
+          if (import.meta.env.DEV) {
+            console.error('Validation errors:', validationErrors.map((error: any) => ({
+              field: error.loc ? error.loc.join('.') : 'unknown',
+              message: error.msg
+            })));
+          }
+          
+          // Extract user-friendly validation messages
+          if (Array.isArray(validationErrors) && validationErrors.length > 0) {
+            errorMessage = validationErrors.map((error: any) => 
+              `${error.loc ? error.loc.join('.') + ': ' : ''}${error.msg}`
+            ).join(', ');
+          } else {
+            errorMessage = 'Validation failed';
+          }
+        } else if (err.response?.data?.detail) {
+          // Other API errors with detail
+          errorMessage = typeof err.response.data.detail === 'string' 
+            ? err.response.data.detail 
+            : 'Server error occurred';
+        } else if (err.message) {
+          // Network or other axios errors
+          errorMessage = err.message;
+        }
+      } else {
+        // Non-axios errors
+        if (import.meta.env.DEV) {
+          console.error('Non-axios error during registration:', String(err));
+        }
+        errorMessage = 'Registration failed. Please try again.';
+      }
+      
       setError(errorMessage);
       toast({
         variant: 'destructive',
-        title: 'Error',
+        title: 'Registration Failed',
         description: errorMessage,
       });
     } finally {
@@ -131,6 +200,9 @@ export default function RegistrationForm() {
             data-testid="password-input"
             disabled={isLoading}
           />
+          <p className="text-xs text-muted-foreground">
+            Password must be at least 8 characters with uppercase, lowercase, and number
+          </p>
           {errors.password && (
             <p className="text-sm text-destructive" data-testid="password-error">
               {errors.password.message}

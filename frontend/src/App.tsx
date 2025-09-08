@@ -1,9 +1,11 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 // import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { Toaster } from '@/components/ui/toaster';
 import { useAuthStore, useIsAuthenticated } from '@/store/authStore';
+import ErrorBoundary from '@/components/ErrorBoundary';
+import { LoadingState } from '@/components/ui/loading-skeleton';
 
 // Layout Components
 import AuthLayout from '@/components/layout/AuthLayout';
@@ -100,9 +102,11 @@ const App: React.FC = () => {
   // This will be implemented once the basic API client is working
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <Router>
-        <div className="min-h-screen bg-background text-foreground">
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <Suspense fallback={<LoadingState title="Loading CryptoUniverse..." />}>
+          <Router>
+            <div className="min-h-screen bg-background text-foreground">
           <Routes>
             {/* Public Routes */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -203,16 +207,18 @@ const App: React.FC = () => {
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
 
-          {/* Global Toast Notifications */}
-          <Toaster />
-        </div>
-      </Router>
+            {/* Global Toast Notifications */}
+            <Toaster />
+          </div>
+        </Router>
+      </Suspense>
 
       {/* React Query DevTools (only in development) */}
       {/* {import.meta.env.DEV && (
         <ReactQueryDevtools initialIsOpen={false} position="bottom-right" />
       )} */}
     </QueryClientProvider>
+  </ErrorBoundary>
   );
 };
 
