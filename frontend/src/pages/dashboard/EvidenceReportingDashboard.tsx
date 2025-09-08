@@ -372,6 +372,21 @@ const EvidenceReportingDashboard: React.FC = () => {
     }
   };
 
+  const mapDecisionStatusToBgClass = (status: DecisionStatus) => {
+    switch (status) {
+      case DecisionStatus.SUCCESS:
+        return 'bg-green-500/10';
+      case DecisionStatus.PENDING:
+        return 'bg-yellow-500/10';
+      case DecisionStatus.PARTIAL:
+        return 'bg-orange-500/10';
+      case DecisionStatus.FAILED:
+        return 'bg-red-500/10';
+      default:
+        return 'bg-gray-500/10';
+    }
+  };
+
   const renderDecisionCard = (decision: DecisionRecord) => {
     const isExpanded = expandedDecision === decision.id;
     
@@ -394,7 +409,7 @@ const EvidenceReportingDashboard: React.FC = () => {
               <div className="flex items-start gap-3">
                 <div className={cn(
                   'p-2 rounded-lg',
-                  decision.status === DecisionStatus.SUCCESS ? 'bg-green-500/10' : 'bg-red-500/10'
+                  mapDecisionStatusToBgClass(decision.status)
                 )}>
                   {getDecisionIcon(decision.type)}
                 </div>

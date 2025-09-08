@@ -273,7 +273,7 @@ const TrustJourneyDashboard: React.FC = () => {
       title: 'Consistent Winner',
       description: 'Maintain 60% win rate',
       requirement: '60% win rate',
-      progress: performanceMetrics.winRate * 100,
+      progress: Math.min(Math.max(performanceMetrics.winRate * 100, 0), 100),
       target: 60,
       completed: performanceMetrics.winRate >= 0.6,
       reward: '+15 Trust Score',
@@ -607,7 +607,7 @@ const TrustJourneyDashboard: React.FC = () => {
                         </span>
                       </div>
                       <Progress
-                        value={(milestone.progress / milestone.target) * 100}
+                        value={milestone.target === 0 ? (milestone.completed ? 100 : 0) : Math.min((milestone.progress / milestone.target) * 100, 100)}
                         className="h-1"
                       />
                       <div className="flex items-center gap-1">
