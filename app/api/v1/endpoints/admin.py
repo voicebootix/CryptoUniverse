@@ -466,20 +466,44 @@ async def get_pending_verification_users(
     )
     
     try:
-        # Build query based on parameters
+        # Build base query based on parameters
         if include_unverified:
             # Include all unverified users
-            stmt = select(User).where(
-                or_(
-                    User.status == UserStatus.PENDING_VERIFICATION,
-                    ~User.is_verified  # Using NOT operator instead of == False
-                )
-            ).order_by(User.created_at.desc())
+            base_conditions = or_(
+                User.status == UserStatus.PENDING_VERIFICATION,
+                ~User.is_verified  # Using NOT operator instead of == False
+            )
         else:
             # Only pending verification status (default behavior)
+            base_conditions = User.status == UserStatus.PENDING_VERIFICATION
+        
+        # SECURITY: Apply tenant isolation
+        # Global admins (tenant_id=None) can see all users
+        # Tenant admins can only see their own tenant's users
+        if current_user.tenant_id is not None:
+            # Tenant admin - restrict to same tenant
             stmt = select(User).where(
-                User.status == UserStatus.PENDING_VERIFICATION
+                and_(
+                    base_conditions,
+                    User.tenant_id == current_user.tenant_id
+                )
             ).order_by(User.created_at.desc())
+            
+            logger.debug(
+                "Tenant admin viewing pending users",
+                admin_user=str(current_user.id),
+                admin_tenant=str(current_user.tenant_id)
+            )
+        else:
+            # Global admin - can see all tenants
+            stmt = select(User).where(
+                base_conditions
+            ).order_by(User.created_at.desc())
+            
+            logger.debug(
+                "Global admin viewing all pending users",
+                admin_user=str(current_user.id)
+            )
         
         result = await db.execute(stmt)
         pending_users = result.scalars().all()
@@ -538,6 +562,22 @@ async def list_users(
         # Build the base query using select statement for async
         stmt = select(User)
         
+        # SECURITY: Apply tenant isolation for user list
+        # Global admins (tenant_id=None) can see all users
+        # Tenant admins can only see their own tenant's users
+        if current_user.tenant_id is not None:
+            stmt = stmt.where(User.tenant_id == current_user.tenant_id)
+            logger.debug(
+                "Tenant admin listing users",
+                admin_user=str(current_user.id),
+                admin_tenant=str(current_user.tenant_id)
+            )
+        else:
+            logger.debug(
+                "Global admin listing all users",
+                admin_user=str(current_user.id)
+            )
+        
         # Apply filters using where clause for async SQLAlchemy
         if status_filter:
             # Convert string to UserStatus enum
@@ -579,21 +619,45 @@ async def list_users(
         result = await db.execute(stmt)
         users = result.scalars().all()
         
-        # Count by status using async queries
-        active_count_result = await db.execute(
-            select(func.count()).select_from(User).where(User.status == UserStatus.ACTIVE)
-        )
-        active_count = active_count_result.scalar_one()
-        
-        trading_count_result = await db.execute(
-            select(func.count()).select_from(User).where(
-                and_(
-                    User.status == UserStatus.ACTIVE,
-                    User.role.in_([UserRole.TRADER, UserRole.ADMIN])
+        # Count by status using async queries with tenant isolation
+        if current_user.tenant_id is not None:
+            # Tenant admin - count only within tenant
+            active_count_result = await db.execute(
+                select(func.count()).select_from(User).where(
+                    and_(
+                        User.status == UserStatus.ACTIVE,
+                        User.tenant_id == current_user.tenant_id
+                    )
                 )
             )
-        )
-        trading_count = trading_count_result.scalar_one()
+            active_count = active_count_result.scalar_one()
+            
+            trading_count_result = await db.execute(
+                select(func.count()).select_from(User).where(
+                    and_(
+                        User.status == UserStatus.ACTIVE,
+                        User.role.in_([UserRole.TRADER, UserRole.ADMIN]),
+                        User.tenant_id == current_user.tenant_id
+                    )
+                )
+            )
+            trading_count = trading_count_result.scalar_one()
+        else:
+            # Global admin - count all users
+            active_count_result = await db.execute(
+                select(func.count()).select_from(User).where(User.status == UserStatus.ACTIVE)
+            )
+            active_count = active_count_result.scalar_one()
+            
+            trading_count_result = await db.execute(
+                select(func.count()).select_from(User).where(
+                    and_(
+                        User.status == UserStatus.ACTIVE,
+                        User.role.in_([UserRole.TRADER, UserRole.ADMIN])
+                    )
+                )
+            )
+            trading_count = trading_count_result.scalar_one()
         
         # Batch fetch credit accounts for all users to avoid N+1 queries
         user_ids = [user.id for user in users]
