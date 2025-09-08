@@ -35,14 +35,10 @@ export function getRefreshToken(): string | null {
   if (typeof window === 'undefined') return null;
   
   try {
-    // Try sessionStorage first (primary location for refresh tokens)
-    const sessionToken = sessionStorage.getItem(REFRESH_TOKEN_KEY);
-    if (sessionToken) return sessionToken;
-    
-    // Fallback to localStorage for backwards compatibility
-    return localStorage.getItem(REFRESH_TOKEN_KEY);
+    // SECURITY: Refresh tokens are ONLY stored in sessionStorage
+    return sessionStorage.getItem(REFRESH_TOKEN_KEY);
   } catch (error) {
-    console.debug('Failed to read refresh token from storage:', error);
+    console.debug('Failed to read refresh token from sessionStorage:', error);
     return null;
   }
 }
@@ -61,16 +57,20 @@ export function setAuthTokens(tokens: AuthTokens): void {
   }
   
   try {
-    // Store refresh token in sessionStorage for better security
+    // Store refresh token ONLY in sessionStorage for security
     sessionStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
   } catch (error) {
     console.debug('Failed to store refresh token in sessionStorage:', error);
-    // Fallback to localStorage if sessionStorage fails
+    // SECURITY: Never fallback to localStorage for refresh tokens
+    // Clear any partial auth state and trigger re-authentication
     try {
-      localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
-    } catch (fallbackError) {
-      console.debug('Failed to store refresh token in localStorage fallback:', fallbackError);
+      localStorage.removeItem(TOKEN_KEY); // Clear access token too
+    } catch (clearError) {
+      console.debug('Failed to clear access token after sessionStorage failure:', clearError);
     }
+    
+    // Throw error to trigger re-auth flow
+    throw new Error('Unable to securely store refresh token. Please log in again.');
   }
 }
 
