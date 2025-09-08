@@ -18,6 +18,7 @@ import {
   AIConsensusResult,
 } from '@/types/trading';
 import { ConversationMemory } from '@/constants/trading';
+import { mapTradeExecutionResponse } from '@/lib/utils/typeMappers';
 
 // Paper Trading API
 export const paperTradingApi = {
@@ -177,7 +178,12 @@ export const conversationalTradingApi = {
         throw new Error(response.data.error || 'Trade execution failed');
       }
       
-      return response.data.data!;
+      // Map DTO to frontend type if needed
+      const responseData = response.data.data!;
+      // Check if it's in DTO format (snake_case) vs frontend format (camelCase)
+      return 'trade_id' in responseData 
+        ? mapTradeExecutionResponse(responseData as any) 
+        : responseData;
     } catch (error: any) {
       console.error('Trade execution failed:', error);
       return {

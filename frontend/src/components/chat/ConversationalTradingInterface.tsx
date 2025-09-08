@@ -39,6 +39,7 @@ import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { apiClient } from '@/lib/api/client';
 import { conversationalTradingApi, getWebSocketUrl } from '@/lib/api/tradingApi';
 import { useAuthStore } from '@/store/authStore';
+import { mapTradeExecutionResponse } from '@/lib/utils/typeMappers';
 
 import {
   ExecutionPhase,
@@ -245,11 +246,12 @@ How would you like to start? You can:
 
   const handleWebSocketMessage = (data: any) => {
     switch (data.type) {
-      case 'phase_update':
+      case 'phase_update': {
         const mappedPhase = serverPhaseToEnum(data.phase);
         setCurrentPhase(mappedPhase);
         addPhaseMessage(mappedPhase, data.details);
         break;
+      }
       
       case 'trade_proposal':
         setActiveProposal(data.proposal);
@@ -262,12 +264,15 @@ How would you like to start? You can:
         setIsLoading(false); // Stop loading after AI response
         break;
       
-      case 'execution_result':
-        handleExecutionResult(data);
-        if (data.success) {
+      case 'execution_result': {
+        // Map DTO to frontend type if it's in snake_case format
+        const mappedResult = data.trade_id ? mapTradeExecutionResponse(data) : data;
+        handleExecutionResult(mappedResult);
+        if (mappedResult.success) {
           setActiveProposal(null);
         }
         break;
+      }
     }
   };
 
