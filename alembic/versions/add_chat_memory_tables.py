@@ -50,7 +50,7 @@ def upgrade():
         sa.Column('timestamp', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column('intent', sa.String, nullable=True),
         sa.Column('confidence', sa.Float, nullable=True),
-        sa.Column('metadata', postgresql.JSONB, nullable=True),
+        sa.Column('message_metadata', postgresql.JSONB, nullable=True),
         sa.Column('processed', sa.Boolean, nullable=False, server_default=sa.text('true')),
         sa.Column('error_message', sa.Text, nullable=True),
         sa.Column('model_used', sa.String, nullable=True),

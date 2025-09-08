@@ -120,7 +120,7 @@ class ChatMemoryService:
                     message_type=message_type,
                     intent=intent,
                     confidence=confidence,
-                    metadata=metadata or {},
+                    message_metadata=metadata or {},
                     model_used=model_used,
                     processing_time_ms=processing_time_ms,
                     tokens_used=tokens_used,

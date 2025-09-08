@@ -90,7 +90,7 @@ class ChatMessage(Base):
     timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     intent = Column(String)  # trade_execution, portfolio_analysis, etc.
     confidence = Column(Float)  # AI confidence score (0.0 - 1.0)
-    metadata = Column(JSON)  # Additional message-specific data
+    message_metadata = Column(JSON)  # Additional message-specific data
     
     # Processing state
     processed = Column(String, default="true")  # Processing status
@@ -124,7 +124,7 @@ class ChatMessage(Base):
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "intent": self.intent,
             "confidence": self.confidence,
-            "metadata": self.metadata or {},
+            "message_metadata": self.message_metadata or {},
             "model_used": self.model_used,
             "processing_time_ms": self.processing_time_ms,
             "tokens_used": self.tokens_used,
