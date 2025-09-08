@@ -82,12 +82,34 @@ export default function RegistrationForm() {
         description: 'Registration successful! Please check your email to verify your account.',
       });
 
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
+    } catch (err: any) {
+      console.error('Registration error:', err);
+      
+      let errorMessage = 'An unexpected error occurred';
+      
+      // Handle axios error with validation details
+      if (err.response?.status === 422 && err.response?.data?.detail) {
+        console.error('Validation errors:', err.response.data.detail);
+        
+        // Extract validation error messages
+        const validationErrors = err.response.data.detail;
+        if (Array.isArray(validationErrors) && validationErrors.length > 0) {
+          errorMessage = validationErrors.map((error: any) => 
+            `${error.loc ? error.loc.join('.') + ': ' : ''}${error.msg}`
+          ).join(', ');
+        } else {
+          errorMessage = 'Validation failed';
+        }
+      } else if (err.response?.data?.detail) {
+        errorMessage = err.response.data.detail;
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
       setError(errorMessage);
       toast({
         variant: 'destructive',
-        title: 'Error',
+        title: 'Registration Failed',
         description: errorMessage,
       });
     } finally {
