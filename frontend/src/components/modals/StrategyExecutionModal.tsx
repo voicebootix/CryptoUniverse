@@ -86,7 +86,7 @@ const StrategyExecutionModal: React.FC<StrategyExecutionModalProps> = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">
             <div className={`p-2 rounded ${strategy?.color}`}>
-              <strategy?.icon className="h-5 w-5" />
+              {strategy?.icon && <strategy.icon className="h-5 w-5" />}
             </div>
             Execute Strategy: {strategy?.name}
           </DialogTitle>

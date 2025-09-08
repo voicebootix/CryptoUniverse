@@ -122,7 +122,7 @@ const StrategyPurchaseModal: React.FC<StrategyPurchaseModalProps> = ({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className={`p-3 rounded ${strategy?.color}`}>
-                    <strategy?.icon className="h-6 w-6" />
+                    {strategy?.icon && <strategy.icon className="h-6 w-6" />}
                   </div>
                   <div>
                     <CardTitle className="text-xl">{strategy?.name}</CardTitle>
