@@ -623,10 +623,10 @@ const EvidenceReportingDashboard: React.FC = () => {
                             </div>
                             <div className="flex items-center gap-4 text-xs text-muted-foreground">
                               <span>{details.duration}ms</span>
-                              {details.dataPoints && <span>{details.dataPoints} data points</span>}
-                              {details.iterations && <span>{details.iterations} iterations</span>}
-                              {details.checks && <span>{details.checks} checks</span>}
-                              {details.adjustments && <span>{details.adjustments} adjustments</span>}
+                              {'dataPoints' in details && details.dataPoints && <span>{details.dataPoints} data points</span>}
+                              {'iterations' in details && details.iterations && <span>{details.iterations} iterations</span>}
+                              {'checks' in details && details.checks && <span>{details.checks} checks</span>}
+                              {'adjustments' in details && details.adjustments && <span>{details.adjustments} adjustments</span>}
                             </div>
                           </div>
                         ))}

@@ -365,25 +365,7 @@ const StrategyMarketplace: React.FC = () => {
     return 0;
   });
 
-  const getRiskColor = (risk: string) => {
-    switch (risk) {
-      case 'Low': return 'text-green-500';
-      case 'Medium': return 'text-yellow-500';
-      case 'High': return 'text-red-500';
-      default: return 'text-gray-500';
-    }
-  };
-
-  const getTierBadge = (tier: string) => {
-    const tierConfig = tiers.find(t => t.id === tier);
-    if (!tierConfig) return null;
-    
-    return (
-      <Badge className={`${tierConfig.color} text-white`}>
-        {tierConfig.name}
-      </Badge>
-    );
-  };
+  // Use the helper functions defined above
 
   return (
     <div className="space-y-6">
@@ -642,6 +624,27 @@ const StrategyMarketplace: React.FC = () => {
         )}
       </AnimatePresence>
     </div>
+  );
+};
+
+// Helper functions moved outside component
+const getRiskColor = (risk: string) => {
+  switch (risk) {
+    case 'Low': return 'text-green-500';
+    case 'Medium': return 'text-yellow-500';
+    case 'High': return 'text-red-500';
+    default: return 'text-gray-500';
+  }
+};
+
+const getTierBadge = (tier: string) => {
+  const tierConfig = tiers.find(t => t.id === tier);
+  if (!tierConfig) return null;
+  
+  return (
+    <Badge className={`${tierConfig.color} text-white`}>
+      {tierConfig.name}
+    </Badge>
   );
 };
 
