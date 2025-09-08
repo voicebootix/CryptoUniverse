@@ -47,10 +47,18 @@ export default function RegistrationForm() {
       setIsLoading(true);
       setError('');
 
+      // Send only the data that backend expects
+      const registrationData = {
+        email: data.email,
+        password: data.password,
+        full_name: data.full_name,
+        role: 'TRADER' // Default role
+      };
+
       const response = await fetch('/api/v1/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(registrationData),
       });
 
       if (!response.ok) {
