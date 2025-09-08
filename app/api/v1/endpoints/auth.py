@@ -283,6 +283,13 @@ async def login(
                 detail="Invalid credentials"
             )
         
+        # Check if account is active (deactivated/blocked check)
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is deactivated. Please contact admin."
+            )
+        
         # Check user status and verification
         if user.status == UserStatus.PENDING_VERIFICATION:
             raise HTTPException(
@@ -380,6 +387,15 @@ async def register(
     
     logger.info("Registration attempt", email=request.email)
     
+    # Log if user attempts to request elevated role
+    if request.role != UserRole.TRADER:
+        logger.warning(
+            "User attempted to register with elevated role",
+            email=request.email,
+            requested_role=request.role.value,
+            assigned_role=UserRole.TRADER.value
+        )
+    
     # Check if user exists
     result = await db.execute(select(User).filter(User.email == request.email))
     existing_user = result.scalar_one_or_none()
@@ -400,13 +416,14 @@ async def register(
             )
     
     # Create user with all required fields
+    # SECURITY: Force TRADER role for self-registration to prevent privilege escalation
     import uuid
     current_time = datetime.utcnow()
     user = User(
         id=uuid.uuid4(),  # Explicitly set UUID
         email=request.email,
         hashed_password=auth_service.hash_password(request.password),
-        role=request.role,
+        role=UserRole.TRADER,  # Always use TRADER role for self-registration
         tenant_id=request.tenant_id if request.tenant_id else None,
         status=UserStatus.PENDING_VERIFICATION,  # Admin must approve before login
         is_active=True,  # Account is active but needs verification

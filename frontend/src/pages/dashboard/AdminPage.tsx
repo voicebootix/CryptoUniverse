@@ -41,7 +41,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { formatCurrency, formatPercentage, formatNumber, formatRelativeTime } from '@/lib/utils';
-import adminService from '@/services/adminService';
+import { adminService } from '@/services/adminService';
 import { toast } from 'sonner';
 
 // State for real data
@@ -60,14 +60,19 @@ interface User {
 }
 
 interface SystemMetrics {
-  active_users: number;
-  total_trades_today: number;
-  total_volume_24h: number;
-  system_health: string;
-  autonomous_sessions: number;
-  error_rate: number;
-  response_time_avg: number;
-  uptime_percentage: number;
+  active_users?: number;
+  total_trades_today?: number;
+  total_volume_24h?: number;
+  system_health?: string;
+  autonomous_sessions?: number;
+  error_rate?: number;
+  response_time_avg?: number;
+  uptime_percentage?: number;
+  // Additional fields that may exist
+  cpuUsage?: number;
+  memoryUsage?: number;
+  diskUsage?: number;
+  networkLatency?: number;
 }
 
 const auditLogs = [
@@ -369,9 +374,9 @@ const AdminPage: React.FC = () => {
                       <Cpu className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">CPU Usage</span>
                     </div>
-                    <span className="text-sm font-bold">{systemMetrics.cpuUsage}%</span>
+                    <span className="text-sm font-bold">{systemMetrics?.cpuUsage ?? 0}%</span>
                   </div>
-                  <Progress value={systemMetrics.cpuUsage} className="h-2" />
+                  <Progress value={systemMetrics?.cpuUsage ?? 0} className="h-2" />
                 </div>
 
                 <div className="space-y-3">
@@ -380,9 +385,9 @@ const AdminPage: React.FC = () => {
                       <Database className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">Memory Usage</span>
                     </div>
-                    <span className="text-sm font-bold">{systemMetrics.memoryUsage}%</span>
+                    <span className="text-sm font-bold">{systemMetrics?.memoryUsage ?? 0}%</span>
                   </div>
-                  <Progress value={systemMetrics.memoryUsage} className="h-2" />
+                  <Progress value={systemMetrics?.memoryUsage ?? 0} className="h-2" />
                 </div>
 
                 <div className="space-y-3">
@@ -391,9 +396,9 @@ const AdminPage: React.FC = () => {
                       <HardDrive className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">Disk Usage</span>
                     </div>
-                    <span className="text-sm font-bold">{systemMetrics.diskUsage}%</span>
+                    <span className="text-sm font-bold">{systemMetrics?.diskUsage ?? 0}%</span>
                   </div>
-                  <Progress value={systemMetrics.diskUsage} className="h-2" />
+                  <Progress value={systemMetrics?.diskUsage ?? 0} className="h-2" />
                 </div>
 
                 <div className="space-y-3">
@@ -402,9 +407,9 @@ const AdminPage: React.FC = () => {
                       <Wifi className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">Network Latency</span>
                     </div>
-                    <span className="text-sm font-bold">{systemMetrics.networkLatency}ms</span>
+                    <span className="text-sm font-bold">{systemMetrics?.networkLatency ?? 0}ms</span>
                   </div>
-                  <Progress value={systemMetrics.networkLatency} max={200} className="h-2" />
+                  <Progress value={systemMetrics?.networkLatency ?? 0} max={200} className="h-2" />
                 </div>
               </CardContent>
             </Card>
@@ -575,7 +580,7 @@ const AdminPage: React.FC = () => {
                               Needs Verification
                             </Badge>
                           )}
-                          {!user.is_verified && user.status !== 'pending_verification' && (
+                          {user.is_verified === false && user.status !== 'pending_verification' && (
                             <Badge variant="destructive" className="text-xs">
                               Not Verified
                             </Badge>

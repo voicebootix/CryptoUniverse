@@ -448,10 +448,15 @@ async def update_strategy_pricing(
 
 @router.get("/users/pending-verification")
 async def get_pending_verification_users(
+    include_unverified: bool = False,
     current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: AsyncSession = Depends(get_database)
 ):
-    """Get all users pending verification."""
+    """Get all users pending verification.
+    
+    Args:
+        include_unverified: If True, also include all unverified users regardless of status
+    """
     
     await rate_limiter.check_rate_limit(
         key="admin:pending_users",
@@ -461,15 +466,22 @@ async def get_pending_verification_users(
     )
     
     try:
-        # Query for pending verification users
-        result = await db.execute(
-            select(User).where(
+        # Build query based on parameters
+        if include_unverified:
+            # Include all unverified users
+            stmt = select(User).where(
                 or_(
                     User.status == UserStatus.PENDING_VERIFICATION,
-                    User.is_verified == False
+                    ~User.is_verified  # Using NOT operator instead of == False
                 )
             ).order_by(User.created_at.desc())
-        )
+        else:
+            # Only pending verification status (default behavior)
+            stmt = select(User).where(
+                User.status == UserStatus.PENDING_VERIFICATION
+            ).order_by(User.created_at.desc())
+        
+        result = await db.execute(stmt)
         pending_users = result.scalars().all()
         
         # Format user data
@@ -491,14 +503,15 @@ async def get_pending_verification_users(
             "pending_users": user_list,
             "total_pending": len(user_list),
             "message": f"{len(user_list)} users awaiting verification",
+            "include_unverified": include_unverified,
             "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
-        logger.error("Failed to get pending users", error=str(e))
+        logger.exception("Failed to get pending users")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get pending users: {str(e)}"
+            detail="Failed to get pending users"
         )
 
 
@@ -616,6 +629,7 @@ async def list_users(
                 "full_name": user.email,  # Using email as full_name doesn't exist
                 "role": user.role.value,
                 "status": user.status.value,
+                "is_verified": user.is_verified,  # Explicitly include is_verified
                 "created_at": user.created_at.isoformat(),
                 "last_login": user.last_login.isoformat() if user.last_login else None,
                 "tenant_id": str(user.tenant_id) if user.tenant_id else None,
@@ -681,12 +695,16 @@ async def verify_user(
                 "timestamp": datetime.utcnow().isoformat()
             }
         
+        # Capture previous status before mutation
+        previous_status = str(target_user.status.value) if target_user.status else "PENDING_VERIFICATION"
+        previous_verified = target_user.is_verified
+        
         # Verify the user
         target_user.status = UserStatus.ACTIVE
         target_user.is_verified = True
         target_user.updated_at = datetime.utcnow()
         
-        # Create audit log
+        # Create audit log with captured previous status
         audit_log = AuditLog(
             user_id=current_user.id,
             event_type="user_verification",
@@ -694,7 +712,10 @@ async def verify_user(
                 "target_user_id": user_id,
                 "target_user_email": target_user.email,
                 "action": "verify",
-                "previous_status": str(target_user.status.value) if target_user.status else "PENDING_VERIFICATION",
+                "previous_status": previous_status,
+                "previous_verified": previous_verified,
+                "new_status": "ACTIVE",
+                "new_verified": True,
                 "details": {
                     "target_user_id": user_id,
                     "target_user_email": target_user.email,
@@ -728,11 +749,11 @@ async def verify_user(
         raise
     except Exception as e:
         await db.rollback()
-        logger.error("User verification failed", error=str(e), exc_info=True)
+        logger.exception("User verification failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"User verification failed: {str(e)}"
-        )
+            detail="User verification failed"
+        ) from e
 
 
 @router.post("/users/verify-batch")
