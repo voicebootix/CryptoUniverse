@@ -74,14 +74,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  // Initialize chat session and WebSocket connection
+  // Initialize chat session
   useEffect(() => {
     initializeChatSession();
-    return () => {
-      if (websocket) {
-        websocket.close();
-      }
-    };
+    // WebSocket cleanup is handled by the useWebSocket hook
   }, []);
 
   const initializeChatSession = async () => {
