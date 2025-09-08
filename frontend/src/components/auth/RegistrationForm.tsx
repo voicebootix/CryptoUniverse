@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/components/ui/use-toast';
 import { Link } from 'react-router-dom';
+import { apiClient } from '@/lib/api/client';
 
 const formSchema = z.object({
   full_name: z.string().min(2, 'Full name must be at least 2 characters'),
@@ -55,16 +56,11 @@ export default function RegistrationForm() {
         role: 'TRADER' // Default role
       };
 
-      const response = await fetch('/api/v1/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(registrationData),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to register');
-      }
+      console.log('Sending registration data:', registrationData);
+      
+      const response = await apiClient.post('/auth/register', registrationData);
+      
+      console.log('Registration successful:', response.data);
 
       toast({
         title: 'Success',
