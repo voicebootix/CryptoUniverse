@@ -8,6 +8,7 @@ system configuration, and monitoring for the AI money manager platform.
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
@@ -72,6 +73,43 @@ class UserManagementRequest(BaseModel):
         if v.lower() not in allowed_actions:
             raise ValueError(f"Action must be one of: {allowed_actions}")
         return v.lower()
+
+
+class BatchVerifyRequest(BaseModel):
+    user_ids: List[str]  # Will be validated to UUIDs
+    reason: Optional[str] = None
+    
+    @field_validator('user_ids')
+    @classmethod
+    def validate_user_ids(cls, v):
+        """Validate, dedupe, and limit user IDs."""
+        if not v:
+            raise ValueError("At least one user ID is required")
+        
+        # Parse and validate UUIDs
+        valid_uuids = []
+        seen = set()
+        
+        for user_id in v:
+            try:
+                # Parse to UUID to validate format
+                uuid_obj = UUID(user_id)
+                uuid_str = str(uuid_obj)
+                
+                # Deduplicate
+                if uuid_str not in seen:
+                    valid_uuids.append(uuid_str)
+                    seen.add(uuid_str)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Invalid UUID format: {user_id}")
+        
+        # Check batch size limits
+        if len(valid_uuids) == 0:
+            raise ValueError("No valid user IDs provided after deduplication")
+        if len(valid_uuids) > 100:
+            raise ValueError(f"Batch size exceeds maximum of 100 users (got {len(valid_uuids)})")
+        
+        return valid_uuids
 
 
 class SystemMetricsResponse(BaseModel):
@@ -151,11 +189,11 @@ async def get_system_overview(
         }
         
     except Exception as e:
-        logger.error("System status retrieval failed", error=str(e))
+        logger.exception("System status retrieval failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get system status: {str(e)}"
-        )
+            detail="Failed to get system status"
+        ) from e
 
 
 @router.post("/system/configure")
@@ -243,11 +281,11 @@ async def configure_system(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("System configuration failed", error=str(e))
+        logger.exception("System configuration failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"System configuration failed: {str(e)}"
-    )
+                    detail="System configuration failed"
+    ) from e
 
 
 @router.get("/credit-pricing")
@@ -278,10 +316,10 @@ async def get_credit_pricing_config(
         }
         
     except Exception as e:
-        logger.exception("Failed to get credit pricing config: %s", e)
+        logger.exception("Failed to get credit pricing config")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get pricing config: {str(e)}"
+            detail="Failed to get pricing config"
         ) from e
 
 
@@ -373,10 +411,10 @@ async def update_credit_pricing_config(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Failed to update credit pricing: %s", e)
+        logger.exception("Failed to update credit pricing")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update pricing: {str(e)}"
+            detail="Failed to update pricing"
         ) from e
 
 
@@ -434,11 +472,104 @@ async def update_strategy_pricing(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("Failed to update strategy pricing: %s", e)
+        logger.exception("Failed to update strategy pricing")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update strategy pricing: {str(e)}"
+            detail="Failed to update strategy pricing"
         ) from e
+
+
+@router.get("/users/pending-verification")
+async def get_pending_verification_users(
+    include_unverified: bool = False,
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_database)
+):
+    """Get all users pending verification.
+    
+    Args:
+        include_unverified: If True, also include all unverified users regardless of status
+    """
+    
+    await rate_limiter.check_rate_limit(
+        key="admin:pending_users",
+        limit=100,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # Build base query based on parameters
+        if include_unverified:
+            # Include all unverified users
+            base_conditions = or_(
+                User.status == UserStatus.PENDING_VERIFICATION,
+                ~User.is_verified  # Using NOT operator instead of == False
+            )
+        else:
+            # Only pending verification status (default behavior)
+            base_conditions = User.status == UserStatus.PENDING_VERIFICATION
+        
+        # SECURITY: Apply tenant isolation
+        # Global admins (tenant_id=None) can see all users
+        # Tenant admins can only see their own tenant's users
+        if current_user.tenant_id is not None:
+            # Tenant admin - restrict to same tenant
+            stmt = select(User).where(
+                and_(
+                    base_conditions,
+                    User.tenant_id == current_user.tenant_id
+                )
+            ).order_by(User.created_at.desc())
+            
+            logger.debug(
+                "Tenant admin viewing pending users",
+                admin_user=str(current_user.id),
+                admin_tenant=str(current_user.tenant_id)
+            )
+        else:
+            # Global admin - can see all tenants
+            stmt = select(User).where(
+                base_conditions
+            ).order_by(User.created_at.desc())
+            
+            logger.debug(
+                "Global admin viewing all pending users",
+                admin_user=str(current_user.id)
+            )
+        
+        result = await db.execute(stmt)
+        pending_users = result.scalars().all()
+        
+        # Format user data
+        user_list = []
+        for user in pending_users:
+            user_data = {
+                "id": str(user.id),
+                "email": user.email,
+                "role": user.role.value,
+                "status": user.status.value,
+                "is_verified": user.is_verified,
+                "created_at": user.created_at.isoformat(),
+                "registration_age": str(datetime.utcnow() - user.created_at)
+            }
+            user_list.append(user_data)
+        
+        return {
+            "status": "success",
+            "pending_users": user_list,
+            "total_pending": len(user_list),
+            "message": f"{len(user_list)} users awaiting verification",
+            "include_unverified": include_unverified,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.exception("Failed to get pending users")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get pending users"
+        )
 
 
 @router.get("/users", response_model=UserListResponse)
@@ -463,6 +594,22 @@ async def list_users(
     try:
         # Build the base query using select statement for async
         stmt = select(User)
+        
+        # SECURITY: Apply tenant isolation for user list
+        # Global admins (tenant_id=None) can see all users
+        # Tenant admins can only see their own tenant's users
+        if current_user.tenant_id is not None:
+            stmt = stmt.where(User.tenant_id == current_user.tenant_id)
+            logger.debug(
+                "Tenant admin listing users",
+                admin_user=str(current_user.id),
+                admin_tenant=str(current_user.tenant_id)
+            )
+        else:
+            logger.debug(
+                "Global admin listing all users",
+                admin_user=str(current_user.id)
+            )
         
         # Apply filters using where clause for async SQLAlchemy
         if status_filter:
@@ -505,21 +652,45 @@ async def list_users(
         result = await db.execute(stmt)
         users = result.scalars().all()
         
-        # Count by status using async queries
-        active_count_result = await db.execute(
-            select(func.count()).select_from(User).where(User.status == UserStatus.ACTIVE)
-        )
-        active_count = active_count_result.scalar_one()
-        
-        trading_count_result = await db.execute(
-            select(func.count()).select_from(User).where(
-                and_(
-                    User.status == UserStatus.ACTIVE,
-                    User.role.in_([UserRole.TRADER, UserRole.ADMIN])
+        # Count by status using async queries with tenant isolation
+        if current_user.tenant_id is not None:
+            # Tenant admin - count only within tenant
+            active_count_result = await db.execute(
+                select(func.count()).select_from(User).where(
+                    and_(
+                        User.status == UserStatus.ACTIVE,
+                        User.tenant_id == current_user.tenant_id
+                    )
                 )
             )
-        )
-        trading_count = trading_count_result.scalar_one()
+            active_count = active_count_result.scalar_one()
+            
+            trading_count_result = await db.execute(
+                select(func.count()).select_from(User).where(
+                    and_(
+                        User.status == UserStatus.ACTIVE,
+                        User.role.in_([UserRole.TRADER, UserRole.ADMIN]),
+                        User.tenant_id == current_user.tenant_id
+                    )
+                )
+            )
+            trading_count = trading_count_result.scalar_one()
+        else:
+            # Global admin - count all users
+            active_count_result = await db.execute(
+                select(func.count()).select_from(User).where(User.status == UserStatus.ACTIVE)
+            )
+            active_count = active_count_result.scalar_one()
+            
+            trading_count_result = await db.execute(
+                select(func.count()).select_from(User).where(
+                    and_(
+                        User.status == UserStatus.ACTIVE,
+                        User.role.in_([UserRole.TRADER, UserRole.ADMIN])
+                    )
+                )
+            )
+            trading_count = trading_count_result.scalar_one()
         
         # Batch fetch credit accounts for all users to avoid N+1 queries
         user_ids = [user.id for user in users]
@@ -555,6 +726,7 @@ async def list_users(
                 "full_name": user.email,  # Using email as full_name doesn't exist
                 "role": user.role.value,
                 "status": user.status.value,
+                "is_verified": user.is_verified,  # Explicitly include is_verified
                 "created_at": user.created_at.isoformat(),
                 "last_login": user.last_login.isoformat() if user.last_login else None,
                 "tenant_id": str(user.tenant_id) if user.tenant_id else None,
@@ -571,11 +743,322 @@ async def list_users(
         )
         
     except Exception as e:
-        logger.error("User listing failed", error=str(e))
+        logger.exception("User listing failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list users: {str(e)}"
+            detail="Failed to list users"
+        ) from e
+
+
+@router.post("/users/verify/{user_id}")
+async def verify_user(
+    user_id: str,
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_database)
+):
+    """Verify a pending user account to allow login."""
+    
+    await rate_limiter.check_rate_limit(
+        key="admin:verify_user",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    logger.info(
+        "User verification requested",
+        admin_user=str(current_user.id),
+        target_user=user_id
+    )
+    
+    try:
+        # Get target user
+        result = await db.execute(
+            select(User).where(User.id == user_id)
         )
+        target_user = result.scalar_one_or_none()
+        if not target_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # SECURITY: Check tenant isolation - prevent cross-tenant operations
+        # Allow global admins (tenant_id=None) to verify any user
+        if (current_user.tenant_id is not None and 
+            target_user.tenant_id is not None and 
+            current_user.tenant_id != target_user.tenant_id):
+            logger.warning(
+                "Attempted cross-tenant verification blocked",
+                admin_user=str(current_user.id),
+                admin_tenant=str(current_user.tenant_id),
+                target_user=str(target_user.id),
+                target_tenant=str(target_user.tenant_id)
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cannot verify users from different tenant"
+            )
+        
+        # Check if already verified
+        if target_user.status == UserStatus.ACTIVE and target_user.is_verified:
+            return {
+                "status": "already_verified",
+                "message": "User is already verified and active",
+                "user_email": target_user.email,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        # SECURITY: Only verify users in PENDING_VERIFICATION status
+        # Prevent reactivation of suspended/inactive users
+        if target_user.status != UserStatus.PENDING_VERIFICATION:
+            logger.warning(
+                "Attempted to verify user with invalid status",
+                admin_user=str(current_user.id),
+                target_user=str(target_user.id),
+                current_status=target_user.status.value
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot verify user with status {target_user.status.value}. User must be in PENDING_VERIFICATION status."
+            )
+        
+        # Capture previous status before mutation
+        previous_status = str(target_user.status.value) if target_user.status else "PENDING_VERIFICATION"
+        previous_verified = target_user.is_verified
+        
+        # Verify the user
+        target_user.status = UserStatus.ACTIVE
+        target_user.is_verified = True
+        target_user.updated_at = datetime.utcnow()
+        
+        # Create audit log with captured previous status
+        audit_log = AuditLog(
+            user_id=current_user.id,
+            event_type="user_verification",
+            event_data={
+                "target_user_id": user_id,
+                "target_user_email": target_user.email,
+                "action": "verify",
+                "previous_status": previous_status,
+                "previous_verified": previous_verified,
+                "new_status": "ACTIVE",
+                "new_verified": True,
+                "details": {
+                    "target_user_id": user_id,
+                    "target_user_email": target_user.email,
+                    "verified_by": current_user.email
+                },
+                "ip_address": "admin_api",
+                "user_agent": "system"
+            }
+        )
+        db.add(audit_log)
+        
+        await db.commit()
+        
+        logger.info(
+            "User verified successfully",
+            admin_user=str(current_user.id),
+            target_user=user_id,
+            target_email=target_user.email
+        )
+        
+        return {
+            "status": "verified",
+            "message": "User has been verified and can now login",
+            "user_email": target_user.email,
+            "user_id": str(target_user.id),
+            "timestamp": datetime.utcnow().isoformat(),
+            "verified_by": current_user.email
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        logger.exception("User verification failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User verification failed"
+        ) from e
+
+
+@router.post("/users/verify-batch")
+async def verify_users_batch(
+    request: BatchVerifyRequest,
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_database)
+):
+    """Verify multiple pending user accounts at once."""
+    
+    await rate_limiter.check_rate_limit(
+        key="admin:verify_batch",
+        limit=10,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    logger.info(
+        "Batch user verification requested",
+        admin_user=str(current_user.id),
+        user_count=len(request.user_ids)
+    )
+    
+    verified_users = []
+    already_verified = []
+    not_found = []
+    skipped = []
+    errors = []
+    
+    try:
+        for user_id in request.user_ids:
+            try:
+                # Get target user
+                result = await db.execute(
+                    select(User).where(User.id == user_id)
+                )
+                target_user = result.scalar_one_or_none()
+                
+                if not target_user:
+                    not_found.append(user_id)
+                    continue
+                
+                # SECURITY: Check tenant isolation - prevent cross-tenant operations
+                # Allow global admins (tenant_id=None) to verify any user
+                if (current_user.tenant_id is not None and 
+                    target_user.tenant_id is not None and 
+                    current_user.tenant_id != target_user.tenant_id):
+                    skipped.append({
+                        "user_id": str(target_user.id),
+                        "email": target_user.email,
+                        "reason": "cross_tenant",
+                        "message": "Cannot verify users from different tenant"
+                    })
+                    
+                    # Log attempted cross-tenant operation for security audit
+                    logger.warning(
+                        "Attempted cross-tenant verification blocked",
+                        admin_user=str(current_user.id),
+                        admin_tenant=str(current_user.tenant_id),
+                        target_user=str(target_user.id),
+                        target_tenant=str(target_user.tenant_id)
+                    )
+                    continue
+                
+                # Check if already verified
+                if target_user.status == UserStatus.ACTIVE and target_user.is_verified:
+                    already_verified.append({
+                        "user_id": str(target_user.id),
+                        "email": target_user.email
+                    })
+                    continue
+                
+                # SECURITY: Only verify users in PENDING_VERIFICATION status
+                # Prevent reactivation of suspended/inactive users
+                if target_user.status != UserStatus.PENDING_VERIFICATION:
+                    skipped.append({
+                        "user_id": str(target_user.id),
+                        "email": target_user.email,
+                        "reason": "invalid_status",
+                        "message": f"User status is {target_user.status.value}, not PENDING_VERIFICATION",
+                        "current_status": target_user.status.value
+                    })
+                    continue
+                
+                # Capture previous state for audit
+                previous_status = target_user.status.value
+                previous_verified = target_user.is_verified
+                
+                # Verify the user - only if all checks pass
+                target_user.status = UserStatus.ACTIVE
+                target_user.is_verified = True
+                target_user.updated_at = datetime.utcnow()
+                
+                verified_users.append({
+                    "user_id": str(target_user.id),
+                    "email": target_user.email
+                })
+                
+                # Create audit log with security context
+                audit_log = AuditLog(
+                    user_id=current_user.id,
+                    event_type="batch_user_verification",
+                    event_data={
+                        "target_user_id": user_id,
+                        "target_user_email": target_user.email,
+                        "action": "verify",
+                        "batch_operation": True,
+                        "previous_status": previous_status,
+                        "previous_verified": previous_verified,
+                        "new_status": "ACTIVE",
+                        "new_verified": True,
+                        "tenant_id": str(target_user.tenant_id) if target_user.tenant_id else None,
+                        "details": {
+                            "target_user_id": user_id,
+                            "target_user_email": target_user.email,
+                            "verified_by": current_user.email,
+                            "reason": request.reason
+                        },
+                        "ip_address": "admin_api",
+                        "user_agent": "system"
+                    }
+                )
+                db.add(audit_log)
+                
+            except Exception as e:
+                # Sanitize error for client response
+                errors.append({
+                    "user_id": user_id,
+                    "error": "verification_failed"  # Generic error for client
+                })
+                # Log full exception details for debugging
+                logger.exception(
+                    "Failed to verify user in batch operation",
+                    user_id=user_id,
+                    admin_user=str(current_user.id),
+                    error_type=type(e).__name__
+                )
+        
+        # Commit all changes
+        await db.commit()
+        
+        logger.info(
+            "Batch verification completed",
+            admin_user=str(current_user.id),
+            verified_count=len(verified_users),
+            already_verified_count=len(already_verified),
+            skipped_count=len(skipped),
+            not_found_count=len(not_found),
+            error_count=len(errors)
+        )
+        
+        return {
+            "status": "batch_verification_completed",
+            "summary": {
+                "total_requested": len(request.user_ids),
+                "successfully_verified": len(verified_users),
+                "already_verified": len(already_verified),
+                "skipped": len(skipped),
+                "not_found": len(not_found),
+                "errors": len(errors)
+            },
+            "verified_users": verified_users,
+            "already_verified": already_verified,
+            "skipped": skipped,
+            "not_found": not_found,
+            "errors": errors,
+            "timestamp": datetime.utcnow().isoformat(),
+            "verified_by": current_user.email
+        }
+        
+    except Exception as e:
+        await db.rollback()
+        logger.exception("Batch verification failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Batch verification failed"
+        ) from e
 
 
 @router.post("/users/manage")
@@ -707,11 +1190,11 @@ async def manage_user(
     except Exception as e:
         # Rollback transaction on any other error
         await db.rollback()
-        logger.error("User management failed", error=str(e), exc_info=True)
+        logger.exception("User management failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"User management failed: {str(e)}"
-        )
+            detail="User management failed"
+        ) from e
 
 
 @router.get("/metrics", response_model=SystemMetricsResponse)
@@ -785,11 +1268,11 @@ async def get_detailed_metrics(
         )
         
     except Exception as e:
-        logger.error("Metrics retrieval failed", error=str(e))
+        logger.exception("Metrics retrieval failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get metrics: {str(e)}"
-        )
+            detail="Failed to get metrics"
+        ) from e
 
 
 @router.get("/audit-logs")
@@ -898,11 +1381,11 @@ async def get_audit_logs(
         }
         
     except Exception as e:
-        logger.error("Audit logs retrieval failed", error=str(e))
+        logger.exception("Audit logs retrieval failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get audit logs: {str(e)}"
-        )
+            detail="Failed to get audit logs"
+        ) from e
 
 
 @router.post("/emergency/stop-all")
@@ -961,11 +1444,11 @@ async def emergency_stop_all_trading(
         }
         
     except Exception as e:
-        logger.error("Emergency stop failed", error=str(e))
+        logger.exception("Emergency stop failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Emergency stop failed: {str(e)}"
-        )
+            detail="Emergency stop failed"
+        ) from e
 
 
 # Helper Functions

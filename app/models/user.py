@@ -158,6 +158,13 @@ class User(Base):
             and self.role in [UserRole.ADMIN, UserRole.TRADER]
         )
     
+    @property
+    def full_name(self) -> str:
+        """Get user's full name from profile or email."""
+        if self.profile:
+            return self.profile.full_name
+        return self.email.split('@')[0]
+    
 
     
     def __repr__(self) -> str:

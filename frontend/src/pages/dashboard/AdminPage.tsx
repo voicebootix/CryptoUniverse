@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import {
   Shield,
@@ -41,72 +41,39 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { formatCurrency, formatPercentage, formatNumber, formatRelativeTime } from '@/lib/utils';
+import { adminService } from '@/services/adminService';
+import { toast } from 'sonner';
 
-// Mock data
-const systemMetrics = {
-  uptime: '24.5 hours',
-  activeUsers: 147,
-  autonomousSessions: 32,
-  totalTrades: 1247,
-  systemHealth: 'excellent',
-  cpuUsage: 35,
-  memoryUsage: 68,
-  diskUsage: 42,
-  networkLatency: 45,
-  errorRate: 0.02,
-  responseTime: 150,
-};
+// State for real data
+interface User {
+  id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  status: string;
+  is_verified?: boolean;
+  created_at: string;
+  last_login: string | null;
+  tenant_id: string | null;
+  credits?: number;
+  total_trades?: number;
+}
 
-const users = [
-  {
-    id: '1',
-    fullName: 'John Smith',
-    email: 'john.smith@example.com',
-    role: 'trader',
-    status: 'active',
-    lastLogin: new Date(Date.now() - 2 * 60 * 60 * 1000),
-    portfolioValue: 125000,
-    autonomousMode: true,
-    simulationMode: false,
-    trades24h: 23,
-  },
-  {
-    id: '2',
-    fullName: 'Sarah Johnson',
-    email: 'sarah.j@example.com',
-    role: 'trader',
-    status: 'active',
-    lastLogin: new Date(Date.now() - 30 * 60 * 1000),
-    portfolioValue: 87500,
-    autonomousMode: false,
-    simulationMode: true,
-    trades24h: 12,
-  },
-  {
-    id: '3',
-    fullName: 'Mike Chen',
-    email: 'mike.chen@example.com',
-    role: 'viewer',
-    status: 'inactive',
-    lastLogin: new Date(Date.now() - 24 * 60 * 60 * 1000),
-    portfolioValue: 45000,
-    autonomousMode: false,
-    simulationMode: true,
-    trades24h: 0,
-  },
-  {
-    id: '4',
-    fullName: 'Emma Wilson',
-    email: 'emma.w@example.com',
-    role: 'trader',
-    status: 'suspended',
-    lastLogin: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-    portfolioValue: 200000,
-    autonomousMode: false,
-    simulationMode: false,
-    trades24h: 0,
-  },
-];
+interface SystemMetrics {
+  active_users?: number;
+  total_trades_today?: number;
+  total_volume_24h?: number;
+  system_health?: string;
+  autonomous_sessions?: number;
+  error_rate?: number;
+  response_time_avg?: number;
+  uptime_percentage?: number;
+  // Additional fields that may exist
+  cpuUsage?: number;
+  memoryUsage?: number;
+  diskUsage?: number;
+  networkLatency?: number;
+}
 
 const auditLogs = [
   {
@@ -149,20 +116,82 @@ const AdminPage: React.FC = () => {
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [users, setUsers] = useState<User[]>([]);
+  const [pendingUsers, setPendingUsers] = useState<User[]>([]);
+  const [systemMetrics, setSystemMetrics] = useState<SystemMetrics | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+
+  // Fetch real data from backend
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch all data in parallel
+      const [usersData, metricsData, pendingData, logsData] = await Promise.all([
+        adminService.getUsers(),
+        adminService.getMetrics().catch(() => null),
+        adminService.getPendingUsers().catch(() => ({ pending_users: [] })),
+        adminService.getAuditLogs({ limit: 10 }).catch(() => ({ audit_logs: [] }))
+      ]);
+
+      // Update state with real data
+      setUsers(usersData.users || []);
+      setPendingUsers(pendingData.pending_users || []);
+      setSystemMetrics(metricsData);
+      setAuditLogs(logsData.audit_logs || []);
+    } catch (error) {
+      console.error('Failed to fetch admin data:', error);
+      toast.error('Failed to load admin data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    await fetchData();
     setIsRefreshing(false);
   };
 
   const handleEmergencyStop = async () => {
-    // Implement emergency stop
-    console.log('Emergency stop activated');
+    if (confirm('Are you sure you want to stop all trading activities?')) {
+      try {
+        await adminService.emergencyStopAll('Manual emergency stop by admin');
+        toast.success('Emergency stop activated');
+        await fetchData();
+      } catch (error) {
+        toast.error('Failed to activate emergency stop');
+      }
+    }
+  };
+
+  const handleVerifyUser = async (userId: string) => {
+    try {
+      const result = await adminService.verifyUser(userId);
+      toast.success(`User ${result.user_email} has been verified`);
+      await fetchData(); // Refresh data
+    } catch (error) {
+      toast.error('Failed to verify user');
+    }
+  };
+
+  const handleUserAction = async (userId: string, action: string) => {
+    try {
+      const result = await adminService.manageUser(userId, action);
+      toast.success(result.action_taken || 'Action completed');
+      await fetchData(); // Refresh data
+    } catch (error) {
+      toast.error(`Failed to ${action} user`);
+    }
   };
 
   const filteredUsers = users.filter(user => {
-    const matchesSearch = user.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const matchesSearch = (user.full_name || user.email).toLowerCase().includes(searchTerm.toLowerCase()) ||
                          user.email.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = selectedRole === 'all' || user.role === selectedRole;
     const matchesStatus = selectedStatus === 'all' || user.status === selectedStatus;
@@ -247,10 +276,10 @@ const AdminPage: React.FC = () => {
             <CardContent>
               <div className="flex items-center gap-2">
                 <CheckCircle className="h-5 w-5 text-profit" />
-                <span className="text-lg font-bold capitalize">{systemMetrics.systemHealth}</span>
+                <span className="text-lg font-bold capitalize">{systemMetrics?.system_health || 'Loading...'}</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Uptime: {systemMetrics.uptime}
+                Uptime: {systemMetrics?.uptime_percentage ? `${systemMetrics.uptime_percentage}%` : 'Loading...'}
               </p>
             </CardContent>
           </Card>
@@ -267,9 +296,9 @@ const AdminPage: React.FC = () => {
               <Users className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{systemMetrics.activeUsers}</div>
+              <div className="text-2xl font-bold">{systemMetrics?.active_users || 0}</div>
               <p className="text-xs text-muted-foreground">
-                {systemMetrics.autonomousSessions} autonomous sessions
+                {systemMetrics?.autonomous_sessions || 0} autonomous sessions
               </p>
             </CardContent>
           </Card>
@@ -286,7 +315,7 @@ const AdminPage: React.FC = () => {
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{formatNumber(systemMetrics.totalTrades)}</div>
+              <div className="text-2xl font-bold">{formatNumber(systemMetrics?.total_trades_today || 0)}</div>
               <p className="text-xs text-muted-foreground">
                 Last 24 hours
               </p>
@@ -306,10 +335,10 @@ const AdminPage: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-profit">
-                {formatPercentage(systemMetrics.errorRate)}
+                {formatPercentage(systemMetrics?.error_rate || 0)}
               </div>
               <p className="text-xs text-muted-foreground">
-                Avg response: {systemMetrics.responseTime}ms
+                Avg response: {systemMetrics?.response_time_avg || 0}ms
               </p>
             </CardContent>
           </Card>
@@ -345,9 +374,9 @@ const AdminPage: React.FC = () => {
                       <Cpu className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">CPU Usage</span>
                     </div>
-                    <span className="text-sm font-bold">{systemMetrics.cpuUsage}%</span>
+                    <span className="text-sm font-bold">{systemMetrics?.cpuUsage ?? 0}%</span>
                   </div>
-                  <Progress value={systemMetrics.cpuUsage} className="h-2" />
+                  <Progress value={systemMetrics?.cpuUsage ?? 0} className="h-2" />
                 </div>
 
                 <div className="space-y-3">
@@ -356,9 +385,9 @@ const AdminPage: React.FC = () => {
                       <Database className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">Memory Usage</span>
                     </div>
-                    <span className="text-sm font-bold">{systemMetrics.memoryUsage}%</span>
+                    <span className="text-sm font-bold">{systemMetrics?.memoryUsage ?? 0}%</span>
                   </div>
-                  <Progress value={systemMetrics.memoryUsage} className="h-2" />
+                  <Progress value={systemMetrics?.memoryUsage ?? 0} className="h-2" />
                 </div>
 
                 <div className="space-y-3">
@@ -367,9 +396,9 @@ const AdminPage: React.FC = () => {
                       <HardDrive className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">Disk Usage</span>
                     </div>
-                    <span className="text-sm font-bold">{systemMetrics.diskUsage}%</span>
+                    <span className="text-sm font-bold">{systemMetrics?.diskUsage ?? 0}%</span>
                   </div>
-                  <Progress value={systemMetrics.diskUsage} className="h-2" />
+                  <Progress value={systemMetrics?.diskUsage ?? 0} className="h-2" />
                 </div>
 
                 <div className="space-y-3">
@@ -378,9 +407,9 @@ const AdminPage: React.FC = () => {
                       <Wifi className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">Network Latency</span>
                     </div>
-                    <span className="text-sm font-bold">{systemMetrics.networkLatency}ms</span>
+                    <span className="text-sm font-bold">{systemMetrics?.networkLatency ?? 0}ms</span>
                   </div>
-                  <Progress value={systemMetrics.networkLatency} max={200} className="h-2" />
+                  <Progress value={systemMetrics?.networkLatency ?? 0} max={200} className="h-2" />
                 </div>
               </CardContent>
             </Card>
@@ -431,6 +460,47 @@ const AdminPage: React.FC = () => {
 
         {/* Users Tab */}
         <TabsContent value="users" className="space-y-6">
+          {/* Pending Verification Alert */}
+          {pendingUsers.length > 0 && (
+            <Card className="trading-card border-warning">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-warning">
+                  <AlertTriangle className="h-5 w-5" />
+                  Pending Verifications ({pendingUsers.length})
+                </CardTitle>
+                <CardDescription>These users are waiting for admin approval to access the platform</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {pendingUsers.slice(0, 5).map((user) => (
+                    <div key={user.id} className="flex items-center justify-between p-3 bg-warning/10 rounded-lg">
+                      <div>
+                        <p className="font-medium">{user.email}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Registered: {formatRelativeTime(new Date(user.created_at))}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => handleVerifyUser(user.id)}
+                        className="gap-2"
+                      >
+                        <UserCheck className="h-4 w-4" />
+                        Verify Now
+                      </Button>
+                    </div>
+                  ))}
+                  {pendingUsers.length > 5 && (
+                    <p className="text-sm text-muted-foreground text-center">
+                      And {pendingUsers.length - 5} more users pending...
+                    </p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* User Filters */}
           <Card className="trading-card">
             <CardHeader>
@@ -493,26 +563,26 @@ const AdminPage: React.FC = () => {
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
                         <span className="font-medium text-sm">
-                          {user.fullName.split(' ').map(n => n[0]).join('')}
+                          {(user.full_name || user.email).split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
                         </span>
                       </div>
                       
                       <div>
-                        <p className="font-medium">{user.fullName}</p>
+                        <p className="font-medium">{user.full_name || user.email}</p>
                         <p className="text-sm text-muted-foreground">{user.email}</p>
                         <div className="flex items-center gap-2 mt-1">
                           {getStatusBadge(user.status)}
                           <Badge variant="outline" className="text-xs capitalize">
                             {user.role}
                           </Badge>
-                          {user.autonomousMode && (
-                            <Badge variant="profit" className="text-xs">
-                              AI Active
+                          {user.status === 'pending_verification' && (
+                            <Badge variant="warning" className="text-xs">
+                              Needs Verification
                             </Badge>
                           )}
-                          {user.simulationMode && (
-                            <Badge variant="outline" className="text-xs">
-                              Simulation
+                          {user.is_verified === false && user.status !== 'pending_verification' && (
+                            <Badge variant="destructive" className="text-xs">
+                              Not Verified
                             </Badge>
                           )}
                         </div>
@@ -520,12 +590,12 @@ const AdminPage: React.FC = () => {
                     </div>
 
                     <div className="text-right">
-                      <p className="font-medium">{formatCurrency(user.portfolioValue)}</p>
+                      <p className="font-medium">{user.credits ? `${user.credits} credits` : 'No credits'}</p>
                       <p className="text-sm text-muted-foreground">
-                        {user.trades24h} trades today
+                        {user.total_trades || 0} trades total
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Last login: {formatRelativeTime(user.lastLogin)}
+                        {user.last_login ? `Last login: ${formatRelativeTime(new Date(user.last_login))}` : 'Never logged in'}
                       </p>
                     </div>
 
@@ -536,21 +606,23 @@ const AdminPage: React.FC = () => {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem>
-                          <Eye className="mr-2 h-4 w-4" />
-                          View Details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
+                        {(user.status === 'pending_verification' || !user.is_verified) && (
+                          <DropdownMenuItem onClick={() => handleVerifyUser(user.id)}>
+                            <UserCheck className="mr-2 h-4 w-4 text-green-500" />
+                            Verify User
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem onClick={() => handleUserAction(user.id, 'activate')}>
                           <UserCheck className="mr-2 h-4 w-4" />
                           Activate User
                         </DropdownMenuItem>
-                        <DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleUserAction(user.id, 'deactivate')}>
                           <UserX className="mr-2 h-4 w-4" />
-                          Suspend User
+                          Deactivate User
                         </DropdownMenuItem>
-                        <DropdownMenuItem className="text-destructive">
+                        <DropdownMenuItem onClick={() => handleUserAction(user.id, 'suspend')} className="text-destructive">
                           <Ban className="mr-2 h-4 w-4" />
-                          Ban User
+                          Suspend User
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -646,10 +718,10 @@ const AdminPage: React.FC = () => {
                       }`} />
                       
                       <div>
-                        <p className="font-medium">{log.action}</p>
-                        <p className="text-sm text-muted-foreground">{log.details}</p>
+                        <p className="font-medium">{log.action || log.event_type}</p>
+                        <p className="text-sm text-muted-foreground">{log.details || JSON.stringify(log.event_data?.details || {})}</p>
                         <p className="text-xs text-muted-foreground">
-                          by {log.user} • {formatRelativeTime(log.timestamp)}
+                          by {log.user_email || log.user || 'Unknown'} • {formatRelativeTime(new Date(log.created_at || log.timestamp))}
                         </p>
                       </div>
                     </div>
