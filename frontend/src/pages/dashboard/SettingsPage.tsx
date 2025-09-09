@@ -126,7 +126,7 @@ const SettingsPage: React.FC = () => {
 
   const fetchUserSettings = async () => {
     try {
-      const response = await apiClient.get('/api/v1/user/settings');
+      const response = await apiClient.get('/user/settings');
       if (response.data.success) {
         setSettings(response.data.data);
       }
@@ -140,7 +140,7 @@ const SettingsPage: React.FC = () => {
     try {
       const payload = section ? { [section]: settings[section] } : settings;
       
-      const response = await apiClient.put('/api/v1/user/settings', payload);
+      const response = await apiClient.put('/user/settings', payload);
       
       if (response.data.success) {
         toast({
@@ -188,7 +188,7 @@ const SettingsPage: React.FC = () => {
 
     setIsLoading(true);
     try {
-      await apiClient.post('/api/v1/user/change-password', {
+      await apiClient.post('/user/change-password', {
         currentPassword,
         newPassword
       });

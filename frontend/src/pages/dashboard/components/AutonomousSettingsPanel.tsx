@@ -84,7 +84,7 @@ const AutonomousSettingsPanel: React.FC<AutonomousSettingsPanelProps> = ({
 
   const fetchSettings = async () => {
     try {
-      const response = await apiClient.get('/api/v1/autonomous/settings');
+      const response = await apiClient.get('/autonomous/settings');
       if (response.data.success) {
         setSettings(response.data.data);
       }
@@ -96,8 +96,8 @@ const AutonomousSettingsPanel: React.FC<AutonomousSettingsPanelProps> = ({
   const fetchStats = async () => {
     try {
       const endpoint = isPaperMode 
-        ? '/api/v1/paper-trading/autonomous-stats'
-        : '/api/v1/autonomous/stats';
+        ? '/paper-trading/autonomous-stats'
+        : '/autonomous/stats';
       
       const response = await apiClient.get(endpoint);
       if (response.data.success) {
@@ -111,7 +111,7 @@ const AutonomousSettingsPanel: React.FC<AutonomousSettingsPanelProps> = ({
   const saveSettings = async () => {
     setIsLoading(true);
     try {
-      const response = await apiClient.post('/api/v1/autonomous/settings', {
+      const response = await apiClient.post('/autonomous/settings', {
         ...settings,
         paperMode: isPaperMode
       });

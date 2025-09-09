@@ -42,7 +42,7 @@ export const usePaperModeStore = create<PaperModeState>()(
         try {
           if (enabled) {
             // Initialize paper trading account if needed
-            const response = await apiClient.post('/api/v1/paper-trading/setup');
+            const response = await apiClient.post('/paper-trading/setup');
             
             if (response.data.success) {
               set({ 
@@ -70,7 +70,7 @@ export const usePaperModeStore = create<PaperModeState>()(
 
       fetchPaperStats: async () => {
         try {
-          const response = await apiClient.get('/api/v1/paper-trading/stats');
+          const response = await apiClient.get('/paper-trading/stats');
           
           if (response.data.success) {
             set({ 
@@ -87,7 +87,7 @@ export const usePaperModeStore = create<PaperModeState>()(
         set({ isLoading: true });
         
         try {
-          const response = await apiClient.post('/api/v1/paper-trading/reset');
+          const response = await apiClient.post('/paper-trading/reset');
           
           if (response.data.success) {
             set({

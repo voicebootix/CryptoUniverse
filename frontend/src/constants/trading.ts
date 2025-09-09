@@ -295,33 +295,33 @@ export const PHASE_ORDER: ExecutionPhase[] = [
 // API Endpoints
 export const API_ENDPOINTS = {
   // Chat Endpoints
-  CHAT_SESSION: '/api/v1/chat/session/new',
-  CHAT_MESSAGE: '/api/v1/chat/message',
-  CHAT_HISTORY: '/api/v1/chat/history',
-  CHAT_STATS: '/api/v1/chat/stats',
-  CHAT_RECENT_ACTIONS: '/api/v1/chat/recent-actions',
+  CHAT_SESSION: '/chat/session/new',
+  CHAT_MESSAGE: '/chat/message',
+  CHAT_HISTORY: '/chat/history',
+  CHAT_STATS: '/chat/stats',
+  CHAT_RECENT_ACTIONS: '/chat/recent-actions',
   
   // Trading Endpoints
-  TRADE_EXECUTE: '/api/v1/trading/execute',
-  TRADE_HISTORY: '/api/v1/trading/history',
-  TRADE_POSITIONS: '/api/v1/trading/positions',
+  TRADE_EXECUTE: '/trading/execute',
+  TRADE_HISTORY: '/trading/history',
+  TRADE_POSITIONS: '/trading/positions',
   
   // Paper Trading Endpoints
-  PAPER_TRADING_EXECUTE: '/api/v1/paper-trading/execute',
-  PAPER_TRADING_STATS: '/api/v1/paper-trading/stats',
-  PAPER_TRADING_HISTORY: '/api/v1/paper-trading/history',
+  PAPER_TRADING_EXECUTE: '/paper-trading/execute',
+  PAPER_TRADING_STATS: '/paper-trading/stats',
+  PAPER_TRADING_HISTORY: '/paper-trading/history',
   
   // User Preferences
-  USER_PREFERENCES: '/api/v1/user/preferences',
-  USER_TRUST_SCORE: '/api/v1/user/trust-score',
+  USER_PREFERENCES: '/user/preferences',
+  USER_TRUST_SCORE: '/user/trust-score',
   
   // Market Data
-  MARKET_PRICES: '/api/v1/market/realtime-prices',
-  MARKET_OPPORTUNITIES: '/api/v1/market/opportunities',
+  MARKET_PRICES: '/market/realtime-prices',
+  MARKET_OPPORTUNITIES: '/market/opportunities',
   
   // AI Consensus
-  AI_CONSENSUS: '/api/v1/ai-consensus/analyze',
-  AI_CONSENSUS_STATUS: '/api/v1/ai-consensus/status'
+  AI_CONSENSUS: '/ai-consensus/analyze',
+  AI_CONSENSUS_STATUS: '/ai-consensus/status'
 };
 
 // WebSocket Events

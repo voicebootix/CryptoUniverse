@@ -171,7 +171,7 @@ const TrustJourneyDashboard: React.FC = () => {
   const { data: trustData, isLoading: trustLoading } = useQuery({
     queryKey: ['trust-score'],
     queryFn: async () => {
-      const response = await apiClient.get('/api/v1/user/trust-score');
+      const response = await apiClient.get('/user/trust-score');
       return response.data.data || {
         score: 0,
         level: TrustLevel.BEGINNER,
@@ -197,7 +197,7 @@ const TrustJourneyDashboard: React.FC = () => {
   const { data: milestones, isLoading: milestonesLoading } = useQuery({
     queryKey: ['trust-milestones'],
     queryFn: async () => {
-      const response = await apiClient.get('/api/v1/user/milestones');
+      const response = await apiClient.get('/user/milestones');
       return mapMilestones(response.data.data || []);
     }
   });

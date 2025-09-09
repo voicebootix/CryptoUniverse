@@ -50,7 +50,7 @@ const PortfolioHeader: React.FC = () => {
           };
         } else {
           // Fetch real portfolio metrics
-          const response = await apiClient.get('/api/v1/portfolio/metrics');
+          const response = await apiClient.get('/portfolio/metrics');
           return response.data.data;
         }
       } catch (error) {

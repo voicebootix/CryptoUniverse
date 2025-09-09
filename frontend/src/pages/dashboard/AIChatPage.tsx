@@ -39,7 +39,7 @@ const AIChatPage: React.FC = () => {
   const { data: chatStats, isLoading: statsLoading } = useQuery({
     queryKey: ['chat-stats'],
     queryFn: async () => {
-      const response = await apiClient.get('/api/v1/chat/stats');
+      const response = await apiClient.get('/chat/stats');
       return response.data;
     },
     refetchInterval: 30000, // Refresh every 30 seconds
@@ -49,7 +49,7 @@ const AIChatPage: React.FC = () => {
   const { data: recentActions, isLoading: actionsLoading } = useQuery({
     queryKey: ['recent-actions'],
     queryFn: async () => {
-      const response = await apiClient.get('/api/v1/chat/recent-actions');
+      const response = await apiClient.get('/chat/recent-actions');
       return response.data.actions || [];
     },
     refetchInterval: 10000, // Refresh every 10 seconds

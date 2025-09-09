@@ -30,8 +30,8 @@ const AnalyticsOverview: React.FC = () => {
     queryKey: ['performance-metrics', isPaperMode],
     queryFn: async () => {
       const endpoint = isPaperMode 
-        ? '/api/v1/paper-trading/stats'
-        : '/api/v1/portfolio/performance';
+        ? '/paper-trading/stats'
+        : '/portfolio/performance';
       const response = await apiClient.get(endpoint);
       return response.data.data;
     },

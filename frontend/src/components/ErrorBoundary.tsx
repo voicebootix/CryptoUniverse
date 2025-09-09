@@ -53,7 +53,7 @@ class ErrorBoundary extends Component<Props, State> {
   private logErrorToService = (error: Error, errorInfo: ErrorInfo) => {
     // Send to error tracking service (e.g., Sentry)
     try {
-      fetch('/api/v1/errors/log', {
+      fetch('/errors/log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

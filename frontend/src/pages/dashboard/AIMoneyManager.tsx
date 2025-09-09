@@ -100,7 +100,7 @@ const AIMoneyManager: React.FC = () => {
 
   const initializeChatSession = async () => {
     try {
-      const response = await apiClient.post('/api/v1/chat/sessions', {
+      const response = await apiClient.post('/chat/sessions', {
         session_type: 'trading',
         context: {
           isPaperMode,
@@ -191,7 +191,7 @@ const AIMoneyManager: React.FC = () => {
     try {
       // Phase 1: Analysis
       setCurrentPhase(ExecutionPhase.ANALYSIS);
-      const analysisResponse = await apiClient.post('/api/v1/ai-consensus/analyze-opportunity', {
+      const analysisResponse = await apiClient.post('/ai-consensus/analyze-opportunity', {
         ...tradeParams,
         paperMode: isPaperMode
       });
@@ -203,7 +203,7 @@ const AIMoneyManager: React.FC = () => {
 
       // Phase 2: Consensus
       setCurrentPhase(ExecutionPhase.CONSENSUS);
-      const consensusResponse = await apiClient.post('/api/v1/ai-consensus/consensus-decision', {
+      const consensusResponse = await apiClient.post('/ai-consensus/consensus-decision', {
         analysis_id: analysisResponse.data.data.id,
         paperMode: isPaperMode
       });
@@ -215,7 +215,7 @@ const AIMoneyManager: React.FC = () => {
 
       // Phase 3: Validation
       setCurrentPhase(ExecutionPhase.VALIDATION);
-      const validationResponse = await apiClient.post('/api/v1/ai-consensus/validate-trade', {
+      const validationResponse = await apiClient.post('/ai-consensus/validate-trade', {
         consensus_id: consensusResponse.data.data.id,
         paperMode: isPaperMode
       });
@@ -233,8 +233,8 @@ const AIMoneyManager: React.FC = () => {
       // Phase 4: Execution
       setCurrentPhase(ExecutionPhase.EXECUTION);
       const endpoint = isPaperMode 
-        ? '/api/v1/paper-trading/execute'
-        : '/api/v1/trading/execute';
+        ? '/paper-trading/execute'
+        : '/trading/execute';
 
       const executionResponse = await apiClient.post(endpoint, {
         validation_id: validationResponse.data.data.id,
@@ -288,7 +288,7 @@ const AIMoneyManager: React.FC = () => {
     try {
       const newState = !isAutonomousEnabled;
       
-      const response = await apiClient.post('/api/v1/autonomous/toggle', {
+      const response = await apiClient.post('/autonomous/toggle', {
         enabled: newState,
         paperMode: isPaperMode
       });

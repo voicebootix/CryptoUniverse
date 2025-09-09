@@ -75,8 +75,8 @@ const ManualTradingPanel: React.FC<ManualTradingPanelProps> = ({
   const fetchBalance = async () => {
     try {
       const endpoint = isPaperMode 
-        ? '/api/v1/paper-trading/balance'
-        : '/api/v1/portfolio/balance';
+        ? '/paper-trading/balance'
+        : '/portfolio/balance';
       
       const response = await apiClient.get(endpoint);
       if (response.data.success) {
@@ -89,7 +89,7 @@ const ManualTradingPanel: React.FC<ManualTradingPanelProps> = ({
 
   const fetchTradingPairs = async () => {
     try {
-      const response = await apiClient.get('/api/v1/market/pairs');
+      const response = await apiClient.get('/market/pairs');
       if (response.data.success) {
         setTradingPairs(response.data.data);
       }
