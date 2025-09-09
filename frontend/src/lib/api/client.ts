@@ -20,8 +20,8 @@ export const apiClient: AxiosInstance = axios.create({
   },
 });
 
-// Shared refresh promise to prevent concurrent token refreshes
-let refreshInFlight: Promise<void> | null = null;
+// Note: Using globalThis.__authRefreshPromise for deduplication instead of module-level promise
+// This ensures consistent deduplication across the entire app
 
 // Request interceptor to add auth token with expiry checking
 apiClient.interceptors.request.use(
@@ -63,18 +63,13 @@ apiClient.interceptors.request.use(
           console.log('Token expiring soon, attempting refresh before request...');
           
           try {
-            // Check for in-flight refresh to avoid concurrent refreshes
-            if (refreshInFlight) {
+            // Use global deduplication mechanism
+            if (globalThis.__authRefreshPromise) {
               console.log('Refresh already in progress, awaiting...');
-              await refreshInFlight;
+              await globalThis.__authRefreshPromise;
             } else {
-              console.log('Starting new refresh...');
-              refreshInFlight = refreshToken();
-              try {
-                await refreshInFlight;
-              } finally {
-                refreshInFlight = null;
-              }
+              console.log('Starting new refresh from request interceptor...');
+              await refreshToken();
             }
             
             // Get fresh tokens after refresh
@@ -86,7 +81,6 @@ apiClient.interceptors.request.use(
             }
           } catch (refreshError) {
             console.error('Pre-request token refresh failed:', refreshError);
-            refreshInFlight = null;
             logout();
             throw new Error('Session expired. Please login again.');
           }
@@ -152,18 +146,13 @@ apiClient.interceptors.response.use(
                 return Promise.reject(new Error('Session expired. Please login again.'));
               }
               
-              // Use the same deduplication logic as request interceptor
-              if (refreshInFlight) {
+              // Use the same global deduplication as everywhere else
+              if (globalThis.__authRefreshPromise) {
                 console.log('Refresh already in progress, awaiting...');
-                await refreshInFlight;
+                await globalThis.__authRefreshPromise;
               } else {
                 console.log('Starting new refresh from response interceptor...');
-                refreshInFlight = authStore.refreshToken();
-                try {
-                  await refreshInFlight;
-                } finally {
-                  refreshInFlight = null;
-                }
+                await authStore.refreshToken();
               }
               
               // Retry original request with new token
@@ -181,7 +170,6 @@ apiClient.interceptors.response.use(
             } catch (refreshError) {
               // Refresh failed, logout user
               console.error('Token refresh failed in response interceptor:', refreshError);
-              refreshInFlight = null;
               const { useAuthStore } = await import('@/store/authStore');
               useAuthStore.getState().logout();
               

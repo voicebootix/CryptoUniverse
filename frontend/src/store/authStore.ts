@@ -3,6 +3,11 @@ import { persist } from 'zustand/middleware';
 import { User, AuthTokens, LoginRequest, RegisterRequest, AuthResponse } from '@/types/auth';
 import { apiClient } from '@/lib/api/client';
 
+// Extend globalThis for TypeScript
+declare global {
+  var __authRefreshPromise: Promise<void> | null;
+}
+
 interface AuthState {
   user: User | null;
   tokens: AuthTokens | null;
@@ -194,6 +199,9 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       logout: () => {
+        // Clear global refresh promise to prevent hanging state
+        globalThis.__authRefreshPromise = null;
+        
         // Clear authorization header
         delete apiClient.defaults.headers.common['Authorization'];
         
@@ -214,6 +222,12 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       refreshToken: async () => {
+        // Use global deduplication to prevent concurrent refresh calls
+        if (globalThis.__authRefreshPromise) {
+          console.log('Token refresh already in progress, awaiting existing promise...');
+          return await globalThis.__authRefreshPromise;
+        }
+
         const { tokens } = get();
         
         if (!tokens?.refresh_token) {
@@ -221,42 +235,56 @@ export const useAuthStore = create<AuthStore>()(
           return;
         }
 
-        try {
-          const response = await apiClient.post<AuthResponse>('/auth/refresh', {
-            refresh_token: tokens.refresh_token,
-          });
-
-          if (response.data.success && response.data.tokens) {
-            // Update tokens with properly normalized expiration timestamp
-            const now = Math.floor(Date.now() / 1000);
-            const rawExpiresIn = Number(response.data.tokens.expires_in) || 28800; // Default 8 hours
-            
-            // Normalize expires_in: if it looks like absolute timestamp, use it; otherwise treat as duration
-            const expirationTimestamp = rawExpiresIn > now 
-              ? rawExpiresIn  // Already an absolute timestamp
-              : now + rawExpiresIn;  // Duration, convert to timestamp
-            
-            const updatedTokens = {
-              ...response.data.tokens,
-              expires_in: Math.floor(expirationTimestamp) // Store as integer timestamp
-            };
-            
-            set({
-              tokens: updatedTokens,
-              error: null,
+        // Create and store the refresh promise globally
+        globalThis.__authRefreshPromise = (async () => {
+          try {
+            console.log('Starting token refresh...');
+            const response = await apiClient.post<AuthResponse>('/auth/refresh', {
+              refresh_token: tokens.refresh_token,
             });
 
-            // Update authorization header
-            apiClient.defaults.headers.common['Authorization'] = 
-              `Bearer ${response.data.tokens.access_token}`;
-          } else {
-            throw new Error('Token refresh failed');
+            if (response.data.success && response.data.tokens) {
+              // Update tokens with properly normalized expiration timestamp
+              const now = Math.floor(Date.now() / 1000);
+              const rawExpiresIn = Number(response.data.tokens.expires_in) || 28800; // Default 8 hours
+              
+              // Normalize expires_in: if it looks like absolute timestamp, use it; otherwise treat as duration
+              const expirationTimestamp = rawExpiresIn > now 
+                ? rawExpiresIn  // Already an absolute timestamp
+                : now + rawExpiresIn;  // Duration, convert to timestamp
+              
+              const updatedTokens = {
+                ...response.data.tokens,
+                expires_in: Math.floor(expirationTimestamp) // Store as integer timestamp
+              };
+              
+              set({
+                tokens: updatedTokens,
+                error: null,
+              });
+
+              // Update authorization header
+              apiClient.defaults.headers.common['Authorization'] = 
+                `Bearer ${response.data.tokens.access_token}`;
+              
+              console.log('Token refresh completed successfully');
+            } else {
+              throw new Error('Token refresh failed');
+            }
+          } catch (error) {
+            console.error('Token refresh failed:', error);
+            // Clear the promise before logout to prevent hanging state
+            globalThis.__authRefreshPromise = null;
+            // If refresh fails, logout user
+            get().logout();
+            throw error;
+          } finally {
+            // Always clear the global promise on completion
+            globalThis.__authRefreshPromise = null;
           }
-        } catch (error) {
-          // If refresh fails, logout user
-          get().logout();
-          throw error;
-        }
+        })();
+
+        return await globalThis.__authRefreshPromise;
       },
 
       clearError: () => {
@@ -325,10 +353,16 @@ const setupTokenRefresh = () => {
   // If token already expired or expires very soon, refresh immediately
   if (timeUntilExpiry <= 60) {
     console.log('Token expired or expiring soon, refreshing immediately...');
-    refreshToken().catch((error) => {
-      console.error('Immediate token refresh failed:', error);
-      logout();
-    });
+    
+    // Use global deduplication for immediate refresh
+    if (!globalThis.__authRefreshPromise) {
+      refreshToken().catch((error) => {
+        console.error('Immediate token refresh failed:', error);
+        logout();
+      });
+    } else {
+      console.log('Immediate refresh already in progress, skipping...');
+    }
     return;
   }
   
@@ -339,6 +373,22 @@ const setupTokenRefresh = () => {
   
   refreshTimer = setTimeout(async () => {
     console.log('Executing automatic token refresh...');
+    
+    // Use global deduplication for scheduled refresh
+    if (globalThis.__authRefreshPromise) {
+      console.log('Scheduled refresh skipped - refresh already in progress');
+      // Still need to schedule next refresh cycle
+      try {
+        await globalThis.__authRefreshPromise;
+        console.log('Awaited existing refresh, scheduling next cycle...');
+        setupTokenRefresh(); // Setup next refresh cycle
+      } catch (error) {
+        console.error('Awaited refresh failed:', error);
+        logout();
+      }
+      return;
+    }
+    
     try {
       await refreshToken();
       console.log('Automatic token refresh successful');
