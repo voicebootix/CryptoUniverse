@@ -44,7 +44,7 @@ apiClient.interceptors.request.use(
     }
 
     // Add request timestamp for debugging
-    config.metadata = { startTime: new Date() };
+    (config as any).metadata = { startTime: Date.now() };
     
     return config;
   },
@@ -58,9 +58,9 @@ apiClient.interceptors.response.use(
   (response: AxiosResponse) => {
     // Log response time in development
     if (import.meta.env.DEV) {
-      const startTime = response.config.metadata?.startTime;
+      const startTime = (response.config as any).metadata?.startTime;
       if (startTime) {
-        const duration = new Date().getTime() - startTime.getTime();
+        const duration = Date.now() - startTime;
         // API request timing logged internally
       }
     }
