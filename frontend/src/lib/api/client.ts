@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
-import { useAuthStore } from '@/store/authStore';
+// Note: useAuthStore imported dynamically to avoid circular dependency
 
 // API configuration
 // In production, always use the backend URL, not relative paths
@@ -20,7 +20,10 @@ export const apiClient: AxiosInstance = axios.create({
   },
 });
 
-// Request interceptor to add auth token
+// Note: Using globalThis.__authRefreshPromise for deduplication instead of module-level promise
+// This ensures consistent deduplication across the entire app
+
+// Request interceptor to add auth token with expiry checking
 apiClient.interceptors.request.use(
   async (config) => {
     // Skip auth for certain endpoints
@@ -29,7 +32,9 @@ apiClient.interceptors.request.use(
       '/auth/register',
       '/auth/forgot-password',
       '/auth/reset-password',
-      '/auth/verify-email'
+      '/auth/verify-email',
+      '/auth/refresh',
+      '/auth/logout'
     ];
 
     const shouldSkipAuth = skipAuthEndpoints.some(endpoint => 
@@ -37,9 +42,53 @@ apiClient.interceptors.request.use(
     );
 
     if (!shouldSkipAuth) {
-      const token = useAuthStore.getState().tokens?.access_token;
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+      // Use dynamic import to avoid circular dependency
+      const { useAuthStore } = await import('@/store/authStore');
+      const { tokens, refreshToken, logout } = useAuthStore.getState();
+      
+      if (!tokens?.access_token) {
+        console.log('No access token available');
+        // Don't call logout() here to avoid recursive calls - let higher level handle
+        throw new Error('Authentication required');
+      }
+      
+      // Check if token is expired or expiring soon
+      if (tokens?.expires_in) {
+        const now = Math.floor(Date.now() / 1000);
+        const expirationTime = tokens.expires_in; // Now always a timestamp
+        const timeUntilExpiry = expirationTime - now;
+        
+        // If token expires in less than 30 seconds, try to refresh it
+        if (timeUntilExpiry <= 30) {
+          console.log('Token expiring soon, attempting refresh before request...');
+          
+          try {
+            // Use global deduplication mechanism
+            if (globalThis.__authRefreshPromise) {
+              console.log('Refresh already in progress, awaiting...');
+              await globalThis.__authRefreshPromise;
+            } else {
+              console.log('Starting new refresh from request interceptor...');
+              await refreshToken();
+            }
+            
+            // Get fresh tokens after refresh
+            const freshTokens = useAuthStore.getState().tokens;
+            if (freshTokens?.access_token) {
+              config.headers.Authorization = `Bearer ${freshTokens.access_token}`;
+            } else {
+              throw new Error('No fresh token after refresh');
+            }
+          } catch (refreshError) {
+            console.error('Pre-request token refresh failed:', refreshError);
+            logout();
+            throw new Error('Session expired. Please login again.');
+          }
+        } else {
+          config.headers.Authorization = `Bearer ${tokens.access_token}`;
+        }
+      } else {
+        config.headers.Authorization = `Bearer ${tokens.access_token}`;
       }
     }
 
@@ -80,22 +129,47 @@ apiClient.interceptors.response.use(
           if (!originalRequest._retry) {
             originalRequest._retry = true;
             
-            // Try to refresh token
+            console.log('401 Unauthorized - attempting token refresh...');
+            
+            // Try to refresh token with deduplication
             try {
               const { useAuthStore } = await import('@/store/authStore');
-              await useAuthStore.getState().refreshToken();
+              const authStore = useAuthStore.getState();
+              
+              // Check if we have a refresh token
+              if (!authStore.tokens?.refresh_token) {
+                console.log('No refresh token available, logging out...');
+                authStore.logout();
+                if (typeof window !== 'undefined') {
+                  window.location.href = '/login';
+                }
+                return Promise.reject(new Error('Session expired. Please login again.'));
+              }
+              
+              // Use the same global deduplication as everywhere else
+              if (globalThis.__authRefreshPromise) {
+                console.log('Refresh already in progress, awaiting...');
+                await globalThis.__authRefreshPromise;
+              } else {
+                console.log('Starting new refresh from response interceptor...');
+                await authStore.refreshToken();
+              }
               
               // Retry original request with new token
-              const token = useAuthStore.getState().tokens?.access_token;
-              if (token) {
+              const newTokens = authStore.tokens;
+              if (newTokens?.access_token) {
                 originalRequest.headers = {
                   ...originalRequest.headers,
-                  Authorization: `Bearer ${token}`
+                  Authorization: `Bearer ${newTokens.access_token}`
                 };
+                console.log('Token refreshed successfully, retrying original request...');
                 return apiClient(originalRequest);
+              } else {
+                throw new Error('Token refresh succeeded but no new token received');
               }
             } catch (refreshError) {
               // Refresh failed, logout user
+              console.error('Token refresh failed in response interceptor:', refreshError);
               const { useAuthStore } = await import('@/store/authStore');
               useAuthStore.getState().logout();
               
@@ -103,6 +177,17 @@ apiClient.interceptors.response.use(
               if (typeof window !== 'undefined') {
                 window.location.href = '/login';
               }
+              
+              return Promise.reject(new Error('Session expired. Please login again.'));
+            }
+          } else {
+            // Already tried refresh, force logout
+            console.log('Token refresh already attempted, forcing logout...');
+            const { useAuthStore } = await import('@/store/authStore');
+            useAuthStore.getState().logout();
+            
+            if (typeof window !== 'undefined') {
+              window.location.href = '/login';
             }
           }
           break;
@@ -308,7 +393,8 @@ export const exchangesAPI = axios.create({
 [tradingAPI, exchangesAPI].forEach(instance => {
   // Add auth interceptor (same as apiClient)
   instance.interceptors.request.use(
-    (config) => {
+    async (config) => {
+      const { useAuthStore } = await import('@/store/authStore');
       const authStore = useAuthStore.getState();
       const token = authStore.tokens?.access_token;
       
@@ -331,6 +417,7 @@ export const exchangesAPI = axios.create({
         originalRequest._retry = true;
         
         try {
+          const { useAuthStore } = await import('@/store/authStore');
           const authStore = useAuthStore.getState();
           await authStore.refreshToken();
           const newToken = authStore.tokens?.access_token;
@@ -341,6 +428,7 @@ export const exchangesAPI = axios.create({
           }
         } catch (refreshError) {
           console.error('Token refresh failed:', refreshError);
+          const { useAuthStore } = await import('@/store/authStore');
           const authStore = useAuthStore.getState();
           authStore.logout();
           window.location.href = '/login';
