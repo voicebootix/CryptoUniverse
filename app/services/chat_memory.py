@@ -9,7 +9,7 @@ features like summarization and context management.
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
-from sqlalchemy import desc, asc, and_, or_, select, text
+from sqlalchemy import desc, asc, and_, or_, select, text, func
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError
 import structlog
@@ -166,26 +166,30 @@ class ChatMemoryService:
         """
         try:
             async for db in get_database():
-                query = db.query(ChatMessage).filter(
+                # Use async SQLAlchemy syntax
+                stmt = select(ChatMessage).filter(
                     ChatMessage.session_id == session_id
                 ).order_by(desc(ChatMessage.timestamp))
                 
                 if limit:
-                    query = query.limit(limit)
+                    stmt = stmt.limit(limit)
                 
-                messages = query.all()
+                result = await db.execute(stmt)
+                messages = result.scalars().all()
                 
                 # Convert to dict format
-                result = [msg.to_dict() for msg in reversed(messages)]
+                result_messages = [msg.to_dict() for msg in reversed(messages)]
                 
                 # Add session context if requested
                 if include_context:
-                    session = db.query(ChatSession).filter(
+                    session_stmt = select(ChatSession).filter(
                         ChatSession.session_id == session_id
-                    ).first()
+                    )
+                    session_result = await db.execute(session_stmt)
+                    session = session_result.scalar_one_or_none()
                     
                     if session:
-                        result.insert(0, {
+                        result_messages.insert(0, {
                             "type": "session_context",
                             "context": session.context,
                             "active_strategies": session.active_strategies,
@@ -193,7 +197,7 @@ class ChatMemoryService:
                             "session_type": session.session_type
                         })
                 
-                return result
+                return result_messages
                 
         except SQLAlchemyError as e:
             logger.error("Failed to get session messages", error=str(e), session_id=session_id)
@@ -256,9 +260,12 @@ class ChatMemoryService:
         """
         try:
             async for db in get_database():
-                session = db.query(ChatSession).filter(
+                # Use async SQLAlchemy syntax
+                stmt = select(ChatSession).filter(
                     ChatSession.session_id == session_id
-                ).first()
+                )
+                result = await db.execute(stmt)
+                session = result.scalar_one_or_none()
                 
                 if not session:
                     return False
@@ -304,9 +311,11 @@ class ChatMemoryService:
         try:
             async for db in get_database():
                 # Get session information
-                session = db.query(ChatSession).filter(
+                stmt = select(ChatSession).filter(
                     ChatSession.session_id == session_id
-                ).first()
+                )
+                result = await db.execute(stmt)
+                session = result.scalar_one_or_none()
                 
                 if not session:
                     return {}
@@ -314,14 +323,18 @@ class ChatMemoryService:
                 context_window = context_window or self.context_window_size
                 
                 # Get recent messages
-                recent_messages = db.query(ChatMessage).filter(
+                msg_stmt = select(ChatMessage).filter(
                     ChatMessage.session_id == session_id
-                ).order_by(desc(ChatMessage.timestamp)).limit(context_window).all()
+                ).order_by(desc(ChatMessage.timestamp)).limit(context_window)
+                msg_result = await db.execute(msg_stmt)
+                recent_messages = msg_result.scalars().all()
                 
                 # Get session summaries
-                summaries = db.query(ChatSessionSummary).filter(
+                sum_stmt = select(ChatSessionSummary).filter(
                     ChatSessionSummary.session_id == session_id
-                ).order_by(desc(ChatSessionSummary.created_at)).limit(3).all()
+                ).order_by(desc(ChatSessionSummary.created_at)).limit(3)
+                sum_result = await db.execute(sum_stmt)
+                summaries = sum_result.scalars().all()
                 
                 return {
                     "session_id": str(session.session_id),
@@ -368,30 +381,37 @@ class ChatMemoryService:
         """
         try:
             # Count messages in session
-            message_count = db.query(ChatMessage).filter(
+            count_stmt = select(func.count(ChatMessage.message_id)).filter(
                 ChatMessage.session_id == session_id
-            ).count()
+            )
+            count_result = await db.execute(count_stmt)
+            message_count = count_result.scalar()
             
             if message_count < self.max_messages_per_session:
                 return False
             
             # Get last summary timestamp
-            last_summary = db.query(ChatSessionSummary).filter(
+            summary_stmt = select(ChatSessionSummary).filter(
                 ChatSessionSummary.session_id == session_id
-            ).order_by(desc(ChatSessionSummary.created_at)).first()
+            ).order_by(desc(ChatSessionSummary.created_at))
+            summary_result = await db.execute(summary_stmt)
+            last_summary = summary_result.scalar_one_or_none()
             
             # Determine messages to summarize
             if last_summary:
-                messages_to_summarize = db.query(ChatMessage).filter(
+                msgs_stmt = select(ChatMessage).filter(
                     and_(
                         ChatMessage.session_id == session_id,
                         ChatMessage.timestamp > last_summary.end_timestamp
                     )
-                ).order_by(asc(ChatMessage.timestamp)).limit(self.summarization_threshold).all()
+                ).order_by(asc(ChatMessage.timestamp)).limit(self.summarization_threshold)
             else:
-                messages_to_summarize = db.query(ChatMessage).filter(
+                msgs_stmt = select(ChatMessage).filter(
                     ChatMessage.session_id == session_id
-                ).order_by(asc(ChatMessage.timestamp)).limit(self.summarization_threshold).all()
+                ).order_by(asc(ChatMessage.timestamp)).limit(self.summarization_threshold)
+            
+            msgs_result = await db.execute(msgs_stmt)
+            messages_to_summarize = msgs_result.scalars().all()
             
             if len(messages_to_summarize) < 50:  # Not enough messages to summarize
                 return False
