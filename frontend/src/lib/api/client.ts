@@ -44,7 +44,7 @@ apiClient.interceptors.request.use(
     }
 
     // Add request timestamp for debugging
-    config.metadata = { startTime: new Date() };
+    config.metadata = { ...(config.metadata || {}), startTime: Date.now() };
     
     return config;
   },
@@ -60,7 +60,7 @@ apiClient.interceptors.response.use(
     if (import.meta.env.DEV) {
       const startTime = response.config.metadata?.startTime;
       if (startTime) {
-        const duration = new Date().getTime() - startTime.getTime();
+        const duration = Date.now() - startTime;
         // API request timing logged internally
       }
     }
@@ -359,11 +359,4 @@ export type APIError = {
   data?: any;
 };
 
-// Declare module augmentation for metadata
-declare module 'axios' {
-  interface AxiosRequestConfig {
-    metadata?: {
-      startTime: Date;
-    };
-  }
-}
+// Module augmentation moved to src/types/axios.d.ts

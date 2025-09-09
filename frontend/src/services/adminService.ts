@@ -1,6 +1,9 @@
 import axios from 'axios';
 import { getAuthToken } from './authService';
 
+// Debug flag - only enable in dev mode or when explicitly enabled
+const DEBUG_HTTP = import.meta.env.DEV || import.meta.env.VITE_DEBUG_HTTP === 'true';
+
 // Create axios instance with auth interceptor
 const adminApi = axios.create({
   baseURL: `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/admin`,
@@ -8,11 +11,65 @@ const adminApi = axios.create({
 
 // Add auth token to requests
 adminApi.interceptors.request.use((config) => {
+  // Set start time for duration tracking
+  config.metadata = { ...(config.metadata || {}), startTime: Date.now() };
+  
   const token = getAuthToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  
+  // Only log in debug mode, and sanitize output
+  if (DEBUG_HTTP) {
+    console.debug('Admin API Request:', {
+      method: config.method?.toUpperCase(),
+      url: config.url,
+      hasAuth: !!token,
+      // Never log the actual token or headers
+    });
+  }
+  
   return config;
+}, (error) => {
+  // Sanitized error logging
+  if (DEBUG_HTTP) {
+    console.debug('Admin API Request Error:', {
+      message: error.message,
+      // Don't log config or headers
+    });
+  }
+  return Promise.reject(error);
+});
+
+// Add response interceptor for debugging
+adminApi.interceptors.response.use((response) => {
+  // Only log minimal metadata in debug mode
+  if (DEBUG_HTTP) {
+    const duration = Date.now() - (response.config.metadata?.startTime || Date.now());
+    console.debug('Admin API Response:', {
+      method: response.config.method?.toUpperCase(),
+      url: response.config.url,
+      status: response.status,
+      duration: `${duration}ms`,
+      requestId: response.headers['x-request-id'],
+      // Never log response data which may contain PII
+    });
+  }
+  return response;
+}, (error) => {
+  // Sanitized error logging
+  if (DEBUG_HTTP) {
+    const duration = Date.now() - (error.config?.metadata?.startTime || Date.now());
+    console.debug('Admin API Error:', {
+      method: error.config?.method?.toUpperCase(),
+      url: error.config?.url,
+      status: error.response?.status,
+      message: error.message,
+      duration: `${duration}ms`,
+      // Never log response.data which may contain sensitive error details
+    });
+  }
+  return Promise.reject(error);
 });
 
 // User Management
