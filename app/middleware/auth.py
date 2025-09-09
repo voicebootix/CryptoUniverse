@@ -46,12 +46,12 @@ PROTECTED_PATHS = {
 TOKEN_REFRESH_THRESHOLD = 300
 
 
-def add_cors_headers_to_response(response: JSONResponse, request: Request) -> None:
+def add_cors_headers_to_response(response: Response, request: Request) -> None:
     """
     Add proper CORS headers to error responses with origin allowlist validation.
     
     Args:
-        response: The JSONResponse to add headers to
+        response: The Response to add headers to (can be any starlette.Response type)
         request: The incoming request to get Origin from
     """
     settings = get_settings()
@@ -67,11 +67,15 @@ def add_cors_headers_to_response(response: JSONResponse, request: Request) -> No
         response.headers["Access-Control-Allow-Origin"] = "*"
         # Don't set credentials header for non-allowed origins
     
-    # Append "Origin" to existing Vary header instead of replacing
+    # Append "Origin" to existing Vary header with proper parsing
     existing_vary = response.headers.get("Vary", "")
     if existing_vary:
-        if "Origin" not in existing_vary:
-            response.headers["Vary"] = f"{existing_vary}, Origin"
+        # Split existing vary header by commas and trim whitespace
+        tokens = [t.strip() for t in existing_vary.split(",")]
+        # Add "Origin" only if not already present
+        if "Origin" not in tokens:
+            tokens.append("Origin")
+        response.headers["Vary"] = ", ".join(tokens)
     else:
         response.headers["Vary"] = "Origin"
     
