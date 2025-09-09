@@ -3,6 +3,11 @@ import { persist } from 'zustand/middleware';
 import { User, AuthTokens, LoginRequest, RegisterRequest, AuthResponse } from '@/types/auth';
 import { apiClient } from '@/lib/api/client';
 
+// Extend globalThis for TypeScript
+declare global {
+  var __authRefreshPromise: Promise<void> | null;
+}
+
 interface AuthState {
   user: User | null;
   tokens: AuthTokens | null;
@@ -112,11 +117,19 @@ export const useAuthStore = create<AuthStore>()(
               permissions: response.data.permissions || []
             };
 
-            // Create tokens object
+            // Create tokens object with properly normalized expiration timestamp
+            const now = Math.floor(Date.now() / 1000);
+            const rawExpiresIn = Number(response.data.expires_in) || 28800; // Default 8 hours
+            
+            // Normalize expires_in: if it looks like absolute timestamp, use it; otherwise treat as duration
+            const expirationTimestamp = rawExpiresIn > now 
+              ? rawExpiresIn  // Already an absolute timestamp
+              : now + rawExpiresIn;  // Duration, convert to timestamp
+            
             const tokens = {
               access_token: response.data.access_token,
               refresh_token: response.data.refresh_token,
-              expires_in: response.data.expires_in,
+              expires_in: Math.floor(expirationTimestamp), // Store as integer timestamp
               token_type: response.data.token_type
             };
 
@@ -186,6 +199,9 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       logout: () => {
+        // Clear global refresh promise to prevent hanging state
+        globalThis.__authRefreshPromise = null;
+        
         // Clear authorization header
         delete apiClient.defaults.headers.common['Authorization'];
         
@@ -206,6 +222,12 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       refreshToken: async () => {
+        // Use global deduplication to prevent concurrent refresh calls
+        if (globalThis.__authRefreshPromise) {
+          console.log('Token refresh already in progress, awaiting existing promise...');
+          return await globalThis.__authRefreshPromise;
+        }
+
         const { tokens } = get();
         
         if (!tokens?.refresh_token) {
@@ -213,28 +235,56 @@ export const useAuthStore = create<AuthStore>()(
           return;
         }
 
-        try {
-          const response = await apiClient.post<AuthResponse>('/auth/refresh', {
-            refresh_token: tokens.refresh_token,
-          });
-
-          if (response.data.success && response.data.tokens) {
-            set({
-              tokens: response.data.tokens,
-              error: null,
+        // Create and store the refresh promise globally
+        globalThis.__authRefreshPromise = (async () => {
+          try {
+            console.log('Starting token refresh...');
+            const response = await apiClient.post<AuthResponse>('/auth/refresh', {
+              refresh_token: tokens.refresh_token,
             });
 
-            // Update authorization header
-            apiClient.defaults.headers.common['Authorization'] = 
-              `Bearer ${response.data.tokens.access_token}`;
-          } else {
-            throw new Error('Token refresh failed');
+            if (response.data.success && response.data.tokens) {
+              // Update tokens with properly normalized expiration timestamp
+              const now = Math.floor(Date.now() / 1000);
+              const rawExpiresIn = Number(response.data.tokens.expires_in) || 28800; // Default 8 hours
+              
+              // Normalize expires_in: if it looks like absolute timestamp, use it; otherwise treat as duration
+              const expirationTimestamp = rawExpiresIn > now 
+                ? rawExpiresIn  // Already an absolute timestamp
+                : now + rawExpiresIn;  // Duration, convert to timestamp
+              
+              const updatedTokens = {
+                ...response.data.tokens,
+                expires_in: Math.floor(expirationTimestamp) // Store as integer timestamp
+              };
+              
+              set({
+                tokens: updatedTokens,
+                error: null,
+              });
+
+              // Update authorization header
+              apiClient.defaults.headers.common['Authorization'] = 
+                `Bearer ${response.data.tokens.access_token}`;
+              
+              console.log('Token refresh completed successfully');
+            } else {
+              throw new Error('Token refresh failed');
+            }
+          } catch (error) {
+            console.error('Token refresh failed:', error);
+            // Clear the promise before logout to prevent hanging state
+            globalThis.__authRefreshPromise = null;
+            // If refresh fails, logout user
+            get().logout();
+            throw error;
+          } finally {
+            // Always clear the global promise on completion
+            globalThis.__authRefreshPromise = null;
           }
-        } catch (error) {
-          // If refresh fails, logout user
-          get().logout();
-          throw error;
-        }
+        })();
+
+        return await globalThis.__authRefreshPromise;
       },
 
       clearError: () => {
@@ -278,43 +328,107 @@ export const useAuthLoading = () => useAuthStore((state) => state.isLoading);
 export const useAuthError = () => useAuthStore((state) => state.error);
 export const useMfaRequired = () => useAuthStore((state) => state.mfaRequired);
 
-// Auto token refresh setup
+// Auto token refresh setup with improved handling
 let refreshTimer: NodeJS.Timeout | null = null;
 
 const setupTokenRefresh = () => {
   const { tokens, refreshToken, logout } = useAuthStore.getState();
   
+  // Clear existing timer
   if (refreshTimer) {
     clearTimeout(refreshTimer);
+    refreshTimer = null;
   }
 
   if (!tokens?.access_token || !tokens?.expires_in) {
+    console.log('No valid tokens for refresh setup');
     return;
   }
 
-  // Refresh token 5 minutes before expiry
-  const refreshTime = (tokens.expires_in - 300) * 1000;
+  // Calculate time until expiry (expires_in is now always a timestamp)
+  const now = Math.floor(Date.now() / 1000);
+  const expirationTime = tokens.expires_in; // Now always normalized as timestamp
+  const timeUntilExpiry = expirationTime - now;
   
-  if (refreshTime > 0) {
-    refreshTimer = setTimeout(async () => {
+  // If token already expired or expires very soon, refresh immediately
+  if (timeUntilExpiry <= 60) {
+    console.log('Token expired or expiring soon, refreshing immediately...');
+    
+    // Use global deduplication for immediate refresh
+    if (!globalThis.__authRefreshPromise) {
+      refreshToken().catch((error) => {
+        console.error('Immediate token refresh failed:', error);
+        logout();
+      });
+    } else {
+      console.log('Immediate refresh already in progress, skipping...');
+    }
+    return;
+  }
+  
+  // Schedule refresh 2 minutes before expiry
+  const refreshTime = Math.max(1000, (timeUntilExpiry - 120) * 1000);
+  
+  console.log(`Token refresh scheduled in ${Math.floor(refreshTime / 1000)} seconds`);
+  
+  refreshTimer = setTimeout(async () => {
+    console.log('Executing automatic token refresh...');
+    
+    // Use global deduplication for scheduled refresh
+    if (globalThis.__authRefreshPromise) {
+      console.log('Scheduled refresh skipped - refresh already in progress');
+      // Still need to schedule next refresh cycle
       try {
-        await refreshToken();
-        setupTokenRefresh(); // Setup next refresh
+        await globalThis.__authRefreshPromise;
+        console.log('Awaited existing refresh, scheduling next cycle...');
+        setupTokenRefresh(); // Setup next refresh cycle
       } catch (error) {
-        console.error('Auto token refresh failed:', error);
+        console.error('Awaited refresh failed:', error);
         logout();
       }
-    }, refreshTime);
-  }
+      return;
+    }
+    
+    try {
+      await refreshToken();
+      console.log('Automatic token refresh successful');
+      setupTokenRefresh(); // Setup next refresh cycle
+    } catch (error) {
+      console.error('Auto token refresh failed:', error);
+      logout();
+    }
+  }, refreshTime);
 };
 
-// Setup token refresh when store is rehydrated
+// Function to check if token is expired or expiring soon
+const isTokenExpiredOrExpiring = () => {
+  const { tokens } = useAuthStore.getState();
+  
+  if (!tokens?.access_token || !tokens?.expires_in) {
+    return true;
+  }
+  
+  const now = Math.floor(Date.now() / 1000);
+  const expirationTime = tokens.expires_in; // Now always normalized as timestamp
+  const timeUntilExpiry = expirationTime - now;
+  
+  // Consider expired if less than 1 minute remaining
+  return timeUntilExpiry <= 60;
+};
+
+// Setup token refresh when store changes
 useAuthStore.subscribe(
   (state) => {
-    if (state.tokens) {
+    if (state.tokens && state.isAuthenticated) {
       setupTokenRefresh();
+    } else if (!state.isAuthenticated && refreshTimer) {
+      clearTimeout(refreshTimer);
+      refreshTimer = null;
     }
   }
 );
+
+// Export utility function
+export { isTokenExpiredOrExpiring };
 
 export default useAuthStore;
