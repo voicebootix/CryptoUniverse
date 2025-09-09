@@ -155,6 +155,19 @@ const AdminPage: React.FC = () => {
     try {
       setLoading(true);
       
+      // Check authentication token before making API calls
+      const tokens = useAuthStore.getState().tokens;
+      console.log('Auth tokens available:', !!tokens?.access_token);
+      console.log('User authenticated:', isAuthenticated);
+      console.log('Current user role:', user?.role);
+      
+      if (!tokens?.access_token) {
+        console.error('No access token available for admin API calls');
+        toast.error('Authentication required. Please login again.');
+        navigate('/auth/login');
+        return;
+      }
+      
       // Fetch all data using Promise.allSettled for better error handling
       const results = await Promise.allSettled([
         adminService.getUsers(),
