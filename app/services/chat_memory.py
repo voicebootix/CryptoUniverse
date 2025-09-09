@@ -9,7 +9,7 @@ features like summarization and context management.
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
-from sqlalchemy import desc, asc, and_, or_
+from sqlalchemy import desc, asc, and_, or_, select
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError
 import structlog
@@ -218,19 +218,21 @@ class ChatMemoryService:
         """
         try:
             async for db in get_database():
-                query = db.query(ChatSession).filter(
+                # Use async SQLAlchemy syntax
+                stmt = select(ChatSession).filter(
                     ChatSession.user_id == user_id
                 )
                 
                 if not include_inactive:
-                    query = query.filter(ChatSession.is_active == "true")
+                    stmt = stmt.filter(ChatSession.is_active == "true")
                 
-                query = query.order_by(desc(ChatSession.last_activity))
+                stmt = stmt.order_by(desc(ChatSession.last_activity))
                 
                 if limit:
-                    query = query.limit(limit)
+                    stmt = stmt.limit(limit)
                 
-                sessions = query.all()
+                result = await db.execute(stmt)
+                sessions = result.scalars().all()
                 return [session.to_dict() for session in sessions]
                 
         except SQLAlchemyError as e:
