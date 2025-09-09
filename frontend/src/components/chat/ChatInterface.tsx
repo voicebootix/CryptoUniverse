@@ -524,7 +524,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyPress={handleKeyPress}
                 placeholder="Ask me about your portfolio, trading, or market opportunities..."
-                disabled={isLoading || !isConnected}
+                disabled={isLoading}
                 className="pr-12"
               />
               {inputValue && (
@@ -541,7 +541,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
             
             <Button
               onClick={sendMessage}
-              disabled={!inputValue.trim() || isLoading || !isConnected}
+              disabled={!inputValue.trim() || isLoading}
               className="gap-2"
             >
               {isLoading ? (
