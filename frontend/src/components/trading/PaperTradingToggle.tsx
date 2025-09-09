@@ -36,6 +36,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { apiClient } from '@/lib/api/client';
 import { paperTradingApi } from '@/lib/api/tradingApi';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
+import { useGlobalPaperModeStore, useGlobalPaperMode } from '@/store/globalPaperModeStore';
 
 interface PaperTradingStats {
   totalTrades: number;
@@ -57,11 +58,10 @@ const PaperTradingToggle: React.FC<PaperTradingToggleProps> = ({
   onModeChange,
   className = ''
 }) => {
-  const [isPaperTrading, setIsPaperTrading] = useState(true);
+  const isPaperTrading = useGlobalPaperMode();
+  const { toggleGlobalPaperMode, paperStats, isLoading } = useGlobalPaperModeStore();
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [showStatsDialog, setShowStatsDialog] = useState(false);
-  const [paperStats, setPaperStats] = useState<PaperTradingStats | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -90,10 +90,31 @@ const PaperTradingToggle: React.FC<PaperTradingToggleProps> = ({
   const handleToggle = async (checked: boolean) => {
     if (checked) {
       // Switching to paper trading (safe)
-      await switchToPaperTrading();
+      await toggleGlobalPaperMode();
+      onModeChange?.(true);
     } else {
       // Switching to live trading (needs confirmation)
       setShowConfirmDialog(true);
+    }
+  };
+
+  const switchToLiveTrading = async () => {
+    try {
+      await toggleGlobalPaperMode(); // This will turn OFF paper mode (switch to live)
+      setShowConfirmDialog(false);
+      onModeChange?.(false);
+      
+      toast({
+        title: "Live Trading Enabled",
+        description: "You're now trading with real funds. Be careful!",
+        variant: "default"
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to switch to live trading",
+        variant: "destructive"
+      });
     }
   };
 

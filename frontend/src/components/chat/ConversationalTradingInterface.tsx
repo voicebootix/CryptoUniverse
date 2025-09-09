@@ -84,6 +84,8 @@ interface ConversationalTradingInterfaceProps {
   isExpanded?: boolean;
   onToggleExpand?: () => void;
   isPaperTrading?: boolean;
+  onTradeExecuted?: (tradeData: any) => void;
+  sessionId?: string;
 }
 
 const ConversationalTradingInterface: React.FC<ConversationalTradingInterfaceProps> = ({

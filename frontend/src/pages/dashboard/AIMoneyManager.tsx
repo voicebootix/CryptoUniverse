@@ -34,7 +34,7 @@ import PhaseProgressVisualizer, { ExecutionPhase } from '@/components/trading/Ph
 import PaperTradingToggle from '@/components/trading/PaperTradingToggle';
 
 // Import stores
-import { usePaperModeStore, useIsPaperMode } from '@/store/paperModeStore';
+import { useGlobalPaperModeStore, useGlobalPaperMode } from '@/store/globalPaperModeStore';
 import { useAuthStore } from '@/store/authStore';
 
 // Import API client
@@ -63,8 +63,8 @@ interface TradeExecution {
 const AIMoneyManager: React.FC = () => {
   const { toast } = useToast();
   const { user } = useAuthStore();
-  const isPaperMode = useIsPaperMode();
-  const { fetchPaperStats, paperStats } = usePaperModeStore();
+  const isPaperMode = useGlobalPaperMode();
+  const { fetchPaperStats, paperStats } = useGlobalPaperModeStore();
 
   // State management
   const [activeTab, setActiveTab] = useState('conversation');
@@ -313,9 +313,9 @@ const AIMoneyManager: React.FC = () => {
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
+    <div className="h-full flex flex-col">
       {/* Header Section */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between p-6 border-b">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-3">
             <Brain className="h-8 w-8 text-primary" />
@@ -326,28 +326,23 @@ const AIMoneyManager: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-4">
-          {/* Paper Mode Toggle */}
-          <PaperTradingToggle isCompact />
-
-          {/* Autonomous Mode Toggle */}
-          <div className="flex items-center gap-2">
-            <Switch
-              id="autonomous-mode"
-              checked={isAutonomousEnabled}
-              onCheckedChange={toggleAutonomousMode}
-            />
-            <Label htmlFor="autonomous-mode" className="flex items-center gap-2">
-              <Bot className="h-4 w-4" />
-              Auto Mode
-            </Label>
-          </div>
+        {/* Autonomous Mode Toggle */}
+        <div className="flex items-center gap-2">
+          <Switch
+            id="autonomous-mode"
+            checked={isAutonomousEnabled}
+            onCheckedChange={toggleAutonomousMode}
+          />
+          <Label htmlFor="autonomous-mode" className="flex items-center gap-2">
+            <Bot className="h-4 w-4" />
+            Auto Mode
+          </Label>
         </div>
       </div>
 
       {/* Paper Mode Alert */}
       {isPaperMode && (
-        <Alert className="border-blue-500 bg-blue-500/10">
+        <Alert className="mx-6 mt-4 border-blue-500 bg-blue-500/10">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
             You're in Paper Trading mode. All trades use virtual funds for practice.
@@ -361,61 +356,34 @@ const AIMoneyManager: React.FC = () => {
         </Alert>
       )}
 
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-12 gap-6">
-        {/* Left Panel - Conversational Interface & Trading Modes */}
-        <div className="col-span-7">
-          <Card className="h-full">
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
-              <CardHeader>
-                <TabsList className="grid w-full grid-cols-3">
-                  <TabsTrigger value="conversation" className="flex items-center gap-2">
-                    <MessageSquare className="h-4 w-4" />
-                    AI Chat
-                  </TabsTrigger>
-                  <TabsTrigger value="manual" className="flex items-center gap-2">
-                    <TrendingUp className="h-4 w-4" />
-                    Manual
-                  </TabsTrigger>
-                  <TabsTrigger value="autonomous" className="flex items-center gap-2">
-                    <Settings className="h-4 w-4" />
-                    Auto Settings
-                  </TabsTrigger>
-                </TabsList>
-              </CardHeader>
-
-              <CardContent className="flex-1 overflow-hidden">
-                <TabsContent value="conversation" className="h-full mt-0">
-                  <ConversationalTradingInterface
-                    isPaperTrading={isPaperMode}
-                    className="h-full"
-                  />
-                </TabsContent>
-
-                <TabsContent value="manual" className="h-full mt-0">
-                  <ManualTradingPanel
-                    isPaperMode={isPaperMode}
-                    onExecuteTrade={handleManualTrade}
-                    isExecuting={isExecuting}
-                    aiSuggestions={phaseDetails.analysis?.suggestions}
-                  />
-                </TabsContent>
-
-                <TabsContent value="autonomous" className="h-full mt-0">
-                  <AutonomousSettingsPanel
-                    isPaperMode={isPaperMode}
-                    isEnabled={isAutonomousEnabled}
-                    onToggle={toggleAutonomousMode}
-                  />
-                </TabsContent>
-              </CardContent>
-            </Tabs>
+      {/* Main Content - Split View as Specified */}
+      <div className="flex-1 grid grid-cols-12 gap-6 p-6">
+        {/* LEFT: Conversational Interface (col-span-7) */}
+        <div className="col-span-7 flex flex-col">
+          <Card className="flex-1 flex flex-col">
+            <CardHeader className="pb-0">
+              <CardTitle className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5" />
+                Conversational Interface
+              </CardTitle>
+              <CardDescription>
+                Chat with AI about market analysis and trading decisions
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex-1 p-0">
+              <ConversationalTradingInterface
+                isPaperTrading={isPaperMode}
+                className="h-full"
+                onTradeExecuted={handleChatTrade}
+                sessionId={sessionId}
+              />
+            </CardContent>
           </Card>
         </div>
 
-        {/* Right Panel - 5-Phase Progress & Execution Details */}
+        {/* RIGHT: Action Panel (col-span-5) */}
         <div className="col-span-5 space-y-6">
-          {/* 5-Phase Progress Visualizer */}
+          {/* 5-Phase Visualizer */}
           <PhaseProgressVisualizer
             currentPhase={currentPhase}
             phaseHistory={[]}
@@ -423,7 +391,6 @@ const AIMoneyManager: React.FC = () => {
             showMetrics={true}
             allowManualControl={true}
             onPhaseOverride={(phase: ExecutionPhase) => {
-              // Handle manual phase override if needed
               setCurrentPhase(phase);
             }}
           />
@@ -477,16 +444,16 @@ const AIMoneyManager: React.FC = () => {
             </Card>
           )}
 
-          {/* Recent Executions */}
-          {recentExecutions.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <History className="h-5 w-5" />
-                  Recent Trades
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
+          {/* Current Positions */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Wallet className="h-5 w-5" />
+                Current Positions
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {recentExecutions.length > 0 ? (
                 <div className="space-y-2">
                   {recentExecutions.slice(0, 5).map((execution) => (
                     <div
@@ -512,10 +479,88 @@ const AIMoneyManager: React.FC = () => {
                     </div>
                   ))}
                 </div>
-              </CardContent>
-            </Card>
-          )}
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Activity className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No active positions</p>
+                  <p className="text-xs">Start a conversation to begin trading</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
+      </div>
+
+      {/* BOTTOM: Tabs as Specified */}
+      <div className="border-t bg-muted/30">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full">
+          <div className="flex items-center justify-center py-2">
+            <TabsList className="grid grid-cols-4 w-auto">
+              <TabsTrigger value="conversation" className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4" />
+                Conversation
+              </TabsTrigger>
+              <TabsTrigger value="manual" className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4" />
+                Manual Trading
+              </TabsTrigger>
+              <TabsTrigger value="autonomous" className="flex items-center gap-2">
+                <Settings className="h-4 w-4" />
+                Autonomous Settings
+              </TabsTrigger>
+              <TabsTrigger value="copy" className="flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Copy Trading
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          
+          {/* Tab Content Drawers */}
+          <AnimatePresence mode="wait">
+            {activeTab !== 'conversation' && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="border-t"
+              >
+                <div className="max-h-96 overflow-y-auto">
+                  <TabsContent value="manual" className="p-6 m-0">
+                    <ManualTradingPanel
+                      isPaperMode={isPaperMode}
+                      onExecuteTrade={handleManualTrade}
+                      isExecuting={isExecuting}
+                      aiSuggestions={phaseDetails.analysis?.suggestions}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="autonomous" className="p-6 m-0">
+                    <AutonomousSettingsPanel
+                      isPaperMode={isPaperMode}
+                      isEnabled={isAutonomousEnabled}
+                      onToggle={toggleAutonomousMode}
+                    />
+                  </TabsContent>
+
+                  <TabsContent value="copy" className="p-6 m-0">
+                    <div className="text-center space-y-4">
+                      <Users className="h-12 w-12 mx-auto text-muted-foreground" />
+                      <div>
+                        <h3 className="font-semibold">Copy Trading</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Follow and copy successful traders automatically
+                        </p>
+                      </div>
+                      <Button variant="outline" size="sm">
+                        Browse Traders
+                      </Button>
+                    </div>
+                  </TabsContent>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </Tabs>
       </div>
     </div>
   );

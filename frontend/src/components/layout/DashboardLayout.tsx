@@ -41,6 +41,7 @@ import { Badge } from "@/components/ui/badge";
 import { getInitials } from "@/lib/utils";
 import ChatWidget from "@/components/chat/ChatWidget";
 import NotificationDropdown from "@/components/notifications/NotificationDropdown";
+import SophisticatedHeaderWidgets from "@/components/layout/SophisticatedHeaderWidgets";
 
 interface NavigationItem {
   name: string;
@@ -58,13 +59,13 @@ const navigation: NavigationItem[] = [
     badge: "AI"
   },
   {
-    name: "Strategies",
+    name: "Strategy Marketplace",
     href: "/dashboard/strategies",
     icon: Zap,
     badge: "25+",
   },
   {
-    name: "Performance",
+    name: "Performance Hub",
     href: "/dashboard/performance",
     icon: BarChart3,
   },
@@ -73,11 +74,6 @@ const navigation: NavigationItem[] = [
     href: "/dashboard/copy-trading",
     icon: Users,
     badge: "HOT",
-  },
-  {
-    name: "Settings",
-    href: "/dashboard/settings",
-    icon: Settings,
   },
   { 
     name: "Admin", 
@@ -179,6 +175,9 @@ const DashboardLayout: React.FC = () => {
               </nav>
             </div>
           </div>
+
+          {/* Sophisticated Header Widgets */}
+          <SophisticatedHeaderWidgets />
 
           {/* Right side */}
           <div className="flex items-center gap-x-4 lg:gap-x-6">
