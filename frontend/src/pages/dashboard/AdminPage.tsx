@@ -166,24 +166,20 @@ const AdminPage: React.FC = () => {
       // Process users result
       if (results[0].status === 'fulfilled') {
         const usersData = results[0].value;
-        // Normalize the response - handle array or object formats
-        if (Array.isArray(usersData)) {
-          setUsers(usersData);
-        } else if (usersData?.users && Array.isArray(usersData.users)) {
+        console.log('Users API Response:', usersData); // Debug log
+        
+        // Backend returns { users: [...], total_count: number, ... } format
+        if (usersData?.users && Array.isArray(usersData.users)) {
           setUsers(usersData.users);
-        } else if (usersData?.data) {
-          if (Array.isArray(usersData.data)) {
-            setUsers(usersData.data);
-          } else if (usersData.data.users && Array.isArray(usersData.data.users)) {
-            setUsers(usersData.data.users);
-          } else {
-            setUsers([]);
-          }
+        } else if (Array.isArray(usersData)) {
+          // Fallback for direct array response
+          setUsers(usersData);
         } else {
+          console.warn('Unexpected users response format:', usersData);
           setUsers([]);
         }
       } else {
-        console.error('Failed to fetch users:', results[0].reason?.message);
+        console.error('Failed to fetch users:', results[0].reason?.message || results[0].reason);
         toast.error('Failed to load users');
         setUsers([]);
       }
