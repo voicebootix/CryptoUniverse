@@ -287,16 +287,33 @@ def create_application() -> FastAPI:
         if origin not in cors_origins:
             cors_origins.append(origin)
     
+    # Debug CORS configuration in production
     logger.info(f"CORS origins configured: {cors_origins}")
+    logger.info(f"Frontend URL: {settings.FRONTEND_URL}")
+    logger.info(f"Base URL: {settings.BASE_URL}")
+    logger.info(f"Environment: {settings.ENVIRONMENT}")
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins or [],  # Use computed list or empty list as fallback
+        allow_origins=cors_origins or ["*"],  # Fallback to wildcard if empty
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=["*"],
         max_age=86400  # Cache preflight for 24 hours
     )
+    
+    # Add explicit OPTIONS handler for troubleshooting
+    @app.options("/{path:path}")
+    async def handle_options(path: str):
+        """Handle preflight OPTIONS requests explicitly."""
+        from fastapi.responses import Response
+        response = Response()
+        response.headers["Access-Control-Allow-Origin"] = settings.FRONTEND_URL
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
     
     # Note: Health and root endpoints are defined at module scope to avoid duplication
 
@@ -349,6 +366,18 @@ def create_application() -> FastAPI:
             content={"detail": "An unexpected server error occurred. Please contact support."}
         )
 
+    # Add CORS debugging endpoint
+    @app.get("/debug/cors")
+    async def debug_cors():
+        """Debug CORS configuration."""
+        return {
+            "cors_origins": settings.cors_origins,
+            "frontend_url": settings.FRONTEND_URL,
+            "base_url": settings.BASE_URL,
+            "environment": settings.ENVIRONMENT,
+            "headers_info": "Check browser network tab for Access-Control-Allow-Origin header"
+        }
+    
     return app
 
 
