@@ -20,7 +20,7 @@ export const apiClient: AxiosInstance = axios.create({
   },
 });
 
-// Request interceptor to add auth token
+// Request interceptor to add auth token with expiry checking
 apiClient.interceptors.request.use(
   async (config) => {
     // Skip auth for certain endpoints
@@ -29,7 +29,8 @@ apiClient.interceptors.request.use(
       '/auth/register',
       '/auth/forgot-password',
       '/auth/reset-password',
-      '/auth/verify-email'
+      '/auth/verify-email',
+      '/auth/refresh'
     ];
 
     const shouldSkipAuth = skipAuthEndpoints.some(endpoint => 
@@ -37,9 +38,46 @@ apiClient.interceptors.request.use(
     );
 
     if (!shouldSkipAuth) {
-      const token = useAuthStore.getState().tokens?.access_token;
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+      const { tokens, refreshToken, logout } = useAuthStore.getState();
+      
+      if (!tokens?.access_token) {
+        console.log('No access token available');
+        logout();
+        throw new Error('Authentication required');
+      }
+      
+      // Check if token is expired or expiring soon
+      if (tokens?.expires_in) {
+        const now = Math.floor(Date.now() / 1000);
+        let expirationTime = tokens.expires_in;
+        
+        // Handle both timestamp and duration formats
+        if (expirationTime < now) {
+          expirationTime = now + tokens.expires_in;
+        }
+        
+        const timeUntilExpiry = expirationTime - now;
+        
+        // If token expires in less than 30 seconds, try to refresh it
+        if (timeUntilExpiry <= 30) {
+          console.log('Token expiring soon, attempting refresh before request...');
+          try {
+            await refreshToken();
+            // Get fresh token after refresh
+            const freshTokens = useAuthStore.getState().tokens;
+            if (freshTokens?.access_token) {
+              config.headers.Authorization = `Bearer ${freshTokens.access_token}`;
+            }
+          } catch (refreshError) {
+            console.error('Pre-request token refresh failed:', refreshError);
+            logout();
+            throw new Error('Session expired. Please login again.');
+          }
+        } else {
+          config.headers.Authorization = `Bearer ${tokens.access_token}`;
+        }
+      } else {
+        config.headers.Authorization = `Bearer ${tokens.access_token}`;
       }
     }
 
@@ -80,22 +118,40 @@ apiClient.interceptors.response.use(
           if (!originalRequest._retry) {
             originalRequest._retry = true;
             
+            console.log('401 Unauthorized - attempting token refresh...');
+            
             // Try to refresh token
             try {
               const { useAuthStore } = await import('@/store/authStore');
-              await useAuthStore.getState().refreshToken();
+              const authStore = useAuthStore.getState();
+              
+              // Check if we have a refresh token
+              if (!authStore.tokens?.refresh_token) {
+                console.log('No refresh token available, logging out...');
+                authStore.logout();
+                if (typeof window !== 'undefined') {
+                  window.location.href = '/login';
+                }
+                return Promise.reject(new Error('Session expired. Please login again.'));
+              }
+              
+              await authStore.refreshToken();
               
               // Retry original request with new token
-              const token = useAuthStore.getState().tokens?.access_token;
-              if (token) {
+              const newTokens = authStore.tokens;
+              if (newTokens?.access_token) {
                 originalRequest.headers = {
                   ...originalRequest.headers,
-                  Authorization: `Bearer ${token}`
+                  Authorization: `Bearer ${newTokens.access_token}`
                 };
+                console.log('Token refreshed successfully, retrying original request...');
                 return apiClient(originalRequest);
+              } else {
+                throw new Error('Token refresh succeeded but no new token received');
               }
             } catch (refreshError) {
               // Refresh failed, logout user
+              console.error('Token refresh failed in response interceptor:', refreshError);
               const { useAuthStore } = await import('@/store/authStore');
               useAuthStore.getState().logout();
               
@@ -103,6 +159,17 @@ apiClient.interceptors.response.use(
               if (typeof window !== 'undefined') {
                 window.location.href = '/login';
               }
+              
+              return Promise.reject(new Error('Session expired. Please login again.'));
+            }
+          } else {
+            // Already tried refresh, force logout
+            console.log('Token refresh already attempted, forcing logout...');
+            const { useAuthStore } = await import('@/store/authStore');
+            useAuthStore.getState().logout();
+            
+            if (typeof window !== 'undefined') {
+              window.location.href = '/login';
             }
           }
           break;
