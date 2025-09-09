@@ -143,27 +143,21 @@ const AdminPage: React.FC = () => {
     }
   }, [isAuthenticated, user, navigate]);
 
+  // Track API errors separately from data state
+  const [apiErrors, setApiErrors] = useState(0);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+
   // Handle authentication errors during API calls
   useEffect(() => {
-    const handleAuthError = () => {
-      if (isAuthenticated && user) {
-        // Token might be expired, try to refresh or logout
-        console.warn('Authentication error detected, redirecting to login');
-        toast.error('Session expired. Please login again.');
-        navigate('/login');
-      }
-    };
-
-    // Listen for auth errors from failed API calls
-    const interval = setInterval(() => {
-      // Check if we have repeated 401 errors from API calls
-      if (users.length === 0 && systemMetrics === null && !loading) {
-        handleAuthError();
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [isAuthenticated, user, users, systemMetrics, loading, navigate]);
+    // Only redirect if we have actual auth errors, not just empty data
+    // This prevents redirect loops when CORS or network errors occur
+    if (apiErrors >= 3 && hasLoadedOnce) {
+      console.warn('Multiple API errors detected, possible authentication issue');
+      // Don't auto-redirect, let user decide
+      toast.warning('Having trouble loading data. Please refresh the page or try logging in again.');
+      setApiErrors(0); // Reset counter to prevent spam
+    }
+  }, [apiErrors, hasLoadedOnce]);
 
   // Fetch real data from backend
   useEffect(() => {
@@ -185,6 +179,9 @@ const AdminPage: React.FC = () => {
         adminService.getAuditLogs({ limit: 10 })
       ]);
       
+      // Track errors
+      let errorCount = 0;
+      
       // Process users result
       if (results[0].status === 'fulfilled') {
         const usersData = results[0].value;
@@ -200,8 +197,14 @@ const AdminPage: React.FC = () => {
           console.warn('Unexpected users response format:', usersData);
           setUsers([]);
         }
+        setHasLoadedOnce(true);
       } else {
         console.error('Failed to fetch users:', results[0].reason?.message || results[0].reason);
+        // Check if it's an auth error (401) vs CORS/network error
+        const error = results[0].reason;
+        if (error?.response?.status === 401) {
+          errorCount++;
+        }
         toast.error('Failed to load users');
         setUsers([]);
       }
@@ -209,8 +212,13 @@ const AdminPage: React.FC = () => {
       // Process metrics result
       if (results[1].status === 'fulfilled') {
         setSystemMetrics(results[1].value);
+        setHasLoadedOnce(true);
       } else {
         console.error('Failed to fetch metrics:', results[1].reason?.message);
+        const error = results[1].reason;
+        if (error?.response?.status === 401) {
+          errorCount++;
+        }
         setSystemMetrics(null);
       }
       
@@ -259,11 +267,20 @@ const AdminPage: React.FC = () => {
         }
       } else {
         console.error('Failed to fetch audit logs:', results[3].reason?.message);
+        const error = results[3].reason;
+        if (error?.response?.status === 401) {
+          errorCount++;
+        }
         setAuditLogs([]);
       }
+      
+      // Update API error count for auth tracking
+      setApiErrors(prev => prev + errorCount);
+      
     } catch (error: any) {
       console.error('Failed to fetch admin data:', error.message);
       toast.error('Failed to load admin data');
+      // Don't count general catch errors as auth errors
     } finally {
       setLoading(false);
     }
