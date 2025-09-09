@@ -178,44 +178,15 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     setIsLoading(true);
 
     try {
-      if (isConnected && sendWsMessage) {
-        // Send via WebSocket for real-time response with timeout fallback
+      // TEMPORARY FIX: Force REST API only until WebSocket is fixed
+      // TODO: Re-enable WebSocket after debugging
+      if (false && isConnected && sendWsMessage) {
+        // WebSocket disabled for debugging
         sendWsMessage({
           type: 'chat_message',
           message: inputValue,
           session_id: sessionId
         });
-        
-        // Set a timeout to fall back to REST API if WebSocket doesn't respond
-        setTimeout(async () => {
-          if (isLoading) {
-            console.log('WebSocket timeout, falling back to REST API');
-            try {
-              const response = await apiClient.post('/chat/message', {
-                message: inputValue,
-                session_id: sessionId
-              });
-
-              if (response.data.success) {
-                const assistantMessage: ChatMessage = {
-                  id: response.data.message_id,
-                  content: response.data.content,
-                  type: 'assistant',
-                  timestamp: response.data.timestamp,
-                  intent: response.data.intent,
-                  confidence: response.data.confidence,
-                  metadata: response.data.metadata
-                };
-                
-                setMessages(prev => [...prev, assistantMessage]);
-                setIsLoading(false);
-              }
-            } catch (fallbackError) {
-              console.error('REST API fallback failed:', fallbackError);
-              setIsLoading(false);
-            }
-          }
-        }, 10000); // 10 second timeout
       } else {
         // Fallback to REST API
         const response = await apiClient.post('/chat/message', {
