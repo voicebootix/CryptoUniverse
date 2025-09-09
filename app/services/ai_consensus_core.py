@@ -1297,6 +1297,53 @@ class AIConsensusService(LoggerMixin):
     def get_cost_summary(self) -> Dict[str, Any]:
         """Get comprehensive cost summary."""
         return self.ai_connector.get_cost_report()
+    
+    async def get_service_status(self) -> Dict[str, Any]:
+        """Get current service status and health information."""
+        try:
+            # Check circuit breaker status
+            circuit_status = {}
+            all_healthy = True
+            
+            for provider, breaker in self.ai_connector.circuit_breakers.items():
+                is_healthy = not breaker.is_open
+                circuit_status[provider.value] = {
+                    "healthy": is_healthy,
+                    "failures": breaker.failures,
+                    "success_count": breaker.success_count,
+                    "is_open": breaker.is_open
+                }
+                if not is_healthy:
+                    all_healthy = False
+            
+            # Determine overall status
+            if all_healthy:
+                status = "operational"
+            elif any(not cb["is_open"] for cb in circuit_status.values()):
+                status = "degraded"
+            else:
+                status = "error"
+            
+            return {
+                "status": status,
+                "healthy": all_healthy,
+                "circuit_breakers": circuit_status,
+                "api_keys_configured": {
+                    "openai": bool(settings.OPENAI_API_KEY),
+                    "anthropic": bool(settings.ANTHROPIC_API_KEY),
+                    "google": bool(settings.GOOGLE_AI_API_KEY)
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error("Failed to get service status", error=str(e))
+            return {
+                "status": "error",
+                "healthy": False,
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
 
 # Global service instance
