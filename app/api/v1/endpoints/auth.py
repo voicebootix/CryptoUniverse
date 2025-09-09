@@ -301,9 +301,7 @@ async def login(
             )
         
         # Check user status and verification
-        from app.utils.role_normalizer import normalize_status as norm_status
-        user_status = norm_status(user.status)
-        if user_status == UserStatus.PENDING_VERIFICATION:
+        if user.status == UserStatus.PENDING_VERIFICATION:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account pending admin verification. Please wait for admin approval to login."
@@ -313,7 +311,7 @@ async def login(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account not verified. Please contact admin for verification."
             )
-        elif user_status != UserStatus.ACTIVE:
+        elif user.status != UserStatus.ACTIVE:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Account is {user.status.value}. Please contact admin."
