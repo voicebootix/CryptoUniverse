@@ -12,7 +12,7 @@ const adminApi = axios.create({
 // Add auth token to requests
 adminApi.interceptors.request.use((config) => {
   // Set start time for duration tracking
-  (config as any).metadata = { startTime: Date.now() };
+  config.metadata = { ...(config.metadata || {}), startTime: Date.now() };
   
   const token = getAuthToken();
   if (token) {
@@ -45,7 +45,7 @@ adminApi.interceptors.request.use((config) => {
 adminApi.interceptors.response.use((response) => {
   // Only log minimal metadata in debug mode
   if (DEBUG_HTTP) {
-    const duration = Date.now() - ((response.config as any).metadata?.startTime || Date.now());
+    const duration = Date.now() - (response.config.metadata?.startTime || Date.now());
     console.debug('Admin API Response:', {
       method: response.config.method?.toUpperCase(),
       url: response.config.url,
@@ -59,7 +59,7 @@ adminApi.interceptors.response.use((response) => {
 }, (error) => {
   // Sanitized error logging
   if (DEBUG_HTTP) {
-    const duration = Date.now() - ((error.config as any)?.metadata?.startTime || Date.now());
+    const duration = Date.now() - (error.config?.metadata?.startTime || Date.now());
     console.debug('Admin API Error:', {
       method: error.config?.method?.toUpperCase(),
       url: error.config?.url,
