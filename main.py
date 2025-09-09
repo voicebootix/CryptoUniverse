@@ -287,16 +287,33 @@ def create_application() -> FastAPI:
         if origin not in cors_origins:
             cors_origins.append(origin)
     
+    # Debug CORS configuration in production
     logger.info(f"CORS origins configured: {cors_origins}")
+    logger.info(f"Frontend URL: {settings.FRONTEND_URL}")
+    logger.info(f"Base URL: {settings.BASE_URL}")
+    logger.info(f"Environment: {settings.ENVIRONMENT}")
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cors_origins or [],  # Use computed list or empty list as fallback
+        allow_origins=cors_origins or ["*"],  # Fallback to wildcard if empty
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=["*"],
         max_age=86400  # Cache preflight for 24 hours
     )
+    
+    # Add explicit OPTIONS handler for troubleshooting
+    @app.options("/{path:path}")
+    async def handle_options(path: str):
+        """Handle preflight OPTIONS requests explicitly."""
+        from fastapi.responses import Response
+        response = Response()
+        response.headers["Access-Control-Allow-Origin"] = settings.FRONTEND_URL
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
     
     # Note: Health and root endpoints are defined at module scope to avoid duplication
 
@@ -349,6 +366,47 @@ def create_application() -> FastAPI:
             content={"detail": "An unexpected server error occurred. Please contact support."}
         )
 
+    # Add CORS debugging endpoint (protected)
+    @app.get("/debug/cors")
+    async def debug_cors(request: Request):
+        """Debug CORS configuration (development/admin only)."""
+        # Always allow in development mode
+        if settings.ENVIRONMENT == "development":
+            return {
+                "cors_origins": settings.cors_origins,
+                "frontend_url": settings.FRONTEND_URL,
+                "base_url": settings.BASE_URL,
+                "environment": settings.ENVIRONMENT,
+                "headers_info": "Check browser network tab for Access-Control-Allow-Origin header"
+            }
+        
+        # In production, check for debug token first (most secure)
+        debug_token = request.headers.get("X-Debug-Token")
+        if debug_token and settings.DEBUG_TOKEN and debug_token == settings.DEBUG_TOKEN:
+            logger.info("Debug CORS endpoint accessed with valid token", 
+                       client_ip=request.client.host if request.client else "unknown")
+            return {
+                "cors_origins": settings.cors_origins,
+                "frontend_url": settings.FRONTEND_URL,
+                "base_url": settings.BASE_URL,
+                "environment": settings.ENVIRONMENT,
+                "headers_info": "Check browser network tab for Access-Control-Allow-Origin header"
+            }
+        
+        # Access denied - log the attempt
+        client_ip = request.client.host if request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "unknown")
+        logger.warning("Unauthorized debug endpoint access", 
+                      client_ip=client_ip,
+                      user_agent=user_agent,
+                      path="/debug/cors")
+        
+        # Return 403 without exposing system details
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
+    
     return app
 
 
