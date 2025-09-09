@@ -168,8 +168,8 @@ async def get_credit_balance(
             profit_stmt = select(func.sum(Trade.profit_realized_usd)).where(
                 and_(
                     Trade.user_id == current_user.id,
-                    Trade.status == TradeStatus.COMPLETED,  # Use proper enum
-                    Trade.is_simulation == False,  # Use == instead of .is_(False)
+                    Trade.status == 'COMPLETED',  # Use string literal instead of enum
+                    Trade.is_simulation.is_(False),  # Use proper SQLAlchemy boolean comparison
                     Trade.profit_realized_usd > 0
                 )
             )

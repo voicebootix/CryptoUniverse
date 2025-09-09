@@ -542,7 +542,7 @@ class BackgroundServiceManager(LoggerMixin):
             
             await asyncio.sleep(self.intervals["market_data_sync"])
     
-    async def _discover_active_trading_symbols(self) -> Set[str]:
+    async def _discover_active_trading_symbols(self) -> List[str]:
         all_discovered_symbols = set()
         strategies = [
             {"name": "enterprise_unlimited", "description": "Unlimited asset discovery"},
@@ -617,7 +617,7 @@ class BackgroundServiceManager(LoggerMixin):
         
         self.logger.info(
             f"🔍 Discovered {len(discovered_list)} active trading symbols - NO LIMITS",
-            sample_symbols=discovered_list[:20],
+            sample_symbols=discovered_list[:20] if discovered_list else [],
             message="ENTERPRISE: All opportunities captured for maximum profit"
         )
         

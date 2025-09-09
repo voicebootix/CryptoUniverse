@@ -35,6 +35,9 @@ router = APIRouter()
 # Initialize services
 trade_executor = TradeExecutionService()
 
+# Initialize Kraken nonce manager
+kraken_nonce_manager = KrakenNonceManager()
+
 # Encryption for API keys
 def get_encryption_key():
     """Get or generate a consistent encryption key."""
@@ -1139,6 +1142,8 @@ async def fetch_kraken_balances(api_key: str, api_secret: str) -> List[Dict[str,
         
         base_url = "https://api.kraken.com"
         endpoint = "/0/private/Balance"
+        # Initialize nonce manager if needed
+        await kraken_nonce_manager._init_redis()
         nonce = await kraken_nonce_manager.get_nonce()  # ENTERPRISE NONCE MANAGEMENT
         
         # Prepare POST data
