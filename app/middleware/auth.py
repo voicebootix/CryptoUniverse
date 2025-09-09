@@ -20,6 +20,7 @@ from app.core.security import (
 )
 from app.core.redis import get_redis_client
 from app.core.logging import logger
+from app.core.config import get_settings
 
 # Paths that don't require authentication
 PUBLIC_PATHS = {
@@ -47,25 +48,35 @@ TOKEN_REFRESH_THRESHOLD = 300
 
 def add_cors_headers_to_response(response: JSONResponse, request: Request) -> None:
     """
-    Add proper CORS headers to error responses.
+    Add proper CORS headers to error responses with origin allowlist validation.
     
     Args:
         response: The JSONResponse to add headers to
         request: The incoming request to get Origin from
     """
+    settings = get_settings()
     origin = request.headers.get("Origin")
     
-    if origin:
-        # When Origin is present, use it and allow credentials
+    # Check if origin is in the configured allowlist
+    if origin and origin in settings.cors_origins:
+        # Origin is allowed - use it and allow credentials
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
     else:
-        # When no Origin, use wildcard and don't allow credentials
+        # Origin not allowed or missing - use wildcard and no credentials
         response.headers["Access-Control-Allow-Origin"] = "*"
-        # Don't set credentials header or set to false
+        # Don't set credentials header for non-allowed origins
     
-    # Always add Vary: Origin for proper caching
-    response.headers["Vary"] = "Origin"
+    # Append "Origin" to existing Vary header instead of replacing
+    existing_vary = response.headers.get("Vary", "")
+    if existing_vary:
+        if "Origin" not in existing_vary:
+            response.headers["Vary"] = f"{existing_vary}, Origin"
+    else:
+        response.headers["Vary"] = "Origin"
+    
+    # Always add Cache-Control: no-store for error responses
+    response.headers["Cache-Control"] = "no-store"
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
