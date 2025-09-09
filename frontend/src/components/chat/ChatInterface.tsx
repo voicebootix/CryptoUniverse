@@ -167,7 +167,15 @@ Just chat with me naturally! How can I help you manage your crypto investments t
   }, [connectionStatus]);
 
   const sendMessage = async () => {
-    if (!inputValue.trim() || isLoading || !sessionId) return;
+    console.log('🚀 SEND MESSAGE CALLED!', { inputValue, isLoading, sessionId });
+    if (!inputValue.trim() || isLoading || !sessionId) {
+      console.log('❌ SEND MESSAGE BLOCKED:', { 
+        noInput: !inputValue.trim(), 
+        isLoading, 
+        noSession: !sessionId 
+      });
+      return;
+    }
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
