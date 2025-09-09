@@ -62,6 +62,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-New-Access-Token"],  # Expose auth header for frontend
 )
 
 # Security
