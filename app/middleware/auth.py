@@ -88,10 +88,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
             
         # Require authentication for all other endpoints
         if not auth_header:
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Missing authorization header"}
             )
+            # Add CORS headers for error responses
+            response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            return response
             
         # Extract token
         try:
@@ -99,10 +103,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if scheme.lower() != "bearer":
                 raise ValueError("Invalid authorization scheme")
         except ValueError as e:
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Invalid authorization header format"}
             )
+            # Add CORS headers for error responses
+            response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            return response
             
         try:
             # Verify access token
@@ -110,10 +118,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
             
             # Check if token is revoked
             if is_token_revoked(payload["jti"]):
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     content={"detail": "Token has been revoked"}
                 )
+                # Add CORS headers for error responses
+                response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                return response
                 
             # Check if token needs refresh (expiring soon)
             needs_refresh = False
@@ -162,16 +174,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
             
         except JWTError as e:
             logger.warning(f"JWT validation failed: {str(e)}")
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Invalid or expired token"}
             )
+            # Add CORS headers for error responses
+            response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            return response
         except Exception as e:
             logger.error(f"Authentication error: {str(e)}", exc_info=True)
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content={"detail": "Authentication service error"}
             )
+            # Add CORS headers for error responses
+            response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            return response
 
 
 def get_current_user(request: Request) -> Dict[str, Any]:
