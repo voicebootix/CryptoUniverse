@@ -32,18 +32,18 @@ from app.core.database import Base
 
 class UserRole(str, enum.Enum):
     """User role enumeration."""
-    ADMIN = "ADMIN"
-    TRADER = "TRADER"
-    VIEWER = "VIEWER"
-    API_ONLY = "API_ONLY"
+    ADMIN = "admin"
+    TRADER = "trader"
+    VIEWER = "viewer"
+    API_ONLY = "api_only"
 
 
 class UserStatus(str, enum.Enum):
     """User status enumeration."""
-    ACTIVE = "ACTIVE"
-    INACTIVE = "INACTIVE"
-    SUSPENDED = "SUSPENDED"
-    PENDING_VERIFICATION = "PENDING_VERIFICATION"
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    SUSPENDED = "suspended"
+    PENDING_VERIFICATION = "pending_verification"
 
 
 class KYCStatus(str, enum.Enum):
