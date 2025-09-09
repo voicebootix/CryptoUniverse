@@ -35,9 +35,6 @@ router = APIRouter()
 # Initialize services
 trade_executor = TradeExecutionService()
 
-# Initialize Kraken nonce manager
-kraken_nonce_manager = KrakenNonceManager()
-
 # Encryption for API keys
 def get_encryption_key():
     """Get or generate a consistent encryption key."""
