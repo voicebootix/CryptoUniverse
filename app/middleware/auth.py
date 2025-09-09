@@ -20,6 +20,7 @@ from app.core.security import (
 )
 from app.core.redis import get_redis_client
 from app.core.logging import logger
+from app.core.config import get_settings
 
 # Paths that don't require authentication
 PUBLIC_PATHS = {
@@ -43,6 +44,39 @@ PROTECTED_PATHS = {
 
 # Token refresh threshold in seconds (5 minutes before expiration)
 TOKEN_REFRESH_THRESHOLD = 300
+
+
+def add_cors_headers_to_response(response: JSONResponse, request: Request) -> None:
+    """
+    Add proper CORS headers to error responses with origin allowlist validation.
+    
+    Args:
+        response: The JSONResponse to add headers to
+        request: The incoming request to get Origin from
+    """
+    settings = get_settings()
+    origin = request.headers.get("Origin")
+    
+    # Check if origin is in the configured allowlist
+    if origin and origin in settings.cors_origins:
+        # Origin is allowed - use it and allow credentials
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    else:
+        # Origin not allowed or missing - use wildcard and no credentials
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        # Don't set credentials header for non-allowed origins
+    
+    # Append "Origin" to existing Vary header instead of replacing
+    existing_vary = response.headers.get("Vary", "")
+    if existing_vary:
+        if "Origin" not in existing_vary:
+            response.headers["Vary"] = f"{existing_vary}, Origin"
+    else:
+        response.headers["Vary"] = "Origin"
+    
+    # Always add Cache-Control: no-store for error responses
+    response.headers["Cache-Control"] = "no-store"
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -88,10 +122,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             
         # Require authentication for all other endpoints
         if not auth_header:
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Missing authorization header"}
             )
+            add_cors_headers_to_response(response, request)
+            return response
             
         # Extract token
         try:
@@ -99,10 +135,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if scheme.lower() != "bearer":
                 raise ValueError("Invalid authorization scheme")
         except ValueError as e:
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Invalid authorization header format"}
             )
+            add_cors_headers_to_response(response, request)
+            return response
             
         try:
             # Verify access token
@@ -110,10 +148,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             
             # Check if token is revoked
             if is_token_revoked(payload["jti"]):
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     content={"detail": "Token has been revoked"}
                 )
+                add_cors_headers_to_response(response, request)
+                return response
                 
             # Check if token needs refresh (expiring soon)
             needs_refresh = False
@@ -162,16 +202,20 @@ class AuthMiddleware(BaseHTTPMiddleware):
             
         except JWTError as e:
             logger.warning(f"JWT validation failed: {str(e)}")
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Invalid or expired token"}
             )
+            add_cors_headers_to_response(response, request)
+            return response
         except Exception as e:
             logger.error(f"Authentication error: {str(e)}", exc_info=True)
-            return JSONResponse(
+            response = JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content={"detail": "Authentication service error"}
             )
+            add_cors_headers_to_response(response, request)
+            return response
 
 
 def get_current_user(request: Request) -> Dict[str, Any]:
