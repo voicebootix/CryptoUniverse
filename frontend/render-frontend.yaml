@@ -23,7 +23,7 @@ services:
       - key: VITE_API_URL
         value: https://cryptouniverse.onrender.com/api/v1
       - key: VITE_WS_URL
-        value: wss://cryptouniverse.onrender.com/ws
+        value: wss://cryptouniverse.onrender.com
       - key: VITE_APP_NAME
         value: CryptoUniverse Enterprise
       - key: VITE_APP_VERSION
