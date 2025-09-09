@@ -839,12 +839,16 @@ Which area would you like to address first?"""
             "system_role": "crypto_money_manager"
         }
         
-        ai_response = await self.ai_consensus.analyze_opportunity(
-            json.dumps(ai_context),
-            confidence_threshold=70.0,
-            ai_models="cost_optimized",
-            user_id=session.user_id
-        )
+        try:
+            ai_response = await self.ai_consensus.analyze_opportunity(
+                json.dumps(ai_context),
+                confidence_threshold=70.0,
+                ai_models="cost_optimized",
+                user_id=session.user_id
+            )
+        except Exception as e:
+            self.logger.warning("AI consensus failed for general query", error=str(e))
+            ai_response = {"success": False}
         
         if ai_response.get("success"):
             response_content = ai_response.get("analysis", "I'm processing your request...")
@@ -862,12 +866,45 @@ Which area would you like to address first?"""
 
 Just ask me naturally about any of these topics!"""
         else:
-            response_content = """I'm here to help you manage your cryptocurrency investments! 
+            # Provide intelligent fallback based on the user's message
+            user_message_lower = message.content.lower()
+            
+            if any(word in user_message_lower for word in ['bitcoin', 'btc', 'price']):
+                response_content = """I can help you with Bitcoin analysis! While I'm connecting to my advanced AI models, here's what I can tell you:
 
-You can ask me about:
-• Your portfolio performance and allocation
-• Market analysis and trends
-• Trading opportunities and execution
+Bitcoin is the leading cryptocurrency and I can help you with:
+• Current price analysis and trends
+• Portfolio allocation recommendations
+• Trading strategies and timing
+• Risk assessment for Bitcoin investments
+
+What specific aspect of Bitcoin would you like to explore?"""
+            
+            elif any(word in user_message_lower for word in ['portfolio', 'balance', 'holdings']):
+                response_content = """I'm your AI portfolio manager! I can help you with:
+
+• **Portfolio Analysis** - Review your current holdings and performance
+• **Asset Allocation** - Optimize your crypto distribution
+• **Rebalancing** - Maintain your target allocation
+• **Risk Management** - Assess and minimize portfolio risk
+
+Would you like me to analyze your current portfolio or help with a specific aspect?"""
+            
+            elif any(word in user_message_lower for word in ['trade', 'buy', 'sell', 'execute']):
+                response_content = """I can help you execute trades using our advanced 5-phase system:
+
+**Phase 1** - Market Analysis
+**Phase 2** - AI Consensus 
+**Phase 3** - Risk Validation
+**Phase 4** - Trade Execution
+**Phase 5** - Monitoring
+
+What trade are you considering? I can analyze the opportunity and help you execute it safely."""
+            
+            else:
+                response_content = f"""Hello! I'm your AI cryptocurrency money manager. I understand you said: "{message.content}"
+
+I'm here to help you manage your cryptocurrency investments!
 • Risk management strategies
 • Rebalancing recommendations
 
