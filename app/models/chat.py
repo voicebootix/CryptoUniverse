@@ -7,7 +7,7 @@ enabling persistent conversation memory across server restarts.
 
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-from sqlalchemy import Column, String, DateTime, Text, JSON, Float, ForeignKey, Index
+from sqlalchemy import Column, String, DateTime, Text, JSON, Float, ForeignKey, Index, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
@@ -39,7 +39,7 @@ class ChatSession(Base):
     active_strategies = Column(JSON, default=list)  # Currently active trading strategies
     
     # Session configuration
-    is_active = Column(String, default="true")  # Active status
+    is_active = Column(Boolean, default=True)  # Active status
     session_type = Column(String, default="general")  # general, trading, analysis, etc.
     
     # Relationships
@@ -93,7 +93,7 @@ class ChatMessage(Base):
     message_metadata = Column(JSON)  # Additional message-specific data
     
     # Processing state
-    processed = Column(String, default="true")  # Processing status
+    processed = Column(Boolean, default=True)  # Processing status
     error_message = Column(Text)  # Any processing errors
     
     # AI model information

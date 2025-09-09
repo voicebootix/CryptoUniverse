@@ -60,7 +60,7 @@ class ChatMemoryService:
                     session_type=session_type,
                     context=context or {},
                     active_strategies=[],
-                    is_active="true"
+                    is_active=True
                 )
                 
                 db.add(session)
@@ -124,7 +124,7 @@ class ChatMemoryService:
                     model_used=model_used,
                     processing_time_ms=processing_time_ms,
                     tokens_used=tokens_used,
-                    processed="true"
+                    processed=True
                 )
                 
                 db.add(message)
@@ -224,7 +224,7 @@ class ChatMemoryService:
                 )
                 
                 if not include_inactive:
-                    stmt = stmt.filter(ChatSession.is_active == "true")
+                    stmt = stmt.filter(ChatSession.is_active == True)
                 
                 stmt = stmt.order_by(desc(ChatSession.last_activity))
                 
@@ -511,9 +511,9 @@ This summary covers conversation from {messages[0].timestamp} to {messages[-1].t
                 result = await db.execute(
                     """
                     UPDATE chat_sessions 
-                    SET is_active = 'false' 
+                    SET is_active = false 
                     WHERE last_activity < :cutoff_date 
-                    AND is_active = 'true'
+                    AND is_active = true
                     """,
                     {"cutoff_date": cutoff_date}
                 )
