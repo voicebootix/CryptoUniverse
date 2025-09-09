@@ -178,15 +178,41 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     setIsLoading(true);
 
     try {
-      // TEMPORARY FIX: Force REST API only until WebSocket is fixed
-      // TODO: Re-enable WebSocket after debugging
-      if (false && isConnected && sendWsMessage) {
-        // WebSocket disabled for debugging
+      if (isConnected && sendWsMessage) {
+        // Send via WebSocket for real-time response
         sendWsMessage({
           type: 'chat_message',
           message: inputValue,
           session_id: sessionId
         });
+        
+        // Set timeout to fall back to REST API if no WebSocket response
+        setTimeout(() => {
+          if (isLoading) {
+            console.log('WebSocket timeout, falling back to REST API');
+            // Fallback to REST API
+            apiClient.post('/chat/message', {
+              message: inputValue,
+              session_id: sessionId
+            }).then(response => {
+              if (response.data.success) {
+                const assistantMessage: ChatMessage = {
+                  id: response.data.message_id,
+                  content: response.data.content,
+                  type: 'assistant',
+                  timestamp: response.data.timestamp,
+                  intent: response.data.intent,
+                  confidence: response.data.confidence,
+                  metadata: response.data.metadata
+                };
+                setMessages(prev => [...prev, assistantMessage]);
+              }
+              setIsLoading(false);
+            }).catch(() => {
+              setIsLoading(false);
+            });
+          }
+        }, 10000); // 10 second timeout
       } else {
         // Fallback to REST API
         const response = await apiClient.post('/chat/message', {
