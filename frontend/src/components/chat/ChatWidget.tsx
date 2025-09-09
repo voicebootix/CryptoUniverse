@@ -35,6 +35,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   // Initialize with welcome message when opened
   useEffect(() => {
@@ -65,25 +66,52 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
     setIsLoading(true);
 
     try {
-      // Simulate API call - replace with actual chat API
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Use real chat API
+      const { apiClient } = await import('@/lib/api/client');
       
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        content: `I understand you want to: "${userMessage.content}". Let me analyze this for you and provide recommendations.`,
-        type: 'assistant',
-        timestamp: new Date().toISOString(),
-        confidence: 0.85
-      };
+      // Create session if needed
+      if (!sessionId) {
+        const sessionResponse = await apiClient.post('/chat/session/new', {});
+        if (sessionResponse.data.success) {
+          setSessionId(sessionResponse.data.session_id);
+        }
+      }
       
-      setMessages(prev => [...prev, assistantMessage]);
+      // Send message to real API
+      const response = await apiClient.post('/chat/message', {
+        message: userMessage.content,
+        session_id: sessionId
+      });
+
+      if (response.data.success) {
+        const assistantMessage: ChatMessage = {
+          id: response.data.message_id,
+          content: response.data.content,
+          type: 'assistant',
+          timestamp: response.data.timestamp,
+          confidence: response.data.confidence || 0.8
+        };
       
-      if (isMinimized) {
-        setUnreadCount(prev => prev + 1);
+        setMessages(prev => [...prev, assistantMessage]);
+        
+        if (isMinimized) {
+          setUnreadCount(prev => prev + 1);
+        }
+      } else {
+        throw new Error('Failed to get AI response');
       }
       
     } catch (error) {
       console.error('Failed to send message:', error);
+      // Add fallback message
+      const errorMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        content: "I'm having trouble connecting right now. Please try again in a moment.",
+        type: 'assistant',
+        timestamp: new Date().toISOString(),
+        confidence: 0.5
+      };
+      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
