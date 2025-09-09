@@ -143,6 +143,28 @@ const AdminPage: React.FC = () => {
     }
   }, [isAuthenticated, user, navigate]);
 
+  // Handle authentication errors during API calls
+  useEffect(() => {
+    const handleAuthError = () => {
+      if (isAuthenticated && user) {
+        // Token might be expired, try to refresh or logout
+        console.warn('Authentication error detected, redirecting to login');
+        toast.error('Session expired. Please login again.');
+        navigate('/login');
+      }
+    };
+
+    // Listen for auth errors from failed API calls
+    const interval = setInterval(() => {
+      // Check if we have repeated 401 errors from API calls
+      if (users.length === 0 && systemMetrics === null && !loading) {
+        handleAuthError();
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isAuthenticated, user, users, systemMetrics, loading, navigate]);
+
   // Fetch real data from backend
   useEffect(() => {
     // Only fetch data if authenticated and authorized
