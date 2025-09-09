@@ -479,7 +479,6 @@ I encountered an error during the 5-phase execution. The trade was not completed
             if self.market_analysis:
                 market_data = await self.market_analysis.complete_market_assessment(
                     symbols=["BTC", "ETH", "SOL"],  # Default major coins
-                    timeframes=["1h", "4h", "1d"],
                     analysis_depth="comprehensive"
                 )
             else:
@@ -507,10 +506,10 @@ I encountered an error during the 5-phase execution. The trade was not completed
         """Execute Phase 2: Portfolio Risk Assessment + AI Consensus"""
         try:
             # First get portfolio risk assessment using real service
-            user_id = context.get("session_context", {}).get("user_id") or "unknown"
+            user_id = context.get("session_context", {}).get("user_id")
             
             portfolio_status = {}
-            if self.portfolio_risk:
+            if self.portfolio_risk and user_id and user_id != "unknown":
                 try:
                     portfolio_status = await self.portfolio_risk.get_portfolio_status(user_id)
                 except Exception as e:
@@ -527,7 +526,7 @@ I encountered an error during the 5-phase execution. The trade was not completed
                 }),
                 confidence_threshold=80.0,
                 ai_models="all",
-                user_id=user_id
+                user_id=user_id or "system"
             )
             
             return {
