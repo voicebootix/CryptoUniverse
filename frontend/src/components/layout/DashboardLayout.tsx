@@ -39,7 +39,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { getInitials } from "@/lib/utils";
-import ChatWidget from "@/components/chat/ChatWidget";
+import ChatInterface from "@/components/chat/ChatInterface";
 import NotificationDropdown from "@/components/notifications/NotificationDropdown";
 import SophisticatedHeaderWidgets from "@/components/layout/SophisticatedHeaderWidgets";
 
@@ -415,7 +415,9 @@ const SidebarContent: React.FC<SidebarContentProps> = ({
       </nav>
 
       {/* Chat Widget - Available on all pages */}
-      <ChatWidget />
+      <div className="fixed bottom-4 right-4 z-50">
+        <ChatInterface />
+      </div>
     </div>
   );
 };
