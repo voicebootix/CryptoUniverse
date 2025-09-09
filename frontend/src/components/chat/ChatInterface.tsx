@@ -124,7 +124,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
 
   // Use the shared WebSocket hook with proper authentication and reconnection
   const { lastMessage, connectionStatus, sendMessage: sendWsMessage } = useWebSocket(
-    sessionId ? `/ws/api/v1/chat/ws/${sessionId}` : '',
+    sessionId ? `/api/v1/chat/ws/${sessionId}` : '',
     {
       onOpen: () => {
         setIsConnected(true);
