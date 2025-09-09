@@ -45,6 +45,29 @@ PROTECTED_PATHS = {
 TOKEN_REFRESH_THRESHOLD = 300
 
 
+def add_cors_headers_to_response(response: JSONResponse, request: Request) -> None:
+    """
+    Add proper CORS headers to error responses.
+    
+    Args:
+        response: The JSONResponse to add headers to
+        request: The incoming request to get Origin from
+    """
+    origin = request.headers.get("Origin")
+    
+    if origin:
+        # When Origin is present, use it and allow credentials
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+    else:
+        # When no Origin, use wildcard and don't allow credentials
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        # Don't set credentials header or set to false
+    
+    # Always add Vary: Origin for proper caching
+    response.headers["Vary"] = "Origin"
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """
     Authentication middleware that handles JWT validation and token refresh.
@@ -92,9 +115,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Missing authorization header"}
             )
-            # Add CORS headers for error responses
-            response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-            response.headers["Access-Control-Allow-Credentials"] = "true"
+            add_cors_headers_to_response(response, request)
             return response
             
         # Extract token
@@ -107,9 +128,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Invalid authorization header format"}
             )
-            # Add CORS headers for error responses
-            response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-            response.headers["Access-Control-Allow-Credentials"] = "true"
+            add_cors_headers_to_response(response, request)
             return response
             
         try:
@@ -122,9 +141,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     content={"detail": "Token has been revoked"}
                 )
-                # Add CORS headers for error responses
-                response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-                response.headers["Access-Control-Allow-Credentials"] = "true"
+                add_cors_headers_to_response(response, request)
                 return response
                 
             # Check if token needs refresh (expiring soon)
@@ -178,9 +195,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Invalid or expired token"}
             )
-            # Add CORS headers for error responses
-            response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-            response.headers["Access-Control-Allow-Credentials"] = "true"
+            add_cors_headers_to_response(response, request)
             return response
         except Exception as e:
             logger.error(f"Authentication error: {str(e)}", exc_info=True)
@@ -188,9 +203,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content={"detail": "Authentication service error"}
             )
-            # Add CORS headers for error responses
-            response.headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
-            response.headers["Access-Control-Allow-Credentials"] = "true"
+            add_cors_headers_to_response(response, request)
             return response
 
 
