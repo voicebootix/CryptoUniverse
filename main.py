@@ -366,17 +366,46 @@ def create_application() -> FastAPI:
             content={"detail": "An unexpected server error occurred. Please contact support."}
         )
 
-    # Add CORS debugging endpoint
+    # Add CORS debugging endpoint (protected)
     @app.get("/debug/cors")
-    async def debug_cors():
-        """Debug CORS configuration."""
-        return {
-            "cors_origins": settings.cors_origins,
-            "frontend_url": settings.FRONTEND_URL,
-            "base_url": settings.BASE_URL,
-            "environment": settings.ENVIRONMENT,
-            "headers_info": "Check browser network tab for Access-Control-Allow-Origin header"
-        }
+    async def debug_cors(request: Request):
+        """Debug CORS configuration (development/admin only)."""
+        # Always allow in development mode
+        if settings.ENVIRONMENT == "development":
+            return {
+                "cors_origins": settings.cors_origins,
+                "frontend_url": settings.FRONTEND_URL,
+                "base_url": settings.BASE_URL,
+                "environment": settings.ENVIRONMENT,
+                "headers_info": "Check browser network tab for Access-Control-Allow-Origin header"
+            }
+        
+        # In production, check for debug token first (most secure)
+        debug_token = request.headers.get("X-Debug-Token")
+        if debug_token and settings.DEBUG_TOKEN and debug_token == settings.DEBUG_TOKEN:
+            logger.info("Debug CORS endpoint accessed with valid token", 
+                       client_ip=request.client.host if request.client else "unknown")
+            return {
+                "cors_origins": settings.cors_origins,
+                "frontend_url": settings.FRONTEND_URL,
+                "base_url": settings.BASE_URL,
+                "environment": settings.ENVIRONMENT,
+                "headers_info": "Check browser network tab for Access-Control-Allow-Origin header"
+            }
+        
+        # Access denied - log the attempt
+        client_ip = request.client.host if request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "unknown")
+        logger.warning("Unauthorized debug endpoint access", 
+                      client_ip=client_ip,
+                      user_agent=user_agent,
+                      path="/debug/cors")
+        
+        # Return 403 without exposing system details
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied"
+        )
     
     return app
 
