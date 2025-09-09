@@ -127,12 +127,15 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     sessionId ? `/api/v1/chat/ws/${sessionId}` : '',
     {
       onOpen: () => {
+        console.log('🔌 WebSocket connected for chat');
         setIsConnected(true);
       },
       onClose: () => {
+        console.log('🔌 WebSocket disconnected for chat');
         setIsConnected(false);
       },
       onMessage: (data) => {
+        console.log('📨 WebSocket message received:', data);
         if (data.type === 'chat_response') {
           const newMessage: ChatMessage = {
             id: data.message_id,
@@ -178,7 +181,9 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     setIsLoading(true);
 
     try {
+      console.log('💬 Sending message:', { isConnected, hasWsMessage: !!sendWsMessage, inputValue });
       if (isConnected && sendWsMessage) {
+        console.log('📤 Sending via WebSocket');
         // Send via WebSocket for real-time response
         sendWsMessage({
           type: 'chat_message',
@@ -189,7 +194,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         // Set timeout to fall back to REST API if no WebSocket response
         setTimeout(() => {
           if (isLoading) {
-            console.log('WebSocket timeout, falling back to REST API');
+            console.log('⏰ WebSocket timeout, falling back to REST API');
             // Fallback to REST API
             apiClient.post('/chat/message', {
               message: inputValue,
@@ -214,6 +219,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
           }
         }, 10000); // 10 second timeout
       } else {
+        console.log('📡 Using REST API (WebSocket not connected)');
         // Fallback to REST API
         const response = await apiClient.post('/chat/message', {
           message: inputValue,
