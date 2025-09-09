@@ -214,7 +214,7 @@ How would you like to start? You can:
       cleanupWebSocket();
     }
 
-    const wsUrl = getWebSocketUrl('/api/v1/chat/ws');
+    const wsUrl = getWebSocketUrl('/ws/api/v1/chat/ws');
     
     const ws = new WebSocket(wsUrl);
     
