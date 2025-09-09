@@ -155,21 +155,60 @@ const AdminPage: React.FC = () => {
     try {
       setLoading(true);
       
-      // Fetch all data in parallel
-      const [usersData, metricsData, pendingData, logsData] = await Promise.all([
-        adminService.getUsers(),
-        adminService.getMetrics().catch(() => null),
-        adminService.getPendingUsers().catch(() => ({ pending_users: [] })),
-        adminService.getAuditLogs({ limit: 10 }).catch(() => ({ audit_logs: [] }))
-      ]);
-
-      // Update state with real data
-      setUsers(usersData.users || []);
-      setPendingUsers(pendingData.pending_users || []);
-      setSystemMetrics(metricsData);
-      setAuditLogs(logsData.audit_logs || []);
-    } catch (error) {
+      console.log('Fetching admin data...');
+      
+      // Fetch users separately to debug
+      try {
+        console.log('Fetching users...');
+        const usersData = await adminService.getUsers();
+        console.log('Users data received:', usersData);
+        
+        // Handle both possible response formats
+        if (usersData) {
+          if (Array.isArray(usersData)) {
+            setUsers(usersData);
+          } else if (usersData.users && Array.isArray(usersData.users)) {
+            setUsers(usersData.users);
+          } else if (usersData.data && Array.isArray(usersData.data)) {
+            setUsers(usersData.data);
+          } else {
+            console.warn('Unexpected users data format:', usersData);
+            setUsers([]);
+          }
+        }
+      } catch (userError: any) {
+        console.error('Failed to fetch users:', userError);
+        console.error('User fetch error details:', userError.response?.data);
+        toast.error(`Failed to load users: ${userError.response?.data?.detail || userError.message}`);
+        setUsers([]);
+      }
+      
+      // Fetch other data
+      try {
+        const [metricsData, pendingData, logsData] = await Promise.all([
+          adminService.getMetrics().catch((e) => {
+            console.error('Metrics error:', e);
+            return null;
+          }),
+          adminService.getPendingUsers().catch((e) => {
+            console.error('Pending users error:', e);
+            return { pending_users: [] };
+          }),
+          adminService.getAuditLogs({ limit: 10 }).catch((e) => {
+            console.error('Audit logs error:', e);
+            return { audit_logs: [] };
+          })
+        ]);
+        
+        setPendingUsers(pendingData?.pending_users || []);
+        setSystemMetrics(metricsData);
+        setAuditLogs(logsData?.audit_logs || []);
+      } catch (otherError) {
+        console.error('Failed to fetch other admin data:', otherError);
+      }
+    } catch (error: any) {
       console.error('Failed to fetch admin data:', error);
+      console.error('Error details:', error.response?.data);
       toast.error('Failed to load admin data');
     } finally {
       setLoading(false);

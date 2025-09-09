@@ -12,7 +12,20 @@ adminApi.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  console.log('Admin API Request:', config.method?.toUpperCase(), config.url, 'Auth:', !!token);
   return config;
+}, (error) => {
+  console.error('Admin API Request Error:', error);
+  return Promise.reject(error);
+});
+
+// Add response interceptor for debugging
+adminApi.interceptors.response.use((response) => {
+  console.log('Admin API Response:', response.config.url, response.status, response.data);
+  return response;
+}, (error) => {
+  console.error('Admin API Error:', error.config?.url, error.response?.status, error.response?.data);
+  return Promise.reject(error);
 });
 
 // User Management
