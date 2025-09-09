@@ -47,7 +47,7 @@ const SophisticatedHeaderWidgets: React.FC = () => {
   const { data: credits } = useQuery({
     queryKey: ['user-credits'],
     queryFn: async () => {
-      const response = await apiClient.get('/user/credits');
+      const response = await apiClient.get('/credits/balance');
       return response.data.data;
     },
     refetchInterval: 30000

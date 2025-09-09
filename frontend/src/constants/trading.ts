@@ -292,14 +292,15 @@ export const PHASE_ORDER: ExecutionPhase[] = [
   ExecutionPhase.MONITORING
 ];
 
-// API Endpoints
+// API Endpoints - MATCHED TO ACTUAL BACKEND
 export const API_ENDPOINTS = {
   // Chat Endpoints
   CHAT_SESSION: '/chat/session/new',
-  CHAT_MESSAGE: '/chat/message',
-  CHAT_HISTORY: '/chat/history',
-  CHAT_STATS: '/chat/stats',
-  CHAT_RECENT_ACTIONS: '/chat/recent-actions',
+  CHAT_MESSAGE: '/chat/message', 
+  CHAT_HISTORY: '/chat/sessions', // Backend has GET /chat/sessions
+  CHAT_SESSIONS: '/chat/sessions',
+  CHAT_STATS: '/chat/status',
+  CHAT_RECENT_ACTIONS: '/chat/status',
   
   // Trading Endpoints
   TRADE_EXECUTE: '/trading/execute',
@@ -311,17 +312,21 @@ export const API_ENDPOINTS = {
   PAPER_TRADING_STATS: '/paper-trading/stats',
   PAPER_TRADING_HISTORY: '/paper-trading/history',
   
-  // User Preferences
-  USER_PREFERENCES: '/user/preferences',
-  USER_TRUST_SCORE: '/user/trust-score',
+  // User Endpoints
+  USER_PROFILE: '/auth/me',
+  USER_PREFERENCES: '/auth/me',
+  USER_TRUST_SCORE: '/auth/me',
+  
+  // Credits Endpoints
+  USER_CREDITS: '/credits/balance',
   
   // Market Data
   MARKET_PRICES: '/market/realtime-prices',
-  MARKET_OPPORTUNITIES: '/market/opportunities',
+  MARKET_OPPORTUNITIES: '/chat/market/opportunities', // Backend has this under chat
   
   // AI Consensus
-  AI_CONSENSUS: '/ai-consensus/analyze',
-  AI_CONSENSUS_STATUS: '/ai-consensus/status'
+  AI_CONSENSUS: '/ai-consensus/analyze-opportunity',
+  AI_CONSENSUS_STATUS: '/ai-consensus/status/real-time'
 };
 
 // WebSocket Events

@@ -100,7 +100,7 @@ const AIMoneyManager: React.FC = () => {
 
   const initializeChatSession = async () => {
     try {
-      const response = await apiClient.post('/chat/sessions', {
+      const response = await apiClient.post('/chat/session/new', {
         session_type: 'trading',
         context: {
           isPaperMode,

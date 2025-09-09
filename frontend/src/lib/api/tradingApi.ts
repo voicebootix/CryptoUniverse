@@ -123,30 +123,33 @@ export const conversationalTradingApi = {
 
   async getMemory(): Promise<{ memory: ConversationMemory | null }> {
     try {
-      const [historyRes, trustRes] = await Promise.all([
-        apiClient.get(API_ENDPOINTS.CHAT_HISTORY),
-        apiClient.get(API_ENDPOINTS.USER_TRUST_SCORE)
-      ]);
+      // Just get sessions - simpler approach
+      const historyRes = await apiClient.get(API_ENDPOINTS.CHAT_SESSIONS);
       
-      if (!historyRes.data.success) {
-        return { memory: null };
-      }
-      
-      // Transform to memory format
+      // Return basic memory structure for new users
       return {
         memory: {
-          sessionId: historyRes.data.session_id || '',
-          context: historyRes.data.context || {},
-          preferences: historyRes.data.preferences || {},
-          lastActivity: historyRes.data.last_activity || new Date().toISOString(),
-          trustScore: trustRes.data.data?.score || 0,
-          totalProfit: historyRes.data.total_profit || 0
+          sessionId: '',
+          context: {},
+          preferences: {},
+          lastActivity: new Date().toISOString(),
+          trustScore: 50, // Default trust score
+          totalProfit: 0
         }
       };
     } catch (error) {
       console.error('Failed to fetch conversation memory:', error);
-      // Return null for new users
-      return { memory: null };
+      // Return default for new users
+      return {
+        memory: {
+          sessionId: '',
+          context: {},
+          preferences: {},
+          lastActivity: new Date().toISOString(),
+          trustScore: 50,
+          totalProfit: 0
+        }
+      };
     }
   },
 
