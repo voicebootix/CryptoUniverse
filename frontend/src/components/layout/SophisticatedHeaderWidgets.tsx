@@ -56,7 +56,7 @@ const SophisticatedHeaderWidgets: React.FC = () => {
   // Calculate portfolio metrics
   const portfolioValue = isPaperMode ? paperBalance : totalValue;
   const portfolioPnL = isPaperMode ? (paperStats?.totalProfit || 0) : totalPnL;
-  const dailyPnLValue = isPaperMode ? (paperStats?.totalProfit * 0.1 || 0) : dailyPnL;
+  const dailyPnLValue = isPaperMode ? ((paperStats?.totalProfit || 0) * 0.1) : dailyPnL;
 
   return (
     <div className="flex items-center gap-4">

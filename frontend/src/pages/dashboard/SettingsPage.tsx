@@ -71,7 +71,7 @@ interface UserSettings {
 
 const SettingsPage: React.FC = () => {
   const { toast } = useToast();
-  const { user, updateProfile } = useAuthStore();
+  const { user, setUser } = useAuthStore();
   const { isPaperMode } = usePaperModeStore();
   
   const [activeTab, setActiveTab] = useState('profile');
@@ -84,10 +84,10 @@ const SettingsPage: React.FC = () => {
   
   const [settings, setSettings] = useState<UserSettings>({
     profile: {
-      firstName: user?.firstName || '',
-      lastName: user?.lastName || '',
+      firstName: user?.full_name?.split(' ')[0] || '',
+      lastName: user?.full_name?.split(' ')[1] || '',
       email: user?.email || '',
-      avatar: user?.avatar || '',
+      avatar: user?.avatar_url || '',
       timezone: 'UTC',
       language: 'en'
     },
@@ -148,8 +148,12 @@ const SettingsPage: React.FC = () => {
           description: `${section ? section.charAt(0).toUpperCase() + section.slice(1) : 'All'} settings updated successfully`
         });
         
-        if (section === 'profile') {
-          updateProfile(settings.profile);
+        if (section === 'profile' && user) {
+          setUser({
+            ...user,
+            full_name: `${settings.profile.firstName} ${settings.profile.lastName}`,
+            avatar_url: settings.profile.avatar
+          });
         }
       }
     } catch (error) {

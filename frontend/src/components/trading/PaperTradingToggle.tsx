@@ -70,21 +70,11 @@ const PaperTradingToggle: React.FC<PaperTradingToggleProps> = ({
   }, []);
 
   const loadTradingMode = async () => {
-    try {
-      const response = await paperTradingApi.getTradingMode();
-      setIsPaperTrading(response.isPaperTrading);
-    } catch (error) {
-      console.error('Failed to load trading mode:', error);
-    }
+    // Mode is now loaded from global store
   };
 
   const loadPaperStats = async () => {
-    try {
-      const stats = await paperTradingApi.getStats();
-      setPaperStats(stats);
-    } catch (error) {
-      console.error('Failed to load paper trading stats:', error);
-    }
+    // Stats are now loaded from global store
   };
 
   const handleToggle = async (checked: boolean) => {
@@ -118,49 +108,9 @@ const PaperTradingToggle: React.FC<PaperTradingToggleProps> = ({
     }
   };
 
-  const switchToPaperTrading = async () => {
-    setIsLoading(true);
-    try {
-      await paperTradingApi.setTradingMode(true);
-      setIsPaperTrading(true);
-      onModeChange?.(true);
-      toast({
-        title: 'Switched to Paper Trading',
-        description: 'You are now using virtual money for practice.',
-      });
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to switch trading mode',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Removed - using toggleGlobalPaperMode instead
 
-  const switchToLiveTrading = async () => {
-    setIsLoading(true);
-    try {
-      await paperTradingApi.setTradingMode(false);
-      setIsPaperTrading(false);
-      onModeChange?.(false);
-      setShowConfirmDialog(false);
-      toast({
-        title: 'Switched to Live Trading',
-        description: 'You are now trading with real money. Trade responsibly!',
-        variant: 'default',
-      });
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to switch to live trading',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Removed duplicate - switchToLiveTrading already defined above
 
   const renderCompactToggle = () => (
     <TooltipProvider>

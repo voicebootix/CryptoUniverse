@@ -7,6 +7,7 @@ import {
   Settings,
   Users,
   Zap,
+  Wallet,
   Shield,
   Activity,
   DollarSign,
@@ -375,7 +376,7 @@ const AIMoneyManager: React.FC = () => {
                 isPaperTrading={isPaperMode}
                 className="h-full"
                 onTradeExecuted={handleChatTrade}
-                sessionId={sessionId}
+                sessionId={sessionId || undefined}
               />
             </CardContent>
           </Card>
