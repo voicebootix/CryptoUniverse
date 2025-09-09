@@ -155,60 +155,96 @@ const AdminPage: React.FC = () => {
     try {
       setLoading(true);
       
-      console.log('Fetching admin data...');
+      // Fetch all data using Promise.allSettled for better error handling
+      const results = await Promise.allSettled([
+        adminService.getUsers(),
+        adminService.getMetrics(),
+        adminService.getPendingUsers(),
+        adminService.getAuditLogs({ limit: 10 })
+      ]);
       
-      // Fetch users separately to debug
-      try {
-        console.log('Fetching users...');
-        const usersData = await adminService.getUsers();
-        console.log('Users data received:', usersData);
-        
-        // Handle both possible response formats
-        if (usersData) {
-          if (Array.isArray(usersData)) {
-            setUsers(usersData);
-          } else if (usersData.users && Array.isArray(usersData.users)) {
-            setUsers(usersData.users);
-          } else if (usersData.data && Array.isArray(usersData.data)) {
+      // Process users result
+      if (results[0].status === 'fulfilled') {
+        const usersData = results[0].value;
+        // Normalize the response - handle array or object formats
+        if (Array.isArray(usersData)) {
+          setUsers(usersData);
+        } else if (usersData?.users && Array.isArray(usersData.users)) {
+          setUsers(usersData.users);
+        } else if (usersData?.data) {
+          if (Array.isArray(usersData.data)) {
             setUsers(usersData.data);
+          } else if (usersData.data.users && Array.isArray(usersData.data.users)) {
+            setUsers(usersData.data.users);
           } else {
-            console.warn('Unexpected users data format:', usersData);
             setUsers([]);
           }
+        } else {
+          setUsers([]);
         }
-      } catch (userError: any) {
-        console.error('Failed to fetch users:', userError);
-        console.error('User fetch error details:', userError.response?.data);
-        toast.error(`Failed to load users: ${userError.response?.data?.detail || userError.message}`);
+      } else {
+        console.error('Failed to fetch users:', results[0].reason?.message);
+        toast.error('Failed to load users');
         setUsers([]);
       }
       
-      // Fetch other data
-      try {
-        const [metricsData, pendingData, logsData] = await Promise.all([
-          adminService.getMetrics().catch((e) => {
-            console.error('Metrics error:', e);
-            return null;
-          }),
-          adminService.getPendingUsers().catch((e) => {
-            console.error('Pending users error:', e);
-            return { pending_users: [] };
-          }),
-          adminService.getAuditLogs({ limit: 10 }).catch((e) => {
-            console.error('Audit logs error:', e);
-            return { audit_logs: [] };
-          })
-        ]);
-        
-        setPendingUsers(pendingData?.pending_users || []);
-        setSystemMetrics(metricsData);
-        setAuditLogs(logsData?.audit_logs || []);
-      } catch (otherError) {
-        console.error('Failed to fetch other admin data:', otherError);
+      // Process metrics result
+      if (results[1].status === 'fulfilled') {
+        setSystemMetrics(results[1].value);
+      } else {
+        console.error('Failed to fetch metrics:', results[1].reason?.message);
+        setSystemMetrics(null);
+      }
+      
+      // Process pending users result
+      if (results[2].status === 'fulfilled') {
+        const pendingData = results[2].value;
+        // Normalize the response
+        if (Array.isArray(pendingData)) {
+          setPendingUsers(pendingData);
+        } else if (pendingData?.pending_users && Array.isArray(pendingData.pending_users)) {
+          setPendingUsers(pendingData.pending_users);
+        } else if (pendingData?.data) {
+          if (Array.isArray(pendingData.data)) {
+            setPendingUsers(pendingData.data);
+          } else if (pendingData.data.pending_users && Array.isArray(pendingData.data.pending_users)) {
+            setPendingUsers(pendingData.data.pending_users);
+          } else {
+            setPendingUsers([]);
+          }
+        } else {
+          setPendingUsers([]);
+        }
+      } else {
+        console.error('Failed to fetch pending users:', results[2].reason?.message);
+        setPendingUsers([]);
+      }
+      
+      // Process audit logs result
+      if (results[3].status === 'fulfilled') {
+        const logsData = results[3].value;
+        // Normalize the response
+        if (Array.isArray(logsData)) {
+          setAuditLogs(logsData);
+        } else if (logsData?.audit_logs && Array.isArray(logsData.audit_logs)) {
+          setAuditLogs(logsData.audit_logs);
+        } else if (logsData?.data) {
+          if (Array.isArray(logsData.data)) {
+            setAuditLogs(logsData.data);
+          } else if (logsData.data.audit_logs && Array.isArray(logsData.data.audit_logs)) {
+            setAuditLogs(logsData.data.audit_logs);
+          } else {
+            setAuditLogs([]);
+          }
+        } else {
+          setAuditLogs([]);
+        }
+      } else {
+        console.error('Failed to fetch audit logs:', results[3].reason?.message);
+        setAuditLogs([]);
       }
     } catch (error: any) {
-      console.error('Failed to fetch admin data:', error);
-      console.error('Error details:', error.response?.data);
+      console.error('Failed to fetch admin data:', error.message);
       toast.error('Failed to load admin data');
     } finally {
       setLoading(false);
