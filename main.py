@@ -293,19 +293,13 @@ def create_application() -> FastAPI:
     logger.info(f"Base URL: {settings.BASE_URL}")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     
-    # Emergency CORS fix - be more permissive for now
-    emergency_origins = [
+    # FORCE CORS origins to ensure frontend works
+    cors_origins = [
         "https://cryptouniverse-frontend.onrender.com",
-        "https://cryptouniverse.onrender.com"
+        "https://cryptouniverse.onrender.com",
+        "http://localhost:3000",
+        "http://localhost:8000"
     ]
-    
-    # Use emergency origins if environment variable fails
-    if not cors_origins or len(cors_origins) == 0:
-        cors_origins = emergency_origins
-    
-    # Ensure frontend origin is always present
-    if "https://cryptouniverse-frontend.onrender.com" not in cors_origins:
-        cors_origins.append("https://cryptouniverse-frontend.onrender.com")
     
     logger.info(f"Final CORS origins being used: {cors_origins}")
     
