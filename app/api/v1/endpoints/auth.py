@@ -220,9 +220,7 @@ async def get_current_user(
             detail="User not found"
         )
     
-    from app.utils.role_normalizer import normalize_status
-    user_status = normalize_status(user.status)
-    if user_status != UserStatus.ACTIVE:
+    if user.status != UserStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is not active"
@@ -233,17 +231,9 @@ async def get_current_user(
 
 # Role-based access control
 def require_role(allowed_roles: list):
-    """Decorator for role-based access control with normalization."""
-    from app.utils.role_normalizer import normalize_role
-    
+    """Decorator for role-based access control."""
     def role_checker(current_user: User = Depends(get_current_user)):
-        # Normalize the user's role from database
-        user_role = normalize_role(current_user.role)
-        
-        # Normalize allowed roles for comparison
-        normalized_allowed = [normalize_role(r) for r in allowed_roles]
-        
-        if user_role not in normalized_allowed:
+        if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions"
@@ -571,8 +561,7 @@ async def refresh_token(
             
         # Get user and verify status
         user = await db.get(User, user_id)
-        from app.utils.role_normalizer import normalize_status as norm_status2
-        if not user or norm_status2(user.status) != UserStatus.ACTIVE:
+        if not user or user.status != UserStatus.ACTIVE:
             logger.warning("User not found or inactive", 
                          user_id=user_id,
                          status=getattr(user, 'status', None) if user else None)
