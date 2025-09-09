@@ -479,7 +479,7 @@ I encountered an error during the 5-phase execution. The trade was not completed
             if self.market_analysis:
                 market_data = await self.market_analysis.complete_market_assessment(
                     symbols=["BTC", "ETH", "SOL"],  # Default major coins
-                    analysis_depth="comprehensive"
+                    depth="comprehensive"
                 )
             else:
                 market_data = {"status": "service_unavailable"}
@@ -656,31 +656,19 @@ USER MESSAGE: {user_message}
 Provide a helpful, context-aware response that builds on our conversation history.
 """
         
-        # Get AI response using consensus decision - simplified test
+        # TEMPORARY: Skip AI consensus to test if that's what's hanging
         try:
-            ai_response = await self.ai_consensus.consensus_decision(
-                decision_request=json.dumps({
-                    "user_message": user_message,
-                    "intent": intent.value,
-                    "prompt": full_prompt
-                }),
-                confidence_threshold=75.0,
-                ai_models="all",
-                user_id=context.get("user_id", "unknown")
-            )
-            
-            # Check if we got a valid response
-            if not ai_response or not ai_response.get("success"):
-                raise Exception(f"AI consensus failed: {ai_response.get('error', 'Unknown error')}")
+            # Skip the hanging AI consensus call for now
+            raise Exception("Temporarily bypassing AI consensus to test infrastructure")
                 
         except Exception as e:
-            # Fallback to simple response if AI consensus fails
-            self.logger.error("AI consensus failed, using fallback", error=str(e))
+            # Use simple response without AI consensus
+            self.logger.info("Using fallback response (AI consensus bypassed)", message=user_message)
             ai_response = {
                 "success": True,
-                "final_recommendation": f"I understand you said: '{user_message}'. I'm having trouble with my AI processing right now, but I'm working on it.",
+                "final_recommendation": f"🔧 Testing mode: You said '{user_message}'. The chat infrastructure is working, but AI consensus is temporarily bypassed.",
                 "consensus_score": 0.7,
-                "reasoning": f"Fallback response due to AI processing error: {str(e)}"
+                "reasoning": "Infrastructure test response"
             }
         
         return {
