@@ -251,6 +251,10 @@ I'll remember our conversation and provide increasingly personalized assistance.
         processing_start = time.time()
         
         try:
+            # Create session if none provided
+            if not session_id or session_id.strip() == "":
+                session_id = await self.start_chat_session(user_id)
+            
             # Save user message
             user_message_id = await self.memory.save_message(
                 session_id=session_id,
@@ -656,19 +660,22 @@ USER MESSAGE: {user_message}
 Provide a helpful, context-aware response that builds on our conversation history.
 """
         
-        # TEMPORARY: Skip AI consensus to test if that's what's hanging
+        # Get AI consensus response
         try:
-            # Skip the hanging AI consensus call for now
-            raise Exception("Temporarily bypassing AI consensus to test infrastructure")
-                
+            ai_response = await self.ai_consensus.consensus_decision(
+                decision_request=full_prompt,
+                confidence_threshold=70.0,
+                ai_models="all",
+                user_id=context.get("session_context", {}).get("user_id", "system")
+            )
         except Exception as e:
-            # Use simple response without AI consensus
-            self.logger.info("Using fallback response (AI consensus bypassed)", message=user_message)
+            # Use simple response if AI consensus fails
+            self.logger.warning("AI consensus failed, using fallback", error=str(e), message=user_message)
             ai_response = {
-                "success": True,
-                "final_recommendation": f"🔧 Testing mode: You said '{user_message}'. The chat infrastructure is working, but AI consensus is temporarily bypassed.",
-                "consensus_score": 0.7,
-                "reasoning": "Infrastructure test response"
+                "success": False,
+                "final_recommendation": f"I understand your message: '{user_message}'. I'm having trouble accessing my advanced AI capabilities right now, but I can still help with basic questions about cryptocurrency trading and portfolio management.",
+                "consensus_score": 0.6,
+                "reasoning": "Fallback response due to AI service unavailability"
             }
         
         return {
