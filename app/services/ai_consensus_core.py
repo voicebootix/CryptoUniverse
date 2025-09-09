@@ -974,11 +974,27 @@ class AIConsensusService(LoggerMixin):
         self.logger.info("Making consensus decision", request_id=request_id, user_id=user_id)
         
         try:
-            # Parse decision request (supports any trading decision)
-            decision_data = json.loads(decision_request) if isinstance(decision_request, str) else decision_request
+            # Parse decision request (supports both JSON and plain text)
+            if isinstance(decision_request, str):
+                try:
+                    decision_data = json.loads(decision_request)
+                except json.JSONDecodeError:
+                    # Handle plain text prompts from chat engine
+                    decision_data = {
+                        "type": "chat_message",
+                        "prompt": decision_request,
+                        "user_id": user_id
+                    }
+            else:
+                decision_data = decision_request
             
             # Build final decision prompt
-            prompt = self._build_consensus_decision_prompt(decision_data)
+            if decision_data.get("type") == "chat_message":
+                # For chat messages, use the prompt directly
+                prompt = decision_data["prompt"]
+            else:
+                # For structured trading decisions, build complex prompt
+                prompt = self._build_consensus_decision_prompt(decision_data)
             
             # Get highest confidence multi-AI consensus for final decision
             consensus_result = await self.consensus_engine.generate_consensus(
