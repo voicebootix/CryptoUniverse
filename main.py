@@ -315,7 +315,7 @@ def create_application() -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
         allow_headers=["*"],
-        expose_headers=["*"],
+        expose_headers=["X-New-Access-Token", "*"],  # Explicitly expose auth header
         max_age=86400  # Cache preflight for 24 hours
     )
     
