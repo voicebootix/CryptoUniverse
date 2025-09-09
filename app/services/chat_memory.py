@@ -9,7 +9,7 @@ features like summarization and context management.
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
-from sqlalchemy import desc, asc, and_, or_, select
+from sqlalchemy import desc, asc, and_, or_, select, text
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError
 import structlog
@@ -131,7 +131,7 @@ class ChatMemoryService:
                 
                 # Update session last activity
                 await db.execute(
-                    "UPDATE chat_sessions SET last_activity = :now WHERE session_id = :session_id",
+                    text("UPDATE chat_sessions SET last_activity = :now WHERE session_id = :session_id"),
                     {"now": datetime.utcnow(), "session_id": session_id}
                 )
                 
@@ -509,12 +509,12 @@ This summary covers conversation from {messages[0].timestamp} to {messages[-1].t
             async for db in get_database():
                 # Mark old sessions as inactive
                 result = await db.execute(
-                    """
+                    text("""
                     UPDATE chat_sessions 
                     SET is_active = false 
                     WHERE last_activity < :cutoff_date 
                     AND is_active = true
-                    """,
+                    """),
                     {"cutoff_date": cutoff_date}
                 )
                 

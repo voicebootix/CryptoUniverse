@@ -21,6 +21,7 @@ async def initialize_database():
         try:
             from app.core.database import engine, Base
             from app.models.user import User, UserRole, UserStatus
+            from app.models.chat import ChatSession, ChatMessage, ChatSessionSummary  # Import chat models
             from app.core.config import get_settings
             from sqlalchemy.ext.asyncio import AsyncSession
             from sqlalchemy import select, text
