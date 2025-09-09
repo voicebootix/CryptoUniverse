@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
-import { useAuthStore } from '@/store/authStore';
+// Note: useAuthStore imported dynamically to avoid circular dependency
 
 // API configuration
 // In production, always use the backend URL, not relative paths
@@ -20,6 +20,9 @@ export const apiClient: AxiosInstance = axios.create({
   },
 });
 
+// Shared refresh promise to prevent concurrent token refreshes
+let refreshInFlight: Promise<void> | null = null;
+
 // Request interceptor to add auth token with expiry checking
 apiClient.interceptors.request.use(
   async (config) => {
@@ -30,7 +33,8 @@ apiClient.interceptors.request.use(
       '/auth/forgot-password',
       '/auth/reset-password',
       '/auth/verify-email',
-      '/auth/refresh'
+      '/auth/refresh',
+      '/auth/logout'
     ];
 
     const shouldSkipAuth = skipAuthEndpoints.some(endpoint => 
@@ -38,38 +42,51 @@ apiClient.interceptors.request.use(
     );
 
     if (!shouldSkipAuth) {
+      // Use dynamic import to avoid circular dependency
+      const { useAuthStore } = await import('@/store/authStore');
       const { tokens, refreshToken, logout } = useAuthStore.getState();
       
       if (!tokens?.access_token) {
         console.log('No access token available');
-        logout();
+        // Don't call logout() here to avoid recursive calls - let higher level handle
         throw new Error('Authentication required');
       }
       
       // Check if token is expired or expiring soon
       if (tokens?.expires_in) {
         const now = Math.floor(Date.now() / 1000);
-        let expirationTime = tokens.expires_in;
-        
-        // Handle both timestamp and duration formats
-        if (expirationTime < now) {
-          expirationTime = now + tokens.expires_in;
-        }
-        
+        const expirationTime = tokens.expires_in; // Now always a timestamp
         const timeUntilExpiry = expirationTime - now;
         
         // If token expires in less than 30 seconds, try to refresh it
         if (timeUntilExpiry <= 30) {
           console.log('Token expiring soon, attempting refresh before request...');
+          
           try {
-            await refreshToken();
-            // Get fresh token after refresh
+            // Check for in-flight refresh to avoid concurrent refreshes
+            if (refreshInFlight) {
+              console.log('Refresh already in progress, awaiting...');
+              await refreshInFlight;
+            } else {
+              console.log('Starting new refresh...');
+              refreshInFlight = refreshToken();
+              try {
+                await refreshInFlight;
+              } finally {
+                refreshInFlight = null;
+              }
+            }
+            
+            // Get fresh tokens after refresh
             const freshTokens = useAuthStore.getState().tokens;
             if (freshTokens?.access_token) {
               config.headers.Authorization = `Bearer ${freshTokens.access_token}`;
+            } else {
+              throw new Error('No fresh token after refresh');
             }
           } catch (refreshError) {
             console.error('Pre-request token refresh failed:', refreshError);
+            refreshInFlight = null;
             logout();
             throw new Error('Session expired. Please login again.');
           }
@@ -120,7 +137,7 @@ apiClient.interceptors.response.use(
             
             console.log('401 Unauthorized - attempting token refresh...');
             
-            // Try to refresh token
+            // Try to refresh token with deduplication
             try {
               const { useAuthStore } = await import('@/store/authStore');
               const authStore = useAuthStore.getState();
@@ -135,7 +152,19 @@ apiClient.interceptors.response.use(
                 return Promise.reject(new Error('Session expired. Please login again.'));
               }
               
-              await authStore.refreshToken();
+              // Use the same deduplication logic as request interceptor
+              if (refreshInFlight) {
+                console.log('Refresh already in progress, awaiting...');
+                await refreshInFlight;
+              } else {
+                console.log('Starting new refresh from response interceptor...');
+                refreshInFlight = authStore.refreshToken();
+                try {
+                  await refreshInFlight;
+                } finally {
+                  refreshInFlight = null;
+                }
+              }
               
               // Retry original request with new token
               const newTokens = authStore.tokens;
@@ -152,6 +181,7 @@ apiClient.interceptors.response.use(
             } catch (refreshError) {
               // Refresh failed, logout user
               console.error('Token refresh failed in response interceptor:', refreshError);
+              refreshInFlight = null;
               const { useAuthStore } = await import('@/store/authStore');
               useAuthStore.getState().logout();
               
@@ -375,7 +405,8 @@ export const exchangesAPI = axios.create({
 [tradingAPI, exchangesAPI].forEach(instance => {
   // Add auth interceptor (same as apiClient)
   instance.interceptors.request.use(
-    (config) => {
+    async (config) => {
+      const { useAuthStore } = await import('@/store/authStore');
       const authStore = useAuthStore.getState();
       const token = authStore.tokens?.access_token;
       
@@ -398,6 +429,7 @@ export const exchangesAPI = axios.create({
         originalRequest._retry = true;
         
         try {
+          const { useAuthStore } = await import('@/store/authStore');
           const authStore = useAuthStore.getState();
           await authStore.refreshToken();
           const newToken = authStore.tokens?.access_token;
@@ -408,6 +440,7 @@ export const exchangesAPI = axios.create({
           }
         } catch (refreshError) {
           console.error('Token refresh failed:', refreshError);
+          const { useAuthStore } = await import('@/store/authStore');
           const authStore = useAuthStore.getState();
           authStore.logout();
           window.location.href = '/login';

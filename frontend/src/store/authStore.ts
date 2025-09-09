@@ -112,14 +112,19 @@ export const useAuthStore = create<AuthStore>()(
               permissions: response.data.permissions || []
             };
 
-            // Create tokens object with proper expiration timestamp
+            // Create tokens object with properly normalized expiration timestamp
             const now = Math.floor(Date.now() / 1000);
-            const expiresIn = response.data.expires_in || 28800; // Default 8 hours
+            const rawExpiresIn = Number(response.data.expires_in) || 28800; // Default 8 hours
+            
+            // Normalize expires_in: if it looks like absolute timestamp, use it; otherwise treat as duration
+            const expirationTimestamp = rawExpiresIn > now 
+              ? rawExpiresIn  // Already an absolute timestamp
+              : now + rawExpiresIn;  // Duration, convert to timestamp
             
             const tokens = {
               access_token: response.data.access_token,
               refresh_token: response.data.refresh_token,
-              expires_in: now + expiresIn, // Store as timestamp instead of duration
+              expires_in: Math.floor(expirationTimestamp), // Store as integer timestamp
               token_type: response.data.token_type
             };
 
@@ -222,13 +227,18 @@ export const useAuthStore = create<AuthStore>()(
           });
 
           if (response.data.success && response.data.tokens) {
-            // Update tokens with proper expiration timestamp
+            // Update tokens with properly normalized expiration timestamp
             const now = Math.floor(Date.now() / 1000);
-            const expiresIn = response.data.tokens.expires_in || 28800; // Default 8 hours
+            const rawExpiresIn = Number(response.data.tokens.expires_in) || 28800; // Default 8 hours
+            
+            // Normalize expires_in: if it looks like absolute timestamp, use it; otherwise treat as duration
+            const expirationTimestamp = rawExpiresIn > now 
+              ? rawExpiresIn  // Already an absolute timestamp
+              : now + rawExpiresIn;  // Duration, convert to timestamp
             
             const updatedTokens = {
               ...response.data.tokens,
-              expires_in: now + expiresIn // Convert to timestamp
+              expires_in: Math.floor(expirationTimestamp) // Store as integer timestamp
             };
             
             set({
@@ -307,16 +317,9 @@ const setupTokenRefresh = () => {
     return;
   }
 
-  // Calculate time until expiry (expires_in should be timestamp)
+  // Calculate time until expiry (expires_in is now always a timestamp)
   const now = Math.floor(Date.now() / 1000);
-  let expirationTime = tokens.expires_in;
-  
-  // If expires_in looks like duration instead of timestamp, convert it
-  if (expirationTime < now) {
-    // This is likely a duration, add it to current time
-    expirationTime = now + tokens.expires_in;
-  }
-  
+  const expirationTime = tokens.expires_in; // Now always normalized as timestamp
   const timeUntilExpiry = expirationTime - now;
   
   // If token already expired or expires very soon, refresh immediately
@@ -356,13 +359,7 @@ const isTokenExpiredOrExpiring = () => {
   }
   
   const now = Math.floor(Date.now() / 1000);
-  let expirationTime = tokens.expires_in;
-  
-  // Handle both timestamp and duration formats
-  if (expirationTime < now) {
-    expirationTime = now + tokens.expires_in;
-  }
-  
+  const expirationTime = tokens.expires_in; // Now always normalized as timestamp
   const timeUntilExpiry = expirationTime - now;
   
   // Consider expired if less than 1 minute remaining
