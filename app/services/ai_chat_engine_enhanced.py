@@ -261,21 +261,17 @@ I'll remember our conversation and provide increasingly personalized assistance.
                 tokens_used=len(user_message.split())
             )
             
-            # Get conversation context
-            context = await self.memory.get_conversation_context(session_id)
+            # TEMPORARY: Bypass complex AI processing to test chat infrastructure
+            context = {}  # Skip context retrieval temporarily
+            intent = ChatIntent.GENERAL_QUERY  # Use simple intent
             
-            # Classify intent
-            intent = await self._classify_intent(user_message, context)
-            
-            # Process with 5-phase execution for trading intents
-            if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
-                response = await self._process_with_5_phases(
-                    session_id, user_message, intent, context
-                )
-            else:
-                response = await self._process_intent(
-                    user_message, intent, context
-                )
+            # Simple test response instead of complex AI processing
+            response = {
+                "content": f"✅ Chat is working! You said: '{user_message}' - This is a test response while we fix the AI processing.",
+                "confidence": 0.9,
+                "metadata": {"test": True},
+                "model_used": "test_system"
+            }
             
             processing_time = (time.time() - processing_start) * 1000
             
