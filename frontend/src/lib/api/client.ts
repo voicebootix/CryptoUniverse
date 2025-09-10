@@ -34,7 +34,10 @@ apiClient.interceptors.request.use(
       '/auth/reset-password',
       '/auth/verify-email',
       '/auth/refresh',
-      '/auth/logout'
+      '/auth/logout',
+      '/auth/oauth',
+      '/auth/oauth/url',
+      '/auth/oauth/callback'
     ];
 
     const shouldSkipAuth = skipAuthEndpoints.some(endpoint => 
