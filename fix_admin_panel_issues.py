@@ -16,11 +16,28 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 # Add app to path
 sys.path.append(str(Path(__file__).parent))
 
 import structlog
+from sqlalchemy import select, func, text
+from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException, status, Depends
+
+# Import models and dependencies - these will be available at runtime
+try:
+    from app.models.user import User, UserStatus, UserRole
+    from app.models.credit import CreditAccount
+    from app.models.trade import Trade
+    from app.core.database import get_database
+    from app.core.auth import require_role
+    from app.core.rate_limiter import rate_limiter
+    from app.schemas.admin import UserListResponse
+except ImportError:
+    # These will be imported at runtime when the app is available
+    pass
 
 logger = structlog.get_logger(__name__)
 
@@ -65,7 +82,7 @@ engine = create_async_engine(
             "jit": "off",
             "work_mem": "16MB",           # Increased for admin queries
             "effective_cache_size": "1GB", # Better query planning
-            "max_connections": "100"       # Ensure enough connections
+            # max_connections is server-level, not per-session setting
         }
     } if "postgresql" in get_async_database_url() else {}
 )'''
@@ -137,7 +154,9 @@ async def list_users(
                 logger.warning(f"Invalid role filter: {role_filter}")
         
         if search:
-            stmt = stmt.where(User.email.ilike(f"%{search}%"))
+            # SECURITY: Use parameterized query to prevent SQL injection
+            search_param = f"%{search}%"
+            stmt = stmt.where(User.email.ilike(search_param))
         
         # Get total count efficiently
         count_stmt = select(func.count()).select_from(stmt.subquery())
@@ -455,7 +474,8 @@ class AdminAPI {
       },
       credentials: 'include',
       // Add timeout
-      signal: AbortSignal.timeout(30000) // 30 second timeout
+      // Use manual timeout for broader browser compatibility
+      // signal: AbortSignal.timeout(30000) // Not supported in all browsers
     });
 
     // Handle token expiration

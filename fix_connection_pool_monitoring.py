@@ -69,17 +69,16 @@ Test database connection pool under load.
 
 import asyncio
 import time
-from app.core.database import get_database
+from sqlalchemy import select, func
+from app.core.database import AsyncSessionLocal
+from app.models.user import User
 
 async def test_connection_under_load(concurrent_connections=10):
     """Test database connections under concurrent load."""
     
     async def single_query(query_id):
         try:
-            async with get_database() as db:
-                from sqlalchemy import select, func
-                from app.models.user import User
-                
+            async with AsyncSessionLocal() as db:
                 result = await db.execute(select(func.count()).select_from(User))
                 count = result.scalar_one()
                 

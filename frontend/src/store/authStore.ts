@@ -52,7 +52,8 @@ export const useAuthStore = create<AuthStore>()(
             // First attempt with very long timeout for Render cold starts
             console.log('Starting first login attempt with 3-minute timeout...');
             response = await apiClient.post('/auth/login', credentials, {
-              timeout: 180000 // 3 minutes timeout for very slow Render cold starts
+              timeout: 180000, // 3 minutes timeout for very slow Render cold starts
+              withCredentials: true // Include cookies for HttpOnly refresh_token
             });
           } catch (firstError: any) {
             // Log error for debugging
@@ -78,7 +79,8 @@ export const useAuthStore = create<AuthStore>()(
                 // Second attempt - service should be warm now
                 console.log('Starting second login attempt with 90-second timeout...');
                 response = await apiClient.post('/auth/login', credentials, {
-                  timeout: 90000 // 90 seconds for warm service
+                  timeout: 90000, // 90 seconds for warm service
+                  withCredentials: true // Include cookies for HttpOnly refresh_token
                 });
               } catch (secondError: any) {
                 console.error('Second login attempt also failed:', secondError.message);
@@ -142,11 +144,9 @@ export const useAuthStore = create<AuthStore>()(
               mfaRequired: false,
             });
 
-            // CRITICAL FIX: Force localStorage save immediately
-            localStorage.setItem('auth_token', response.data.access_token);
-            localStorage.setItem('refresh_token', response.data.refresh_token || '');
-            localStorage.setItem('user_data', JSON.stringify(user));
-            localStorage.setItem('auth_timestamp', Date.now().toString());
+            // SECURITY: Keep access_token only in memory, refresh_token in HttpOnly cookie
+            // Do NOT store access_token in localStorage (XSS vulnerability)
+            // Refresh token is set as HttpOnly cookie by server in Set-Cookie header
 
             // Set authorization header for future requests
             apiClient.defaults.headers.common['Authorization'] = 
@@ -234,19 +234,15 @@ export const useAuthStore = create<AuthStore>()(
           return await globalThis.__authRefreshPromise;
         }
 
-        const { tokens } = get();
+        // Refresh token is now in HttpOnly cookie, server handles it automatically
+        // No need to send refresh_token in request body
         
-        if (!tokens?.refresh_token) {
-          get().logout();
-          return;
-        }
-
         // Create and store the refresh promise globally
         globalThis.__authRefreshPromise = (async () => {
           try {
             console.log('Starting token refresh...');
-            const response = await apiClient.post<AuthResponse>('/auth/refresh', {
-              refresh_token: tokens.refresh_token,
+            const response = await apiClient.post<AuthResponse>('/auth/refresh', {}, {
+              withCredentials: true // Include HttpOnly refresh_token cookie
             });
 
             if (response.data.success && response.data.tokens) {
@@ -312,15 +308,21 @@ export const useAuthStore = create<AuthStore>()(
     {
       name: 'auth-storage',
       partialize: (state) => ({
+        // SECURITY: Only persist user data, NOT tokens
+        // access_token stays in memory, refresh_token in HttpOnly cookie
         user: state.user,
-        tokens: state.tokens,
         isAuthenticated: state.isAuthenticated,
       }),
       onRehydrateStorage: () => (state) => {
-        // Restore authorization header on app load
-        if (state?.tokens?.access_token) {
-          apiClient.defaults.headers.common['Authorization'] = 
-            `Bearer ${state.tokens.access_token}`;
+        // On app load, tokens are not restored from localStorage
+        // Access token must be refreshed using HttpOnly refresh_token cookie
+        if (state?.isAuthenticated && !state.tokens?.access_token) {
+          console.log('User authenticated but no access token, attempting refresh...');
+          const store = useAuthStore.getState();
+          store.refreshToken().catch(() => {
+            console.log('Token refresh failed on app load, logging out');
+            store.logout();
+          });
         }
       },
     }

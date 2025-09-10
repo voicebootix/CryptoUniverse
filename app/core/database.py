@@ -7,6 +7,7 @@ for the multi-tenant cryptocurrency trading platform.
 
 import asyncio
 import logging
+import ssl
 from typing import AsyncGenerator, Optional
 
 import sqlalchemy
@@ -18,6 +19,17 @@ from sqlalchemy.pool import NullPool, QueuePool
 from app.core.config import get_settings
 
 settings = get_settings()
+
+# SSL context helper for asyncpg
+def _get_ssl_context():
+    """Get proper SSL context for asyncpg connections."""
+    db_url = get_async_database_url()
+    if "supabase" in db_url.lower():
+        # For Supabase, use default SSL context
+        return ssl.create_default_context()
+    else:
+        # For other PostgreSQL instances, no SSL
+        return None
 
 # Convert sync DATABASE_URL to async if needed
 def get_async_database_url() -> str:
@@ -58,14 +70,14 @@ engine = create_async_engine(
     connect_args={
         "command_timeout": 60,  # Increased command timeout for admin queries (was 30)
         "timeout": 120,         # Increased connection timeout for slow admin operations (was 60)
-        "ssl": "require" if "supabase" in get_async_database_url().lower() else None,
+        "ssl": _get_ssl_context(),
         # Server settings for asyncpg with admin optimizations
         "server_settings": {
             "application_name": "cryptouniverse_production",
             "jit": "off",
             "work_mem": "16MB",           # Increased for admin queries
-            "effective_cache_size": "1GB", # Better query planning
-            "max_connections": "100"       # Ensure enough connections
+            "effective_cache_size": "1GB"  # Better query planning
+            # Removed max_connections - it's a server-level setting, not per-session
         }
     } if "postgresql" in get_async_database_url() else {}
 )
