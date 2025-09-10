@@ -142,6 +142,12 @@ export const useAuthStore = create<AuthStore>()(
               mfaRequired: false,
             });
 
+            // CRITICAL FIX: Force localStorage save immediately
+            localStorage.setItem('auth_token', response.data.access_token);
+            localStorage.setItem('refresh_token', response.data.refresh_token || '');
+            localStorage.setItem('user_data', JSON.stringify(user));
+            localStorage.setItem('auth_timestamp', Date.now().toString());
+
             // Set authorization header for future requests
             apiClient.defaults.headers.common['Authorization'] = 
               `Bearer ${response.data.access_token}`;

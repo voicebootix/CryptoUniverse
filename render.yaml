@@ -25,7 +25,7 @@ services:
           name: cryptouniverse-redis
           property: connectionString
       - key: CORS_ORIGINS
-        value: "https://cryptouniverse-frontend.onrender.com,https://cryptouniverse.onrender.com"
+        value: "https://cryptouniverse-frontend.onrender.com,https://cryptouniverse.onrender.com,https://app.cryptouniverse.com,https://www.cryptouniverse.com"
       - key: BASE_URL
         value: https://cryptouniverse.onrender.com
       - key: HOST
@@ -94,13 +94,13 @@ databases:
     staticPublishPath: ./frontend/dist
     envVars:
       - key: VITE_API_URL
-        value: /api/v1
+        value: https://cryptouniverse.onrender.com/api/v1
       - key: VITE_WS_URL
         value: wss://cryptouniverse.onrender.com
     routes:
       - type: rewrite
         source: /api/*
-        destination: https://cryptouniverse-backend.onrender.com/api/*
+        destination: https://cryptouniverse.onrender.com/api/*
       - type: rewrite
         source: /*
         destination: /index.html

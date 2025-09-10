@@ -199,37 +199,37 @@ export const authApi = {
     page: number;
     limit: number;
   }> {
-    const response = await apiClient.get('/auth/admin/users', { params });
+    const response = await apiClient.get('/admin/users', { params });
     return response.data;
   },
 
   async updateUserStatus(userId: string, status: string): Promise<User> {
-    const response = await apiClient.patch(`/auth/admin/users/${userId}/status`, { status });
+    const response = await apiClient.patch(`/admin/users/${userId}/status`, { status });
     return response.data;
   },
 
   async updateUserRole(userId: string, role: string): Promise<User> {
-    const response = await apiClient.patch(`/auth/admin/users/${userId}/role`, { role });
+    const response = await apiClient.patch(`/admin/users/${userId}/role`, { role });
     return response.data;
   },
 
   async lockUser(userId: string, reason: string, duration?: number): Promise<{ success: boolean; message: string }> {
-    const response = await apiClient.post(`/auth/admin/users/${userId}/lock`, { reason, duration });
+    const response = await apiClient.post(`/admin/users/${userId}/lock`, { reason, duration });
     return response.data;
   },
 
   async unlockUser(userId: string): Promise<{ success: boolean; message: string }> {
-    const response = await apiClient.post(`/auth/admin/users/${userId}/unlock`);
+    const response = await apiClient.post(`/admin/users/${userId}/unlock`);
     return response.data;
   },
 
   async impersonateUser(userId: string): Promise<AuthResponse> {
-    const response = await apiClient.post(`/auth/admin/users/${userId}/impersonate`);
+    const response = await apiClient.post(`/admin/users/${userId}/impersonate`);
     return response.data;
   },
 
   async stopImpersonation(): Promise<AuthResponse> {
-    const response = await apiClient.post('/auth/admin/stop-impersonate');
+    const response = await apiClient.post('/admin/stop-impersonate');
     return response.data;
   }
 };

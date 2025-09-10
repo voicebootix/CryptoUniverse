@@ -38,15 +38,15 @@ def get_async_database_url() -> str:
     return db_url
 
 # ENTERPRISE SQLAlchemy async engine optimized for Render production
-# Reduced pool size for multi-worker deployment (4 workers × 3 connections = 12 total)
+# Increased pool size and timeouts for admin panel performance
 engine = create_async_engine(
     get_async_database_url(),
     poolclass=QueuePool,  # ENTERPRISE: Use proper connection pooling
-    pool_size=3,          # PRODUCTION: Reduced for multi-worker (was 10)
-    max_overflow=2,       # PRODUCTION: Reduced overflow (was 15)
+    pool_size=25,         # PRODUCTION: Further increased for admin panel load (was 10)
+    max_overflow=50,      # PRODUCTION: Large overflow for peak admin load (was 20)
     pool_pre_ping=True,   # ENTERPRISE: Health check connections
-    pool_recycle=1800,    # PRODUCTION: Faster recycle for cloud (30 min)
-    pool_timeout=30,      # PRODUCTION: Increased for cold starts on Render
+    pool_recycle=3600,    # PRODUCTION: Increased recycle time (was 1800)
+    pool_timeout=60,      # PRODUCTION: Increased timeout for admin queries (was 30)
     echo=getattr(settings, 'DATABASE_ECHO', False),
     future=True,
     # ENTERPRISE: Production performance settings
@@ -54,15 +54,18 @@ engine = create_async_engine(
         "isolation_level": "READ_COMMITTED",
         "compiled_cache": {},  # Enable query compilation cache
     },
-    # PRODUCTION: Optimized settings for asyncpg driver
+    # PRODUCTION: Optimized settings for asyncpg driver with admin panel fixes
     connect_args={
-        "command_timeout": 30,  # Command timeout in seconds
-        "timeout": 60,  # Connection timeout in seconds
-        "ssl": "require" if "supabase" in get_async_database_url().lower() else None,  # SSL for Supabase
-        # Server settings for asyncpg
+        "command_timeout": 60,  # Increased command timeout for admin queries (was 30)
+        "timeout": 120,         # Increased connection timeout for slow admin operations (was 60)
+        "ssl": "require" if "supabase" in get_async_database_url().lower() else None,
+        # Server settings for asyncpg with admin optimizations
         "server_settings": {
             "application_name": "cryptouniverse_production",
-            "jit": "off"
+            "jit": "off",
+            "work_mem": "16MB",           # Increased for admin queries
+            "effective_cache_size": "1GB", # Better query planning
+            "max_connections": "100"       # Ensure enough connections
         }
     } if "postgresql" in get_async_database_url() else {}
 )
