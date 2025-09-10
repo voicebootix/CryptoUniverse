@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { User, AuthTokens, LoginRequest, RegisterRequest, AuthResponse } from '@/types/auth';
 import { apiClient } from '@/lib/api/client';
+import { setAuthTokens } from '@/services/authService';
 
 // Extend globalThis for TypeScript
 declare global {
@@ -132,6 +133,13 @@ export const useAuthStore = create<AuthStore>()(
               expires_in: Math.floor(expirationTimestamp), // Store as integer timestamp
               token_type: response.data.token_type
             };
+
+            // Store tokens in localStorage for persistence
+            setAuthTokens({
+              ...tokens,
+              user_id: user.id,
+              role: user.role
+            });
 
             set({
               user: user as any,
