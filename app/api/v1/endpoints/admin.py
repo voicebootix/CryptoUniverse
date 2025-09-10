@@ -133,7 +133,7 @@ class UserListResponse(BaseModel):
 # Admin Endpoints
 @router.get("/system/status")
 async def get_system_overview(
-    current_user: User = Depends(require_role(["ADMIN", UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: AsyncSession = Depends(get_database)
 ):
     """Get comprehensive system status overview."""
@@ -200,7 +200,7 @@ async def get_system_overview(
 async def configure_system(
     request: SystemConfigRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(require_role(["ADMIN", UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: AsyncSession = Depends(get_database)
 ):
     """Configure system-wide settings."""
@@ -482,7 +482,7 @@ async def update_strategy_pricing(
 @router.get("/users/pending-verification")
 async def get_pending_verification_users(
     include_unverified: bool = False,
-    current_user: User = Depends(require_role(["ADMIN", UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: AsyncSession = Depends(get_database)
 ):
     """Get all users pending verification.
@@ -579,7 +579,7 @@ async def list_users(
     status_filter: Optional[str] = None,
     role_filter: Optional[str] = None,
     search: Optional[str] = None,
-    current_user: User = Depends(require_role(["ADMIN", UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: AsyncSession = Depends(get_database)
 ):
     """List and filter users."""
@@ -753,7 +753,7 @@ async def list_users(
 @router.post("/users/verify/{user_id}")
 async def verify_user(
     user_id: str,
-    current_user: User = Depends(require_role(["ADMIN", UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: AsyncSession = Depends(get_database)
 ):
     """Verify a pending user account to allow login."""
@@ -887,7 +887,7 @@ async def verify_user(
 @router.post("/users/verify-batch")
 async def verify_users_batch(
     request: BatchVerifyRequest,
-    current_user: User = Depends(require_role(["ADMIN", UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: AsyncSession = Depends(get_database)
 ):
     """Verify multiple pending user accounts at once."""
@@ -1064,7 +1064,7 @@ async def verify_users_batch(
 @router.post("/users/manage")
 async def manage_user(
     request: UserManagementRequest,
-    current_user: User = Depends(require_role(["ADMIN", UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: AsyncSession = Depends(get_database)
 ):
     """Manage user accounts (activate, deactivate, etc.)."""
@@ -1199,7 +1199,7 @@ async def manage_user(
 
 @router.get("/metrics", response_model=SystemMetricsResponse)
 async def get_detailed_metrics(
-    current_user: User = Depends(require_role(["ADMIN", UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: AsyncSession = Depends(get_database)
 ):
     """Get detailed system metrics."""
@@ -1283,7 +1283,7 @@ async def get_audit_logs(
     action_filter: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    current_user: User = Depends(require_role(["ADMIN", UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: AsyncSession = Depends(get_database)
 ):
     """Get audit logs for security and compliance."""
@@ -1391,7 +1391,7 @@ async def get_audit_logs(
 @router.post("/emergency/stop-all")
 async def emergency_stop_all_trading(
     reason: str,
-    current_user: User = Depends(require_role(["ADMIN", UserRole.ADMIN])),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
     db: AsyncSession = Depends(get_database)
 ):
     """Emergency stop all trading across the platform."""
