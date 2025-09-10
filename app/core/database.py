@@ -7,6 +7,7 @@ for the multi-tenant cryptocurrency trading platform.
 
 import asyncio
 import logging
+import os
 from typing import AsyncGenerator, Optional
 
 import sqlalchemy
@@ -38,12 +39,12 @@ def get_async_database_url() -> str:
     return db_url
 
 # ENTERPRISE SQLAlchemy async engine optimized for Render production
-# Reduced pool size for multi-worker deployment (4 workers × 3 connections = 12 total)
+# Environment configurable pool size for proper scaling under load
 engine = create_async_engine(
     get_async_database_url(),
     poolclass=QueuePool,  # ENTERPRISE: Use proper connection pooling
-    pool_size=3,          # PRODUCTION: Reduced for multi-worker (was 10)
-    max_overflow=2,       # PRODUCTION: Reduced overflow (was 15)
+    pool_size=int(os.getenv('DB_POOL_SIZE', '20')),       # PRODUCTION: Environment configurable pool size
+    max_overflow=int(os.getenv('DB_MAX_OVERFLOW', '30')), # PRODUCTION: Environment configurable overflow
     pool_pre_ping=True,   # ENTERPRISE: Health check connections
     pool_recycle=1800,    # PRODUCTION: Faster recycle for cloud (30 min)
     pool_timeout=30,      # PRODUCTION: Increased for cold starts on Render
