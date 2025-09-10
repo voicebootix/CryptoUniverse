@@ -18,7 +18,7 @@ sys.path.insert(0, str(project_root))
 
 from app.core.config import get_settings
 from app.services.ai_consensus_core import AIModelConnector, AIModelProvider
-from app.services.ai_chat_engine import chat_engine
+from app.services.ai_chat_engine import enhanced_chat_engine as chat_engine
 
 async def test_production_ai_setup() -> Dict[str, Any]:
     """Test production AI setup with actual API keys from Render."""

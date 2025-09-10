@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.database import get_database
 from app.models.user import User
-from app.services.ai_chat_engine import chat_engine, ChatMessageType
+from app.services.ai_chat_engine import enhanced_chat_engine as chat_engine, ChatMessageType
 from app.services.chat_integration import chat_integration
 from app.services.unified_ai_manager import unified_ai_manager, InterfaceType
 from app.services.websocket import manager
@@ -122,73 +122,36 @@ async def send_message(
             "enhanced_chat_endpoint": True
         }
         
-        # Process through unified AI manager with detailed logging
-        logger.info("Attempting unified AI manager processing", 
+        # Process through ENHANCED CHAT ENGINE (primary system with memory)
+        logger.info("Processing with enhanced chat engine", 
                    session_id=session_id, 
                    user_id=str(current_user.id),
                    mode=request.mode)
         
-        try:
-            ai_result = await unified_ai_manager.handle_web_chat_request(
-                session_id=session_id,
-                user_id=str(current_user.id),
-                message=request.message,
-                interface_type=request.mode,
-                additional_context=unified_context
-            )
-            
-            logger.info("Unified AI manager response", 
-                       success=ai_result.get("success"),
-                       error=ai_result.get("error"))
-        except Exception as e:
-            logger.error("Unified AI manager exception", error=str(e), exc_info=True)
-            ai_result = {"success": False, "error": str(e)}
+        response = await chat_engine.process_message(
+            session_id=session_id,
+            user_message=request.message,
+            user_id=str(current_user.id)
+        )
         
-        if not ai_result.get("success"):
-            # Fallback to original chat engine if unified AI manager fails
-            logger.warning("Unified AI manager failed, falling back to chat engine", 
-                         error=ai_result.get("error"),
-                         session_id=session_id)
-            
-            response = await chat_engine.process_message(
-                session_id=session_id,
-                user_message=request.message,
-                user_id=str(current_user.id)
-            )
-            
-            if not response.get("success"):
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=response.get("error", "Failed to process message")
-                )
-            
-            return ChatMessageResponse(
-                success=True,
-                session_id=response["session_id"],
-                message_id=response["message_id"],
-                content=response["content"],
-                intent=response["intent"],
-                confidence=response["confidence"] or 0.0,
-                requires_approval=False,  # Fallback doesn't support approval
-                decision_id=None,
-                metadata=response.get("metadata"),
-                timestamp=datetime.utcnow(),
-                ai_analysis=None
+        if not response.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=response.get("error", "Failed to process message")
             )
         
-        # Return enhanced response from unified AI manager
         return ChatMessageResponse(
             success=True,
-            session_id=session_id,
-            message_id=f"msg_{uuid.uuid4().hex[:12]}",
-            content=ai_result.get("content", ""),
-            intent=ai_result.get("intent", "general"),
-            confidence=ai_result.get("confidence", 0.0),
-            requires_approval=ai_result.get("requires_approval", False),
-            decision_id=ai_result.get("decision_id"),
-            metadata=ai_result.get("metadata", {}),
+            session_id=response["session_id"],
+            message_id=response["message_id"],
+            content=response["content"],
+            intent=response["intent"],
+            confidence=response["confidence"] or 0.0,
+            requires_approval=response.get("requires_approval", False),
+            decision_id=response.get("decision_id"),
+            metadata=response.get("metadata", {}),
             timestamp=datetime.utcnow(),
-            ai_analysis=ai_result.get("ai_analysis")
+            ai_analysis=response.get("ai_analysis")
         )
         
     except Exception as e:
@@ -583,7 +546,7 @@ async def approve_ai_decision(
     """
     try:
         if request.approved:
-            # Execute the approved decision through unified AI manager
+            # Execute the approved decision through enhanced unified AI manager
             result = await unified_ai_manager.execute_approved_decision(
                 decision_id=request.decision_id,
                 user_id=str(current_user.id)

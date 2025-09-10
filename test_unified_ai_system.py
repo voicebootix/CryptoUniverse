@@ -19,7 +19,7 @@ import json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'app'))
 
 from app.services.unified_ai_manager import unified_ai_manager, InterfaceType, OperationMode
-from app.services.ai_chat_engine import chat_engine
+from app.services.ai_chat_engine import enhanced_chat_engine as chat_engine
 from app.services.ai_manager_startup import initialize_unified_ai_system, verify_ai_system_health
 
 

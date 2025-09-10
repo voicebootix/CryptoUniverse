@@ -25,10 +25,11 @@ from app.core.redis import get_redis_client
 from app.services.master_controller import MasterSystemController, TradingMode
 from app.services.ai_consensus_core import AIConsensusService
 from app.services.trade_execution import TradeExecutionService
-from app.services.ai_chat_engine import chat_engine, ChatIntent
+from app.services.ai_chat_engine import enhanced_chat_engine as chat_engine, ChatIntent
 from app.services.chat_service_adapters import chat_adapters
 from app.services.telegram_core import TelegramCommanderService
 from app.services.websocket import manager
+from app.services.chat_memory import ChatMemoryService
 
 # Import actual service engines for routing
 from app.services.market_analysis_core import MarketAnalysisService
@@ -95,6 +96,9 @@ class UnifiedAIManager(LoggerMixin):
         self.trade_executor = TradeExecutionService()
         self.adapters = chat_adapters
         self.telegram_core = TelegramCommanderService()
+        
+        # Enhanced memory service for conversation continuity
+        self.memory_service = ChatMemoryService()
         
         # Actual service engines for routing
         self.market_analysis = MarketAnalysisService()
@@ -461,6 +465,13 @@ class UnifiedAIManager(LoggerMixin):
         """
         
         try:
+            # ENHANCED: Load persistent user memory for conversation continuity
+            user_memory = {}
+            try:
+                user_memory = await self.memory_service.load_user_memory(user_id) or {}
+            except Exception as e:
+                self.logger.warning("Could not load user memory", error=str(e), user_id=user_id)
+            
             # Get chat session context if available
             chat_history = []
             try:
@@ -468,14 +479,19 @@ class UnifiedAIManager(LoggerMixin):
             except Exception as e:
                 self.logger.warning("Could not retrieve chat history", error=str(e), session_id=session_id)
             
-            # Build comprehensive context
+            # Build comprehensive context with memory
             context = {
                 "session_id": session_id,
                 "chat_history": chat_history,
+                "user_memory": user_memory,
+                "user_expertise": user_memory.get("expertise_level", "intermediate"),
+                "memory_anchors": user_memory.get("memory_anchors", []),
+                "conversation_mood": user_memory.get("conversation_mood", "neutral"),
                 "platform": "web_chat",
                 "interface_type": interface_type,
                 "conversation_continuity": True,
-                "cross_platform_session": True
+                "cross_platform_session": True,
+                "enhanced_memory": True
             }
             
             # Add additional context if provided
@@ -501,9 +517,22 @@ class UnifiedAIManager(LoggerMixin):
                 context=context
             )
             
-            # Enhance response with web-specific formatting
+            # Enhance response with web-specific formatting and memory
             if result.get("success"):
                 result = await self._enhance_web_response(result, interface_type, context)
+                
+                # ENHANCED: Save conversation to memory for continuity
+                await self._save_conversation_to_memory(user_id, message, result.get("content", ""), context)
+                
+                # Add memory metadata to response
+                if "metadata" not in result:
+                    result["metadata"] = {}
+                result["metadata"].update({
+                    "enhanced_memory": True,
+                    "user_expertise": context.get("user_expertise", "intermediate"),
+                    "memory_anchors_count": len(context.get("memory_anchors", [])),
+                    "conversation_continuity": True
+                })
             
             return result
             
@@ -1167,6 +1196,42 @@ class UnifiedAIManager(LoggerMixin):
         except Exception as e:
             self.logger.error("Failed to send Telegram consensus notification", user_id=user_id, error=str(e))
 
+    async def _save_conversation_to_memory(self, user_id: str, user_message: str, ai_response: str, context: Dict[str, Any]):
+        """Save conversation exchange to persistent memory."""
+        try:
+            # Get existing memory
+            user_memory = context.get("user_memory", {})
+            
+            # Update conversation history
+            if "conversation_history" not in user_memory:
+                user_memory["conversation_history"] = []
+            
+            # Add new exchange
+            exchange = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "user_message": user_message[:200],  # Limit for storage
+                "ai_response": ai_response[:200],
+                "interface": context.get("interface_type", "web_chat")
+            }
+            
+            user_memory["conversation_history"].append(exchange)
+            
+            # Keep last 20 exchanges
+            user_memory["conversation_history"] = user_memory["conversation_history"][-20:]
+            
+            # Update expertise level based on message complexity
+            if any(word in user_message.lower() for word in ["what is", "explain", "help me understand"]):
+                user_memory["expertise_level"] = "beginner"
+            elif any(word in user_message.lower() for word in ["arbitrage", "defi", "yield farming", "technical analysis"]):
+                user_memory["expertise_level"] = "expert"
+            else:
+                user_memory["expertise_level"] = user_memory.get("expertise_level", "intermediate")
+            
+            # Save updated memory
+            await self.memory_service.save_user_memory(user_id, user_memory)
+            
+        except Exception as e:
+            self.logger.error("Failed to save conversation to memory", error=str(e), user_id=user_id)
 
     async def _enhance_web_response(
         self, 
