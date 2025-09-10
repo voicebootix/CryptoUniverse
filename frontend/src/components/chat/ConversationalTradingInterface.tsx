@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send,
@@ -37,14 +37,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
-import { useChatStore, ChatMode, ChatMessage } from '@/store/chatStore';
+import { useChatStore, ChatMode, ChatMessage as BaseChatMessage } from '@/store/chatStore';
 
 import {
   ExecutionPhase,
   AIPersonality,
   TradeProposal,
   ConversationMemory,
-  ChatMessage,
   MessageType,
   PHASE_CONFIG,
   PERSONALITY_CONFIG,
@@ -68,8 +67,15 @@ const serverPhaseToEnum = (serverPhase: string): ExecutionPhase => {
   return phaseMap[serverPhase?.toLowerCase()] || ExecutionPhase.IDLE;
 };
 
-// Component-specific interfaces only
-interface Message extends ChatMessage {
+// Extended message interface for trading features
+interface ExtendedChatMessage extends Omit<BaseChatMessage, 'type'> {
+  type: 'user' | 'assistant' | 'phase' | 'trade' | 'ai';
+  phase?: ExecutionPhase;
+  tradeProposal?: TradeProposal;
+  metadata?: any;
+}
+
+interface Message extends ExtendedChatMessage {
   // Additional fields if needed
 }
 
@@ -94,7 +100,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
 }) => {
   // Use shared chat store
   const {
-    messages,
+    messages: baseMessages,
     isLoading,
     sessionId,
     currentMode,
@@ -103,6 +109,32 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     setCurrentMode,
     clearChat
   } = useChatStore();
+  
+  // Overlay state for local-only messages (phase, trade, ai messages)
+  const [overlays, setOverlays] = useState<ExtendedChatMessage[]>([]);
+  
+  // Compose final messages from base messages + overlays
+  const messages = useMemo(() => {
+    const mappedBaseMessages: ExtendedChatMessage[] = baseMessages.map(msg => ({
+      ...msg,
+      type: msg.type as 'user' | 'assistant' | 'phase' | 'trade' | 'ai'
+    }));
+    
+    // Merge base messages with overlays, avoiding duplicates by ID
+    const allMessages = [...mappedBaseMessages];
+    const existingIds = new Set(mappedBaseMessages.map(msg => msg.id));
+    
+    overlays.forEach(overlay => {
+      if (!existingIds.has(overlay.id)) {
+        allMessages.push(overlay);
+      }
+    });
+    
+    // Sort by timestamp to maintain chronological order
+    return allMessages.sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  }, [baseMessages, overlays]);
   
   const [inputValue, setInputValue] = useState('');
   const [currentPhase, setCurrentPhase] = useState<ExecutionPhase>(ExecutionPhase.IDLE);
@@ -132,45 +164,45 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
   // Initialize session and set trading mode
   useEffect(() => {
     setCurrentMode(ChatMode.TRADING);
-    if (!sessionId || messages.length === 0) {
+    if (!sessionId || baseMessages.length === 0) {
       initializeSession();
     }
-  }, [setCurrentMode, sessionId, messages.length, initializeSession]);
+  }, [setCurrentMode, sessionId, baseMessages.length, initializeSession]);
 
   // Remove WebSocket functions since we're using REST API
 
   const addPhaseMessage = (phase: ExecutionPhase, details: string) => {
     const phaseInfo = phaseConfig[phase];
-    const message: Message = {
+    const message: ExtendedChatMessage = {
       id: `phase-${Date.now()}`,
       content: `**${phaseInfo.title}**\n${details}`,
-      type: MessageType.PHASE,
+      type: 'phase',
       phase,
       timestamp: new Date().toISOString()
     };
-    setMessages(prev => [...prev, message]);
+    setOverlays(prev => [...prev, message]);
   };
 
   const addTradeProposalMessage = (proposal: TradeProposal) => {
-    const message: Message = {
+    const message: ExtendedChatMessage = {
       id: `proposal-${proposal.id}`,
       content: `**Trade Proposal Ready**\n${proposal.action.toUpperCase()} ${proposal.amount} ${proposal.symbol} at $${proposal.price}`,
-      type: MessageType.TRADE,
+      type: 'trade',
       tradeProposal: proposal,
       timestamp: new Date().toISOString()
     };
-    setMessages(prev => [...prev, message]);
+    setOverlays(prev => [...prev, message]);
   };
 
   const addAIMessage = (content: string, metadata?: any) => {
-    const message: Message = {
+    const message: ExtendedChatMessage = {
       id: `ai-${Date.now()}`,
       content,
-      type: MessageType.AI,
+      type: 'ai',
       metadata,
       timestamp: new Date().toISOString()
     };
-    setMessages(prev => [...prev, message]);
+    setOverlays(prev => [...prev, message]);
   };
 
   const sendMessage = async () => {
@@ -343,9 +375,9 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     </Card>
   );
 
-  const renderMessage = (message: ChatMessage) => {
-    if (message.type === 'trade' && (message as any).tradeProposal) {
-      return renderTradeProposal((message as any).tradeProposal);
+  const renderMessage = (message: ExtendedChatMessage) => {
+    if (message.type === 'trade' && message.tradeProposal) {
+      return renderTradeProposal(message.tradeProposal);
     }
 
     const isUser = message.type === 'user';
@@ -359,7 +391,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
       >
         {!isUser && (
           <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-            {message.type === 'phase' ? React.createElement(phaseConfig[(message as any).phase!].icon, { className: 'h-4 w-4' }) : icon}
+            {message.type === 'phase' && message.phase ? React.createElement(phaseConfig[message.phase].icon, { className: 'h-4 w-4' }) : icon}
           </div>
         )}
         
@@ -373,9 +405,9 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
               <span className="text-xs opacity-70">
                 {new Date(message.timestamp).toLocaleTimeString()}
               </span>
-              {(message as any).phase && (
+              {message.phase && (
                 <Badge variant="outline" className="text-xs">
-                  {(message as any).phase}
+                  {message.phase}
                 </Badge>
               )}
             </div>
