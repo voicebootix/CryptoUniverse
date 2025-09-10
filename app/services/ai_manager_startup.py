@@ -9,7 +9,7 @@ import asyncio
 import structlog
 from app.core.config import get_settings
 from app.services.unified_ai_manager import unified_ai_manager
-from app.services.ai_chat_engine import chat_engine
+from app.services.ai_chat_engine_enhanced import enhanced_chat_engine as chat_engine
 from app.services.telegram_core import TelegramCommanderService
 from app.services.master_controller import MasterSystemController
 

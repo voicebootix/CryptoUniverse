@@ -13,7 +13,7 @@ import structlog
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
-from app.services.ai_chat_engine import chat_engine, ChatIntent
+from app.services.ai_chat_engine_enhanced import enhanced_chat_engine as chat_engine, ChatIntent
 from app.services.master_controller import MasterSystemController
 from app.services.trade_execution import TradeExecutionService
 from app.services.chat_service_adapters import chat_adapters
