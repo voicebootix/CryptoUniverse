@@ -14,7 +14,7 @@ import structlog
 from app.api.v1.endpoints import (
     auth, trading, admin, exchanges, strategies, credits,
     telegram, paper_trading, chat, market_analysis, api_keys, ai_consensus,
-    password_reset, health  # Add health endpoints
+    password_reset, health, unified_chat  # Add unified chat endpoints
 )
 
 logger = structlog.get_logger(__name__)
@@ -36,6 +36,7 @@ api_router.include_router(paper_trading.router, prefix="/paper-trading", tags=["
 api_router.include_router(market_analysis.router, prefix="/market", tags=["Market Analysis"])
 api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
+api_router.include_router(unified_chat.router, prefix="/unified-chat", tags=["Unified AI Chat"])
 api_router.include_router(ai_consensus.router, prefix="/ai-consensus", tags=["AI Consensus"])
 
 # Add monitoring endpoint that frontend expects

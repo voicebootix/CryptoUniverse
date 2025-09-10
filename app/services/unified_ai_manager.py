@@ -427,25 +427,77 @@ class UnifiedAIManager(LoggerMixin):
             await self.telegram_core.telegram_api.send_message(chat_id, error_message)
             return {"success": False, "error": result.get("error")}
     
-    async def handle_web_chat_request(self, session_id: str, user_id: str, message: str) -> Dict[str, Any]:
-        """Handle web chat requests through unified AI manager."""
+    async def handle_web_chat_request(
+        self, 
+        session_id: str, 
+        user_id: str, 
+        message: str, 
+        interface_type: str = "web_chat",
+        additional_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Handle web chat requests through unified AI manager.
         
-        # Get chat session context
-        chat_history = await chat_engine.get_chat_history(session_id, limit=5)
+        Enhanced to support different web interface types and cross-platform continuity.
+        """
         
-        # Process through unified system
-        result = await self.process_user_request(
-            user_id=user_id,
-            request=message,
-            interface=InterfaceType.WEB_CHAT,
-            context={
+        try:
+            # Get chat session context if available
+            chat_history = []
+            try:
+                chat_history = await chat_engine.get_chat_history(session_id, limit=5)
+            except Exception as e:
+                self.logger.warning("Could not retrieve chat history", error=str(e), session_id=session_id)
+            
+            # Build comprehensive context
+            context = {
                 "session_id": session_id,
                 "chat_history": chat_history,
-                "platform": "web_chat"
+                "platform": "web_chat",
+                "interface_type": interface_type,
+                "conversation_continuity": True,
+                "cross_platform_session": True
             }
-        )
-        
-        return result
+            
+            # Add additional context if provided
+            if additional_context:
+                context.update(additional_context)
+            
+            # Map interface type to appropriate unified interface
+            interface_mapping = {
+                "trading": InterfaceType.WEB_CHAT,
+                "quick": InterfaceType.WEB_CHAT,
+                "analysis": InterfaceType.WEB_UI,
+                "support": InterfaceType.WEB_CHAT,
+                "web_chat": InterfaceType.WEB_CHAT
+            }
+            
+            unified_interface = interface_mapping.get(interface_type, InterfaceType.WEB_CHAT)
+            
+            # Process through unified system
+            result = await self.process_user_request(
+                user_id=user_id,
+                request=message,
+                interface=unified_interface,
+                context=context
+            )
+            
+            # Enhance response with web-specific formatting
+            if result.get("success"):
+                result = await self._enhance_web_response(result, interface_type, context)
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error("Web chat request handling failed", 
+                            error=str(e), 
+                            user_id=user_id, 
+                            session_id=session_id)
+            return {
+                "success": False,
+                "error": str(e),
+                "content": "I encountered an error processing your request. Please try again."
+            }
     
     async def handle_autonomous_decision(self, user_id: str, market_context: Dict[str, Any]) -> Dict[str, Any]:
         """Handle autonomous AI decisions during automated trading cycles."""
@@ -1098,4 +1150,163 @@ class UnifiedAIManager(LoggerMixin):
 
 
 # Global unified AI manager instance
+unified_ai_manager = UnifiedAIManager()    
+ 
+   async def _enhance_web_response(
+        self, 
+        result: Dict[str, Any], 
+        interface_type: str, 
+        context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Enhance response with web-specific formatting and features."""
+        
+        try:
+            # Add interface-specific enhancements
+            if interface_type == "trading":
+                # Add trading-specific metadata
+                result["metadata"] = result.get("metadata", {})
+                result["metadata"]["interface_features"] = {
+                    "show_charts": True,
+                    "show_portfolio": True,
+                    "enable_trading": True,
+                    "show_risk_metrics": True
+                }
+                
+            elif interface_type == "quick":
+                # Add quick-help specific metadata
+                result["metadata"] = result.get("metadata", {})
+                result["metadata"]["interface_features"] = {
+                    "compact_view": True,
+                    "quick_actions": True,
+                    "minimal_details": True
+                }
+                
+            elif interface_type == "analysis":
+                # Add analysis-specific metadata
+                result["metadata"] = result.get("metadata", {})
+                result["metadata"]["interface_features"] = {
+                    "detailed_charts": True,
+                    "advanced_metrics": True,
+                    "export_options": True,
+                    "comparison_tools": True
+                }
+            
+            # Add cross-platform continuity info
+            result["metadata"] = result.get("metadata", {})
+            result["metadata"]["cross_platform"] = {
+                "session_id": context.get("session_id"),
+                "available_on": ["web", "telegram", "mobile"],
+                "conversation_continues": True
+            }
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error("Web response enhancement failed", error=str(e))
+            return result
+    
+    def _get_decision_type(self, intent: str) -> str:
+        """Map intent to decision type."""
+        
+        intent_mapping = {
+            "trade": "trade_execution",
+            "portfolio": "portfolio_management", 
+            "analysis": "market_analysis",
+            "risk": "risk_assessment",
+            "rebalance": "portfolio_rebalance",
+            "autonomous": "mode_change",
+            "emergency": "emergency",
+            "general": "information"
+        }
+        
+        return intent_mapping.get(intent, "general")
+    
+    def _requires_approval(
+        self, 
+        operation_mode: OperationMode, 
+        intent: str, 
+        ai_response: Dict[str, Any]
+    ) -> bool:
+        """Determine if decision requires user approval."""
+        
+        # Always require approval for trades in manual/assisted mode
+        if operation_mode in [OperationMode.MANUAL, OperationMode.ASSISTED]:
+            if intent in ["trade", "rebalance", "autonomous"]:
+                return True
+        
+        # High-risk decisions always require approval
+        risk_level = ai_response.get("risk_assessment", {}).get("level", "medium")
+        if risk_level == "high":
+            return True
+        
+        # Low confidence decisions require approval
+        confidence = ai_response.get("confidence", 0.0)
+        if confidence < 0.8:
+            return True
+        
+        return False
+    
+    def _should_auto_execute(
+        self, 
+        operation_mode: OperationMode, 
+        intent: str, 
+        ai_response: Dict[str, Any]
+    ) -> bool:
+        """Determine if decision should auto-execute."""
+        
+        # Only auto-execute in autonomous mode
+        if operation_mode != OperationMode.AUTONOMOUS:
+            return False
+        
+        # Don't auto-execute high-risk decisions
+        risk_level = ai_response.get("risk_assessment", {}).get("level", "medium")
+        if risk_level == "high":
+            return False
+        
+        # Don't auto-execute low confidence decisions
+        confidence = ai_response.get("confidence", 0.0)
+        if confidence < 0.85:
+            return False
+        
+        # Auto-execute for information requests
+        if intent in ["general", "analysis", "portfolio"]:
+            return True
+        
+        return False
+    
+    async def _check_telegram_connection(self, user_id: str) -> bool:
+        """Check if user has Telegram connected."""
+        
+        try:
+            # This would check the telegram_integration table
+            # For now, return False as placeholder
+            return False
+        except Exception:
+            return False
+    
+    async def get_system_status(self) -> Dict[str, Any]:
+        """Get unified AI manager system status."""
+        
+        try:
+            return {
+                "status": "healthy",
+                "active_decisions": len(self.active_decisions),
+                "redis_connected": self.redis is not None,
+                "services": {
+                    "master_controller": "active",
+                    "ai_consensus": "active", 
+                    "trade_executor": "active",
+                    "telegram_core": "active"
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+
+# Global instance
 unified_ai_manager = UnifiedAIManager()

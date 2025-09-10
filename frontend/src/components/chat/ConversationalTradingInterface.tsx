@@ -36,8 +36,8 @@ import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
-import { apiClient } from '@/lib/api/client';
 import { useAuthStore } from '@/store/authStore';
+import { useChatStore, ChatMode } from '@/store/chatStore';
 
 import {
   ExecutionPhase,
@@ -92,14 +92,23 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
   onToggleExpand,
   isPaperTrading = false
 }) => {
-  const [messages, setMessages] = useState<Message[]>([]);
+  // Use shared chat store
+  const {
+    messages,
+    isLoading,
+    sessionId,
+    currentMode,
+    sendMessage: sendChatMessage,
+    initializeSession,
+    setCurrentMode,
+    clearChat
+  } = useChatStore();
+  
   const [inputValue, setInputValue] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [currentPhase, setCurrentPhase] = useState<ExecutionPhase>(ExecutionPhase.IDLE);
   const [personality, setPersonality] = useState<AIPersonality>(AIPersonality.BALANCED);
   const [memory, setMemory] = useState<ConversationMemory | null>(null);
   const [activeProposal, setActiveProposal] = useState<TradeProposal | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
   // Remove WebSocket connection state since we're using REST API
   const [isConnected] = useState(true); // Always connected via REST API
   
@@ -120,9 +129,12 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
 
   // Remove WebSocket ref since we're using REST API
 
-  // Initialize session
+  // Initialize session and set trading mode
   useEffect(() => {
-    initializeSession();
+    setCurrentMode(ChatMode.TRADING);
+    if (!sessionId || messages.length === 0) {
+      initializeSession();
+    }
   }, []);
 
   const initializeSession = async () => {
@@ -219,64 +231,18 @@ How would you like to start? You can:
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
 
-    const userMessage: Message = {
-      id: `user-${Date.now()}`,
-      content: inputValue,
-      type: MessageType.USER,
-      timestamp: new Date().toISOString()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
     const messageContent = inputValue;
     setInputValue('');
-    setIsLoading(true);
-
+    
     try {
-      // Create session if needed (like ChatWidget does)
-      if (!sessionId) {
-        const sessionResponse = await apiClient.post('/chat/session/new', {});
-        if (sessionResponse.data.success) {
-          setSessionId(sessionResponse.data.session_id);
-        }
-      }
-      
-      // Use the same working API as ChatWidget
-      const response = await apiClient.post('/chat/message', {
-        message: messageContent,
-        session_id: sessionId
-      });
-
-      if (response.data.success) {
-        const assistantMessage: Message = {
-          id: response.data.message_id || `ai-${Date.now()}`,
-          content: response.data.content,
-          type: MessageType.AI,
-          timestamp: response.data.timestamp || new Date().toISOString()
-        };
-        
-        setMessages(prev => [...prev, assistantMessage]);
-      } else {
-        throw new Error('Failed to get AI response');
-      }
+      await sendChatMessage(messageContent);
     } catch (error: any) {
       console.error('Failed to send message:', error);
-      
-      // Add error message
-      const errorMessage: Message = {
-        id: `error-${Date.now()}`,
-        content: "I'm having trouble connecting right now. Please try again in a moment.",
-        type: MessageType.AI,
-        timestamp: new Date().toISOString()
-      };
-      setMessages(prev => [...prev, errorMessage]);
-      
       toast({
         title: 'Error',
         description: 'Failed to send message',
         variant: 'destructive'
       });
-    } finally {
-      setIsLoading(false);
     }
   };
 

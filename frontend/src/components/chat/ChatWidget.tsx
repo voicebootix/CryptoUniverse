@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import { useChatStore, ChatMode } from '@/store/chatStore';
 
 interface ChatMessage {
   id: string;
@@ -29,91 +30,43 @@ interface ChatWidgetProps {
 }
 
 const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Use shared chat store
+  const {
+    messages,
+    isLoading,
+    sessionId,
+    currentMode,
+    isWidgetOpen,
+    isWidgetMinimized,
+    unreadCount,
+    sendMessage: sendChatMessage,
+    initializeSession,
+    setCurrentMode,
+    toggleWidget,
+    toggleMinimize,
+    markAsRead
+  } = useChatStore();
+  
   const [inputValue, setInputValue] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [sessionId, setSessionId] = useState<string | null>(null);
 
-  // Initialize with welcome message when opened
+  // Initialize session when widget opens
   useEffect(() => {
-    if (isOpen && messages.length === 0) {
-      const welcomeMessage: ChatMessage = {
-        id: 'welcome',
-        content: '👋 Hi! I\'m your AI money manager. Ask me about your portfolio, trading, or market opportunities!',
-        type: 'assistant',
-        timestamp: new Date().toISOString(),
-        confidence: 1.0
-      };
-      setMessages([welcomeMessage]);
+    if (isWidgetOpen && (!sessionId || messages.length === 0)) {
+      setCurrentMode(ChatMode.QUICK);
+      initializeSession();
     }
-  }, [isOpen, messages.length]);
+  }, [isWidgetOpen]);
 
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
 
-    const userMessage: ChatMessage = {
-      id: Date.now().toString(),
-      content: inputValue,
-      type: 'user',
-      timestamp: new Date().toISOString()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
+    const messageContent = inputValue;
     setInputValue('');
-    setIsLoading(true);
-
+    
     try {
-      // Use real chat API
-      const { apiClient } = await import('@/lib/api/client');
-      
-      // Create session if needed
-      if (!sessionId) {
-        const sessionResponse = await apiClient.post('/chat/session/new', {});
-        if (sessionResponse.data.success) {
-          setSessionId(sessionResponse.data.session_id);
-        }
-      }
-      
-      // Send message to real API
-      const response = await apiClient.post('/chat/message', {
-        message: userMessage.content,
-        session_id: sessionId
-      });
-
-      if (response.data.success) {
-        const assistantMessage: ChatMessage = {
-          id: response.data.message_id,
-          content: response.data.content,
-          type: 'assistant',
-          timestamp: response.data.timestamp,
-          confidence: response.data.confidence || 0.8
-        };
-      
-        setMessages(prev => [...prev, assistantMessage]);
-        
-        if (isMinimized) {
-          setUnreadCount(prev => prev + 1);
-        }
-      } else {
-        throw new Error('Failed to get AI response');
-      }
-      
+      await sendChatMessage(messageContent);
     } catch (error) {
       console.error('Failed to send message:', error);
-      // Add fallback message
-      const errorMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        content: "I'm having trouble connecting right now. Please try again in a moment.",
-        type: 'assistant',
-        timestamp: new Date().toISOString(),
-        confidence: 0.5
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -124,32 +77,27 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
     }
   };
 
-  const toggleWidget = () => {
-    setIsOpen(!isOpen);
-    if (!isOpen) {
-      setUnreadCount(0);
-    }
+  // Widget controls now use shared store
+  const handleToggleWidget = () => {
+    toggleWidget();
   };
 
-  const toggleMinimize = () => {
-    setIsMinimized(!isMinimized);
-    if (!isMinimized) {
-      setUnreadCount(0);
-    }
+  const handleToggleMinimize = () => {
+    toggleMinimize();
   };
 
   return (
     <>
       {/* Chat Widget */}
       <AnimatePresence>
-        {isOpen && (
+        {isWidgetOpen && (
           <motion.div
             initial={{ opacity: 0, scale: 0.8, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.8, y: 20 }}
             className={`fixed bottom-20 right-6 z-50 ${className}`}
           >
-            <Card className={`w-80 ${isMinimized ? 'h-14' : 'h-96'} transition-all duration-300 shadow-lg border`}>
+            <Card className={`w-80 ${isWidgetMinimized ? 'h-14' : 'h-96'} transition-all duration-300 shadow-lg border`}>
               {/* Header */}
               <CardHeader className="flex flex-row items-center justify-between space-y-0 py-3 px-4">
                 <div className="flex items-center gap-2">
@@ -166,15 +114,15 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
                     variant="ghost"
                     size="sm"
                     className="h-6 w-6 p-0"
-                    onClick={toggleMinimize}
+                    onClick={handleToggleMinimize}
                   >
-                    {isMinimized ? <Maximize2 className="h-3 w-3" /> : <Minimize2 className="h-3 w-3" />}
+                    {isWidgetMinimized ? <Maximize2 className="h-3 w-3" /> : <Minimize2 className="h-3 w-3" />}
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
                     className="h-6 w-6 p-0"
-                    onClick={toggleWidget}
+                    onClick={handleToggleWidget}
                   >
                     <X className="h-3 w-3" />
                   </Button>
@@ -182,7 +130,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
               </CardHeader>
 
               {/* Chat Content */}
-              {!isMinimized && (
+              {!isWidgetMinimized && (
                 <CardContent className="flex flex-col h-80 p-0">
                   {/* Messages */}
                   <ScrollArea className="flex-1 px-4">
@@ -275,14 +223,14 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
       </AnimatePresence>
 
       {/* Floating Action Button */}
-      {!isOpen && (
+      {!isWidgetOpen && (
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
           className="fixed bottom-6 right-6 z-50"
         >
           <Button
-            onClick={toggleWidget}
+            onClick={handleToggleWidget}
             className="h-12 w-12 rounded-full shadow-lg relative"
           >
             <MessageSquare className="h-5 w-5" />
