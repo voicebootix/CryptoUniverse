@@ -28,7 +28,7 @@ PUBLIC_PATHS = {
     "/api/v1/auth/refresh", 
     "/api/v1/auth/register",
     "/api/v1/auth/oauth/url",
-    "/api/v1/auth/oauth/callback/google",
+    "/api/v1/auth/oauth/callback",
     "/api/v1/health",
     "/api/v1/status",
     "/health",
