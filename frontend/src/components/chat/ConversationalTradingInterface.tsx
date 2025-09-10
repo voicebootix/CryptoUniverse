@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Send,
@@ -110,17 +110,31 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     clearChat
   } = useChatStore();
   
-  // Extended messages state for trading features
-  const [messages, setMessages] = useState<ExtendedChatMessage[]>([]);
+  // Overlay state for local-only messages (phase, trade, ai messages)
+  const [overlays, setOverlays] = useState<ExtendedChatMessage[]>([]);
   
-  // Sync base messages with extended messages
-  useEffect(() => {
-    const extendedMessages: ExtendedChatMessage[] = baseMessages.map(msg => ({
+  // Compose final messages from base messages + overlays
+  const messages = useMemo(() => {
+    const mappedBaseMessages: ExtendedChatMessage[] = baseMessages.map(msg => ({
       ...msg,
       type: msg.type as 'user' | 'assistant' | 'phase' | 'trade' | 'ai'
     }));
-    setMessages(extendedMessages);
-  }, [baseMessages]);
+    
+    // Merge base messages with overlays, avoiding duplicates by ID
+    const allMessages = [...mappedBaseMessages];
+    const existingIds = new Set(mappedBaseMessages.map(msg => msg.id));
+    
+    overlays.forEach(overlay => {
+      if (!existingIds.has(overlay.id)) {
+        allMessages.push(overlay);
+      }
+    });
+    
+    // Sort by timestamp to maintain chronological order
+    return allMessages.sort((a, b) => 
+      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+  }, [baseMessages, overlays]);
   
   const [inputValue, setInputValue] = useState('');
   const [currentPhase, setCurrentPhase] = useState<ExecutionPhase>(ExecutionPhase.IDLE);
@@ -150,45 +164,45 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
   // Initialize session and set trading mode
   useEffect(() => {
     setCurrentMode(ChatMode.TRADING);
-    if (!sessionId || messages.length === 0) {
+    if (!sessionId || baseMessages.length === 0) {
       initializeSession();
     }
-  }, [setCurrentMode, sessionId, messages.length, initializeSession]);
+  }, [setCurrentMode, sessionId, baseMessages.length, initializeSession]);
 
   // Remove WebSocket functions since we're using REST API
 
   const addPhaseMessage = (phase: ExecutionPhase, details: string) => {
     const phaseInfo = phaseConfig[phase];
-    const message: Message = {
+    const message: ExtendedChatMessage = {
       id: `phase-${Date.now()}`,
       content: `**${phaseInfo.title}**\n${details}`,
       type: 'phase',
       phase,
       timestamp: new Date().toISOString()
     };
-    setMessages(prev => [...prev, message]);
+    setOverlays(prev => [...prev, message]);
   };
 
   const addTradeProposalMessage = (proposal: TradeProposal) => {
-    const message: Message = {
+    const message: ExtendedChatMessage = {
       id: `proposal-${proposal.id}`,
       content: `**Trade Proposal Ready**\n${proposal.action.toUpperCase()} ${proposal.amount} ${proposal.symbol} at $${proposal.price}`,
       type: 'trade',
       tradeProposal: proposal,
       timestamp: new Date().toISOString()
     };
-    setMessages(prev => [...prev, message]);
+    setOverlays(prev => [...prev, message]);
   };
 
   const addAIMessage = (content: string, metadata?: any) => {
-    const message: Message = {
+    const message: ExtendedChatMessage = {
       id: `ai-${Date.now()}`,
       content,
       type: 'ai',
       metadata,
       timestamp: new Date().toISOString()
     };
-    setMessages(prev => [...prev, message]);
+    setOverlays(prev => [...prev, message]);
   };
 
   const sendMessage = async () => {
