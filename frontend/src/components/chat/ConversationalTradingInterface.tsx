@@ -37,14 +37,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
-import { useChatStore, ChatMode, ChatMessage } from '@/store/chatStore';
+import { useChatStore, ChatMode, ChatMessage as BaseChatMessage } from '@/store/chatStore';
 
 import {
   ExecutionPhase,
   AIPersonality,
   TradeProposal,
   ConversationMemory,
-  ChatMessage,
   MessageType,
   PHASE_CONFIG,
   PERSONALITY_CONFIG,
@@ -68,8 +67,15 @@ const serverPhaseToEnum = (serverPhase: string): ExecutionPhase => {
   return phaseMap[serverPhase?.toLowerCase()] || ExecutionPhase.IDLE;
 };
 
-// Component-specific interfaces only
-interface Message extends ChatMessage {
+// Extended message interface for trading features
+interface ExtendedChatMessage extends Omit<BaseChatMessage, 'type'> {
+  type: 'user' | 'assistant' | 'phase' | 'trade' | 'ai';
+  phase?: ExecutionPhase;
+  tradeProposal?: TradeProposal;
+  metadata?: any;
+}
+
+interface Message extends ExtendedChatMessage {
   // Additional fields if needed
 }
 
@@ -94,7 +100,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
 }) => {
   // Use shared chat store
   const {
-    messages,
+    messages: baseMessages,
     isLoading,
     sessionId,
     currentMode,
@@ -103,6 +109,18 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     setCurrentMode,
     clearChat
   } = useChatStore();
+  
+  // Extended messages state for trading features
+  const [messages, setMessages] = useState<ExtendedChatMessage[]>([]);
+  
+  // Sync base messages with extended messages
+  useEffect(() => {
+    const extendedMessages: ExtendedChatMessage[] = baseMessages.map(msg => ({
+      ...msg,
+      type: msg.type as 'user' | 'assistant' | 'phase' | 'trade' | 'ai'
+    }));
+    setMessages(extendedMessages);
+  }, [baseMessages]);
   
   const [inputValue, setInputValue] = useState('');
   const [currentPhase, setCurrentPhase] = useState<ExecutionPhase>(ExecutionPhase.IDLE);
@@ -144,7 +162,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     const message: Message = {
       id: `phase-${Date.now()}`,
       content: `**${phaseInfo.title}**\n${details}`,
-      type: MessageType.PHASE,
+      type: 'phase',
       phase,
       timestamp: new Date().toISOString()
     };
@@ -155,7 +173,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     const message: Message = {
       id: `proposal-${proposal.id}`,
       content: `**Trade Proposal Ready**\n${proposal.action.toUpperCase()} ${proposal.amount} ${proposal.symbol} at $${proposal.price}`,
-      type: MessageType.TRADE,
+      type: 'trade',
       tradeProposal: proposal,
       timestamp: new Date().toISOString()
     };
@@ -166,7 +184,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     const message: Message = {
       id: `ai-${Date.now()}`,
       content,
-      type: MessageType.AI,
+      type: 'ai',
       metadata,
       timestamp: new Date().toISOString()
     };
@@ -343,9 +361,9 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     </Card>
   );
 
-  const renderMessage = (message: ChatMessage) => {
-    if (message.type === 'trade' && (message as any).tradeProposal) {
-      return renderTradeProposal((message as any).tradeProposal);
+  const renderMessage = (message: ExtendedChatMessage) => {
+    if (message.type === 'trade' && message.tradeProposal) {
+      return renderTradeProposal(message.tradeProposal);
     }
 
     const isUser = message.type === 'user';
@@ -359,7 +377,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
       >
         {!isUser && (
           <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-            {message.type === 'phase' ? React.createElement(phaseConfig[(message as any).phase!].icon, { className: 'h-4 w-4' }) : icon}
+            {message.type === 'phase' && message.phase ? React.createElement(phaseConfig[message.phase].icon, { className: 'h-4 w-4' }) : icon}
           </div>
         )}
         
@@ -373,9 +391,9 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
               <span className="text-xs opacity-70">
                 {new Date(message.timestamp).toLocaleTimeString()}
               </span>
-              {(message as any).phase && (
+              {message.phase && (
                 <Badge variant="outline" className="text-xs">
-                  {(message as any).phase}
+                  {message.phase}
                 </Badge>
               )}
             </div>
