@@ -791,6 +791,94 @@ async def logout(
         }
 
 
+@router.post("/debug/create-admin")
+async def create_debug_admin(db: AsyncSession = Depends(get_database)):
+    """Create admin user for debugging. Remove in production!"""
+    try:
+        # Check if admin already exists
+        result = await db.execute(
+            select(User).filter(User.email == "admin@cryptouniverse.com")
+        )
+        existing_admin = result.scalar_one_or_none()
+        
+        if existing_admin:
+            return {
+                "message": "Admin user already exists",
+                "email": "admin@cryptouniverse.com",
+                "role": existing_admin.role.value,
+                "status": existing_admin.status.value
+            }
+        
+        # Create admin user
+        hashed_password = auth_service.hash_password("admin123")
+        admin_user = User(
+            email="admin@cryptouniverse.com",
+            hashed_password=hashed_password,
+            full_name="Debug Admin",
+            role=UserRole.ADMIN,
+            status=UserStatus.ACTIVE,
+            email_verified=True
+        )
+        
+        db.add(admin_user)
+        await db.commit()
+        await db.refresh(admin_user)
+        
+        return {
+            "message": "Admin user created successfully",
+            "email": "admin@cryptouniverse.com", 
+            "password": "admin123",
+            "role": admin_user.role.value,
+            "status": admin_user.status.value,
+            "id": str(admin_user.id)
+        }
+        
+    except Exception as e:
+        await db.rollback()
+        return {
+            "error": f"Failed to create admin: {str(e)}"
+        }
+
+@router.get("/debug/token")
+async def debug_current_user_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_database)
+):
+    """Debug endpoint to check current user token and role."""
+    try:
+        token = credentials.credentials
+        payload = auth_service.verify_token(token)
+        
+        user_id = payload.get("sub")
+        result = await db.execute(select(User).filter(User.id == user_id))
+        user = result.scalar_one_or_none()
+        
+        return {
+            "token_valid": True,
+            "token_payload": {
+                "user_id": payload.get("sub"),
+                "email": payload.get("email"),
+                "role_in_token": payload.get("role"),
+                "exp": payload.get("exp"),
+                "type": payload.get("type")
+            },
+            "user_from_db": {
+                "id": str(user.id) if user else None,
+                "email": user.email if user else None,
+                "role": user.role.value if user else None,
+                "status": user.status.value if user else None,
+            } if user else None,
+            "user_found": user is not None,
+            "is_admin": user.role == UserRole.ADMIN if user else False
+        }
+    except Exception as e:
+        return {
+            "token_valid": False,
+            "error": str(e),
+            "user_found": False,
+            "is_admin": False
+        }
+
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(current_user: User = Depends(get_current_user)):
     """Get current user information."""
