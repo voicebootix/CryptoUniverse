@@ -37,7 +37,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
-import { useChatStore, ChatMode } from '@/store/chatStore';
+import { useChatStore, ChatMode, ChatMessage } from '@/store/chatStore';
 
 import {
   ExecutionPhase,
@@ -135,62 +135,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     if (!sessionId || messages.length === 0) {
       initializeSession();
     }
-  }, []);
-
-  const initializeSession = async () => {
-    try {
-      // Create a new chat session like ChatWidget does
-      const sessionResponse = await apiClient.post('/chat/session/new', {});
-      if (sessionResponse.data.success) {
-        const newSessionId = sessionResponse.data.session_id;
-        setSessionId(newSessionId);
-        setMemory({
-          sessionId: newSessionId,
-          context: {},
-          preferences: {},
-          lastActivity: new Date().toISOString(),
-          trustScore: 50,
-          totalProfit: 0
-        });
-      }
-
-      // Add welcome message
-      const welcomeMsg: Message = {
-        id: 'welcome',
-        content: `Welcome to CryptoUniverse! I'm ${personalityConfig[personality].name} ${personalityConfig[personality].emoji}, your AI Money Manager.
-
-I'll guide you through our sophisticated 5-phase trading process:
-📊 **Phase 1**: Market Analysis
-🧠 **Phase 2**: AI Consensus (GPT-4, Claude, Gemini)
-🛡️ **Phase 3**: Risk Validation
-📈 **Phase 4**: Trade Execution
-👁️ **Phase 5**: Position Monitoring
-
-${isPaperTrading ? '📝 **Paper Trading Mode Active** - We\'re using virtual money to practice!' : '💰 **Live Trading Mode** - Real money, real profits!'}
-
-How would you like to start? You can:
-• Say "I have $5000 to invest"
-• Ask "What are the best opportunities?"
-• Request "Start autonomous trading"
-• Or just chat naturally!`,
-        type: MessageType.AI,
-        timestamp: new Date().toISOString()
-      };
-      setMessages([welcomeMsg]);
-
-    } catch (error) {
-      console.error('Failed to initialize session:', error);
-      
-      // Add welcome message even if session creation fails
-      const welcomeMsg: Message = {
-        id: 'welcome',
-        content: `Welcome to CryptoUniverse! I'm your AI Money Manager. Ask me about trading opportunities, portfolio analysis, or market insights!`,
-        type: MessageType.AI,
-        timestamp: new Date().toISOString()
-      };
-      setMessages([welcomeMsg]);
-    }
-  };
+  }, [setCurrentMode, sessionId, messages.length, initializeSession]);
 
   // Remove WebSocket functions since we're using REST API
 
@@ -398,12 +343,12 @@ How would you like to start? You can:
     </Card>
   );
 
-  const renderMessage = (message: Message) => {
-    if (message.type === 'trade' && message.tradeProposal) {
-      return renderTradeProposal(message.tradeProposal);
+  const renderMessage = (message: ChatMessage) => {
+    if (message.type === 'trade' && (message as any).tradeProposal) {
+      return renderTradeProposal((message as any).tradeProposal);
     }
 
-    const isUser = message.type === MessageType.USER;
+    const isUser = message.type === 'user';
     const icon = isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />;
     
     return (
@@ -414,7 +359,7 @@ How would you like to start? You can:
       >
         {!isUser && (
           <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-            {message.type === MessageType.PHASE ? React.createElement(phaseConfig[message.phase!].icon, { className: 'h-4 w-4' }) : icon}
+            {message.type === 'phase' ? React.createElement(phaseConfig[(message as any).phase!].icon, { className: 'h-4 w-4' }) : icon}
           </div>
         )}
         
@@ -428,9 +373,9 @@ How would you like to start? You can:
               <span className="text-xs opacity-70">
                 {new Date(message.timestamp).toLocaleTimeString()}
               </span>
-              {message.phase && (
+              {(message as any).phase && (
                 <Badge variant="outline" className="text-xs">
-                  {message.phase}
+                  {(message as any).phase}
                 </Badge>
               )}
             </div>

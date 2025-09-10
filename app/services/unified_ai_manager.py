@@ -1149,10 +1149,7 @@ class UnifiedAIManager(LoggerMixin):
             self.logger.error("Failed to send Telegram consensus notification", user_id=user_id, error=str(e))
 
 
-# Global unified AI manager instance
-unified_ai_manager = UnifiedAIManager()    
- 
-   async def _enhance_web_response(
+    async def _enhance_web_response(
         self, 
         result: Dict[str, Any], 
         interface_type: str, 

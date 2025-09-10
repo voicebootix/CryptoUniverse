@@ -8,6 +8,7 @@ export interface ChatMessage {
   timestamp: string;
   mode?: ChatMode;
   metadata?: any;
+  confidence?: number;
 }
 
 export enum ChatMode {
@@ -120,27 +121,21 @@ export const useChatStore = create<ChatState>()(
           // Import API client dynamically to avoid circular dependencies
           const { apiClient } = await import('@/lib/api/client');
           
-          // Create session if needed using unified chat
+          // Create session if needed
           let currentSessionId = sessionId;
           if (!currentSessionId) {
-            const sessionResponse = await apiClient.post('/unified-chat/session/new', {
-              interface_type: currentMode,
-              context: {
-                platform: 'web',
-                initial_tab: window.location.pathname
-              }
-            });
+            const sessionResponse = await apiClient.post('/chat/session/new', {});
             if (sessionResponse.data.success) {
               currentSessionId = sessionResponse.data.session_id;
               set({ sessionId: currentSessionId });
             }
           }
           
-          // Send message through unified AI manager
-          const response = await apiClient.post('/unified-chat/message', {
+          // Send message through enhanced chat endpoint (now uses unified AI manager)
+          const response = await apiClient.post('/chat/message', {
             message: content,
             session_id: currentSessionId,
-            interface_type: currentMode,
+            mode: currentMode,
             context: {
               previous_messages: messages.slice(-5), // Last 5 messages for context
               current_tab: window.location.pathname,
@@ -208,31 +203,23 @@ export const useChatStore = create<ChatState>()(
       initializeSession: async () => {
         try {
           const { apiClient } = await import('@/lib/api/client');
-          const { currentMode } = get();
-          
-          const sessionResponse = await apiClient.post('/unified-chat/session/new', {
-            interface_type: currentMode,
-            context: {
-              platform: 'web',
-              initial_tab: window.location.pathname,
-              user_agent: navigator.userAgent
-            }
-          });
+          const sessionResponse = await apiClient.post('/chat/session/new', {});
           
           if (sessionResponse.data.success) {
             const sessionId = sessionResponse.data.session_id;
             set({ sessionId });
             
-            // Use welcome message from unified AI manager
+            // Add welcome message based on current mode
+            const { currentMode } = get();
             const welcomeMessage: ChatMessage = {
               id: 'welcome',
-              content: sessionResponse.data.welcome_message,
+              content: getWelcomeMessage(currentMode),
               type: 'assistant',
-              timestamp: sessionResponse.data.timestamp,
+              timestamp: new Date().toISOString(),
               mode: currentMode,
               metadata: {
-                unified_session: true,
-                cross_platform: true,
+                enhanced_chat: true,
+                unified_ai: true,
                 interface_type: currentMode
               }
             };
@@ -268,7 +255,7 @@ export const useChatStore = create<ChatState>()(
         try {
           const { apiClient } = await import('@/lib/api/client');
           
-          const response = await apiClient.post('/unified-chat/decision/approve', {
+          const response = await apiClient.post('/chat/decision/approve', {
             decision_id: decisionId,
             approved: approved,
             modifications: {}

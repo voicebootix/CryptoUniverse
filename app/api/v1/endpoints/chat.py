@@ -20,6 +20,7 @@ from app.core.database import get_database
 from app.models.user import User
 from app.services.ai_chat_engine import chat_engine, ChatMessageType
 from app.services.chat_integration import chat_integration
+from app.services.unified_ai_manager import unified_ai_manager, InterfaceType
 from app.services.websocket import manager
 import structlog
 
@@ -28,11 +29,28 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["AI Chat"])
 
 
+class DecisionApprovalRequest(BaseModel):
+    """Request model for approving AI decisions."""
+    decision_id: str = Field(..., description="Decision ID to approve")
+    approved: bool = Field(..., description="Whether the decision is approved")
+    modifications: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Any modifications to the decision")
+
+
+class DecisionApprovalResponse(BaseModel):
+    """Response model for decision approval."""
+    success: bool
+    decision_id: str
+    execution_result: Optional[Dict[str, Any]] = None
+    message: str
+
+
 # Pydantic models for request/response
 class ChatMessageRequest(BaseModel):
     """Request model for sending chat messages."""
     message: str = Field(..., description="The user's message content")
     session_id: Optional[str] = Field(None, description="Optional session ID to continue existing conversation")
+    mode: Optional[str] = Field("trading", description="Chat mode: trading, quick, analysis, support")
+    context: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional context information")
 
 
 class ChatMessageResponse(BaseModel):
@@ -43,8 +61,11 @@ class ChatMessageResponse(BaseModel):
     content: str
     intent: str
     confidence: float
+    requires_approval: bool = False
+    decision_id: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     timestamp: datetime
+    ai_analysis: Optional[str] = None
 
 
 class ChatHistoryResponse(BaseModel):
@@ -78,28 +99,82 @@ async def send_message(
     - Opportunity discovery
     """
     try:
-        # Process message through chat engine
-        response = await chat_engine.process_message(
-            session_id=request.session_id or "",
-            user_message=request.message,
-            user_id=str(current_user.id)
+        # Enhanced: Process through unified AI manager for consistent experience
+        session_id = request.session_id or f"chat_{uuid.uuid4().hex}"
+        
+        # Map mode to interface type
+        interface_mapping = {
+            "trading": InterfaceType.WEB_CHAT,
+            "quick": InterfaceType.WEB_CHAT,
+            "analysis": InterfaceType.WEB_UI,
+            "support": InterfaceType.WEB_CHAT
+        }
+        
+        interface_type = interface_mapping.get(request.mode, InterfaceType.WEB_CHAT)
+        
+        # Build context for unified AI manager
+        unified_context = {
+            "session_id": session_id,
+            "interface_type": request.mode,
+            "platform": "web",
+            "user_context": request.context,
+            "conversation_continuity": True,
+            "enhanced_chat_endpoint": True
+        }
+        
+        # Process through unified AI manager
+        ai_result = await unified_ai_manager.handle_web_chat_request(
+            session_id=session_id,
+            user_id=str(current_user.id),
+            message=request.message,
+            interface_type=request.mode,
+            additional_context=unified_context
         )
         
-        if not response.get("success"):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=response.get("error", "Failed to process message")
+        if not ai_result.get("success"):
+            # Fallback to original chat engine if unified AI manager fails
+            logger.warning("Unified AI manager failed, falling back to chat engine", 
+                         error=ai_result.get("error"))
+            
+            response = await chat_engine.process_message(
+                session_id=session_id,
+                user_message=request.message,
+                user_id=str(current_user.id)
+            )
+            
+            if not response.get("success"):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=response.get("error", "Failed to process message")
+                )
+            
+            return ChatMessageResponse(
+                success=True,
+                session_id=response["session_id"],
+                message_id=response["message_id"],
+                content=response["content"],
+                intent=response["intent"],
+                confidence=response["confidence"] or 0.0,
+                requires_approval=False,  # Fallback doesn't support approval
+                decision_id=None,
+                metadata=response.get("metadata"),
+                timestamp=datetime.utcnow(),
+                ai_analysis=None
             )
         
+        # Return enhanced response from unified AI manager
         return ChatMessageResponse(
             success=True,
-            session_id=response["session_id"],
-            message_id=response["message_id"],
-            content=response["content"],
-            intent=response["intent"],
-            confidence=response["confidence"] or 0.0,
-            metadata=response.get("metadata"),
-            timestamp=datetime.utcnow()
+            session_id=session_id,
+            message_id=f"msg_{uuid.uuid4().hex[:12]}",
+            content=ai_result.get("content", ""),
+            intent=ai_result.get("intent", "general"),
+            confidence=ai_result.get("confidence", 0.0),
+            requires_approval=ai_result.get("requires_approval", False),
+            decision_id=ai_result.get("decision_id"),
+            metadata=ai_result.get("metadata", {}),
+            timestamp=datetime.utcnow(),
+            ai_analysis=ai_result.get("ai_analysis")
         )
         
     except Exception as e:
@@ -478,4 +553,59 @@ async def discover_opportunities(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to discover opportunities"
+        )
+
+
+@router.post("/decision/approve", response_model=DecisionApprovalResponse)
+async def approve_ai_decision(
+    request: DecisionApprovalRequest,
+    current_user: User = Depends(get_current_user)
+) -> DecisionApprovalResponse:
+    """
+    Approve or reject an AI decision that requires user approval.
+    
+    This enables the unified AI to execute trades and other actions
+    after user confirmation through the enhanced chat system.
+    """
+    try:
+        if request.approved:
+            # Execute the approved decision through unified AI manager
+            result = await unified_ai_manager.execute_approved_decision(
+                decision_id=request.decision_id,
+                user_id=str(current_user.id)
+            )
+            
+            if result.get("success"):
+                return DecisionApprovalResponse(
+                    success=True,
+                    decision_id=request.decision_id,
+                    execution_result=result.get("execution_result"),
+                    message="Decision executed successfully"
+                )
+            else:
+                return DecisionApprovalResponse(
+                    success=False,
+                    decision_id=request.decision_id,
+                    message=result.get("error", "Execution failed")
+                )
+        else:
+            # Decision rejected
+            logger.info("AI decision rejected by user",
+                       decision_id=request.decision_id,
+                       user_id=str(current_user.id))
+            
+            return DecisionApprovalResponse(
+                success=True,
+                decision_id=request.decision_id,
+                message="Decision rejected"
+            )
+            
+    except Exception as e:
+        logger.error("Decision approval failed", 
+                    error=str(e),
+                    decision_id=request.decision_id,
+                    user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process decision approval"
         )
