@@ -131,15 +131,13 @@ export const useAuthStore = create<AuthStore>()(
               access_token: response.data.access_token,
               refresh_token: response.data.refresh_token,
               expires_in: Math.floor(expirationTimestamp), // Store as integer timestamp
-              token_type: response.data.token_type
+              token_type: response.data.token_type,
+              user_id: user.id,
+              role: user.role
             };
 
             // Store tokens in localStorage for persistence
-            setAuthTokens({
-              ...tokens,
-              user_id: user.id,
-              role: user.role
-            });
+            setAuthTokens(tokens);
 
             set({
               user: user as any,

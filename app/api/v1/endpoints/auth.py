@@ -794,6 +794,13 @@ async def logout(
 @router.post("/debug/create-admin")
 async def create_debug_admin(db: AsyncSession = Depends(get_database)):
     """Create admin user for debugging. Remove in production!"""
+    # Production guard - disable in production
+    if settings.ENVIRONMENT == "production":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not found"
+        )
+    
     try:
         # Check if admin already exists
         result = await db.execute(
@@ -814,10 +821,9 @@ async def create_debug_admin(db: AsyncSession = Depends(get_database)):
         admin_user = User(
             email="admin@cryptouniverse.com",
             hashed_password=hashed_password,
-            full_name="Debug Admin",
             role=UserRole.ADMIN,
             status=UserStatus.ACTIVE,
-            email_verified=True
+            is_verified=True
         )
         
         db.add(admin_user)
@@ -845,6 +851,13 @@ async def debug_current_user_token(
     db: AsyncSession = Depends(get_database)
 ):
     """Debug endpoint to check current user token and role."""
+    # Production guard - disable in production
+    if settings.ENVIRONMENT == "production":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not found"
+        )
+    
     try:
         token = credentials.credentials
         payload = auth_service.verify_token(token)
