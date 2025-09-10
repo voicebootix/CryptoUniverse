@@ -122,19 +122,33 @@ async def send_message(
             "enhanced_chat_endpoint": True
         }
         
-        # Process through unified AI manager
-        ai_result = await unified_ai_manager.handle_web_chat_request(
-            session_id=session_id,
-            user_id=str(current_user.id),
-            message=request.message,
-            interface_type=request.mode,
-            additional_context=unified_context
-        )
+        # Process through unified AI manager with detailed logging
+        logger.info("Attempting unified AI manager processing", 
+                   session_id=session_id, 
+                   user_id=str(current_user.id),
+                   mode=request.mode)
+        
+        try:
+            ai_result = await unified_ai_manager.handle_web_chat_request(
+                session_id=session_id,
+                user_id=str(current_user.id),
+                message=request.message,
+                interface_type=request.mode,
+                additional_context=unified_context
+            )
+            
+            logger.info("Unified AI manager response", 
+                       success=ai_result.get("success"),
+                       error=ai_result.get("error"))
+        except Exception as e:
+            logger.error("Unified AI manager exception", error=str(e), exc_info=True)
+            ai_result = {"success": False, "error": str(e)}
         
         if not ai_result.get("success"):
             # Fallback to original chat engine if unified AI manager fails
             logger.warning("Unified AI manager failed, falling back to chat engine", 
-                         error=ai_result.get("error"))
+                         error=ai_result.get("error"),
+                         session_id=session_id)
             
             response = await chat_engine.process_message(
                 session_id=session_id,

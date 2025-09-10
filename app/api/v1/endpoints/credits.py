@@ -169,7 +169,7 @@ async def get_credit_balance(
                 and_(
                     Trade.user_id == current_user.id,
                     Trade.status == 'COMPLETED',  # Use string literal instead of enum
-                    Trade.is_simulation.is_(False),  # Use proper SQLAlchemy boolean comparison
+                    Trade.is_simulation == False,  # Use == for boolean comparison
                     Trade.profit_realized_usd > 0
                 )
             )
