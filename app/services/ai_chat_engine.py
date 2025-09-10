@@ -643,11 +643,58 @@ I'll continue monitoring and notify you when rebalancing becomes beneficial."""
     async def _handle_opportunity_discovery(self, session: ChatSession, message: ChatMessage) -> Dict[str, Any]:
         """Handle opportunity discovery requests."""
         
-        # Get market opportunities
-        market_opportunities = await self.market_analysis.discover_opportunities(
-            user_id=session.user_id,
-            risk_tolerance=session.context.get("risk_tolerance", "balanced")
-        )
+        try:
+            # Check if market analysis service is available
+            if self.market_analysis is None:
+                self.logger.warning("Market analysis service not available, falling back to AI consensus")
+                # Fallback to AI consensus for opportunity discovery
+                ai_analysis = await self.ai_consensus.analyze_opportunity(
+                    f"Find market opportunities for user request: {message.content}",
+                    confidence_threshold=75.0,
+                    ai_models="all",
+                    user_id=session.user_id
+                )
+                
+                return {
+                    "content": ai_analysis.get("analysis", "Unable to analyze opportunities at this time."),
+                    "confidence": ai_analysis.get("confidence", 0.8),
+                    "metadata": {"fallback_used": True}
+                }
+            
+            # Step 1: Dynamically discover all available assets with good volume
+            asset_discovery = await self.market_analysis.discover_exchange_assets(
+                exchanges="all",
+                asset_types="spot",
+                user_id=session.user_id,
+                min_volume_usd=1000000  # Only assets with >$1M daily volume
+            )
+            
+            # Step 2: Extract top assets for scanning (dynamic, not hardcoded!)
+            discovered_symbols = []
+            for exchange_data in asset_discovery.get("asset_discovery", {}).values():
+                high_volume_assets = exchange_data.get("high_volume_assets", [])[:20]  # Top 20 per exchange
+                discovered_symbols.extend([asset.get("symbol", "").replace("/USDT", "").replace("/USD", "") for asset in high_volume_assets])
+            
+            # Remove duplicates and create symbol string
+            unique_symbols = list(set(discovered_symbols))[:50]  # Limit to top 50 unique assets
+            symbols_string = ",".join(unique_symbols) if unique_symbols else "BTC,ETH,BNB,SOL,ADA"  # Fallback
+            
+            self.logger.info(f"Dynamically discovered {len(unique_symbols)} assets for opportunity scanning")
+            
+            # Step 3: Scan for market inefficiencies across discovered assets
+            market_opportunities = await self.market_analysis.market_inefficiency_scanner(
+                symbols=symbols_string,
+                exchanges="all", 
+                scan_types="spread,volume,time",
+                user_id=session.user_id
+            )
+        except Exception as e:
+            self.logger.error(f"Error in opportunity discovery: {e}")
+            return {
+                "content": f"I'm having technical difficulties analyzing market opportunities. Error: {str(e)}",
+                "confidence": 0.3,
+                "metadata": {"error": str(e)}
+            }
         
         # Get AI analysis
         ai_context = {

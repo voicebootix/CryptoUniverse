@@ -689,8 +689,10 @@ I encountered an error during the 5-phase execution. The trade was not completed
         try:
             # STEP 1: Use your REAL market analysis service
             opportunities = await self.market_analysis.market_inefficiency_scanner(
-                symbols=["BTC", "ETH", "SOL", "ADA", "DOT"],
-                depth="comprehensive"
+                symbols="BTC,ETH,SOL,ADA,DOT",
+                exchanges="all",
+                scan_types="spread,volume,time",
+                user_id=user_id
             )
             
             # STEP 2: Use AI consensus to VALIDATE and format results
@@ -751,8 +753,9 @@ I encountered an error during the 5-phase execution. The trade was not completed
         try:
             # Use real market analysis
             analysis = await self.market_analysis.complete_market_assessment(
-                symbols=["BTC", "ETH", "SOL"],
-                depth="comprehensive"
+                symbols="BTC,ETH,SOL",
+                depth="comprehensive",
+                user_id=user_id
             )
             
             # AI formats the real data
