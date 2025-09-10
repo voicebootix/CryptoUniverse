@@ -30,6 +30,11 @@ from app.services.chat_service_adapters import chat_adapters
 from app.services.telegram_core import TelegramCommanderService
 from app.services.websocket import manager
 
+# Import actual service engines for routing
+from app.services.market_analysis_core import MarketAnalysisService
+from app.services.portfolio_risk_core import PortfolioRiskService
+from app.services.trading_strategies import TradingStrategiesService
+
 settings = get_settings()
 logger = structlog.get_logger(__name__)
 
@@ -90,6 +95,11 @@ class UnifiedAIManager(LoggerMixin):
         self.trade_executor = TradeExecutionService()
         self.adapters = chat_adapters
         self.telegram_core = TelegramCommanderService()
+        
+        # Actual service engines for routing
+        self.market_analysis = MarketAnalysisService()
+        self.portfolio_risk = PortfolioRiskService()
+        self.trading_strategies = TradingStrategiesService()
         
         # Redis for state management - initialize properly for async usage
         self.redis = None
@@ -162,11 +172,20 @@ class UnifiedAIManager(LoggerMixin):
                 "timestamp": datetime.utcnow().isoformat()
             }
             
-            # Get AI analysis and recommendation
+            # ENHANCED: Route to actual services first based on intent
+            service_result = await self._route_to_service(intent, request, user_id, context)
+            
+            # Then use AI consensus to VALIDATE and format the service result
+            enhanced_context = {
+                **decision_context,
+                "service_result": service_result,
+                "analysis_type": "validation_and_formatting"
+            }
+            
             ai_response = await self.ai_consensus.analyze_opportunity(
-                json.dumps(decision_context),
-                confidence_threshold=80.0,
-                ai_models="all",
+                json.dumps(enhanced_context),
+                confidence_threshold=75.0,
+                ai_models="all", 
                 user_id=user_id
             )
             
@@ -1202,6 +1221,49 @@ class UnifiedAIManager(LoggerMixin):
             self.logger.error("Web response enhancement failed", error=str(e))
             return result
     
+    async def _route_to_service(self, intent: str, request: str, user_id: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Route request to appropriate service based on intent - REAL SERVICE CALLS."""
+        
+        try:
+            self.logger.info(f"Routing intent '{intent}' to actual service for user {user_id}")
+            
+            if "opportunity" in intent.lower() or "discover" in intent.lower():
+                # Route to market analysis for opportunity discovery
+                result = await self.market_analysis.market_inefficiency_scanner(
+                    symbols="BTC,ETH,BNB,SOL,ADA,XRP,DOT,AVAX,MATIC,LINK,UNI,ATOM",
+                    exchanges="all",
+                    scan_types="spread,volume,time",
+                    user_id=user_id
+                )
+                return {"service": "market_analysis", "method": "opportunity_discovery", "result": result}
+                
+            elif "portfolio" in intent.lower():
+                # Route to portfolio risk service
+                result = await self.portfolio_risk.get_portfolio_status(user_id)
+                return {"service": "portfolio_risk", "method": "portfolio_analysis", "result": result}
+                
+            elif "market" in intent.lower() or "analysis" in intent.lower():
+                # Route to market analysis service
+                result = await self.market_analysis.complete_market_assessment(
+                    symbols="BTC,ETH,SOL",
+                    depth="comprehensive",
+                    user_id=user_id
+                )
+                return {"service": "market_analysis", "method": "market_assessment", "result": result}
+                
+            elif "trade" in intent.lower() or "buy" in intent.lower() or "sell" in intent.lower():
+                # Route to trading strategies service
+                result = await self.trading_strategies.get_active_strategy(user_id)
+                return {"service": "trading_strategies", "method": "trade_analysis", "result": result}
+                
+            else:
+                # Fallback for general queries - no service routing needed
+                return {"service": "none", "method": "general", "result": {"message": "General query - no specific service routing required"}}
+                
+        except Exception as e:
+            self.logger.error(f"Service routing failed for intent '{intent}': {e}")
+            return {"service": "error", "method": "fallback", "result": {"error": str(e), "message": "Service routing failed, falling back to AI consensus"}}
+
     def _get_decision_type(self, intent: str) -> str:
         """Map intent to decision type."""
         
