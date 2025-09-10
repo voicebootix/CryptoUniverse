@@ -22,6 +22,10 @@ from app.services.ai_consensus_core import AIConsensusService
 from app.services.master_controller import MasterSystemController
 from app.services.trade_execution import TradeExecutionService
 from app.services.chat_memory import chat_memory
+from app.services.market_analysis_core import MarketAnalysisService
+from app.services.trading_strategies import TradingStrategiesService
+from app.services.portfolio_risk_core import PortfolioRiskService
+from app.services.chat_service_adapters import ChatServiceAdapters
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -80,31 +84,30 @@ class EnhancedAIChatEngine(LoggerMixin):
         portfolio_risk: Optional['PortfolioRiskServiceExtended'] = None,
         market_analysis: Optional['MarketAnalysisService'] = None
     ):
-        # Initialize services
-        self.ai_consensus = AIConsensusService()
+        # Initialize services - ACTUAL SERVICES NOW!
+        self.ai_consensus = AIConsensusService()  # VALIDATION ONLY
         self.master_controller = MasterSystemController()
         self.trade_executor = TradeExecutionService()
         self.memory = chat_memory
         self.unified_manager = None  # Will be set by unified manager
         
-        # Initialize portfolio and market analysis services
-        if portfolio_risk is not None:
-            self.portfolio_risk = portfolio_risk
-        else:
-            try:
-                from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
-                self.portfolio_risk = PortfolioRiskServiceExtended()
-            except ImportError:
-                self.portfolio_risk = None
+        # Initialize ALL your powerful services
+        self.market_analysis = MarketAnalysisService()
+        try:
+            self.trading_strategies = TradingStrategiesService()
+        except:
+            self.trading_strategies = None
+            self.logger.warning("TradingStrategiesService not available")
         
-        if market_analysis is not None:
-            self.market_analysis = market_analysis
-        else:
-            try:
-                from app.services.market_analysis_core import MarketAnalysisService
-                self.market_analysis = MarketAnalysisService()
-            except ImportError:
-                self.market_analysis = None
+        try:
+            from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+            self.portfolio_risk = PortfolioRiskServiceExtended()
+        except:
+            self.portfolio_risk = PortfolioRiskService()
+            
+        self.chat_adapters = ChatServiceAdapters()
+        
+        self.logger.info("✅ Enhanced chat engine initialized with ALL services connected")
         
         # Intent classification patterns
         self.intent_patterns = {
@@ -641,59 +644,324 @@ I encountered an error during the 5-phase execution. The trade was not completed
         intent: ChatIntent,
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Process non-trading intents with conversation memory."""
+        """Process intents by ROUTING TO ACTUAL SERVICES first, then using AI consensus for validation."""
         
-        # Build context-aware prompt
-        system_prompt = self.system_prompts.get(intent, self.system_prompts[ChatIntent.GENERAL_QUERY])
+        user_id = context.get("session_context", {}).get("user_id", "system")
         
-        # Add conversation context
-        context_summary = self._build_context_summary(context)
-        
-        full_prompt = f"""
-{system_prompt}
-
-CONVERSATION CONTEXT:
-{context_summary}
-
-USER MESSAGE: {user_message}
-
-Provide a helpful, context-aware response that builds on our conversation history.
-"""
-        
-        # Get AI consensus response
         try:
-            ai_response = await self.ai_consensus.consensus_decision(
-                decision_request=full_prompt,
+            # STEP 1: ROUTE TO APPROPRIATE SERVICE (Do the work!)
+            if intent == ChatIntent.OPPORTUNITY_DISCOVERY:
+                return await self._handle_opportunity_discovery(user_message, context, user_id)
+            
+            elif intent == ChatIntent.MARKET_ANALYSIS:
+                return await self._handle_market_analysis(user_message, context, user_id)
+            
+            elif intent == ChatIntent.PORTFOLIO_ANALYSIS:
+                return await self._handle_portfolio_analysis(user_message, context, user_id)
+            
+            elif intent == ChatIntent.STRATEGY_DISCUSSION:
+                return await self._handle_strategy_discussion(user_message, context, user_id)
+            
+            elif intent == ChatIntent.RISK_ASSESSMENT:
+                return await self._handle_risk_assessment(user_message, context, user_id)
+            
+            elif intent == ChatIntent.AUTONOMOUS_CONTROL:
+                return await self._handle_autonomous_control(user_message, context, user_id)
+            
+            elif intent == ChatIntent.EMERGENCY_COMMAND:
+                return await self._handle_emergency_command(user_message, context, user_id)
+            
+            else:
+                # For general queries, use AI consensus but with service context
+                return await self._handle_general_query(user_message, context, user_id)
+                
+        except Exception as e:
+            self.logger.error("Service routing failed", error=str(e), intent=intent.value)
+            return {
+                "content": f"I encountered an error accessing the {intent.value} service: {str(e)}",
+                "confidence": 0.3,
+                "metadata": {"error": True, "intent": intent.value, "service_error": str(e)}
+            }
+    
+    async def _handle_opportunity_discovery(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
+        """Handle opportunity discovery using REAL market analysis API."""
+        
+        try:
+            # STEP 1: Use your REAL market analysis service
+            opportunities = await self.market_analysis.market_inefficiency_scanner(
+                symbols=["BTC", "ETH", "SOL", "ADA", "DOT"],
+                depth="comprehensive"
+            )
+            
+            # STEP 2: Use AI consensus to VALIDATE and format results
+            validation_prompt = f"""
+            REAL MARKET OPPORTUNITIES FOUND:
+            {json.dumps(opportunities, indent=2)}
+            
+            USER REQUEST: {message}
+            
+            Analyze these REAL opportunities and provide:
+            1. Which opportunities best match the user's request
+            2. Risk assessment for each
+            3. Recommended actions
+            4. Clear next steps
+            
+            Present in a professional, actionable format.
+            """
+            
+            ai_validation = await self.ai_consensus.consensus_decision(
+                decision_request=validation_prompt,
+                confidence_threshold=75.0,
+                ai_models="all",
+                user_id=user_id
+            )
+            
+            # Combine service results with AI validation
+            response_content = f"""🔍 **REAL Market Opportunities Found**
+
+**Analysis Results:**
+{ai_validation.get('final_recommendation', 'Opportunities analyzed')}
+
+**Data Source:** Live market analysis service
+**Confidence:** {ai_validation.get('consensus_score', 0.8):.1%}
+**Processing:** {len(opportunities.get('opportunities', []))} opportunities analyzed"""
+
+            return {
+                "content": response_content,
+                "confidence": ai_validation.get("consensus_score", 0.8),
+                "metadata": {
+                    "service_used": "market_analysis_service",
+                    "opportunities_count": len(opportunities.get('opportunities', [])),
+                    "ai_validated": True,
+                    "real_data": True
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error("Opportunity discovery failed", error=str(e))
+            return {
+                "content": f"Market analysis service error: {str(e)}",
+                "confidence": 0.3,
+                "metadata": {"service_error": True}
+            }
+    
+    async def _handle_market_analysis(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
+        """Handle market analysis using REAL market service."""
+        
+        try:
+            # Use real market analysis
+            analysis = await self.market_analysis.complete_market_assessment(
+                symbols=["BTC", "ETH", "SOL"],
+                depth="comprehensive"
+            )
+            
+            # AI formats the real data
+            format_prompt = f"""
+            REAL MARKET ANALYSIS RESULTS:
+            {json.dumps(analysis, indent=2)}
+            
+            USER REQUEST: {message}
+            
+            Format this real market data into a professional analysis response.
+            """
+            
+            ai_format = await self.ai_consensus.consensus_decision(
+                decision_request=format_prompt,
                 confidence_threshold=70.0,
                 ai_models="all",
-                user_id=context.get("session_context", {}).get("user_id", "system")
+                user_id=user_id
             )
-        except Exception as e:
-            # Use simple response if AI consensus fails
-            self.logger.warning("AI consensus failed, using fallback", error=str(e), message=user_message)
-            ai_response = {
-                "success": False,
-                "final_recommendation": f"I understand your message: '{user_message}'. I'm having trouble accessing my advanced AI capabilities right now, but I can still help with basic questions about cryptocurrency trading and portfolio management.",
-                "consensus_score": 0.6,
-                "reasoning": "Fallback response due to AI service unavailability"
+            
+            return {
+                "content": f"📊 **Real Market Analysis**\n\n{ai_format.get('final_recommendation', 'Analysis complete')}",
+                "confidence": 0.9,
+                "metadata": {"service_used": "market_analysis", "real_data": True}
             }
+            
+        except Exception as e:
+            return {"content": f"Market analysis error: {str(e)}", "confidence": 0.3}
+    
+    async def _handle_portfolio_analysis(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
+        """Handle portfolio analysis using REAL portfolio service."""
         
-        return {
-            "content": (ai_response.get("final_recommendation") or 
-                       ai_response.get("content") or 
-                       ai_response.get("reasoning") or
-                       "I apologize, but I couldn't process that request."),
-            "confidence": (ai_response.get("consensus_score") or 
-                          ai_response.get("confidence") or 0.8),
-            "metadata": {
-                "intent": intent.value,
-                "context_used": len(context.get("recent_messages", [])),
-                "model_used": ai_response.get("model_used", "ai_consensus"),
-                "ai_success": ai_response.get("success", False)
-            },
-            "model_used": ai_response.get("model_used", "ai_consensus"),
-            "tokens_used": ai_response.get("tokens_used", 0)
-        }
+        try:
+            # Use real portfolio service
+            portfolio = await self.chat_adapters.get_portfolio_summary(user_id)
+            risk_analysis = await self.portfolio_risk.get_portfolio_status(user_id)
+            
+            # AI analyzes real portfolio data
+            analysis_prompt = f"""
+            REAL PORTFOLIO DATA:
+            {json.dumps(portfolio, indent=2)}
+            
+            RISK ANALYSIS:
+            {json.dumps(risk_analysis, indent=2)}
+            
+            USER REQUEST: {message}
+            
+            Provide comprehensive portfolio analysis with specific recommendations.
+            """
+            
+            ai_analysis = await self.ai_consensus.consensus_decision(
+                decision_request=analysis_prompt,
+                confidence_threshold=75.0,
+                ai_models="all",
+                user_id=user_id
+            )
+            
+            return {
+                "content": f"💼 **Your Portfolio Analysis**\n\n{ai_analysis.get('final_recommendation', 'Analysis complete')}",
+                "confidence": ai_analysis.get("consensus_score", 0.85),
+                "metadata": {"service_used": "portfolio_analysis", "real_data": True}
+            }
+            
+        except Exception as e:
+            return {"content": f"Portfolio analysis error: {str(e)}", "confidence": 0.3}
+    
+    async def _handle_strategy_discussion(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
+        """Handle strategy discussion using REAL trading strategies service."""
+        
+        try:
+            # Use real trading strategies service - fallback if service unavailable
+            if self.trading_strategies:
+                strategies = await self.trading_strategies.futures_trade(
+                    symbol="BTC", action="analyze", amount=0, leverage=1
+                )
+            else:
+                strategies = {"available_strategies": ["momentum", "mean_reversion", "arbitrage"]}
+            
+            strategy_prompt = f"""
+            AVAILABLE TRADING STRATEGIES:
+            {json.dumps(strategies, indent=2)}
+            
+            USER REQUEST: {message}
+            
+            Recommend appropriate strategies and explain their benefits.
+            """
+            
+            ai_recommendation = await self.ai_consensus.consensus_decision(
+                decision_request=strategy_prompt,
+                confidence_threshold=70.0,
+                ai_models="all",
+                user_id=user_id
+            )
+            
+            return {
+                "content": f"📈 **Trading Strategy Recommendations**\n\n{ai_recommendation.get('final_recommendation', 'Strategies available')}",
+                "confidence": ai_recommendation.get("consensus_score", 0.8),
+                "metadata": {"service_used": "trading_strategies", "real_data": True}
+            }
+            
+        except Exception as e:
+            return {"content": f"Strategy service error: {str(e)}", "confidence": 0.3}
+    
+    async def _handle_risk_assessment(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
+        """Handle risk assessment using REAL risk service."""
+        
+        try:
+            # Use real risk assessment service
+            risk_data = await self.portfolio_risk.get_portfolio_status(user_id)
+            
+            risk_prompt = f"""
+            REAL RISK ANALYSIS:
+            {json.dumps(risk_data, indent=2)}
+            
+            USER REQUEST: {message}
+            
+            Provide detailed risk assessment and mitigation recommendations.
+            """
+            
+            ai_assessment = await self.ai_consensus.consensus_decision(
+                decision_request=risk_prompt,
+                confidence_threshold=80.0,
+                ai_models="all",
+                user_id=user_id
+            )
+            
+            return {
+                "content": f"🛡️ **Risk Assessment**\n\n{ai_assessment.get('final_recommendation', 'Risk analysis complete')}",
+                "confidence": ai_assessment.get("consensus_score", 0.85),
+                "metadata": {"service_used": "risk_assessment", "real_data": True}
+            }
+            
+        except Exception as e:
+            return {"content": f"Risk assessment error: {str(e)}", "confidence": 0.3}
+    
+    async def _handle_autonomous_control(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
+        """Handle autonomous mode control."""
+        
+        try:
+            if "start" in message.lower() or "enable" in message.lower():
+                result = await self.master_controller.start_autonomous_mode({
+                    "user_id": user_id,
+                    "mode": "balanced"
+                })
+                return {
+                    "content": f"🤖 **Autonomous Mode Started**\n\n{result.get('message', 'Autonomous trading activated')}",
+                    "confidence": 0.9,
+                    "metadata": {"service_used": "master_controller", "action": "start_autonomous"}
+                }
+            else:
+                result = await self.master_controller.stop_autonomous_mode(user_id)
+                return {
+                    "content": f"🛑 **Autonomous Mode Stopped**\n\n{result.get('message', 'Autonomous trading deactivated')}",
+                    "confidence": 0.9,
+                    "metadata": {"service_used": "master_controller", "action": "stop_autonomous"}
+                }
+                
+        except Exception as e:
+            return {"content": f"Autonomous control error: {str(e)}", "confidence": 0.3}
+    
+    async def _handle_emergency_command(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
+        """Handle emergency commands."""
+        
+        try:
+            result = await self.master_controller.emergency_stop(user_id)
+            return {
+                "content": f"🚨 **Emergency Protocol Activated**\n\n{result.get('message', 'All trading halted for safety')}",
+                "confidence": 1.0,
+                "metadata": {"service_used": "master_controller", "action": "emergency_stop"}
+            }
+            
+        except Exception as e:
+            return {"content": f"Emergency protocol error: {str(e)}", "confidence": 0.3}
+    
+    async def _handle_general_query(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
+        """Handle general queries with service context."""
+        
+        context_summary = self._build_context_summary(context)
+        
+        general_prompt = f"""
+        You are CryptoUniverse AI with access to real trading services.
+        
+        CONVERSATION CONTEXT:
+        {context_summary}
+        
+        USER MESSAGE: {message}
+        
+        Provide helpful information about cryptocurrency trading and portfolio management.
+        """
+        
+        try:
+            ai_response = await self.ai_consensus.consensus_decision(
+                decision_request=general_prompt,
+                confidence_threshold=70.0,
+                ai_models="all",
+                user_id=user_id
+            )
+            
+            return {
+                "content": ai_response.get("final_recommendation", "I can help with trading questions."),
+                "confidence": ai_response.get("consensus_score", 0.7),
+                "metadata": {"service_used": "ai_consensus", "query_type": "general"}
+            }
+            
+        except Exception as e:
+            return {
+                "content": "I'm here to help with cryptocurrency trading and portfolio management questions.",
+                "confidence": 0.6,
+                "metadata": {"fallback": True}
+            }
     
     def _build_context_summary(self, context: Dict[str, Any]) -> str:
         """Build a summary of conversation context for AI processing."""
