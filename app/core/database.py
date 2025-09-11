@@ -43,8 +43,8 @@ def get_async_database_url() -> str:
 engine = create_async_engine(
     get_async_database_url(),
     poolclass=QueuePool,  # ENTERPRISE: Use proper connection pooling
-    pool_size=int(os.getenv('DB_POOL_SIZE', '20')),       # PRODUCTION: Environment configurable pool size
-    max_overflow=int(os.getenv('DB_MAX_OVERFLOW', '30')), # PRODUCTION: Environment configurable overflow
+    pool_size=int(os.getenv('DB_POOL_SIZE', '8')),        # EVIDENCE-BASED: Stay under Supabase 60 connection limit
+    max_overflow=int(os.getenv('DB_MAX_OVERFLOW', '12')), # EVIDENCE-BASED: Total 20 connections max (33% of limit)
     pool_pre_ping=True,   # ENTERPRISE: Health check connections
     pool_recycle=1800,    # PRODUCTION: Faster recycle for cloud (30 min)
     pool_timeout=30,      # PRODUCTION: Increased for cold starts on Render
