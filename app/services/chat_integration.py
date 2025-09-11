@@ -50,11 +50,10 @@ class ChatIntegrationService(LoggerMixin):
         chat_engine._handle_market_analysis = self._enhanced_market_analysis
         chat_engine.execute_confirmed_action = self._execute_confirmed_action
     
-    async def _enhanced_portfolio_analysis(self, session, message) -> Dict[str, Any]:
+    async def _enhanced_portfolio_analysis(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Enhanced portfolio analysis with full service integration."""
         
         try:
-            user_id = session.user_id
             
             # Get comprehensive portfolio data
             portfolio_summary = await self.adapters.get_portfolio_summary(user_id)
@@ -146,11 +145,10 @@ What would you like me to help you with next?"""
                 "metadata": {"error": str(e)}
             }
     
-    async def _enhanced_trade_execution(self, session, message) -> Dict[str, Any]:
+    async def _enhanced_trade_execution(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Enhanced trade execution with full market analysis."""
         
         try:
-            user_id = session.user_id
             
             # Extract trade parameters
             trade_params = await chat_engine._extract_trade_parameters(message.content)
@@ -257,11 +255,10 @@ Reply with:
                 "metadata": {"error": str(e)}
             }
     
-    async def _enhanced_rebalancing(self, session, message) -> Dict[str, Any]:
+    async def _enhanced_rebalancing(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Enhanced rebalancing with strategy optimization."""
         
         try:
-            user_id = session.user_id
             
             # Get current portfolio and strategy
             portfolio_data = await self.adapters.get_portfolio_summary(user_id)
@@ -373,11 +370,10 @@ Your portfolio is well-balanced according to your current strategy. No rebalanci
                 "metadata": {"error": str(e)}
             }
     
-    async def _enhanced_opportunity_discovery(self, session, message) -> Dict[str, Any]:
+    async def _enhanced_opportunity_discovery(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Enhanced opportunity discovery with comprehensive market scanning."""
         
         try:
-            user_id = session.user_id
             
             # Get comprehensive market opportunities
             market_scan = await self.adapters.comprehensive_market_scan()
@@ -386,7 +382,7 @@ Your portfolio is well-balanced according to your current strategy. No rebalanci
             # Use trading strategies service to find opportunities
             strategy_opportunities = await self.adapters.discover_opportunities(
                 user_id=user_id,
-                risk_tolerance=session.context.get("risk_tolerance", "balanced")
+                risk_tolerance=context.get("risk_tolerance", "balanced")
             )
             
             # Get AI consensus on opportunities
@@ -394,7 +390,7 @@ Your portfolio is well-balanced according to your current strategy. No rebalanci
                 "market_scan": market_scan,
                 "strategy_opportunities": strategy_opportunities,
                 "portfolio_context": portfolio_context,
-                "user_message": message.content
+                "user_message": message
             }
             
             ai_analysis = await self.adapters.ai_consensus.analyze_opportunity(
@@ -487,11 +483,10 @@ No significant opportunities detected in current market conditions.
                 "metadata": {"error": str(e)}
             }
     
-    async def _enhanced_risk_assessment(self, session, message) -> Dict[str, Any]:
+    async def _enhanced_risk_assessment(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Enhanced risk assessment with comprehensive analysis."""
         
         try:
-            user_id = session.user_id
             
             # Get comprehensive risk analysis
             risk_analysis = await self.adapters.comprehensive_risk_analysis(user_id)
@@ -567,7 +562,7 @@ What risk management action would you like to take?"""
                 "metadata": {"error": str(e)}
             }
     
-    async def _enhanced_market_analysis(self, session, message) -> Dict[str, Any]:
+    async def _enhanced_market_analysis(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Enhanced market analysis with multi-timeframe insights."""
         
         try:

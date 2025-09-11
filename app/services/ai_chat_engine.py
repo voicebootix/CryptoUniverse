@@ -409,8 +409,13 @@ I'll remember our conversation and provide increasingly personalized assistance.
             
             return {
                 "success": False,
-                "error": str(e),
-                "content": "I apologize, but I encountered an error processing your message. Please try again."
+                "session_id": session_id,
+                "message_id": f"error_{uuid.uuid4().hex}",
+                "content": "I apologize, but I encountered an error processing your message. Please try again.",
+                "intent": "error",
+                "confidence": 0.0,
+                "metadata": {"error": True, "error_message": str(e)},
+                "error": str(e)
             }
     
     async def _process_with_5_phases(
