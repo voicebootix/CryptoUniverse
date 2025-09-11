@@ -580,7 +580,7 @@ What risk management action would you like to take?"""
                 json.dumps(market_context),
                 confidence_threshold=80.0,
                 ai_models="all",
-                user_id=session.user_id
+                user_id=user_id
             )
             
             response_content = f"""📈 **Comprehensive Market Analysis**
