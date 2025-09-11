@@ -47,10 +47,8 @@ class MarketDataCoordinator:
                 'ssl_keyfile': getattr(settings, 'redis_ssl_keyfile', None)
             })
             
-        self.redis_client = redis.Redis(
-            host=settings.redis_host,
-            port=settings.redis_port,
-            password=settings.redis_password,
+        self.redis_client = redis.from_url(
+            settings.REDIS_URL,
             decode_responses=True,  # Enable response decoding so replies are strings not bytes
             **ssl_config
         )
