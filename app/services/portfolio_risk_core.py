@@ -1633,13 +1633,16 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
     async def calculate_portfolio_volatility_risk(self, user_id: str, balances: List) -> Dict[str, Any]:
         """ENTERPRISE-GRADE portfolio volatility and risk analysis with caching."""
         try:
+            import asyncio
+            
             # SOPHISTICATED RISK CALCULATIONS - Using real market data principles
             concentration_risks = {}
             volatility_scores = {}
-            correlation_risks = {}
             
             total_value = sum(float(balance.usd_value or 0) for balance in balances)
             
+            # Collect symbols and weights for concurrent processing
+            symbols_with_weights = []
             for balance in balances:
                 if balance.total_balance <= 0:
                     continue
@@ -1654,8 +1657,37 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                     "position_size_usd": float(balance.usd_value or 0)
                 }
                 
-                # ENTERPRISE VOLATILITY SCORING using sophisticated market analysis
-                asset_volatility = await self._get_asset_volatility_estimate(symbol)
+                symbols_with_weights.append((symbol, weight))
+            
+            # ENTERPRISE VOLATILITY SCORING using bounded-concurrency async gather
+            semaphore = asyncio.Semaphore(3)  # Max 3 concurrent volatility calls
+            
+            async def get_volatility_with_timeout(symbol: str, weight: float):
+                async with semaphore:
+                    try:
+                        asset_volatility = await asyncio.wait_for(
+                            self._get_asset_volatility_estimate(symbol), 
+                            timeout=2.0
+                        )
+                        return symbol, weight, asset_volatility
+                    except (asyncio.TimeoutError, Exception) as e:
+                        self.logger.warning(f"Volatility estimation failed for {symbol}: {e}", user_id=user_id)
+                        return symbol, weight, 0.05  # Default 5% volatility
+            
+            # Execute all volatility estimations concurrently
+            volatility_tasks = [
+                get_volatility_with_timeout(symbol, weight) 
+                for symbol, weight in symbols_with_weights
+            ]
+            
+            volatility_results = await asyncio.gather(*volatility_tasks, return_exceptions=True)
+            
+            # Populate volatility_scores from gathered results
+            for result in volatility_results:
+                if isinstance(result, Exception):
+                    continue  # Skip failed tasks
+                
+                symbol, weight, asset_volatility = result
                 volatility_scores[symbol] = {
                     "daily_volatility": asset_volatility,
                     "volatility_contribution": weight * asset_volatility,
