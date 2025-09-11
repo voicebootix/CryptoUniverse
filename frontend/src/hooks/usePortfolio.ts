@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { tradingAPI } from '@/lib/api/client';
+import { apiClient } from '@/lib/api/client';
 import { produce, Draft } from 'immer';
 
 interface Position {
@@ -78,7 +78,7 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
   fetchPortfolio: async () => {
     set({ isLoading: true, error: null });
     try {
-      const response = await tradingAPI.get('/portfolio'); // Endpoint from trading.py
+      const response = await apiClient.get('/trading/portfolio'); // Endpoint from trading.py
       const data = response.data;
       set(produce((draft: Draft<PortfolioState>) => {
         draft.totalValue = data.total_value;
@@ -106,7 +106,7 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
   fetchStatus: async () => {
     set({ isLoading: true, error: null });
     try {
-      const response = await tradingAPI.get('/status');
+      const response = await apiClient.get('/trading/status');
       const data = response.data;
       set(produce((draft: Draft<PortfolioState>) => {
         if (data.performance_today && Array.isArray(data.performance_today.history)) {
@@ -124,7 +124,7 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
   fetchMarketData: async () => {
     set({ isLoading: true, error: null });
     try {
-      const response = await tradingAPI.get('/market-overview');
+      const response = await apiClient.get('/trading/market-overview');
       const data = response.data;
       set(produce((draft: Draft<PortfolioState>) => {
         draft.marketData = data.market_data.map((item: any) => ({
@@ -140,7 +140,7 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
   fetchRecentTrades: async () => {
     set({ isLoading: true, error: null });
     try {
-      const response = await tradingAPI.get('/recent-trades');
+      const response = await apiClient.get('/trading/recent-trades');
       const data = response.data;
       set(produce((draft: Draft<PortfolioState>) => {
         draft.recentTrades = data.recent_trades.map((trade: any) => ({
