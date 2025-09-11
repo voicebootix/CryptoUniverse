@@ -16,7 +16,7 @@ from app.core.logging import LoggerMixin
 from app.services.ai_chat_engine import enhanced_chat_engine as chat_engine, ChatIntent
 from app.services.master_controller import MasterSystemController
 from app.services.trade_execution import TradeExecutionService
-from app.services.chat_service_adapters import chat_adapters
+from app.services.chat_service_adapters_fixed import chat_adapters_fixed as chat_adapters
 from app.services.websocket import manager
 
 settings = get_settings()
@@ -55,16 +55,14 @@ class ChatIntegrationService(LoggerMixin):
         
         try:
             
-            # Get comprehensive portfolio data
+            # Get comprehensive portfolio data using FIXED adapters
             portfolio_summary = await self.adapters.get_portfolio_summary(user_id)
             risk_metrics = await self.adapters.comprehensive_risk_analysis(user_id)
-            performance_data = await self.adapters.get_performance_metrics(user_id)
             
             # Get AI analysis from multiple models
             analysis_context = {
                 "portfolio_summary": portfolio_summary,
                 "risk_metrics": risk_metrics,
-                "performance_data": performance_data,
                 "user_query": message,
                 "analysis_type": "comprehensive_portfolio_analysis"
             }
@@ -375,8 +373,8 @@ Your portfolio is well-balanced according to your current strategy. No rebalanci
         
         try:
             
-            # Get comprehensive market opportunities
-            market_scan = await self.adapters.comprehensive_market_scan()
+            # Get comprehensive market opportunities using FIXED adapters
+            market_scan = await self.adapters.get_market_overview()
             portfolio_context = await self.adapters.get_portfolio_summary(user_id)
             
             # Use trading strategies service to find opportunities
@@ -566,14 +564,14 @@ What risk management action would you like to take?"""
         """Enhanced market analysis with multi-timeframe insights."""
         
         try:
-            # Get comprehensive market analysis
-            market_overview = await self.adapters.get_comprehensive_analysis()
-            sector_analysis = await self.adapters.get_sector_analysis()
+            # Get comprehensive market analysis using FIXED adapters
+            market_overview = await self.adapters.get_market_overview()
+            technical_analysis = await self.adapters.get_technical_analysis()
             
             # Get AI consensus on market conditions
             market_context = {
                 "market_overview": market_overview,
-                "sector_analysis": sector_analysis,
+                "technical_analysis": technical_analysis,
                 "user_message": message,
                 "analysis_type": "comprehensive_market_analysis"
             }
