@@ -237,7 +237,35 @@ class ChatMemoryService:
                 
                 result = await db.execute(stmt)
                 sessions = result.scalars().all()
-                return [session.to_dict() for session in sessions]
+                
+                # Convert to dict manually to avoid lazy loading issues
+                session_list = []
+                for session in sessions:
+                    # Get message count separately to avoid lazy loading
+                    message_count_stmt = text(
+                        "SELECT COUNT(*) FROM chat_messages WHERE session_id = :session_id"
+                    )
+                    count_result = await db.execute(
+                        message_count_stmt, 
+                        {"session_id": str(session.session_id)}
+                    )
+                    message_count = count_result.scalar() or 0
+                    
+                    session_dict = {
+                        "session_id": str(session.session_id),
+                        "user_id": str(session.user_id),
+                        "created_at": session.created_at.isoformat() if session.created_at else None,
+                        "last_activity": session.last_activity.isoformat() if session.last_activity else None,
+                        "context": session.context or {},
+                        "portfolio_state": session.portfolio_state,
+                        "active_strategies": session.active_strategies or [],
+                        "is_active": session.is_active,
+                        "session_type": session.session_type,
+                        "message_count": message_count
+                    }
+                    session_list.append(session_dict)
+                
+                return session_list
                 
         except SQLAlchemyError as e:
             logger.error("Failed to get user sessions", error=str(e), user_id=user_id)
