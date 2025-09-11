@@ -542,7 +542,7 @@ class BackgroundServiceManager(LoggerMixin):
                 symbols_list.sort()
                 
                 # Apply configured batch size limit
-                max_symbols_per_sync = self.config.get("market_data_discovery", {}).get("max_symbols_per_sync")
+                max_symbols_per_sync = getattr(settings, 'MAX_SYMBOLS_PER_SYNC', 100)  # Default to 100
                 if max_symbols_per_sync and max_symbols_per_sync > 0 and len(symbols_list) > max_symbols_per_sync:
                     symbols_list = symbols_list[:max_symbols_per_sync]
                 
