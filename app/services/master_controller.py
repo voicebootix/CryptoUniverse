@@ -1856,24 +1856,6 @@ class MasterSystemController(LoggerMixin):
                             error=str(e))
             return {"success": False, "error": str(e)}
     
-    async def set_trading_mode(self, mode: str) -> Dict[str, Any]:
-        """Set trading mode manually."""
-        
-        try:
-            new_mode = TradingMode(mode)
-            self.current_mode = new_mode
-            
-            self.logger.info("Trading mode updated", mode=mode)
-            
-            return {
-                "success": True,
-                "mode": mode,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-            
-        except Exception as e:
-            self.logger.error("Failed to set trading mode", mode=mode, error=str(e))
-            return {"success": False, "error": str(e)}
             
             # Get USER'S PURCHASED STRATEGIES for autonomous trading
             from app.services.strategy_marketplace_service import strategy_marketplace_service
@@ -2837,11 +2819,17 @@ class MasterSystemController(LoggerMixin):
                         best_opportunity = max(opportunities, key=lambda x: x.get("profit_bps", 0))
                         best_symbol = best_opportunity.get("symbol", "BTC")
                     
+                    # Select strategy based on market conditions
+                    strategy_type = self._select_strategy_based_on_market(market_data, best_symbol)
+                    
+                    # Extract relevant parameters for the strategy
+                    strategy_params = self._extract_strategy_parameters(market_data, best_symbol, strategy_type)
+                    
                     # Generate trading signal based on market analysis
-                    trade_signal = await trading_strategies_service.generate_signal(
-                        strategy_type="spot_momentum_strategy",
+                    trade_signal = await trading_strategies_service.generate_trading_signal(
+                        strategy_type=strategy_type,
                         symbol=best_symbol,
-                        parameters=market_data,  # Pass ENTIRE market analysis output
+                        parameters=strategy_params,
                         risk_mode="balanced"
                     )
                     
@@ -3092,6 +3080,97 @@ class MasterSystemController(LoggerMixin):
                 source=source,
                 symbols=symbols_list
             )
+    
+    def _select_strategy_based_on_market(self, market_data: Dict[str, Any], symbol: str) -> str:
+        """Select trading strategy based on market analysis."""
+        
+        try:
+            # Get market indicators for the symbol
+            symbol_data = market_data.get(symbol, {})
+            technical_indicators = symbol_data.get('technical_indicators', {})
+            volatility = symbol_data.get('volatility', {})
+            arbitrage_opportunities = market_data.get('arbitrage_opportunities', [])
+            
+            # Check for arbitrage opportunities
+            symbol_arbitrage = [opp for opp in arbitrage_opportunities if opp.get('symbol') == symbol]
+            if symbol_arbitrage and len(symbol_arbitrage) > 0:
+                return "arbitrage_strategy"
+            
+            # Check momentum indicators
+            rsi = technical_indicators.get('rsi', 50)
+            macd_histogram = technical_indicators.get('macd_histogram', 0)
+            
+            if (rsi > 70 or rsi < 30) and abs(macd_histogram) > 0.1:
+                return "momentum_strategy"
+            
+            # Check volatility for mean reversion
+            volatility_24h = volatility.get('volatility_24h', 0)
+            if volatility_24h < 0.02:  # Low volatility
+                return "mean_reversion_strategy"
+            
+            # Default fallback strategy
+            return "balanced_strategy"
+            
+        except Exception as e:
+            self.logger.warning(f"Strategy selection failed, using default", symbol=symbol, error=str(e))
+            return "balanced_strategy"
+    
+    def _extract_strategy_parameters(self, market_data: Dict[str, Any], symbol: str, strategy_type: str) -> Dict[str, Any]:
+        """Extract relevant parameters for the selected strategy."""
+        
+        try:
+            symbol_data = market_data.get(symbol, {})
+            technical_indicators = symbol_data.get('technical_indicators', {})
+            
+            # Base parameters for all strategies
+            params = {
+                'symbol': symbol,
+                'timeframe': '1h',
+                'confidence_score': symbol_data.get('ai_consensus', {}).get('confidence_score', 0.5)
+            }
+            
+            # Add strategy-specific parameters
+            if strategy_type == "momentum_strategy":
+                params.update({
+                    'rsi': technical_indicators.get('rsi', 50),
+                    'macd': technical_indicators.get('macd', 0),
+                    'macd_signal': technical_indicators.get('macd_signal', 0),
+                    'price_change_24h': symbol_data.get('price_change_24h', 0)
+                })
+            elif strategy_type == "arbitrage_strategy":
+                arbitrage_opportunities = market_data.get('arbitrage_opportunities', [])
+                symbol_arbitrage = [opp for opp in arbitrage_opportunities if opp.get('symbol') == symbol]
+                if symbol_arbitrage:
+                    best_opp = max(symbol_arbitrage, key=lambda x: x.get('profit_bps', 0))
+                    params.update({
+                        'buy_exchange': best_opp.get('buy_exchange'),
+                        'sell_exchange': best_opp.get('sell_exchange'),
+                        'profit_bps': best_opp.get('profit_bps', 0)
+                    })
+            elif strategy_type == "mean_reversion_strategy":
+                params.update({
+                    'sma_20': technical_indicators.get('sma_20', 0),
+                    'sma_50': technical_indicators.get('sma_50', 0),
+                    'bollinger_upper': technical_indicators.get('bollinger_upper', 0),
+                    'bollinger_lower': technical_indicators.get('bollinger_lower', 0)
+                })
+            else:  # balanced_strategy
+                params.update({
+                    'rsi': technical_indicators.get('rsi', 50),
+                    'sma_20': technical_indicators.get('sma_20', 0),
+                    'volume_24h': symbol_data.get('volume_24h', 0)
+                })
+            
+            return params
+            
+        except Exception as e:
+            self.logger.warning(f"Parameter extraction failed, using minimal params", 
+                              symbol=symbol, strategy_type=strategy_type, error=str(e))
+            return {
+                'symbol': symbol,
+                'timeframe': '1h',
+                'confidence_score': 0.5
+            }
     
     def _is_analysis_batchable(self, analysis_type: str) -> bool:
         """Determine if analysis type can be batched."""

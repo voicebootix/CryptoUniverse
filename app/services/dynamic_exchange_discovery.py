@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Set, Optional, Any
 import aiohttp
 import structlog
+from redis.asyncio import Redis
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
 
@@ -162,7 +163,11 @@ class DynamicExchangeDiscovery:
                 
                 # Add API key for premium sources
                 if "coinmarketcap" in source_name:
-                    headers["X-CMC_PRO_API_KEY"] = settings.coinmarketcap_api_key
+                    api_key = getattr(settings, "coinmarketcap_api_key", None)
+                    if api_key:
+                        headers["X-CMC_PRO_API_KEY"] = api_key
+                    else:
+                        logger.warning("CoinMarketCap API key not configured")
                 
                 async with session.get(source_url, headers=headers, timeout=30) as response:
                     if response.status == 200:
@@ -377,72 +382,148 @@ class DynamicExchangeDiscovery:
         
         return capabilities
     
-    async def _test_exchange_compatibility(self, exchanges: Dict[str, Any]) -> List[str]:
-        """Test API compatibility for discovered exchanges."""
+    async def _test_exchange_compatibility(self, exchanges: Dict[str, Any], max_concurrent: int = 10, max_exchanges: Optional[int] = None) -> List[str]:
+        """Test API compatibility for discovered exchanges with controlled concurrency.
         
-        logger.info(f"🧪 Testing exchange compatibility", total_exchanges=len(exchanges))
+        Args:
+            exchanges: Dictionary of exchanges to test
+            max_concurrent: Maximum number of concurrent tests (default: 10)
+            max_exchanges: Maximum number of exchanges to test (None = all)
+        """
         
+        logger.info(f"🧪 Testing exchange compatibility", total_exchanges=len(exchanges), max_concurrent=max_concurrent)
+        
+        # Apply exchange limit if specified
+        exchange_items = list(exchanges.items())
+        if max_exchanges and max_exchanges > 0:
+            test_exchanges = exchange_items[:max_exchanges]
+        else:
+            test_exchanges = exchange_items
+            
         compatible_exchanges = []
+        semaphore = asyncio.BoundedSemaphore(max_concurrent)
         
-        # Test a subset for performance (can be expanded)
-        test_exchanges = list(exchanges.items())[:20]  # Test top 20
+        async def test_single_with_semaphore(exchange_id: str, exchange_info: Dict) -> Optional[str]:
+            async with semaphore:
+                try:
+                    is_compatible = await self._test_single_exchange(exchange_id, exchange_info)
+                    if is_compatible:
+                        logger.debug(f"✅ Exchange compatible", exchange=exchange_id)
+                        return exchange_id
+                    else:
+                        logger.debug(f"❌ Exchange incompatible", exchange=exchange_id)
+                        return None
+                except Exception as e:
+                    logger.debug(f"⚠️ Exchange test failed", exchange=exchange_id, error=str(e))
+                    return None
         
-        for exchange_id, exchange_info in test_exchanges:
-            try:
-                is_compatible = await self._test_single_exchange(exchange_id, exchange_info)
-                if is_compatible:
-                    compatible_exchanges.append(exchange_id)
-                    logger.debug(f"✅ Exchange compatible", exchange=exchange_id)
-                else:
-                    logger.debug(f"❌ Exchange incompatible", exchange=exchange_id)
-                
-            except Exception as e:
-                logger.debug(f"⚠️ Exchange test failed", exchange=exchange_id, error=str(e))
+        # Run tests concurrently with controlled concurrency
+        tasks = [test_single_with_semaphore(exchange_id, exchange_info) for exchange_id, exchange_info in test_exchanges]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        logger.info(f"✅ Compatibility testing completed", compatible=len(compatible_exchanges))
+        # Collect successful results
+        for result in results:
+            if isinstance(result, str):  # Successfully tested exchange
+                compatible_exchanges.append(result)
+        
+        logger.info(f"✅ Compatibility testing completed", tested=len(test_exchanges), compatible=len(compatible_exchanges))
         
         return compatible_exchanges
     
     async def _test_single_exchange(self, exchange_id: str, exchange_info: Dict) -> bool:
-        """Test a single exchange for API compatibility."""
+        """Test a single exchange for API compatibility with parallel requests and response validation."""
         
         api_url = exchange_info.get("api_url", "")
         if not api_url:
             return False
         
         try:
-            async with aiohttp.ClientSession() as session:
-                # Test common endpoints
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+                # Higher-confidence endpoints to test
                 test_endpoints = [
-                    f"{api_url}/ticker",
-                    f"{api_url}/tickers", 
-                    f"{api_url}/markets",
-                    f"{api_url}/exchangeInfo",
-                    f"{api_url}/time"
+                    {"url": f"{api_url}/ticker", "expected_keys": ["price", "symbol", "volume"]},
+                    {"url": f"{api_url}/ticker/BTCUSDT", "expected_keys": ["price", "symbol"]},
+                    {"url": f"{api_url}/markets", "expected_keys": []},  # Market identifiers
+                    {"url": f"{api_url}/time", "expected_keys": ["serverTime", "timestamp"]},
+                    {"url": f"{api_url}/tickers", "expected_keys": []}  # Should be array or dict
                 ]
                 
-                for endpoint in test_endpoints:
+                # Create tasks for parallel execution
+                async def test_endpoint(endpoint_info: Dict) -> bool:
                     try:
-                        async with session.get(endpoint, timeout=10) as response:
-                            if response.status == 200:
-                                # At least one endpoint works
-                                return True
-                    except:
-                        continue  # Try next endpoint
+                        async with session.get(endpoint_info["url"], timeout=10) as response:
+                            if response.status != 200:
+                                return False
+                                
+                            try:
+                                data = await response.json()
+                                return self._validate_response_structure(data, endpoint_info["expected_keys"])
+                            except (ValueError, TypeError) as e:
+                                logger.debug(f"JSON parsing failed for {exchange_id}", endpoint=endpoint_info["url"], error=str(e))
+                                return False
+                                
+                    except Exception as e:
+                        logger.debug(f"Request failed for {exchange_id}", endpoint=endpoint_info["url"], error=str(e))
+                        return False
                 
-        except Exception:
-            pass
+                # Run all tests concurrently
+                tasks = [asyncio.create_task(test_endpoint(endpoint)) for endpoint in test_endpoints]
+                
+                # Wait for first successful response or all to complete
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED, timeout=15)
+                
+                # Cancel remaining tasks
+                for task in pending:
+                    task.cancel()
+                
+                # Check if any test succeeded
+                for task in done:
+                    if not task.exception() and task.result():
+                        return True
+                
+                return False
+                
+        except Exception as e:
+            logger.debug(f"Exchange test failed for {exchange_id}", error=str(e))
+            return False
+    
+    def _validate_response_structure(self, data: Any, expected_keys: List[str]) -> bool:
+        """Validate response structure matches expectations."""
         
-        return False
+        if not data:
+            return False
+            
+        # For ticker endpoints - should be dict with price/market keys
+        if expected_keys and any(key in ["price", "symbol", "volume"] for key in expected_keys):
+            if isinstance(data, dict):
+                return any(key in data for key in expected_keys)
+            elif isinstance(data, list) and data:
+                return isinstance(data[0], dict) and any(key in data[0] for key in expected_keys)
+        
+        # For time endpoints - should be numeric timestamp
+        if "timestamp" in expected_keys or "serverTime" in expected_keys:
+            if isinstance(data, dict):
+                time_val = data.get("serverTime") or data.get("timestamp") or data.get("time")
+                if time_val:
+                    try:
+                        return isinstance(int(time_val), int) and int(time_val) > 1000000000  # Valid timestamp
+                    except (ValueError, TypeError):
+                        return False
+        
+        # For markets - should contain market identifiers
+        if not expected_keys:  # Generic validation
+            return isinstance(data, (dict, list)) and bool(data)
+            
+        return True
     
     async def _cache_discovery_results(self, results: Dict[str, Any]):
         """Cache discovery results in Redis."""
         
         try:
-            await self.redis_client.setex(
+            await self.redis_client.set(
                 "exchange_discovery_results",
-                24 * 3600,  # 24 hours
-                json.dumps(results, default=str)
+                json.dumps(results, default=str),
+                ex=24 * 3600  # 24 hours
             )
             
             logger.debug("Cached exchange discovery results")

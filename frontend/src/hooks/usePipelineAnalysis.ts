@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import pipelineApi, { PipelineResult } from '@/lib/api/pipelineApi';
 import { ArbitrageOpportunity } from '@/types/arbitrage';
 
@@ -103,6 +103,8 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isRefreshingRef = useRef<boolean>(false);
 
   const extractPipelineData = (result: PipelineResult) => {
     return {
@@ -119,14 +121,21 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
   const fetchMarketOverview = async (): Promise<void> => {
     setLoading(true);
     setError(null);
+    
     try {
+      // Separate API call handling from processing
       const result = await pipelineApi.getMarketOverview(
         'BTC,ETH,BNB,SOL,ADA,XRP,MATIC,DOT,AVAX,LINK',
         '1h,4h,1d',
         userId
       );
       
-      if (result.success) {
+      if (!result.success) {
+        throw new Error('API call failed: Pipeline could not fetch market overview');
+      }
+      
+      // Process response in separate try/catch
+      try {
         const pipelineData = extractPipelineData(result);
         setMarketOverview({
           ...pipelineData.marketAnalysis,
@@ -134,9 +143,15 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
           execution_time: pipelineData.executionTime,
           pipeline_source: true
         });
-      } else {
-        throw new Error('Pipeline failed to fetch market overview');
+      } catch (processingError: any) {
+        console.error('Data processing error:', processingError);
+        setError(`Data processing failed: ${processingError.message}`);
       }
+      
+    } catch (apiError: any) {
+      console.error('API error:', apiError);
+      setError(`API request failed: ${apiError.message}`);
+    }
       setLastUpdated(new Date().toISOString());
     } catch (err: any) {
       setError(err?.message || 'Failed to fetch pipeline market overview');
@@ -161,31 +176,34 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
         const transformedAnalysis: Record<string, PipelineTechnicalAnalysis> = {};
         
         Object.keys(analysisData).forEach(symbol => {
-          const marketData = analysisData[symbol] || {};
-          const aiConsensus = aiData[symbol] || {};
+          const marketData = analysisData[symbol] ?? {};
+          const aiConsensus = aiData[symbol] ?? {};
+          const techIndicators = marketData.technical_indicators ?? {};
+          const supportLevels = Array.isArray(marketData.support_levels) ? marketData.support_levels : [];
+          const resistanceLevels = Array.isArray(marketData.resistance_levels) ? marketData.resistance_levels : [];
           
           transformedAnalysis[symbol] = {
             symbol,
-            trend: aiConsensus.trend_direction || marketData.trend || 'neutral',
-            rsi: marketData.technical_indicators?.rsi || 50,
+            trend: aiConsensus.trend_direction ?? marketData.trend ?? 'neutral',
+            rsi: techIndicators.rsi ?? 50,
             macd: {
-              line: marketData.technical_indicators?.macd || 0,
-              signal: marketData.technical_indicators?.macd_signal || 0,
-              histogram: marketData.technical_indicators?.macd_histogram || 0
+              line: techIndicators.macd ?? 0,
+              signal: techIndicators.macd_signal ?? 0,
+              histogram: techIndicators.macd_histogram ?? 0
             },
             movingAverages: {
-              sma20: marketData.technical_indicators?.sma_20 || 0,
-              sma50: marketData.technical_indicators?.sma_50 || 0,
-              ema12: marketData.technical_indicators?.ema_12 || 0,
-              ema26: marketData.technical_indicators?.ema_26 || 0
+              sma20: techIndicators.sma_20 ?? 0,
+              sma50: techIndicators.sma_50 ?? 0,
+              ema12: techIndicators.ema_12 ?? 0,
+              ema26: techIndicators.ema_26 ?? 0
             },
-            support: marketData.support_levels?.[0] || 0,
-            resistance: marketData.resistance_levels?.[0] || 0,
-            recommendation: aiConsensus.recommendation || 'hold',
-            confidence: aiConsensus.confidence_score || 0.5,
-            ai_consensus_score: aiConsensus.consensus_score || 0.5,
+            support: supportLevels[0] ?? 0,
+            resistance: resistanceLevels[0] ?? 0,
+            recommendation: aiConsensus.recommendation ?? 'hold',
+            confidence: aiConsensus.confidence_score ?? 0.5,
+            ai_consensus_score: aiConsensus.consensus_score ?? 0.5,
             pipeline_source: true,
-            timestamp: result.last_updated
+            timestamp: result?.last_updated ?? Date.now()
           };
         });
         
@@ -211,19 +229,28 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
         const pipelineData = extractPipelineData(result);
         const opportunities = pipelineData.tradingStrategies.arbitrage_opportunities || [];
         
-        setArbitrageOpportunities(opportunities.map((opp: any) => ({
-          id: opp.id || Math.random().toString(36).substr(2, 9),
-          symbol: opp.symbol || 'UNKNOWN',
-          buyExchange: opp.buy_exchange || 'UNKNOWN',
-          sellExchange: opp.sell_exchange || 'UNKNOWN',
-          buyPrice: parseFloat(opp.buy_price || 0),
-          sellPrice: parseFloat(opp.sell_price || 0),
-          profitBps: parseFloat(opp.profit_bps || 0),
-          profitUsd: parseFloat(opp.profit_usd || 0),
-          volume: parseFloat(opp.volume || 0),
-          confidence: parseFloat(opp.confidence || 0.5),
-          pipeline_source: true
-        })));
+        setArbitrageOpportunities(opportunities.map((opp: any) => {
+          const buyPriceNum = Number(opp.buy_price ?? 0) || 0;
+          const sellPriceNum = Number(opp.sell_price ?? 0) || 0;
+          const profitBpsNum = Number(opp.profit_bps ?? 0) || 0;
+          const profitUsdNum = Number(opp.profit_usd ?? 0) || 0;
+          const volumeNum = Number(opp.volume ?? 0) || 0;
+          const confidenceNum = Number(opp.confidence ?? 0.5) || 0.5;
+          
+          return {
+            id: opp.id || Math.random().toString(36).substr(2, 9),
+            symbol: opp.symbol || 'UNKNOWN',
+            buyExchange: opp.buy_exchange || 'UNKNOWN',
+            sellExchange: opp.sell_exchange || 'UNKNOWN',
+            buyPrice: buyPriceNum,
+            sellPrice: sellPriceNum,
+            profitBps: profitBpsNum,
+            profitUsd: profitUsdNum,
+            volume: volumeNum,
+            confidence: confidenceNum,
+            pipeline_source: true
+          };
+        }));
       } else {
         throw new Error('Pipeline failed to fetch arbitrage opportunities');
       }
@@ -286,10 +313,10 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
         setInstitutionalFlows(flows.map((flow: any) => ({
           timestamp: flow.timestamp || new Date().toISOString(),
           flow_type: flow.flow_type || 'inflow',
-          volume_usd: parseFloat(flow.volume_usd || 0),
+          volume_usd: Number(flow.volume_usd ?? 0) || 0,
           asset: flow.asset || 'UNKNOWN',
           exchange: flow.exchange || 'UNKNOWN',
-          confidence: parseFloat(flow.confidence || 0.5),
+          confidence: Number(flow.confidence ?? 0.5) || 0.5,
           pipeline_source: true
         })));
       } else {
@@ -321,11 +348,11 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
           symbol: signal.symbol || 'UNKNOWN',
           signal_type: signal.signal_type || 'momentum',
           direction: signal.direction || 'long',
-          strength: parseFloat(signal.strength || 0),
-          confidence: parseFloat(signal.confidence || 0),
-          entry_price: parseFloat(signal.entry_price || 0),
-          target_price: parseFloat(signal.target_price || 0),
-          stop_loss: parseFloat(signal.stop_loss || 0),
+          strength: Number(signal.strength ?? 0) || 0,
+          confidence: Number(signal.confidence ?? 0) || 0,
+          entry_price: Number(signal.entry_price ?? 0) || 0,
+          target_price: Number(signal.target_price ?? 0) || 0,
+          stop_loss: Number(signal.stop_loss ?? 0) || 0,
           timeframe: signal.timeframe || '1h',
           generated_at: signal.generated_at || new Date().toISOString(),
           expires_at: signal.expires_at || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
@@ -558,13 +585,39 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
   };
 
   const refreshAll = async (): Promise<void> => {
-    await Promise.all([
-      fetchMarketOverview(),
-      fetchTechnicalAnalysis(['BTC', 'ETH', 'SOL', 'AVAX']),
-      fetchArbitrageData(),
-      fetchAutonomousStatus(),
-      fetchSystemMetrics()
-    ]);
+    // Guard against concurrent refresh calls
+    if (isRefreshingRef.current) {
+      return;
+    }
+    
+    isRefreshingRef.current = true;
+    setLoading(true);
+    
+    try {
+      // Use Promise.allSettled to handle individual failures gracefully
+      const results = await Promise.allSettled([
+        fetchMarketOverview(),
+        fetchTechnicalAnalysis(['BTC', 'ETH', 'SOL', 'AVAX']),
+        fetchArbitrageData(),
+        fetchAutonomousStatus(),
+        fetchSystemMetrics()
+      ]);
+      
+      // Log any failed operations
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          const operations = ['market overview', 'technical analysis', 'arbitrage data', 'autonomous status', 'system metrics'];
+          console.warn(`Failed to fetch ${operations[index]}:`, result.reason);
+        }
+      });
+      
+    } catch (error: any) {
+      console.error('Refresh all failed:', error);
+      setError(`Refresh failed: ${error.message}`);
+    } finally {
+      setLoading(false);
+      isRefreshingRef.current = false;
+    }
   };
 
   const clearError = (): void => {
@@ -573,14 +626,27 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
 
   // Initialize pipeline data on mount
   useEffect(() => {
+    // Clear any existing interval first
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+    
     refreshAll();
     
     // Set up polling for pipeline updates (less frequent than direct API)
-    const interval = setInterval(() => {
-      refreshAll();
+    intervalRef.current = setInterval(() => {
+      // Guard against stale closure issues
+      if (!isRefreshingRef.current) {
+        refreshAll();
+      }
     }, 120000); // Update every 2 minutes (pipeline coordination)
     
-    return () => clearInterval(interval);
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
   }, [userId]);
 
   return {

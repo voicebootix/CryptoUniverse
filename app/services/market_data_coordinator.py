@@ -6,14 +6,18 @@ Prevents duplicate API calls, batches requests, and implements intelligent cachi
 """
 
 import asyncio
+import hashlib
 import json
 import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Set, Optional, Any, Tuple
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Set, Optional, Any, Tuple, TYPE_CHECKING
 from collections import defaultdict
 import structlog
 import redis
 from app.core.config import get_settings
+
+if TYPE_CHECKING:
+    from app.services.master_controller import MasterSystemController
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -31,19 +35,33 @@ class MarketDataCoordinator:
     - API call optimization
     """
     
-    def __init__(self):
+    def __init__(self, master_controller: Optional['MasterSystemController'] = None):
+        # SSL/TLS configuration for production
+        ssl_config = {}
+        if getattr(settings, 'redis_use_ssl', False):
+            ssl_config.update({
+                'ssl': True,
+                'ssl_cert_reqs': getattr(settings, 'redis_ssl_cert_reqs', None),
+                'ssl_ca_certs': getattr(settings, 'redis_ssl_ca_certs', None),
+                'ssl_certfile': getattr(settings, 'redis_ssl_certfile', None),
+                'ssl_keyfile': getattr(settings, 'redis_ssl_keyfile', None)
+            })
+            
         self.redis_client = redis.Redis(
             host=settings.redis_host,
             port=settings.redis_port,
             password=settings.redis_password,
-            decode_responses=True
+            decode_responses=False,  # Preserve binary data
+            **ssl_config
         )
+        self.master_controller = master_controller
         
         # Request tracking
         self.active_requests: Dict[str, asyncio.Event] = {}
         self.request_results: Dict[str, Any] = {}
         self.batch_queues: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self.batch_timers: Dict[str, asyncio.Task] = {}
+        self._cleanup_tasks: Dict[str, asyncio.Task] = {}
         
         # Configuration
         self.cache_ttl = {
@@ -80,7 +98,9 @@ class MarketDataCoordinator:
         sorted_params = sorted(params.items()) if params else []
         param_str = json.dumps(sorted_params, sort_keys=True)
         
-        return f"req:{endpoint}:{hash(param_str)}"
+        # Use cryptographic hash for collision resistance
+        param_hash = hashlib.sha256(param_str.encode('utf-8')).hexdigest()[:16]
+        return f"req:{endpoint}:{param_hash}"
     
     def _generate_cache_key(self, endpoint: str, params: Dict[str, Any]) -> str:
         """Generate cache key for storing results."""
@@ -178,7 +198,12 @@ class MarketDataCoordinator:
                 # Check if cache is still valid
                 if 'cached_at' in result:
                     cached_at = datetime.fromisoformat(result['cached_at'])
-                    if datetime.utcnow() - cached_at < timedelta(seconds=result.get('ttl', 300)):
+                    # Ensure cached_at is timezone-aware
+                    if cached_at.tzinfo is None:
+                        cached_at = cached_at.replace(tzinfo=timezone.utc)
+                    
+                    current_time = datetime.now(timezone.utc)
+                    if current_time - cached_at < timedelta(seconds=result.get('ttl', 300)):
                         logger.debug(f"Cache hit", cache_key=cache_key)
                         return result['data']
                 
@@ -196,7 +221,7 @@ class MarketDataCoordinator:
         try:
             cache_data = {
                 'data': data,
-                'cached_at': datetime.utcnow().isoformat(),
+                'cached_at': datetime.now(timezone.utc).isoformat(),
                 'ttl': ttl
             }
             
@@ -307,9 +332,15 @@ class MarketDataCoordinator:
         requests = self.batch_queues[batch_type].copy()
         self.batch_queues[batch_type].clear()
         
-        # Cancel timer if running
+        # Cancel timer if running (avoid deadlock)
         if batch_type in self.batch_timers:
-            self.batch_timers[batch_type].cancel()
+            timer_task = self.batch_timers[batch_type]
+            if not timer_task.done():
+                timer_task.cancel()
+                try:
+                    await asyncio.wait_for(timer_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass  # Expected when cancelling
             del self.batch_timers[batch_type]
         
         logger.info(f"Executing batch", batch_type=batch_type, requests=len(requests))
@@ -342,10 +373,11 @@ class MarketDataCoordinator:
     async def _execute_endpoint_batch(self, endpoint: str, requests: List[Dict[str, Any]]):
         """Execute a batch of requests for the same endpoint."""
         
-        # Import here to avoid circular imports
-        from app.services.master_controller import MasterSystemController
-        
-        master_controller = MasterSystemController()
+        # Use injected master controller or create one
+        master_controller = self.master_controller
+        if not master_controller:
+            from app.services.master_controller import MasterSystemController
+            master_controller = MasterSystemController()
         
         # Combine symbols from all requests
         all_symbols = set()
@@ -471,7 +503,9 @@ class MarketDataCoordinator:
                 del self.active_requests[request_key]
             if request_key in self.request_results:
                 # Keep result for a short time in case of duplicate requests
-                asyncio.create_task(self._cleanup_result(request_key, delay=30))
+                cleanup_task = asyncio.create_task(self._cleanup_result(request_key, delay=30))
+                self._cleanup_tasks[request_key] = cleanup_task
+                cleanup_task.add_done_callback(lambda t, k=request_key: self._cleanup_tasks.pop(k, None))
     
     async def _cleanup_result(self, request_key: str, delay: int = 30):
         """Clean up stored result after delay."""
@@ -480,21 +514,69 @@ class MarketDataCoordinator:
         if request_key in self.request_results:
             del self.request_results[request_key]
     
-    async def invalidate_cache(self, pattern: str = None):
-        """Invalidate cache entries."""
+    async def invalidate_cache(self, pattern: str = None, max_keys: int = 1000, require_confirmation: bool = False):
+        """Invalidate cache entries with safety checks and limits."""
         
         try:
+            # Validate and sanitize pattern
             if pattern:
-                keys = self.redis_client.keys(f"cache:{pattern}*")
+                # Reject overly broad or unsafe patterns
+                import re
+                if not pattern or len(pattern) < 3 or pattern in ['*', '**', 'cache:*']:
+                    raise ValueError(f"Pattern too broad or unsafe: {pattern}")
+                    
+                if not re.match(r'^[A-Za-z0-9_:-]+$', pattern):
+                    raise ValueError(f"Pattern contains invalid characters: {pattern}")
+                    
+                cache_pattern = f"cache:{pattern}*"
             else:
-                keys = self.redis_client.keys("cache:*")
+                if not require_confirmation:
+                    raise ValueError("Deleting all cache entries requires explicit confirmation")
+                cache_pattern = "cache:*"
+                
+            # Use SCAN to safely count matching keys first
+            key_count = 0
+            cursor = 0
             
-            if keys:
-                self.redis_client.delete(*keys)
-                logger.info(f"Invalidated cache entries", count=len(keys), pattern=pattern)
+            # Count phase
+            while True:
+                cursor, keys = self.redis_client.scan(cursor, match=cache_pattern, count=100)
+                key_count += len(keys)
+                if key_count > max_keys:
+                    raise ValueError(f"Too many keys to delete: {key_count} > {max_keys}")
+                if cursor == 0:
+                    break
+            
+            if key_count == 0:
+                logger.info(f"No cache entries found matching pattern", pattern=cache_pattern)
+                return 0
+                
+            # Deletion phase - delete in small batches
+            deleted_count = 0
+            cursor = 0
+            batch_size = 100
+            
+            while True:
+                cursor, keys = self.redis_client.scan(cursor, match=cache_pattern, count=batch_size)
+                if keys:
+                    # Delete in smaller batches to avoid blocking Redis
+                    for i in range(0, len(keys), batch_size):
+                        batch = keys[i:i + batch_size]
+                        self.redis_client.delete(*batch)
+                        deleted_count += len(batch)
+                        
+                if cursor == 0:
+                    break
+                    
+            logger.info(f"Cache invalidation completed", 
+                       pattern=cache_pattern, 
+                       deleted_count=deleted_count,
+                       max_keys_limit=max_keys)
+            return deleted_count
             
         except Exception as e:
-            logger.error(f"Cache invalidation failed", error=str(e))
+            logger.error(f"Cache invalidation failed", pattern=pattern, error=str(e))
+            raise
     
     def get_stats(self) -> Dict[str, Any]:
         """Get coordination statistics."""
@@ -518,8 +600,12 @@ class MarketDataCoordinator:
         """Perform health check."""
         
         try:
-            # Check Redis connectivity
-            self.redis_client.ping()
+            # Check Redis connectivity (non-blocking async version)
+            # Note: This assumes we'll convert to async Redis client later
+            # For now, use the synchronous version but in a way that won't block too long
+            import asyncio
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self.redis_client.ping)
             redis_status = 'healthy'
         except Exception as e:
             redis_status = f'error: {str(e)}'
@@ -533,6 +619,31 @@ class MarketDataCoordinator:
             'uptime': time.time(),
             'last_updated': datetime.utcnow().isoformat()
         }
+    
+    async def shutdown(self):
+        """Cleanup resources during shutdown."""
+        
+        # Cancel all batch timers
+        for batch_type, timer_task in list(self.batch_timers.items()):
+            if not timer_task.done():
+                timer_task.cancel()
+                try:
+                    await asyncio.wait_for(timer_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+        self.batch_timers.clear()
+        
+        # Cancel and await cleanup tasks
+        for request_key, cleanup_task in list(self._cleanup_tasks.items()):
+            if not cleanup_task.done():
+                cleanup_task.cancel()
+                try:
+                    await asyncio.wait_for(cleanup_task, timeout=1.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+        self._cleanup_tasks.clear()
+        
+        logger.info("MarketDataCoordinator shutdown complete")
 
 
 # Global coordinator instance

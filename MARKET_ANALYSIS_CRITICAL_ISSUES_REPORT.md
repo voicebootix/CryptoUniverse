@@ -107,7 +107,7 @@ Discovered 0 active trading symbols
 ```python
 # API calls with wrong parameter name
 await market_analysis.market_inefficiency_scanner(
-    inefficiency_types=inefficiency_types,  # ❌ WRONG
+    scan_types=scan_types,  # ✅ CORRECT
 )
 
 # Function expects:
@@ -271,13 +271,13 @@ volume_filtered = [s for s in symbols_list if meets_volume_threshold(s)]
 
 # CHANGE FROM:
 await market_analysis.market_inefficiency_scanner(
-    inefficiency_types=inefficiency_types,  # ❌ WRONG parameter
+    inefficiency_types=scan_types,  # ❌ WRONG parameter
     ...
 )
 
 # TO:
 await market_analysis.market_inefficiency_scanner(
-    scan_types=inefficiency_types,  # ✅ CORRECT parameter
+    scan_types=scan_types,  # ✅ CORRECT parameter
     ...
 )
 ```
@@ -386,7 +386,7 @@ class DynamicAssetFilter:
 
 #### **No Hardcoded Limitations Policy**
 ```python
-# MANDATROY: All asset and exchange limitations must be configurable
+# MANDATORY: All asset and exchange limitations must be configurable
 # NO: symbols = ["BTC", "ETH", "SOL"]  # Hardcoded
 # YES: symbols = await dynamic_asset_discovery.get_eligible_assets()
 

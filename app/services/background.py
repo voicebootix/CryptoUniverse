@@ -536,7 +536,15 @@ class BackgroundServiceManager(LoggerMixin):
                 if isinstance(symbols, set):
                     symbols_list = list(symbols)
                 else:
-                    symbols_list = symbols
+                    symbols_list = list(symbols) if symbols else []
+                
+                # Sort for deterministic ordering
+                symbols_list.sort()
+                
+                # Apply configured batch size limit
+                max_symbols_per_sync = self.config.get("market_data_discovery", {}).get("max_symbols_per_sync")
+                if max_symbols_per_sync and max_symbols_per_sync > 0 and len(symbols_list) > max_symbols_per_sync:
+                    symbols_list = symbols_list[:max_symbols_per_sync]
                 
                 # Sync market data for discovered symbols using real APIs
                 await market_data_feeds.sync_market_data_batch(symbols_list)

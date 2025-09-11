@@ -33,8 +33,15 @@ export interface PipelineTriggerOptions {
 export const pipelineApi = {
   // Trigger comprehensive pipeline analysis
   async triggerPipeline(options: PipelineTriggerOptions): Promise<PipelineResult> {
-    const response = await apiClient.post('/master-controller/trigger-pipeline', options);
-    return response.data;
+    try {
+      const response = await apiClient.post('/master-controller/trigger-pipeline', options);
+      return response.data;
+    } catch (error: any) {
+      console.error('Pipeline trigger failed:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || 'Pipeline request failed';
+      const statusCode = error?.response?.status;
+      throw new Error(`Pipeline API Error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`);
+    }
   },
 
   // Get real-time prices via pipeline
@@ -251,34 +258,69 @@ export const pipelineApi = {
 
   // Get autonomous mode status
   async getAutonomousStatus(): Promise<any> {
-    const response = await apiClient.get('/master-controller/autonomous-status');
-    return response.data;
+    try {
+      const response = await apiClient.get('/master-controller/autonomous-status');
+      return response.data;
+    } catch (error: any) {
+      console.error('Get autonomous status failed:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to get autonomous status';
+      const statusCode = error?.response?.status;
+      throw new Error(`Autonomous Status API Error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`);
+    }
   },
 
   // Start autonomous mode
   async startAutonomousMode(config: Record<string, any> = {}): Promise<any> {
-    const response = await apiClient.post('/master-controller/start-autonomous', config);
-    return response.data;
+    try {
+      const response = await apiClient.post('/master-controller/start-autonomous', config);
+      return response.data;
+    } catch (error: any) {
+      console.error('Start autonomous mode failed:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to start autonomous mode';
+      const statusCode = error?.response?.status;
+      throw new Error(`Start Autonomous API Error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`);
+    }
   },
 
   // Stop autonomous mode
   async stopAutonomousMode(): Promise<any> {
-    const response = await apiClient.post('/master-controller/stop-autonomous');
-    return response.data;
+    try {
+      const response = await apiClient.post('/master-controller/stop-autonomous');
+      return response.data;
+    } catch (error: any) {
+      console.error('Stop autonomous mode failed:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to stop autonomous mode';
+      const statusCode = error?.response?.status;
+      throw new Error(`Stop Autonomous API Error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`);
+    }
   },
 
   // Get pipeline execution history
   async getPipelineHistory(limit: number = 50): Promise<any> {
-    const response = await apiClient.get('/master-controller/execution-history', {
-      params: { limit }
-    });
-    return response.data;
+    try {
+      const response = await apiClient.get('/master-controller/execution-history', {
+        params: { limit }
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Get pipeline history failed:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to get pipeline history';
+      const statusCode = error?.response?.status;
+      throw new Error(`Pipeline History API Error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`);
+    }
   },
 
   // Get system performance metrics
   async getSystemMetrics(): Promise<any> {
-    const response = await apiClient.get('/master-controller/system-metrics');
-    return response.data;
+    try {
+      const response = await apiClient.get('/master-controller/system-metrics');
+      return response.data;
+    } catch (error: any) {
+      console.error('Get system metrics failed:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to get system metrics';
+      const statusCode = error?.response?.status;
+      throw new Error(`System Metrics API Error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`);
+    }
   }
 };
 

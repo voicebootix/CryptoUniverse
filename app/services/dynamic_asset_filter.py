@@ -20,14 +20,15 @@ Date: 2025-09-11
 import asyncio
 import time
 import json
-from typing import Dict, List, Set, Optional, Any, Tuple
+from typing import Dict, List, Set, Optional, Any, Tuple, ClassVar
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import aiohttp
 import structlog
+from redis.asyncio import Redis
 
-from app.core.mixins import LoggerMixin
-from app.core.redis_client import get_redis_client
+from app.core.logging import LoggerMixin
+from app.core.redis import get_redis_client
 from app.services.dynamic_exchange_discovery import dynamic_exchange_discovery
 
 
@@ -62,7 +63,7 @@ class EnterpriseAssetFilter(LoggerMixin):
     """
     
     # ENTERPRISE VOLUME TIERS - Completely configurable, no hardcoded limits
-    VOLUME_TIERS = [
+    VOLUME_TIERS: ClassVar[Tuple[VolumeThreshold, ...]] = (
         VolumeThreshold("tier_institutional", 100_000_000, "Institutional Grade ($100M+ daily)", 1),
         VolumeThreshold("tier_enterprise", 50_000_000, "Enterprise Grade ($50M+ daily)", 2),
         VolumeThreshold("tier_professional", 10_000_000, "Professional Grade ($10M+ daily)", 3),
@@ -70,10 +71,10 @@ class EnterpriseAssetFilter(LoggerMixin):
         VolumeThreshold("tier_emerging", 100_000, "Emerging Assets ($100K+ daily)", 5),
         VolumeThreshold("tier_micro", 10_000, "Micro Assets ($10K+ daily)", 6),
         VolumeThreshold("tier_any", 0, "All Assets (No minimum)", 7)
-    ]
+    )
     
     # EXCHANGE CONFIGURATIONS - Dynamic discovery, no hardcoded limitations
-    EXCHANGE_APIS = {
+    EXCHANGE_APIS: ClassVar[Dict[str, Dict[str, Any]]] = {
         "binance": {
             "name": "Binance",
             "spot_url": "https://api.binance.com/api/v3/ticker/24hr",
@@ -149,18 +150,19 @@ class EnterpriseAssetFilter(LoggerMixin):
         }
     }
     
-    def __init__(self):
+    def __init__(self, max_exchanges: Optional[int] = None):
         super().__init__()
         self.redis = None
         self.session = None
         self.asset_cache = {}
         self.last_full_scan = None
         self.dynamic_exchanges = {}  # Will be populated from discovery service
+        self.max_exchanges = max_exchanges
         
     async def async_init(self):
         """Initialize async components."""
         try:
-            self.redis = await get_redis_client()
+            self.redis = get_redis_client()
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=15),
                 headers={
@@ -196,7 +198,13 @@ class EnterpriseAssetFilter(LoggerMixin):
             
             # Convert discovered exchanges to our API format
             priority = 1
-            for exchange in available_exchanges[:20]:  # Top 20 by volume/trust
+            # Apply configurable exchange limit (no hardcoded limitations)
+            if self.max_exchanges and self.max_exchanges > 0:
+                exchange_list = available_exchanges[:self.max_exchanges]
+            else:
+                exchange_list = available_exchanges
+            
+            for exchange in exchange_list:
                 exchange_id = exchange["id"]
                 api_url = exchange.get("api_url", "")
                 
@@ -483,14 +491,27 @@ class EnterpriseAssetFilter(LoggerMixin):
                 
             url = config[url_key]
             
-            # Check rate limiting
+            # Check rate limiting with error handling
             if self.redis:
-                rate_limit_key = f"exchange_rate_limit:{exchange_id}"
-                current_requests = await self.redis.get(rate_limit_key)
-                
-                if current_requests and int(current_requests) >= config.get("rate_limit_per_minute", 60):
-                    self.logger.warning(f"Rate limit reached for {exchange_id}", scan_id=scan_id)
-                    return {}
+                try:
+                    rate_limit_key = f"exchange_rate_limit:{exchange_id}"
+                    current_requests_raw = await self.redis.get(rate_limit_key)
+                    current_requests = 0
+                    
+                    if current_requests_raw:
+                        try:
+                            current_requests = int(current_requests_raw)
+                        except (ValueError, TypeError):
+                            self.logger.warning(f"Invalid rate limit value for {exchange_id}: {current_requests_raw}")
+                            current_requests = 0
+                    
+                    if current_requests >= config.get("rate_limit_per_minute", 60):
+                        self.logger.warning(f"Rate limit reached for {exchange_id}", scan_id=scan_id)
+                        return {}
+                        
+                except Exception as e:
+                    self.logger.error(f"Redis rate limit check failed for {exchange_id}", error=str(e), scan_id=scan_id, exc_info=True)
+                    # Fall back to continuing without rate limit enforcement
             
             # Fetch data with timeout and retry logic
             async with self.session.get(url, timeout=15) as response:
@@ -517,7 +538,7 @@ class EnterpriseAssetFilter(LoggerMixin):
                 elif response.status == 429:
                     # Rate limited - cache the limitation
                     if self.redis:
-                        await self.redis.setex(f"exchange_rate_limit:{exchange_id}", 300, "limited")
+                        await self.redis.set(f"exchange_rate_limit:{exchange_id}", "limited", ex=300)
                     
                     self.logger.warning(f"Rate limited by {exchange_id}", scan_id=scan_id)
                     return {}
@@ -544,7 +565,8 @@ class EnterpriseAssetFilter(LoggerMixin):
         if isinstance(data, list):
             for item in data:
                 try:
-                    symbol = item.get("symbol", "").replace("USDT", "").replace("BUSD", "").replace("BTC", "")
+                    raw_symbol = item.get("symbol", "")
+                    symbol = self._extract_base_symbol(raw_symbol)
                     if not symbol or len(symbol) < 2:
                         continue
                         
@@ -672,7 +694,7 @@ class EnterpriseAssetFilter(LoggerMixin):
                         tier="",
                         last_updated=datetime.utcnow(),
                         metadata={
-                            "change_24h": float(item.get("sodUtc8", 0)),
+                            "change_24h": float(item.get("last", 0)) - float(item.get("open24h", item.get("sodUtc8", 0))),
                             "high_24h": float(item.get("high24h", 0)),
                             "low_24h": float(item.get("low24h", 0)),
                             "asset_type": asset_type
@@ -771,10 +793,28 @@ class EnterpriseAssetFilter(LoggerMixin):
             }
             
             # Cache for 10 minutes
-            await self.redis.setex(cache_key, 600, json.dumps(cache_data))
+            await self.redis.set(cache_key, json.dumps(cache_data), ex=600)
             
         except Exception as e:
             self.logger.debug("Cache storage failed", error=str(e))
+            
+    def _extract_base_symbol(self, raw_symbol: str) -> str:
+        """Extract base symbol by removing known quote suffixes."""
+        if not raw_symbol or len(raw_symbol) < 3:
+            return ""
+            
+        # Known quote currencies in order of longest-first to avoid incorrect matching
+        quote_currencies = ["USDT", "BUSD", "USDC", "BTC", "ETH", "BNB", "USD", "EUR"]
+        
+        symbol = raw_symbol.upper()
+        for quote in quote_currencies:
+            if symbol.endswith(quote) and len(symbol) > len(quote):
+                base = symbol[:-len(quote)]
+                if len(base) >= 2:  # Ensure base symbol is at least 2 chars
+                    return base
+                    
+        # If no quote suffix found or result would be too short, return original if valid
+        return raw_symbol if len(raw_symbol) >= 2 else ""
     
     async def get_assets_by_tier(self, tier_name: str) -> List[AssetInfo]:
         """Get assets for a specific tier."""

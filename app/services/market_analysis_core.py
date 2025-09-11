@@ -29,6 +29,7 @@ Functions migrated:
 """
 
 import asyncio
+import os
 import time
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -479,25 +480,32 @@ class MarketAnalysisService(LoggerMixin):
         try:
             # ENTERPRISE DYNAMIC ASSET DISCOVERY - NO HARDCODED LIMITATIONS
             if symbols == "SMART_ADAPTIVE" or symbols == "DYNAMIC_DISCOVERY":
-                # Import enterprise asset filter
-                from app.services.dynamic_asset_filter import enterprise_asset_filter
-                
-                # Initialize if needed
-                if not enterprise_asset_filter.session:
-                    await enterprise_asset_filter.async_init()
-                
-                # Get top assets dynamically based on volume (NO HARDCODING)
-                top_assets = await enterprise_asset_filter.get_top_assets(
-                    count=50,  # Configurable limit based on depth
-                    min_tier="tier_retail"  # Configurable volume threshold
-                )
-                
-                symbols = ",".join([asset.symbol for asset in top_assets])
-                
-                self.logger.info("🎯 Dynamic Asset Discovery Completed", 
-                               discovered_symbols=len(top_assets),
-                               min_tier="tier_retail",
-                               top_5=[asset.symbol for asset in top_assets[:5]])
+                try:
+                    # Import enterprise asset filter
+                    from app.services.dynamic_asset_filter import enterprise_asset_filter
+                    
+                    # Initialize if needed
+                    if not enterprise_asset_filter.session:
+                        await enterprise_asset_filter.async_init()
+                    
+                    # Get top assets dynamically based on volume (NO HARDCODING)
+                    top_assets = await enterprise_asset_filter.get_top_assets(
+                        count=50,  # Configurable limit based on depth
+                        min_tier="tier_retail"  # Configurable volume threshold
+                    )
+                    
+                    symbols = ",".join([asset.symbol for asset in top_assets])
+                    
+                    self.logger.info("🎯 Dynamic Asset Discovery Completed", 
+                                   discovered_symbols=len(top_assets),
+                                   min_tier="tier_retail",
+                                   top_5=[asset.symbol for asset in top_assets[:5]])
+                                   
+                except Exception as e:
+                    self.logger.exception("Dynamic asset discovery failed", error=str(e))
+                    # Fallback to safe default symbols
+                    symbols = "BTC,ETH,ADA,DOT,LINK,UNI,AAVE,SUSHI"
+                    self.logger.warning("Using fallback symbols for market analysis", fallback_symbols=symbols)
             
             symbol_list = [s.strip() for s in symbols.split(",")]
             
@@ -2395,10 +2403,19 @@ class MarketAnalysisService(LoggerMixin):
                                 # OKX leverage options
                                 futures_data["leverage_options"] = [1, 2, 3, 5, 10, 20, 50, 100]
                                 
-                except asyncio.TimeoutError:
-                    self.logger.warning(f"Timeout fetching futures data from {exchange}")
+                except asyncio.TimeoutError as e:
+                    self.logger.error(f"Timeout fetching futures data from {exchange}", 
+                                    exchange=exchange, 
+                                    url=api_config["perpetual_url"], 
+                                    timeout=10, 
+                                    exc_info=True)
+                    raise TimeoutError(f"Futures data fetch timeout for {exchange}: {api_config['perpetual_url']}")
                 except Exception as e:
-                    self.logger.warning(f"Failed to fetch futures data from {exchange}", error=str(e))
+                    self.logger.exception(f"Failed to fetch futures data from {exchange}", 
+                                        exchange=exchange, 
+                                        url=api_config["perpetual_url"], 
+                                        error=str(e))
+                    raise
                 
                 # Fetch real funding rates
                 try:
@@ -2704,10 +2721,17 @@ class MarketAnalysisService(LoggerMixin):
                                 for underlying in underlying_assets:
                                     options_data["implied_volatility"][underlying] = 0.65
                 
-                except asyncio.TimeoutError:
-                    self.logger.warning(f"Timeout fetching options data from {exchange}")
+                except asyncio.TimeoutError as e:
+                    self.logger.error(f"Timeout fetching options data from {exchange}", 
+                                    exchange=exchange, 
+                                    timeout=10, 
+                                    exc_info=True)
+                    raise TimeoutError(f"Options data fetch timeout for {exchange}")
                 except Exception as e:
-                    self.logger.warning(f"Failed to fetch options data from {exchange}", error=str(e))
+                    self.logger.exception(f"Failed to fetch options data from {exchange}", 
+                                        exchange=exchange, 
+                                        error=str(e))
+                    raise
             
             # Ensure minimum data structure
             if not options_data["underlying_assets"]:
@@ -2780,8 +2804,14 @@ class MarketAnalysisService(LoggerMixin):
                 async with aiohttp.ClientSession() as session:
                     # Whale Alert API integration (requires API key in production)
                     try:
+                        # Get API key from settings/environment
+                        whale_api_key = getattr(self.settings, "whale_alert_api_key", None) or os.environ.get("WHALE_ALERT_API_KEY")
+                        if not whale_api_key:
+                            self.logger.error("Whale Alert API key not configured - skipping whale data analysis")
+                            continue
+                            
                         whale_params = {
-                            "api_key": "demo",  # Replace with real API key
+                            "api_key": whale_api_key,
                             "min_value": 1000000,  # $1M minimum
                             "currency": symbol.lower(),
                             "limit": 50
