@@ -135,26 +135,19 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
       }
       
       // Process response in separate try/catch
-      try {
-        const pipelineData = extractPipelineData(result);
-        setMarketOverview({
-          ...pipelineData.marketAnalysis,
-          ai_consensus: pipelineData.aiConsensus,
-          execution_time: pipelineData.executionTime,
-          pipeline_source: true
-        });
-      } catch (processingError: any) {
-        console.error('Data processing error:', processingError);
-        setError(`Data processing failed: ${processingError.message}`);
-      }
+      const pipelineData = extractPipelineData(result);
+      setMarketOverview({
+        ...pipelineData.marketAnalysis,
+        ai_consensus: pipelineData.aiConsensus,
+        execution_time: pipelineData.executionTime,
+        pipeline_source: true
+      });
       
-    } catch (apiError: any) {
-      console.error('API error:', apiError);
-      setError(`API request failed: ${apiError.message}`);
-    }
       setLastUpdated(new Date().toISOString());
-    } catch (err: any) {
-      setError(err?.message || 'Failed to fetch pipeline market overview');
+      
+    } catch (apiOrProcessingError: any) {
+      console.error('API or processing error:', apiOrProcessingError);
+      setError(apiOrProcessingError?.message || 'Failed to fetch pipeline market overview');
     } finally {
       setLoading(false);
     }

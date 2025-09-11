@@ -2807,8 +2807,8 @@ class MarketAnalysisService(LoggerMixin):
                         # Get API key from settings/environment
                         whale_api_key = getattr(self.settings, "whale_alert_api_key", None) or os.environ.get("WHALE_ALERT_API_KEY")
                         if not whale_api_key:
-                            self.logger.error("Whale Alert API key not configured - skipping whale data analysis")
-                            continue
+                            self.logger.warning("Whale Alert API key not configured - returning default whale data")
+                            return whale_data  # Return default whale_data structure
                             
                         whale_params = {
                             "api_key": whale_api_key,

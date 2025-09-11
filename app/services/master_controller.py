@@ -531,7 +531,8 @@ class MasterSystemController(LoggerMixin):
         self,
         cycle_type: TradingCycle,
         focus_strategies: List[str] = None,
-        user_id: str = "system"
+        user_id: str = "system",
+        risk_tolerance: str = "balanced"
     ) -> Dict[str, Any]:
         """Execute the complete 5-phase validated execution flow."""
         
@@ -777,7 +778,7 @@ class MasterSystemController(LoggerMixin):
                 task = trading_strategies_service.generate_trading_signal(
                     strategy_type=strategy,
                     market_data=enhanced_market_data,
-                    risk_mode=self.current_mode.value,
+                    risk_mode=risk_tolerance,  # Use risk_tolerance from kwargs
                     user_id=user_id
                 )
                 strategy_tasks.append((strategy, task))
@@ -1813,7 +1814,8 @@ class MasterSystemController(LoggerMixin):
             pipeline_result = await self.execute_5_phase_autonomous_cycle(
                 user_id=user_id,
                 source="autonomous",
-                symbols=None  # Uses dynamic discovery
+                symbols=None,  # Uses dynamic discovery
+                risk_tolerance=config.get("risk_tolerance", "balanced")  # Pass risk tolerance from config
             )
             
             # Log pipeline execution results
@@ -1931,7 +1933,8 @@ class MasterSystemController(LoggerMixin):
                         result = await self.execute_5_phase_flow(
                             cycle_type=cycle_enum,
                             focus_strategies=preferred_strategies,
-                            user_id=user_id
+                            user_id=user_id,
+                            risk_tolerance=config.get("risk_tolerance", "balanced")  # Pass risk tolerance from config
                         )
                     
                     cycle_results.append(result)
@@ -2729,7 +2732,8 @@ class MasterSystemController(LoggerMixin):
         self, 
         user_id: str = "system", 
         source: str = "autonomous",
-        symbols: Optional[List[str]] = None
+        symbols: Optional[List[str]] = None,
+        **kwargs
     ) -> Dict[str, Any]:
         """
         ENTERPRISE 5-PHASE TRADING PIPELINE ORCHESTRATION
@@ -2744,8 +2748,11 @@ class MasterSystemController(LoggerMixin):
         cycle_id = f"{source}_{user_id}_{int(time.time())}"
         start_time = time.time()
         
+        # Extract risk tolerance from kwargs for pipeline execution
+        risk_tolerance = kwargs.get('risk_tolerance', 'balanced')
+        
         self.logger.info(f"🚀 ENTERPRISE 5-Phase Pipeline Starting", 
-                        cycle_id=cycle_id, source=source, user_id=user_id)
+                        cycle_id=cycle_id, source=source, user_id=user_id, risk_tolerance=risk_tolerance)
         
         pipeline_result = {
             "success": False,
@@ -2830,7 +2837,7 @@ class MasterSystemController(LoggerMixin):
                         strategy_type=strategy_type,
                         symbol=best_symbol,
                         parameters=strategy_params,
-                        risk_mode="balanced"
+                        risk_mode=risk_tolerance  # Use risk_tolerance from kwargs
                     )
                     
                     phase_2_time = (time.time() - phase_2_start) * 1000
@@ -2866,9 +2873,8 @@ class MasterSystemController(LoggerMixin):
                     portfolio_risk = PortfolioRiskServiceExtended()
                     
                     sized_position = await portfolio_risk.position_sizing(
-                        signal=trade_signal.get("signal", {}),
-                        user_id=user_id,
-                        risk_mode="balanced"
+                        opportunity=json.dumps(trade_signal),
+                        user_id=user_id
                     )
                     
                     phase_3_time = (time.time() - phase_3_start) * 1000
@@ -2901,13 +2907,13 @@ class MasterSystemController(LoggerMixin):
                     from app.services.ai_consensus_core import ai_consensus_service
                     
                     validation = await ai_consensus_service.validate_trade(
-                        trade_request={
+                        analysis_request=json.dumps({
                             "signal": trade_signal.get("signal", {}),
                             "position_size": sized_position.get("position_size_usd", 0),
                             "risk_metrics": sized_position.get("risk_metrics", {}),
                             "market_context": market_data.get("assessment", {}),
                             "user_id": user_id
-                        },
+                        }),
                         confidence_threshold=75.0,
                         ai_models="all"
                     )
@@ -2954,7 +2960,6 @@ class MasterSystemController(LoggerMixin):
                     pipeline_result["phases"]["phase_5"] = {
                         "status": "completed",
                         "service": "trade_execution",
-                        "execution_time_ms": phase_5_time,
                         "trade_executed": execution_result.get("success", False),
                         "filled_price": execution_result.get("filled_price", 0),
                         "execution_time_ms": execution_result.get("execution_time_ms", 0)
@@ -3014,6 +3019,7 @@ class MasterSystemController(LoggerMixin):
         user_id: str = "system",
         source: str = "api",
         force_refresh: bool = False,
+        bypass_coordinator: bool = False,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -3042,27 +3048,42 @@ class MasterSystemController(LoggerMixin):
                         analysis_type=analysis_type, 
                         symbols=symbols,
                         user_id=user_id,
-                        source=source)
+                        source=source,
+                        bypass_coordinator=bypass_coordinator)
         
         try:
-            # Use coordinator for request deduplication and batching
-            result, metadata = await market_data_coordinator.coordinate_request(
-                endpoint=f"pipeline/{analysis_type}",
-                params=coordination_params,
-                force_refresh=force_refresh,
-                batchable=self._is_analysis_batchable(analysis_type)
-            )
-            
-            # Add coordination metadata to result
-            if isinstance(result, dict):
-                result['coordination_metadata'] = metadata
-            
-            self.logger.info(f"✅ Pipeline Coordination Complete", 
-                           analysis_type=analysis_type,
-                           source=metadata.get('source', 'unknown'),
-                           cache_hit=metadata.get('cache_hit', False))
-            
-            return result
+            # Use coordinator for request deduplication and batching (unless bypassed)
+            if not bypass_coordinator:
+                result, metadata = await market_data_coordinator.coordinate_request(
+                    endpoint=f"pipeline/{analysis_type}",
+                    params=coordination_params,
+                    force_refresh=force_refresh,
+                    batchable=self._is_analysis_batchable(analysis_type)
+                )
+                
+                # Add coordination metadata to result
+                if isinstance(result, dict):
+                    result['coordination_metadata'] = metadata
+                
+                self.logger.info(f"✅ Pipeline Coordination Complete", 
+                               analysis_type=analysis_type,
+                               source=metadata.get('source', 'unknown'),
+                               cache_hit=metadata.get('cache_hit', False))
+                
+                return result
+            else:
+                # Bypass coordinator - execute pipeline directly
+                self.logger.info(f"🚀 Direct Pipeline Execution (bypassing coordinator)")
+                
+                # Convert string symbols to list if needed
+                symbols_list = symbols.split(',') if isinstance(symbols, str) else symbols
+                
+                return await self.execute_5_phase_autonomous_cycle(
+                    user_id=user_id,
+                    source=source,
+                    symbols=symbols_list,
+                    **kwargs  # Forward all parameters including risk_tolerance
+                )
             
         except Exception as e:
             self.logger.error(f"Pipeline coordination failed", 
@@ -3078,33 +3099,59 @@ class MasterSystemController(LoggerMixin):
             return await self.execute_5_phase_autonomous_cycle(
                 user_id=user_id,
                 source=source,
-                symbols=symbols_list
+                symbols=symbols_list,
+                **kwargs  # Forward all parameters including risk_tolerance
             )
     
     def _select_strategy_based_on_market(self, market_data: Dict[str, Any], symbol: str) -> str:
         """Select trading strategy based on market analysis."""
         
         try:
-            # Get market indicators for the symbol
+            # Defensive validation: early return if market_data is not a dict or symbol not present
+            if not isinstance(market_data, dict) or not symbol:
+                return "balanced_strategy"
+            
+            # Get market indicators for the symbol with defensive validation
             symbol_data = market_data.get(symbol, {})
+            if not isinstance(symbol_data, dict):
+                symbol_data = {}
+            
             technical_indicators = symbol_data.get('technical_indicators', {})
+            if not isinstance(technical_indicators, dict):
+                technical_indicators = {}
+                
             volatility = symbol_data.get('volatility', {})
+            if not isinstance(volatility, dict):
+                volatility = {}
+            
             arbitrage_opportunities = market_data.get('arbitrage_opportunities', [])
+            if not isinstance(arbitrage_opportunities, list):
+                arbitrage_opportunities = []
             
-            # Check for arbitrage opportunities
-            symbol_arbitrage = [opp for opp in arbitrage_opportunities if opp.get('symbol') == symbol]
-            if symbol_arbitrage and len(symbol_arbitrage) > 0:
-                return "arbitrage_strategy"
+            # Check for arbitrage opportunities with type guard
+            if arbitrage_opportunities:
+                symbol_arbitrage = [opp for opp in arbitrage_opportunities 
+                                  if isinstance(opp, dict) and opp.get('symbol') == symbol]
+                if symbol_arbitrage and len(symbol_arbitrage) > 0:
+                    return "arbitrage_strategy"
             
-            # Check momentum indicators
+            # Check momentum indicators with safe lookups and sensible defaults
             rsi = technical_indicators.get('rsi', 50)
+            if not isinstance(rsi, (int, float)):
+                rsi = 50
+                
             macd_histogram = technical_indicators.get('macd_histogram', 0)
+            if not isinstance(macd_histogram, (int, float)):
+                macd_histogram = 0
             
             if (rsi > 70 or rsi < 30) and abs(macd_histogram) > 0.1:
                 return "momentum_strategy"
             
-            # Check volatility for mean reversion
+            # Check volatility for mean reversion with safe lookup
             volatility_24h = volatility.get('volatility_24h', 0)
+            if not isinstance(volatility_24h, (int, float)):
+                volatility_24h = 0
+                
             if volatility_24h < 0.02:  # Low volatility
                 return "mean_reversion_strategy"
             
@@ -3112,7 +3159,8 @@ class MasterSystemController(LoggerMixin):
             return "balanced_strategy"
             
         except Exception as e:
-            self.logger.warning(f"Strategy selection failed, using default", symbol=symbol, error=str(e))
+            self.logger.warning(f"Strategy selection failed for symbol {symbol}, using balanced_strategy fallback", 
+                              symbol=symbol, error=str(e))
             return "balanced_strategy"
     
     def _extract_strategy_parameters(self, market_data: Dict[str, Any], symbol: str, strategy_type: str) -> Dict[str, Any]:

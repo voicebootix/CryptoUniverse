@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Set, Optional, Any, Tuple, TYPE_CHECKING
 from collections import defaultdict
 import structlog
-import redis
+import redis.asyncio as redis
 from app.core.config import get_settings
 
 if TYPE_CHECKING:
@@ -51,7 +51,7 @@ class MarketDataCoordinator:
             host=settings.redis_host,
             port=settings.redis_port,
             password=settings.redis_password,
-            decode_responses=False,  # Preserve binary data
+            decode_responses=True,  # Enable response decoding so replies are strings not bytes
             **ssl_config
         )
         self.master_controller = master_controller
@@ -108,7 +108,10 @@ class MarketDataCoordinator:
         sorted_params = sorted(params.items()) if params else []
         param_str = json.dumps(sorted_params, sort_keys=True)
         
-        return f"cache:{endpoint}:{hash(param_str)}"
+        # Use stable, collision-resistant digest instead of randomized hash()
+        param_hash = hashlib.sha256(param_str.encode('utf-8')).hexdigest()[:16]  # Truncate for readability
+        
+        return f"cache:{endpoint}:{param_hash}"
     
     def _get_cache_ttl(self, endpoint: str) -> int:
         """Get appropriate cache TTL based on endpoint type."""
@@ -191,7 +194,7 @@ class MarketDataCoordinator:
         """Check Redis cache for existing result."""
         
         try:
-            cached_data = self.redis_client.get(cache_key)
+            cached_data = await self.redis_client.get(cache_key)
             if cached_data:
                 result = json.loads(cached_data)
                 
@@ -208,7 +211,7 @@ class MarketDataCoordinator:
                         return result['data']
                 
                 # Cache expired, remove it
-                self.redis_client.delete(cache_key)
+                await self.redis_client.delete(cache_key)
             
         except Exception as e:
             logger.warning(f"Cache check failed", cache_key=cache_key, error=str(e))
@@ -225,7 +228,7 @@ class MarketDataCoordinator:
                 'ttl': ttl
             }
             
-            self.redis_client.setex(
+            await self.redis_client.setex(
                 cache_key,
                 ttl,
                 json.dumps(cache_data, default=str)
@@ -239,6 +242,20 @@ class MarketDataCoordinator:
     def _is_batchable(self, endpoint: str) -> bool:
         """Determine if endpoint supports batching."""
         
+        # Check for pipeline endpoints (format: pipeline/analysis_type)
+        if endpoint.startswith("pipeline/"):
+            analysis_type = endpoint.split("/", 1)[1]
+            batchable_analysis_types = {
+                'price_tracking',
+                'technical_analysis', 
+                'sentiment_analysis',
+                'volatility_analysis',
+                'support_resistance',
+                'asset_analysis'
+            }
+            return analysis_type in batchable_analysis_types
+        
+        # Check for legacy endpoint formats
         batchable_endpoints = {
             'realtime-prices',
             'technical-analysis', 
@@ -400,8 +417,8 @@ class MarketDataCoordinator:
         combined_params['symbols'] = ','.join(all_symbols)
         
         try:
-            # Execute pipeline request
-            result = await master_controller.trigger_pipeline(**combined_params)
+            # Execute pipeline request (bypass coordinator to prevent recursion)
+            result = await master_controller.trigger_pipeline(bypass_coordinator=True, **combined_params)
             
             self.stats['api_calls_saved'] += len(requests) - 1  # Saved n-1 API calls
             
@@ -461,8 +478,8 @@ class MarketDataCoordinator:
         try:
             master_controller = MasterSystemController()
             
-            # Execute pipeline request
-            result = await master_controller.trigger_pipeline(**params)
+            # Execute pipeline request (bypass coordinator to prevent recursion)
+            result = await master_controller.trigger_pipeline(bypass_coordinator=True, **params)
             
             # Cache result
             ttl = self._get_cache_ttl(endpoint)
@@ -540,7 +557,7 @@ class MarketDataCoordinator:
             
             # Count phase
             while True:
-                cursor, keys = self.redis_client.scan(cursor, match=cache_pattern, count=100)
+                cursor, keys = await self.redis_client.scan(cursor, match=cache_pattern, count=100)
                 key_count += len(keys)
                 if key_count > max_keys:
                     raise ValueError(f"Too many keys to delete: {key_count} > {max_keys}")
@@ -557,12 +574,12 @@ class MarketDataCoordinator:
             batch_size = 100
             
             while True:
-                cursor, keys = self.redis_client.scan(cursor, match=cache_pattern, count=batch_size)
+                cursor, keys = await self.redis_client.scan(cursor, match=cache_pattern, count=batch_size)
                 if keys:
                     # Delete in smaller batches to avoid blocking Redis
                     for i in range(0, len(keys), batch_size):
                         batch = keys[i:i + batch_size]
-                        self.redis_client.delete(*batch)
+                        await self.redis_client.delete(*batch)
                         deleted_count += len(batch)
                         
                 if cursor == 0:
@@ -600,12 +617,8 @@ class MarketDataCoordinator:
         """Perform health check."""
         
         try:
-            # Check Redis connectivity (non-blocking async version)
-            # Note: This assumes we'll convert to async Redis client later
-            # For now, use the synchronous version but in a way that won't block too long
-            import asyncio
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self.redis_client.ping)
+            # Check Redis connectivity (async version)
+            await self.redis_client.ping()
             redis_status = 'healthy'
         except Exception as e:
             redis_status = f'error: {str(e)}'

@@ -492,13 +492,23 @@ class EnterpriseAssetFilter(LoggerMixin):
             url = config[url_key]
             
             # Check rate limiting with error handling
+            rate_limit_key = f"exchange_rate_limit:{exchange_id}"  # Define outside try block
             if self.redis:
                 try:
-                    rate_limit_key = f"exchange_rate_limit:{exchange_id}"
                     current_requests_raw = await self.redis.get(rate_limit_key)
                     current_requests = 0
                     
                     if current_requests_raw:
+                        # Normalize Redis value safely (handle bytes, strings, sentinel values)
+                        if isinstance(current_requests_raw, bytes):
+                            current_requests_raw = current_requests_raw.decode('utf-8')
+                        
+                        # Check for sentinel string first
+                        if current_requests_raw == "limited":
+                            self.logger.warning(f"Exchange {exchange_id} is rate limited (sentinel)", scan_id=scan_id)
+                            return {}
+                        
+                        # Parse integer with safe fallback
                         try:
                             current_requests = int(current_requests_raw)
                         except (ValueError, TypeError):
@@ -518,10 +528,14 @@ class EnterpriseAssetFilter(LoggerMixin):
                 if response.status == 200:
                     data = await response.json()
                     
-                    # Update rate limiting counter
+                    # Update rate limiting counter with error handling
                     if self.redis:
-                        await self.redis.incr(rate_limit_key)
-                        await self.redis.expire(rate_limit_key, 60)
+                        try:
+                            await self.redis.incr(rate_limit_key)
+                            await self.redis.expire(rate_limit_key, 60)
+                        except Exception as e:
+                            self.logger.error(f"Failed to update rate limit counter for {exchange_id}", error=str(e), scan_id=scan_id)
+                            # Continue execution - don't fail the entire request
                     
                     # Parse exchange-specific data format
                     parser_method = getattr(self, config["parser"], None)
@@ -536,9 +550,12 @@ class EnterpriseAssetFilter(LoggerMixin):
                         return {}
                         
                 elif response.status == 429:
-                    # Rate limited - cache the limitation
+                    # Rate limited - cache the limitation with error handling
                     if self.redis:
-                        await self.redis.set(f"exchange_rate_limit:{exchange_id}", "limited", ex=300)
+                        try:
+                            await self.redis.set(rate_limit_key, "limited", ex=300)
+                        except Exception as e:
+                            self.logger.error(f"Failed to set rate limit sentinel for {exchange_id}", error=str(e), scan_id=scan_id)
                     
                     self.logger.warning(f"Rate limited by {exchange_id}", scan_id=scan_id)
                     return {}
