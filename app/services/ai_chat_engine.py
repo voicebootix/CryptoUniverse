@@ -289,12 +289,12 @@ I'll remember our conversation and provide increasingly personalized assistance.
                 session_id = await self.start_chat_session(user_id)
             
             # Save user message (with fallback if memory unavailable)
-            user_message_id = None
+            user_message_id = f"user_{uuid.uuid4().hex}"  # Always generate a message ID
             context = {}
             
             if self.memory:
                 try:
-                    user_message_id = await self.memory.save_message(
+                    saved_user_id = await self.memory.save_message(
                         session_id=session_id,
                         user_id=user_id,
                         content=user_message,
@@ -302,6 +302,9 @@ I'll remember our conversation and provide increasingly personalized assistance.
                         processing_time_ms=0,
                         tokens_used=len(user_message.split())
                     )
+                    # Use the saved message ID if successful
+                    if saved_user_id:
+                        user_message_id = saved_user_id
                     # Get conversation context
                     context = await self.memory.get_conversation_context(session_id)
                 except Exception as e:
@@ -335,10 +338,10 @@ I'll remember our conversation and provide increasingly personalized assistance.
             processing_time = (time.time() - processing_start) * 1000
             
             # Save assistant response (with fallback)
-            assistant_message_id = None
+            assistant_message_id = f"msg_{uuid.uuid4().hex}"  # Always generate a message ID
             if self.memory:
                 try:
-                    assistant_message_id = await self.memory.save_message(
+                    saved_message_id = await self.memory.save_message(
                         session_id=session_id,
                         user_id=user_id,
                         content=response["content"],
@@ -350,6 +353,9 @@ I'll remember our conversation and provide increasingly personalized assistance.
                         processing_time_ms=processing_time,
                         tokens_used=response.get("tokens_used", len(response["content"].split()))
                     )
+                    # Use the saved message ID if successful
+                    if saved_message_id:
+                        assistant_message_id = saved_message_id
                     
                     # Update session context if needed
                     if response.get("context_updates"):
@@ -358,6 +364,7 @@ I'll remember our conversation and provide increasingly personalized assistance.
                         )
                 except Exception as e:
                     self.logger.warning("Failed to save response to memory", error=str(e))
+                    # Keep the fallback message ID
             
             # Send real-time update via WebSocket
             await self._send_websocket_update(user_id, {
