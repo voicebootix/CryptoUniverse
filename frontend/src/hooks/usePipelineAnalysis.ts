@@ -641,7 +641,7 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
     refreshAll();
     
     // Set up polling for pipeline updates (less frequent than direct API)
-    intervalRef.current = setInterval(() => {
+    intervalRef.current = window.setInterval(() => {
       // Guard against stale closure issues
       if (!isRefreshingRef.current) {
         refreshAll();

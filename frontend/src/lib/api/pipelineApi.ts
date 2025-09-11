@@ -235,6 +235,7 @@ export const pipelineApi = {
   ): Promise<PipelineResult> {
     return this.triggerPipeline({
       analysis_type: 'cross_asset_arbitrage',
+      symbols: asset_pairs, // Add required symbols field
       asset_pairs,
       exchanges,
       min_profit_bps,

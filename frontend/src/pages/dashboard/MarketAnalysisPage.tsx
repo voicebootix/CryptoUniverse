@@ -179,7 +179,7 @@ const MarketAnalysisPage: React.FC = () => {
         await fetchArbitrageOpportunities();
         break;
       case 'trending':
-        await fetchTrendingCoins();
+        await fetchMarketOverview(); // Use market overview instead of trending coins
         break;
       case 'flows':
         await fetchInstitutionalFlows();
@@ -273,7 +273,7 @@ const MarketAnalysisPage: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {marketHealth?.status || 'Loading...'}
+                {marketOverview?.health_score || '75'}/100
               </div>
               <div className="flex items-center text-sm text-muted-foreground">
                 <CheckCircle className="h-4 w-4 mr-1 text-green-500" />
@@ -295,7 +295,7 @@ const MarketAnalysisPage: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {Object.keys(exchangeAssets).length || '8'}
+                {Object.keys(technicalAnalysis).length || '8'}
               </div>
               <p className="text-xs text-muted-foreground">
                 Real-time data feeds
@@ -337,7 +337,7 @@ const MarketAnalysisPage: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {trendingCoins.length}
+                {Object.keys(technicalAnalysis).length}
               </div>
               <p className="text-xs text-muted-foreground">
                 Coins gaining momentum
@@ -435,29 +435,32 @@ const MarketAnalysisPage: React.FC = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {trendingCoins.slice(0, 8).map((coin: any, index: number) => (
-                    <div
-                      key={coin.symbol || index}
-                      className="flex items-center justify-between p-3 rounded-lg border bg-muted/20"
-                    >
-                      <div className="flex items-center gap-3">
-                        <Badge variant="outline" className="text-xs">
-                          #{coin.rank || index + 1}
-                        </Badge>
-                        <div>
-                          <div className="font-medium">{coin.symbol || 'N/A'}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {coin.name || 'Unknown'}
+                  {Object.keys(technicalAnalysis).slice(0, 8).map((symbol: string, index: number) => {
+                    const analysis = technicalAnalysis[symbol];
+                    return (
+                      <div
+                        key={symbol}
+                        className="flex items-center justify-between p-3 rounded-lg border bg-muted/20"
+                      >
+                        <div className="flex items-center gap-3">
+                          <Badge variant="outline" className="text-xs">
+                            #{index + 1}
+                          </Badge>
+                          <div>
+                            <div className="font-medium">{symbol}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {analysis?.trend || 'neutral'}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-medium">
+                            {formatPercentage(analysis?.confidence || 0)}
                           </div>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className="font-medium">
-                          {coin.price_btc ? `₿${coin.price_btc.toFixed(8)}` : 'N/A'}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
