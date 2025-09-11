@@ -807,7 +807,7 @@ async def get_market_inefficiencies(
     try:
         result = await market_analysis.market_inefficiency_scanner(
             symbols=symbols,
-            inefficiency_types=inefficiency_types,
+            scan_types=inefficiency_types,  # Fixed: parameter name corrected
             user_id=str(current_user.id)
         )
         

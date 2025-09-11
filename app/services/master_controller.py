@@ -28,6 +28,7 @@ import uuid
 
 import structlog
 from app.core.config import get_settings
+from app.services.market_data_coordinator import market_data_coordinator
 from app.core.logging import LoggerMixin
 from app.core.redis import get_redis_client
 from app.services.websocket import manager
@@ -1794,33 +1795,85 @@ class MasterSystemController(LoggerMixin):
             self.logger.error("Global autonomous cycle failed", error=str(e))
     
     async def _run_user_autonomous_cycle(self, user_id: str, config: Dict):
-        """Run complete autonomous trading cycle for specific user - THE MONEY MAKING MACHINE with AI Chat Integration."""
+        """
+        ENTERPRISE AUTONOMOUS CYCLE - USES 5-PHASE PIPELINE
+        
+        This is the CORE autonomous trading cycle that executes the 5-phase pipeline
+        every 60 seconds for maximum profit optimization.
+        """
         try:
             mode = config.get("mode", "balanced")
-            self.logger.info(f"🤖 AUTONOMOUS CYCLE STARTING for user {user_id}", mode=mode)
+            self.logger.info(f"🤖 ENTERPRISE Autonomous Cycle Starting", 
+                           user_id=user_id, mode=mode)
             
             # Set trading mode for this user
             self.current_mode = TradingMode(mode)
             
-            # Check if unified AI manager is available for enhanced decision making
-            if hasattr(self, 'unified_manager') and self.unified_manager:
-                # Use unified AI manager for autonomous decisions
-                market_context = {
-                    "current_mode": mode,
-                    "cycle_type": "autonomous_trading",
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+            # ENTERPRISE: Execute 5-Phase Pipeline for autonomous trading
+            pipeline_result = await self.execute_5_phase_autonomous_cycle(
+                user_id=user_id,
+                source="autonomous",
+                symbols=None  # Uses dynamic discovery
+            )
+            
+            # Log pipeline execution results
+            if pipeline_result.get("success"):
+                completed_phases = pipeline_result.get("phases_completed", "0/5")
+                execution_time = pipeline_result.get("execution_time_ms", 0)
                 
-                # Let the unified AI manager make autonomous decisions
-                try:
-                    result = await self.unified_manager.handle_autonomous_decision(user_id, market_context)
-                    
-                    if result.get("success"):
-                        self.logger.info("Autonomous AI decision executed", 
-                                       user_id=user_id, 
-                                       action=result.get("action"))
-                except Exception as e:
-                    self.logger.warning("Unified AI manager failed, continuing with standard cycle", error=str(e))
+                self.logger.info("✅ ENTERPRISE Autonomous Pipeline Completed",
+                               user_id=user_id,
+                               phases_completed=completed_phases,
+                               execution_time_ms=execution_time)
+                
+                # Update performance metrics
+                self.performance_metrics["cycles_executed"] += 1
+                self.performance_metrics["avg_cycle_time_ms"] = (
+                    (self.performance_metrics.get("avg_cycle_time_ms", 0) + execution_time) / 
+                    max(self.performance_metrics["cycles_executed"], 1)
+                )
+                
+                # Check if any trades were executed
+                phase_5 = pipeline_result.get("phases", {}).get("phase_5", {})
+                if phase_5.get("status") == "completed" and phase_5.get("trade_executed"):
+                    self.performance_metrics["successful_trades"] += 1
+                    self.logger.info("💰 Autonomous Trade Executed", 
+                                   user_id=user_id,
+                                   symbol=pipeline_result.get("phases", {}).get("phase_2", {}).get("symbol"),
+                                   action=pipeline_result.get("phases", {}).get("phase_2", {}).get("action"))
+                
+            else:
+                self.logger.warning("⚠️ ENTERPRISE Autonomous Pipeline Failed",
+                                  user_id=user_id,
+                                  error=pipeline_result.get("error", "Unknown"),
+                                  phases=pipeline_result.get("phases", {}))
+                                  
+            return pipeline_result
+            
+        except Exception as e:
+            self.logger.error("💥 ENTERPRISE Autonomous Cycle Failed", 
+                            user_id=user_id, 
+                            error=str(e))
+            return {"success": False, "error": str(e)}
+    
+    async def set_trading_mode(self, mode: str) -> Dict[str, Any]:
+        """Set trading mode manually."""
+        
+        try:
+            new_mode = TradingMode(mode)
+            self.current_mode = new_mode
+            
+            self.logger.info("Trading mode updated", mode=mode)
+            
+            return {
+                "success": True,
+                "mode": mode,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error("Failed to set trading mode", mode=mode, error=str(e))
+            return {"success": False, "error": str(e)}
             
             # Get USER'S PURCHASED STRATEGIES for autonomous trading
             from app.services.strategy_marketplace_service import strategy_marketplace_service
@@ -2685,6 +2738,374 @@ class MasterSystemController(LoggerMixin):
                 "error": str(e),
                 "timestamp": datetime.utcnow().isoformat()
             }
+    
+    # ===============================================================================
+    # ENTERPRISE 5-PHASE TRADING PIPELINE ORCHESTRATION
+    # ===============================================================================
+    
+    async def execute_5_phase_autonomous_cycle(
+        self, 
+        user_id: str = "system", 
+        source: str = "autonomous",
+        symbols: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """
+        ENTERPRISE 5-PHASE TRADING PIPELINE ORCHESTRATION
+        
+        This is the core coordinated trading pipeline that ALL components should use.
+        No more direct service calls - everything routes through this pipeline.
+        
+        Phase 1: Market Analysis → Phase 2: Trading Strategy → Phase 3: Portfolio Risk 
+        → Phase 4: AI Consensus → Phase 5: Trade Execution
+        """
+        
+        cycle_id = f"{source}_{user_id}_{int(time.time())}"
+        start_time = time.time()
+        
+        self.logger.info(f"🚀 ENTERPRISE 5-Phase Pipeline Starting", 
+                        cycle_id=cycle_id, source=source, user_id=user_id)
+        
+        pipeline_result = {
+            "success": False,
+            "cycle_id": cycle_id,
+            "source": source,
+            "user_id": user_id,
+            "phases": {},
+            "execution_time_ms": 0,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        try:
+            # =============================================================================
+            # PHASE 1: MARKET ANALYSIS SERVICE - DYNAMIC DISCOVERY & ANALYSIS
+            # =============================================================================
+            
+            phase_1_start = time.time()
+            self.logger.info("📊 Phase 1: Market Analysis Starting", cycle_id=cycle_id)
+            
+            try:
+                from app.services.market_analysis_core import MarketAnalysisService
+                market_analysis = MarketAnalysisService()
+                
+                # Dynamic asset discovery if no symbols provided (NO HARDCODED LIMITATIONS)
+                if not symbols:
+                    symbols_str = "SMART_ADAPTIVE"  # This triggers dynamic discovery
+                else:
+                    symbols_str = ",".join(symbols)
+                
+                market_data = await market_analysis.complete_market_assessment(
+                    symbols=symbols_str,
+                    depth="comprehensive",
+                    user_id=user_id
+                )
+                
+                phase_1_time = (time.time() - phase_1_start) * 1000
+                pipeline_result["phases"]["phase_1"] = {
+                    "status": "completed",
+                    "service": "market_analysis",
+                    "execution_time_ms": phase_1_time,
+                    "opportunities_found": len(market_data.get("assessment", {}).get("arbitrage_opportunities", [])),
+                    "symbols_analyzed": len(market_data.get("assessment", {}).get("technical_analysis", {}))
+                }
+                
+                self.logger.info("✅ Phase 1 Completed", 
+                               cycle_id=cycle_id, 
+                               execution_time_ms=phase_1_time,
+                               opportunities=pipeline_result["phases"]["phase_1"]["opportunities_found"])
+                
+            except Exception as e:
+                self.logger.error("❌ Phase 1 Failed", cycle_id=cycle_id, error=str(e))
+                pipeline_result["phases"]["phase_1"] = {"status": "failed", "error": str(e)}
+                return pipeline_result
+            
+            # =============================================================================
+            # PHASE 2: TRADING STRATEGY SERVICE - SIGNAL GENERATION
+            # =============================================================================
+            
+            if market_data.get("success"):
+                phase_2_start = time.time()
+                self.logger.info("⚡ Phase 2: Trading Strategy Starting", cycle_id=cycle_id)
+                
+                try:
+                    from app.services.trading_strategies import trading_strategies_service
+                    
+                    # Extract best opportunity from market analysis
+                    opportunities = market_data.get("assessment", {}).get("arbitrage_opportunities", [])
+                    best_symbol = "BTC"  # Default fallback
+                    
+                    if opportunities:
+                        best_opportunity = max(opportunities, key=lambda x: x.get("profit_bps", 0))
+                        best_symbol = best_opportunity.get("symbol", "BTC")
+                    
+                    # Generate trading signal based on market analysis
+                    trade_signal = await trading_strategies_service.generate_signal(
+                        strategy_type="spot_momentum_strategy",
+                        symbol=best_symbol,
+                        parameters=market_data,  # Pass ENTIRE market analysis output
+                        risk_mode="balanced"
+                    )
+                    
+                    phase_2_time = (time.time() - phase_2_start) * 1000
+                    pipeline_result["phases"]["phase_2"] = {
+                        "status": "completed",
+                        "service": "trading_strategies",
+                        "execution_time_ms": phase_2_time,
+                        "symbol": best_symbol,
+                        "action": trade_signal.get("signal", {}).get("action", "HOLD"),
+                        "confidence": trade_signal.get("signal", {}).get("confidence", 0)
+                    }
+                    
+                    self.logger.info("✅ Phase 2 Completed", 
+                                   cycle_id=cycle_id,
+                                   symbol=best_symbol,
+                                   action=pipeline_result["phases"]["phase_2"]["action"])
+                    
+                except Exception as e:
+                    self.logger.error("❌ Phase 2 Failed", cycle_id=cycle_id, error=str(e))
+                    pipeline_result["phases"]["phase_2"] = {"status": "failed", "error": str(e)}
+                    return pipeline_result
+            
+            # =============================================================================
+            # PHASE 3: PORTFOLIO & RISK SERVICE - POSITION SIZING
+            # =============================================================================
+            
+            if trade_signal.get("success"):
+                phase_3_start = time.time()
+                self.logger.info("🛡️ Phase 3: Portfolio Risk Starting", cycle_id=cycle_id)
+                
+                try:
+                    from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+                    portfolio_risk = PortfolioRiskServiceExtended()
+                    
+                    sized_position = await portfolio_risk.position_sizing(
+                        signal=trade_signal.get("signal", {}),
+                        user_id=user_id,
+                        risk_mode="balanced"
+                    )
+                    
+                    phase_3_time = (time.time() - phase_3_start) * 1000
+                    pipeline_result["phases"]["phase_3"] = {
+                        "status": "completed",
+                        "service": "portfolio_risk",
+                        "execution_time_ms": phase_3_time,
+                        "position_size_usd": sized_position.get("position_size_usd", 0),
+                        "risk_score": sized_position.get("risk_metrics", {}).get("var_1d", 0)
+                    }
+                    
+                    self.logger.info("✅ Phase 3 Completed", 
+                                   cycle_id=cycle_id,
+                                   position_size=sized_position.get("position_size_usd", 0))
+                    
+                except Exception as e:
+                    self.logger.error("❌ Phase 3 Failed", cycle_id=cycle_id, error=str(e))
+                    pipeline_result["phases"]["phase_3"] = {"status": "failed", "error": str(e)}
+                    return pipeline_result
+            
+            # =============================================================================
+            # PHASE 4: AI CONSENSUS SERVICE - VALIDATION
+            # =============================================================================
+            
+            if sized_position.get("success"):
+                phase_4_start = time.time()
+                self.logger.info("🧠 Phase 4: AI Consensus Starting", cycle_id=cycle_id)
+                
+                try:
+                    from app.services.ai_consensus_core import ai_consensus_service
+                    
+                    validation = await ai_consensus_service.validate_trade(
+                        trade_request={
+                            "signal": trade_signal.get("signal", {}),
+                            "position_size": sized_position.get("position_size_usd", 0),
+                            "risk_metrics": sized_position.get("risk_metrics", {}),
+                            "market_context": market_data.get("assessment", {}),
+                            "user_id": user_id
+                        },
+                        confidence_threshold=75.0,
+                        ai_models="all"
+                    )
+                    
+                    phase_4_time = (time.time() - phase_4_start) * 1000
+                    pipeline_result["phases"]["phase_4"] = {
+                        "status": "completed",
+                        "service": "ai_consensus",
+                        "execution_time_ms": phase_4_time,
+                        "approved": validation.get("approved", False),
+                        "consensus_confidence": validation.get("consensus_confidence", 0)
+                    }
+                    
+                    self.logger.info("✅ Phase 4 Completed", 
+                                   cycle_id=cycle_id,
+                                   approved=validation.get("approved", False),
+                                   confidence=validation.get("consensus_confidence", 0))
+                    
+                except Exception as e:
+                    self.logger.error("❌ Phase 4 Failed", cycle_id=cycle_id, error=str(e))
+                    pipeline_result["phases"]["phase_4"] = {"status": "failed", "error": str(e)}
+                    return pipeline_result
+            
+            # =============================================================================
+            # PHASE 5: TRADE EXECUTION SERVICE - VALIDATED EXECUTION
+            # =============================================================================
+            
+            if validation.get("approved"):
+                phase_5_start = time.time()
+                self.logger.info("⚡ Phase 5: Trade Execution Starting", cycle_id=cycle_id)
+                
+                try:
+                    from app.services.trading_strategies import trading_strategies_service
+                    
+                    execution_result = await trading_strategies_service.execute_validated_trade(
+                        action=trade_signal.get("signal", {}).get("action", "HOLD"),
+                        symbol=pipeline_result["phases"]["phase_2"]["symbol"],
+                        position_size_usd=sized_position.get("position_size_usd", 0),
+                        ai_validation_token=validation.get("validation_token", ""),
+                        user_id=user_id
+                    )
+                    
+                    phase_5_time = (time.time() - phase_5_start) * 1000
+                    pipeline_result["phases"]["phase_5"] = {
+                        "status": "completed",
+                        "service": "trade_execution",
+                        "execution_time_ms": phase_5_time,
+                        "trade_executed": execution_result.get("success", False),
+                        "filled_price": execution_result.get("filled_price", 0),
+                        "execution_time_ms": execution_result.get("execution_time_ms", 0)
+                    }
+                    
+                    self.logger.info("✅ Phase 5 Completed", 
+                                   cycle_id=cycle_id,
+                                   executed=execution_result.get("success", False))
+                    
+                except Exception as e:
+                    self.logger.error("❌ Phase 5 Failed", cycle_id=cycle_id, error=str(e))
+                    pipeline_result["phases"]["phase_5"] = {"status": "failed", "error": str(e)}
+                    
+            else:
+                pipeline_result["phases"]["phase_5"] = {
+                    "status": "skipped",
+                    "reason": "AI consensus rejected trade"
+                }
+                self.logger.info("⏭️ Phase 5 Skipped - Trade rejected by AI consensus", cycle_id=cycle_id)
+            
+            # =============================================================================
+            # PIPELINE COMPLETION & METRICS
+            # =============================================================================
+            
+            total_time = (time.time() - start_time) * 1000
+            pipeline_result["success"] = True
+            pipeline_result["execution_time_ms"] = total_time
+            
+            completed_phases = sum(1 for p in pipeline_result["phases"].values() if p.get("status") == "completed")
+            pipeline_result["phases_completed"] = f"{completed_phases}/5"
+            
+            self.logger.info("🎯 ENTERPRISE Pipeline Completed", 
+                           cycle_id=cycle_id,
+                           total_time_ms=total_time,
+                           phases_completed=completed_phases,
+                           success=pipeline_result["success"])
+            
+            return pipeline_result
+            
+        except Exception as e:
+            total_time = (time.time() - start_time) * 1000
+            pipeline_result["execution_time_ms"] = total_time
+            pipeline_result["error"] = str(e)
+            
+            self.logger.error("💥 ENTERPRISE Pipeline Failed", 
+                            cycle_id=cycle_id, 
+                            total_time_ms=total_time,
+                            error=str(e))
+            
+            return pipeline_result
+    
+    async def trigger_pipeline(
+        self, 
+        analysis_type: str = "comprehensive",
+        symbols: str = "BTC,ETH,SOL",
+        timeframes: str = "1h,4h,1d",
+        user_id: str = "system",
+        source: str = "api",
+        force_refresh: bool = False,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        ENTERPRISE PIPELINE TRIGGER WITH COORDINATION
+        
+        Single entry point for ALL components to trigger the 5-phase pipeline.
+        Integrated with MarketDataCoordinator for deduplication and batching.
+        
+        Usage:
+        - Chat System: await master_controller.trigger_pipeline("asset_analysis", "BTC", user_id="chat")
+        - Frontend: await master_controller.trigger_pipeline("market_overview", user_id="frontend")
+        - Background: await master_controller.trigger_pipeline("autonomous_cycle", user_id="system")
+        """
+        
+        # Prepare coordination parameters
+        coordination_params = {
+            'analysis_type': analysis_type,
+            'symbols': symbols,
+            'timeframes': timeframes,
+            'user_id': user_id,
+            'source': source,
+            **kwargs
+        }
+        
+        self.logger.info(f"🎯 Pipeline Trigger with Coordination", 
+                        analysis_type=analysis_type, 
+                        symbols=symbols,
+                        user_id=user_id,
+                        source=source)
+        
+        try:
+            # Use coordinator for request deduplication and batching
+            result, metadata = await market_data_coordinator.coordinate_request(
+                endpoint=f"pipeline/{analysis_type}",
+                params=coordination_params,
+                force_refresh=force_refresh,
+                batchable=self._is_analysis_batchable(analysis_type)
+            )
+            
+            # Add coordination metadata to result
+            if isinstance(result, dict):
+                result['coordination_metadata'] = metadata
+            
+            self.logger.info(f"✅ Pipeline Coordination Complete", 
+                           analysis_type=analysis_type,
+                           source=metadata.get('source', 'unknown'),
+                           cache_hit=metadata.get('cache_hit', False))
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Pipeline coordination failed", 
+                            analysis_type=analysis_type, 
+                            error=str(e))
+            
+            # Fallback to direct execution
+            self.logger.info(f"Falling back to direct pipeline execution")
+            
+            # Convert string symbols to list if needed
+            symbols_list = symbols.split(',') if isinstance(symbols, str) else symbols
+            
+            return await self.execute_5_phase_autonomous_cycle(
+                user_id=user_id,
+                source=source,
+                symbols=symbols_list
+            )
+    
+    def _is_analysis_batchable(self, analysis_type: str) -> bool:
+        """Determine if analysis type can be batched."""
+        
+        batchable_types = {
+            'price_tracking',
+            'technical_analysis', 
+            'sentiment_analysis',
+            'volatility_analysis',
+            'support_resistance',
+            'asset_analysis'
+        }
+        
+        return analysis_type in batchable_types
 
 
 # Global service instance

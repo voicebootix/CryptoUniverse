@@ -29,7 +29,7 @@ class ChatServiceAdapters:
     
     def __init__(self):
         self.portfolio_risk = PortfolioRiskService()
-        self.market_analysis = MarketAnalysisService()
+        self.master_controller = MasterSystemController()  # Use pipeline instead of direct calls
         self.trade_executor = TradeExecutionService()
         self.trading_strategies = TradingStrategiesService()
         self.ai_consensus = AIConsensusService()
@@ -169,17 +169,17 @@ class ChatServiceAdapters:
             return {}
     
     async def get_asset_analysis(self, symbol: str) -> Dict[str, Any]:
-        """Get analysis for a specific asset."""
+        """Get analysis for a specific asset using the 5-phase pipeline."""
         try:
-            # Use existing market analysis service
-            analysis_result = await self.market_analysis.analyze_asset(
-                symbol=symbol,
-                timeframes=["1h", "4h", "1d"],
-                include_technical=True,
-                include_sentiment=True
+            # Use Master Controller pipeline for comprehensive asset analysis
+            pipeline_result = await self.master_controller.trigger_pipeline(
+                analysis_type="asset_analysis",
+                symbols=symbol,
+                timeframes="1h,4h,1d",
+                user_id="chat_system"
             )
             
-            if not analysis_result.get("success"):
+            if not pipeline_result.get("success"):
                 return {
                     "current_price": 0,
                     "trend": "Unknown",
@@ -189,19 +189,23 @@ class ChatServiceAdapters:
                     "volatility": 0.5
                 }
             
-            analysis_data = analysis_result.get("analysis", {})
+            # Extract data from pipeline result (comes from all 5 phases)
+            pipeline_data = pipeline_result.get("pipeline_results", {})
+            market_analysis = pipeline_data.get("market_analysis", {})
+            ai_consensus = pipeline_data.get("ai_consensus", {})
             
             return {
-                "current_price": analysis_data.get("current_price", 0),
-                "trend": analysis_data.get("trend_direction", "Neutral"),
-                "momentum": analysis_data.get("momentum", "Neutral"),
-                "support_level": analysis_data.get("support_levels", [0])[0] if analysis_data.get("support_levels") else 0,
-                "resistance_level": analysis_data.get("resistance_levels", [0])[0] if analysis_data.get("resistance_levels") else 0,
-                "volatility": analysis_data.get("volatility_score", 0.5),
-                "volume_trend": analysis_data.get("volume_trend", "Normal"),
-                "rsi": analysis_data.get("technical_indicators", {}).get("rsi", 50),
-                "macd": analysis_data.get("technical_indicators", {}).get("macd", 0),
-                "sentiment": analysis_data.get("sentiment_score", 0.5)
+                "current_price": market_analysis.get("current_price", 0),
+                "trend": ai_consensus.get("trend_direction", "Neutral"),
+                "momentum": market_analysis.get("momentum", "Neutral"),
+                "support_level": market_analysis.get("support_levels", [0])[0] if market_analysis.get("support_levels") else 0,
+                "resistance_level": market_analysis.get("resistance_levels", [0])[0] if market_analysis.get("resistance_levels") else 0,
+                "volatility": market_analysis.get("volatility_score", 0.5),
+                "volume_trend": market_analysis.get("volume_trend", "Normal"),
+                "rsi": market_analysis.get("technical_indicators", {}).get("rsi", 50),
+                "macd": market_analysis.get("technical_indicators", {}).get("macd", 0),
+                "sentiment": ai_consensus.get("sentiment_score", 0.5),
+                "pipeline_source": "5_phase_system"  # Indicate this comes from full pipeline
             }
             
         except Exception as e:
@@ -265,21 +269,26 @@ class ChatServiceAdapters:
             }
     
     async def discover_opportunities(self, user_id: str, risk_tolerance: str = "balanced") -> Dict[str, Any]:
-        """Discover market opportunities."""
+        """Discover market opportunities using the 5-phase pipeline."""
         try:
-            # Use existing market analysis and trading strategies services
-            opportunities_result = await self.market_analysis.find_opportunities(
+            # Use Master Controller pipeline for comprehensive opportunity discovery
+            pipeline_result = await self.master_controller.trigger_pipeline(
+                analysis_type="opportunity_discovery",
+                symbols="BTC,ETH,SOL,MATIC,LINK,UNI,AVAX,DOT",  # Top assets for opportunities
                 risk_tolerance=risk_tolerance,
-                min_confidence=70.0,
-                max_results=10
+                user_id=user_id
             )
             
-            if not opportunities_result.get("success"):
+            if not pipeline_result.get("success"):
                 return {
                     "opportunities": []
                 }
             
-            opportunities_data = opportunities_result.get("opportunities", [])
+            # Extract opportunities from pipeline results (trading strategies + AI consensus)
+            pipeline_data = pipeline_result.get("pipeline_results", {})
+            trading_strategies = pipeline_data.get("trading_strategies", {})
+            ai_consensus = pipeline_data.get("ai_consensus", {})
+            opportunities_data = trading_strategies.get("opportunities", [])
             
             # Format opportunities for chat
             formatted_opportunities = []
@@ -297,7 +306,8 @@ class ChatServiceAdapters:
             
             return {
                 "opportunities": formatted_opportunities,
-                "market_conditions": opportunities_result.get("market_context", {}),
+                "market_conditions": ai_consensus.get("market_context", {}),
+                "pipeline_source": "5_phase_system",
                 "last_updated": datetime.utcnow().isoformat()
             }
             
@@ -309,16 +319,17 @@ class ChatServiceAdapters:
             }
     
     async def get_comprehensive_analysis(self) -> Dict[str, Any]:
-        """Get comprehensive market analysis."""
+        """Get comprehensive market analysis using the 5-phase pipeline."""
         try:
-            # Use existing market analysis service
-            analysis_result = await self.market_analysis.get_market_overview(
-                include_sectors=True,
-                include_sentiment=True,
-                include_technical=True
+            # Use Master Controller pipeline for comprehensive market overview
+            pipeline_result = await self.master_controller.trigger_pipeline(
+                analysis_type="market_overview",
+                symbols="BTC,ETH,BNB,SOL,ADA,XRP,MATIC,DOT,AVAX,LINK",
+                timeframes="1h,4h,1d",
+                user_id="chat_system"
             )
             
-            if not analysis_result.get("success"):
+            if not pipeline_result.get("success"):
                 return {
                     "sentiment": "Neutral",
                     "trend": "Sideways",
@@ -330,17 +341,21 @@ class ChatServiceAdapters:
                     "fear_greed_index": 50
                 }
             
-            analysis_data = analysis_result.get("analysis", {})
+            # Extract comprehensive data from pipeline results
+            pipeline_data = pipeline_result.get("pipeline_results", {})
+            market_analysis = pipeline_data.get("market_analysis", {})
+            ai_consensus = pipeline_data.get("ai_consensus", {})
             
             return {
-                "sentiment": analysis_data.get("market_sentiment", "Neutral"),
-                "trend": analysis_data.get("trend_direction", "Sideways"),
-                "market_phase": analysis_data.get("market_phase", "Consolidation"),
-                "volatility": analysis_data.get("volatility_level", "Medium"),
-                "total_market_cap": analysis_data.get("total_market_cap", 0) / 1e9,  # Convert to billions
-                "total_volume_24h": analysis_data.get("total_volume_24h", 0) / 1e9,  # Convert to billions
-                "btc_dominance": analysis_data.get("btc_dominance", 50),
-                "fear_greed_index": analysis_data.get("fear_greed_index", 50),
+                "sentiment": ai_consensus.get("market_sentiment", "Neutral"),
+                "trend": ai_consensus.get("trend_direction", "Sideways"),
+                "market_phase": ai_consensus.get("market_phase", "Consolidation"),
+                "volatility": market_analysis.get("volatility_level", "Medium"),
+                "total_market_cap": market_analysis.get("total_market_cap", 0) / 1e9,  # Convert to billions
+                "total_volume_24h": market_analysis.get("total_volume_24h", 0) / 1e9,  # Convert to billions
+                "btc_dominance": market_analysis.get("btc_dominance", 50),
+                "fear_greed_index": ai_consensus.get("fear_greed_index", 50),
+                "pipeline_source": "5_phase_system",
                 "last_updated": datetime.utcnow().isoformat()
             }
             

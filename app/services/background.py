@@ -532,10 +532,17 @@ class BackgroundServiceManager(LoggerMixin):
                 if market_data_feeds.redis is None:
                     await market_data_feeds.async_init()
                 
-                # Sync market data for discovered symbols using real APIs
-                await market_data_feeds.sync_market_data_batch(symbols)
+                # Convert symbols to list if it's a set (enterprise-grade type safety)
+                if isinstance(symbols, set):
+                    symbols_list = list(symbols)
+                else:
+                    symbols_list = symbols
                 
-                self.logger.debug(f"Market data sync completed for {len(symbols)} discovered symbols", symbols=symbols[:10])
+                # Sync market data for discovered symbols using real APIs
+                await market_data_feeds.sync_market_data_batch(symbols_list)
+                
+                self.logger.debug(f"Market data sync completed for {len(symbols_list)} discovered symbols", 
+                                symbols=symbols_list[:10] if symbols_list else [])
                 
             except Exception as e:
                 self.logger.error("Market data sync error", error=str(e))
