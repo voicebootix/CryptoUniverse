@@ -1772,7 +1772,7 @@ class MarketAnalysisService(LoggerMixin):
                     
                     elif asset_type == "options":
                         # Real options asset discovery via exchange APIs
-                        options_assets = self._discover_real_options_assets(exchange)
+                        options_assets = await self._discover_real_options_assets(exchange)
                         exchange_assets["asset_types"]["options"] = options_assets
                         exchange_assets["total_assets"] += len(options_assets.get("underlying_assets", [])) * 100
                 
