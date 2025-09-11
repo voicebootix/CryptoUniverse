@@ -602,7 +602,7 @@ I encountered an error during the 5-phase execution. The trade was not completed
                 }),
                 confidence_threshold=80.0,
                 ai_models="all",
-                user_id=user_id or "system"
+                user_id=user_id or "00000000-0000-0000-0000-000000000000"  # System UUID
             )
             
             return {
@@ -715,7 +715,7 @@ I encountered an error during the 5-phase execution. The trade was not completed
     ) -> Dict[str, Any]:
         """Process intents by ROUTING TO ACTUAL SERVICES first, then using AI consensus for validation."""
         
-        user_id = context.get("session_context", {}).get("user_id", "system")
+        user_id = context.get("session_context", {}).get("user_id", "00000000-0000-0000-0000-000000000000")
         
         try:
             # STEP 1: ROUTE TO APPROPRIATE SERVICE (Do the work!)

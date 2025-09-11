@@ -39,6 +39,17 @@ class ChatServiceAdaptersFixed:
         try:
             logger.info("Getting portfolio summary using UI method", user_id=user_id)
             
+            # Handle system user ID - return empty portfolio for system queries
+            if user_id == "system":
+                return {
+                    "total_value": 0,
+                    "daily_pnl": 0,
+                    "total_pnl": 0,
+                    "positions": [],
+                    "risk_level": "Unknown",
+                    "message": "System portfolio query - no user data"
+                }
+            
             # Use the WORKING method that we know returns real data
             from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
             from app.core.database import AsyncSessionLocal
@@ -204,7 +215,7 @@ class ChatServiceAdaptersFixed:
             # Use the CORRECT method that actually exists
             tech_result = await self.market_analysis.technical_analysis(
                 symbols=symbols,
-                timeframes="1h,4h,1d"  # Correct parameter format
+                timeframe="1h"  # Use correct parameter name (singular)
             )
             
             if not tech_result.get("success"):
