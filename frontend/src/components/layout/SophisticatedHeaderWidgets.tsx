@@ -31,6 +31,8 @@ import { useExchanges } from '@/hooks/useExchanges';
 import { usePortfolioStore } from '@/hooks/usePortfolio';
 import { apiClient } from '@/lib/api/client';
 import PaperTradingToggle from '@/components/trading/PaperTradingToggle';
+import { useAuthStore } from '@/store/authStore';
+import { UserRole } from '@/types/auth';
 
 interface CreditInfo {
   total: number;
@@ -41,6 +43,7 @@ interface CreditInfo {
 
 const SophisticatedHeaderWidgets: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
   const { isPaperMode, paperStats, paperBalance } = useGlobalPaperModeStore();
   const { exchanges, aggregatedStats } = useExchanges();
   const { totalValue, dailyPnL, totalPnL, positions, fetchPortfolio, fetchStatus, fetchMarketData } = usePortfolioStore();
@@ -366,6 +369,27 @@ const SophisticatedHeaderWidgets: React.FC = () => {
           </Card>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* Admin Indicator */}
+      {user?.role === UserRole.ADMIN && (
+        <>
+          <Separator orientation="vertical" className="h-8" />
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex items-center gap-2 px-3 py-2 h-auto border-yellow-500/30 text-yellow-600 hover:bg-yellow-500/10"
+            onClick={() => navigate('/dashboard/admin')}
+          >
+            <div className="flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              <div className="flex flex-col items-start">
+                <span className="text-sm font-semibold">Admin</span>
+                <span className="text-xs text-muted-foreground">Panel</span>
+              </div>
+            </div>
+          </Button>
+        </>
+      )}
     </div>
   );
 };
