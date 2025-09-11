@@ -76,7 +76,7 @@ interface SystemMetrics {
   memoryUsage?: number | null;
   diskUsage?: number | null;
   networkLatency?: number | null;
-  metricsSource?: 'psutil' | 'fallback' | 'unknown';
+  metricsSource?: 'psutil' | 'fallback' | 'error' | 'unknown';
 }
 
 const auditLogs = [
@@ -534,7 +534,7 @@ const AdminPage: React.FC = () => {
                       <span className="text-sm font-medium">CPU Usage</span>
                     </div>
                     <span className="text-sm font-bold">
-                      {systemMetrics?.metricsSource === 'fallback' || systemMetrics?.cpuUsage == null 
+                      {(['fallback', 'error'].includes(systemMetrics?.metricsSource || '')) || systemMetrics?.cpuUsage == null 
                         ? 'N/A' 
                         : `${systemMetrics.cpuUsage}%`
                       }
@@ -550,7 +550,7 @@ const AdminPage: React.FC = () => {
                       <span className="text-sm font-medium">Memory Usage</span>
                     </div>
                     <span className="text-sm font-bold">
-                      {systemMetrics?.metricsSource === 'fallback' || systemMetrics?.memoryUsage == null 
+                      {(['fallback', 'error'].includes(systemMetrics?.metricsSource || '')) || systemMetrics?.memoryUsage == null 
                         ? 'N/A' 
                         : `${systemMetrics.memoryUsage}%`
                       }
@@ -566,7 +566,7 @@ const AdminPage: React.FC = () => {
                       <span className="text-sm font-medium">Disk Usage</span>
                     </div>
                     <span className="text-sm font-bold">
-                      {systemMetrics?.metricsSource === 'fallback' || systemMetrics?.diskUsage == null 
+                      {(['fallback', 'error'].includes(systemMetrics?.metricsSource || '')) || systemMetrics?.diskUsage == null 
                         ? 'N/A' 
                         : `${systemMetrics.diskUsage}%`
                       }
@@ -582,7 +582,7 @@ const AdminPage: React.FC = () => {
                       <span className="text-sm font-medium">Network Latency</span>
                     </div>
                     <span className="text-sm font-bold">
-                      {systemMetrics?.metricsSource === 'fallback' || systemMetrics?.networkLatency == null 
+                      {(['fallback', 'error'].includes(systemMetrics?.metricsSource || '')) || systemMetrics?.networkLatency == null 
                         ? 'N/A' 
                         : `${systemMetrics.networkLatency}ms`
                       }

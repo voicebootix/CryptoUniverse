@@ -210,14 +210,14 @@ async def get_system_overview(
                 "networkLatency": None,
                 "metricsSource": "fallback"
             }
-        except (OSError, PermissionError) as e:
-            logger.exception("System metrics access denied or OS error occurred")
+        except (OSError, PermissionError):
+            logger.error("System metrics access denied or OS error occurred")
             system_metrics = {
                 "cpuUsage": None,
                 "memoryUsage": None,
                 "diskUsage": None,
                 "networkLatency": None,
-                "metricsSource": "fallback"
+                "metricsSource": "error"
             }
         except Exception as e:
             logger.exception("Unexpected error while gathering system metrics")
