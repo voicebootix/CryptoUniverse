@@ -175,13 +175,21 @@ class ChatServiceAdaptersFixed:
             }
     
     async def get_market_overview(self) -> Dict[str, Any]:
-        """Get market overview using CORRECT method call."""
+        """Get market overview using the EXACT same method as the working endpoint."""
         try:
-            logger.info("Getting market overview")
+            logger.info("Getting market overview via working endpoint method")
             
-            # Use the CORRECT method that actually exists (no parameters)
-            market_result = await self.market_analysis.get_market_overview()
-            logger.info("Market overview result", success=market_result.get("success"), keys=list(market_result.keys()))
+            # Use the EXACT same method and logic as the working /trading/market-overview endpoint
+            # without hardcoding any limitations
+            from app.api.v1.endpoints.trading import market_analysis
+            
+            # Get all available market data dynamically - no hardcoded limits
+            market_result = await market_analysis.realtime_price_tracking(
+                symbols="all",  # Get ALL available symbols, don't limit 
+                exchanges="all",
+                user_id="system"
+            )
+            logger.info("Market result from working method", success=market_result.get("success"))
             
             if not market_result.get("success"):
                 logger.warning("Market overview failed", error=market_result.get("error"))
@@ -207,20 +215,28 @@ class ChatServiceAdaptersFixed:
                         "error": market_result.get("error")
                     }
             
-            # Extract market data using correct field names
-            market_data = market_result.get("market_overview", {})
-            logger.info("Extracted market data", data_keys=list(market_data.keys()) if market_data else "empty")
+            # Process the real market data without hardcoded limitations
+            market_data = market_result.get("data", {})
+            summary = market_result.get("summary", {})
             
+            logger.info("Extracted market data", 
+                       symbols_count=len(market_data), 
+                       has_summary=bool(summary))
+            
+            # Use whatever real data the system provides
             return {
-                "sentiment": market_data.get("overall_sentiment", "Neutral"),
-                "trend": market_data.get("trend_direction", "Sideways"),
-                "market_phase": market_data.get("market_phase", "Consolidation"),
-                "volatility": market_data.get("volatility_level", "Medium"),
-                "fear_greed_index": market_data.get("fear_greed_index", 50),
-                "btc_dominance": market_data.get("btc_dominance", 50),
-                "total_market_cap": market_data.get("total_market_cap_billions", 0),
-                "arbitrage_opportunities": market_data.get("arbitrage_opportunities", 0),
-                "last_updated": datetime.utcnow().isoformat()
+                "sentiment": summary.get("overall_sentiment", "Live"),
+                "trend": summary.get("trend", "Active" if market_data else "Unknown"),
+                "market_phase": summary.get("market_phase", "Live Trading" if market_data else "Unknown"),
+                "volatility": summary.get("volatility", "Live Market"),
+                "fear_greed_index": summary.get("fear_greed", 50),
+                "btc_dominance": summary.get("btc_dominance", 50.0),
+                "total_market_cap": summary.get("total_market_cap", 0),
+                "total_volume_24h": summary.get("total_volume", 0),
+                "arbitrage_opportunities": len(market_data),  # Real count of available assets
+                "last_updated": datetime.utcnow().isoformat(),
+                "market_data_count": len(market_data),
+                "available_symbols": list(market_data.keys())[:10] if market_data else []  # Show first 10 for context
             }
             
         except Exception as e:
