@@ -74,30 +74,12 @@ class ChatServiceAdaptersFixed:
                 if balance.get("value_usd", 0) > 0:
                     formatted_positions.append({
                         "symbol": balance.get("symbol", "Unknown"),
-                                                "amount": balance.get("total_balance", 0),
-                                                "value_usd": value_usd,
-                                                "exchange": exchange_name,
-                                                "change_24h": 0  # TODO: Calculate from price data
-                                            })
-                                    
-                                    total_value += exchange_total
-                                    connected_exchanges.append({
-                                        "name": exchange_name,
-                                        "value_usd": exchange_total
-                                    })
-                                    
-                                    logger.info(f"Exchange {exchange_name} balance: ${exchange_total:,.2f}")
-                                
-                            except Exception as e:
-                                logger.warning(f"Failed to get {exchange_name} balances", error=str(e))
-                                continue
-                
-                # Calculate percentages for positions
-                for position in all_positions:
-                    if total_value > 0:
-                        position["percentage"] = (position["value_usd"] / total_value) * 100
-                    else:
-                        position["percentage"] = 0
+                        "amount": balance.get("total", 0),
+                        "value_usd": balance.get("value_usd", 0),
+                        "percentage": (balance.get("value_usd", 0) / total_value * 100) if total_value > 0 else 0,
+                        "exchange": balance.get("exchange", "Unknown"),
+                        "change_24h": 0
+                    })
                 
                 # Sort positions by value
                 all_positions.sort(key=lambda x: x["value_usd"], reverse=True)
