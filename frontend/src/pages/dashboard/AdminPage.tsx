@@ -764,7 +764,7 @@ const AdminPage: React.FC = () => {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        {(user.status === 'pending_verification' || !user.is_verified) && (
+                        {user.status === 'pending_verification' && (
                           <DropdownMenuItem onClick={() => handleVerifyUser(user.id)}>
                             <UserCheck className="mr-2 h-4 w-4 text-green-500" />
                             Verify User
