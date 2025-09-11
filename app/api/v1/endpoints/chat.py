@@ -100,7 +100,20 @@ async def send_message(
     """
     try:
         # Enhanced: Process through unified AI manager for consistent experience
-        session_id = request.session_id or f"chat_{uuid.uuid4().hex}"
+        # Generate a proper UUID session ID
+        if request.session_id:
+            # Try to validate existing session ID is UUID format
+            try:
+                uuid.UUID(request.session_id)
+                session_id = request.session_id
+            except ValueError:
+                # If not valid UUID, generate a new one but keep for logging
+                session_id = str(uuid.uuid4())
+                logger.warning("Invalid session ID format, generated new UUID", 
+                             old_session_id=request.session_id, 
+                             new_session_id=session_id)
+        else:
+            session_id = str(uuid.uuid4())
         
         logger.info("Chat endpoint called", 
                    session_id=session_id, 
