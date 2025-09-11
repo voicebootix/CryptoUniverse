@@ -35,60 +35,92 @@ class ChatServiceAdaptersFixed:
         self.ai_consensus = AIConsensusService()
     
     async def get_portfolio_summary(self, user_id: str) -> Dict[str, Any]:
-        """Get portfolio summary using REAL exchange data - FIXED VERSION."""
+        """Get portfolio summary using THE SAME METHOD AS THE UI."""
         try:
-            logger.info("Getting real portfolio summary", user_id=user_id)
+            logger.info("Getting portfolio summary using UI method", user_id=user_id)
             
-            # Use the CORRECT method that actually exists
-            portfolio_status = await self.portfolio_risk.get_portfolio_status(user_id)
+            # Use the EXACT SAME approach as the UI
+            from app.api.v1.endpoints.exchanges import list_exchange_connections, get_exchange_balances
+            from app.core.database import AsyncSessionLocal
+            from app.models.user import User
             
-            if not portfolio_status.get("success"):
-                logger.warning("Portfolio status failed", error=portfolio_status.get("error"))
+            total_value = 0
+            all_positions = []
+            connected_exchanges = []
+            
+            # Create a mock user object for the function calls
+            mock_user = User()
+            mock_user.id = user_id
+            
+            async with AsyncSessionLocal() as db:
+                # Step 1: Get exchange list (same as UI /exchanges/list)
+                exchanges_response = await list_exchange_connections(current_user=mock_user, db=db)
+                
+                if exchanges_response.get("connections"):
+                    # Step 2: Get balances for each exchange (same as UI /exchanges/{exchange}/balances)
+                    for exchange_conn in exchanges_response["connections"]:
+                        if exchange_conn.get("is_active"):
+                            exchange_name = exchange_conn.get("exchange")
+                            try:
+                                # Get balances using the same endpoint as UI
+                                balances_response = await get_exchange_balances(
+                                    exchange=exchange_name,
+                                    current_user=mock_user,
+                                    db=db
+                                )
+                                
+                                if balances_response and len(balances_response) > 0:
+                                    exchange_total = 0
+                                    for balance in balances_response:
+                                        if balance.get("total_balance", 0) > 0:
+                                            value_usd = balance.get("usd_value", 0)
+                                            exchange_total += value_usd
+                                            
+                                            all_positions.append({
+                                                "symbol": balance.get("symbol", "Unknown"),
+                                                "amount": balance.get("total_balance", 0),
+                                                "value_usd": value_usd,
+                                                "exchange": exchange_name,
+                                                "change_24h": 0  # TODO: Calculate from price data
+                                            })
+                                    
+                                    total_value += exchange_total
+                                    connected_exchanges.append({
+                                        "name": exchange_name,
+                                        "value_usd": exchange_total
+                                    })
+                                    
+                                    logger.info(f"Exchange {exchange_name} balance: ${exchange_total:,.2f}")
+                                
+                            except Exception as e:
+                                logger.warning(f"Failed to get {exchange_name} balances", error=str(e))
+                                continue
+                
+                # Calculate percentages for positions
+                for position in all_positions:
+                    if total_value > 0:
+                        position["percentage"] = (position["value_usd"] / total_value) * 100
+                    else:
+                        position["percentage"] = 0
+                
+                # Sort positions by value
+                all_positions.sort(key=lambda x: x["value_usd"], reverse=True)
+                
+                logger.info(f"Portfolio summary: ${total_value:,.2f} across {len(connected_exchanges)} exchanges")
+                
                 return {
-                    "total_value": 0,
-                    "daily_pnl": 0,
-                    "total_pnl": 0,
-                    "positions": [],
-                    "risk_level": "Unknown",
-                    "error": portfolio_status.get("error", "No portfolio data")
+                    "total_value": total_value,
+                    "daily_pnl": 0,  # TODO: Calculate from historical data
+                    "daily_pnl_pct": 0,
+                    "total_pnl": 0,  # TODO: Calculate from cost basis
+                    "total_pnl_pct": 0,
+                    "positions": all_positions[:10],  # Top 10 positions
+                    "risk_level": "Medium",  # TODO: Calculate based on positions
+                    "exchanges_connected": len(connected_exchanges),
+                    "exchanges": connected_exchanges,
+                    "data_source": "real_exchanges_ui_method",
+                    "last_updated": datetime.utcnow().isoformat()
                 }
-            
-            # Extract REAL portfolio data
-            portfolio_data = portfolio_status.get("portfolio", {})
-            total_value = portfolio_data.get("total_value_usd", 0)
-            positions = portfolio_data.get("positions", [])
-            
-            # Get REAL daily P&L using the correct method
-            daily_pnl, daily_pnl_pct = await self.portfolio_risk.calculate_daily_pnl(user_id, total_value)
-            
-            # Get REAL total P&L using the correct method
-            total_pnl, total_pnl_pct = await self.portfolio_risk.calculate_total_pnl(user_id, positions)
-            
-            # Format positions for chat using REAL balance data
-            formatted_positions = []
-            for position in positions[:10]:  # Top 10 positions
-                if position.get("total_balance", 0) > 0:  # Only include non-zero balances
-                    formatted_positions.append({
-                        "symbol": position.get("symbol", "Unknown"),
-                        "amount": position.get("total_balance", 0),
-                        "value_usd": position.get("usd_value", 0),
-                        "percentage": (position.get("usd_value", 0) / total_value * 100) if total_value > 0 else 0,
-                        "exchange": position.get("exchange", "Unknown"),
-                        "change_24h": position.get("change_24h", 0)
-                    })
-            
-            return {
-                "total_value": total_value,
-                "daily_pnl": daily_pnl,
-                "daily_pnl_pct": daily_pnl_pct,
-                "total_pnl": total_pnl,
-                "total_pnl_pct": total_pnl_pct,
-                "positions": formatted_positions,
-                "risk_level": portfolio_data.get("risk_level", "Medium"),
-                "exchanges_connected": len(portfolio_data.get("exchanges", [])),
-                "data_source": "real_exchanges",
-                "last_updated": datetime.utcnow().isoformat()
-            }
             
         except Exception as e:
             logger.error("Portfolio summary failed", error=str(e), user_id=user_id, exc_info=True)
