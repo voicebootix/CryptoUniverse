@@ -265,7 +265,12 @@ const SophisticatedHeaderWidgets: React.FC = () => {
               )}
 
               <Separator />
-              <Button variant="outline" size="sm" className="w-full">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="w-full"
+                onClick={() => navigate('/dashboard/exchanges')}
+              >
                 Manage Exchanges
               </Button>
             </CardContent>
