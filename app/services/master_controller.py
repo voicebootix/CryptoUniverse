@@ -2803,7 +2803,7 @@ class MasterSystemController(LoggerMixin):
                                opportunities=pipeline_result["phases"]["phase_1"]["opportunities_found"])
                 
             except Exception as e:
-                self.logger.error("❌ Phase 1 Failed", cycle_id=cycle_id, error=str(e))
+                self.logger.exception("❌ Phase 1 Failed", cycle_id=cycle_id)
                 pipeline_result["phases"]["phase_1"] = {"status": "failed", "error": str(e)}
                 return pipeline_result
             
@@ -2835,8 +2835,7 @@ class MasterSystemController(LoggerMixin):
                     # Generate trading signal based on market analysis
                     trade_signal = await trading_strategies_service.generate_trading_signal(
                         strategy_type=strategy_type,
-                        symbol=best_symbol,
-                        parameters=strategy_params,
+                        market_data=strategy_params,
                         risk_mode=risk_tolerance  # Use risk_tolerance from kwargs
                     )
                     
@@ -2856,7 +2855,7 @@ class MasterSystemController(LoggerMixin):
                                    action=pipeline_result["phases"]["phase_2"]["action"])
                     
                 except Exception as e:
-                    self.logger.error("❌ Phase 2 Failed", cycle_id=cycle_id, error=str(e))
+                    self.logger.exception("❌ Phase 2 Failed", cycle_id=cycle_id)
                     pipeline_result["phases"]["phase_2"] = {"status": "failed", "error": str(e)}
                     return pipeline_result
             
@@ -2891,7 +2890,7 @@ class MasterSystemController(LoggerMixin):
                                    position_size=sized_position.get("position_size_usd", 0))
                     
                 except Exception as e:
-                    self.logger.error("❌ Phase 3 Failed", cycle_id=cycle_id, error=str(e))
+                    self.logger.exception("❌ Phase 3 Failed", cycle_id=cycle_id)
                     pipeline_result["phases"]["phase_3"] = {"status": "failed", "error": str(e)}
                     return pipeline_result
             
@@ -2933,7 +2932,7 @@ class MasterSystemController(LoggerMixin):
                                    confidence=validation.get("consensus_confidence", 0))
                     
                 except Exception as e:
-                    self.logger.error("❌ Phase 4 Failed", cycle_id=cycle_id, error=str(e))
+                    self.logger.exception("❌ Phase 4 Failed", cycle_id=cycle_id)
                     pipeline_result["phases"]["phase_4"] = {"status": "failed", "error": str(e)}
                     return pipeline_result
             
@@ -2970,7 +2969,7 @@ class MasterSystemController(LoggerMixin):
                                    executed=execution_result.get("success", False))
                     
                 except Exception as e:
-                    self.logger.error("❌ Phase 5 Failed", cycle_id=cycle_id, error=str(e))
+                    self.logger.exception("❌ Phase 5 Failed", cycle_id=cycle_id)
                     pipeline_result["phases"]["phase_5"] = {"status": "failed", "error": str(e)}
                     
             else:
@@ -3004,10 +3003,9 @@ class MasterSystemController(LoggerMixin):
             pipeline_result["execution_time_ms"] = total_time
             pipeline_result["error"] = str(e)
             
-            self.logger.error("💥 ENTERPRISE Pipeline Failed", 
+            self.logger.exception("💥 ENTERPRISE Pipeline Failed", 
                             cycle_id=cycle_id, 
-                            total_time_ms=total_time,
-                            error=str(e))
+                            total_time_ms=total_time)
             
             return pipeline_result
     
@@ -3086,9 +3084,8 @@ class MasterSystemController(LoggerMixin):
                 )
             
         except Exception as e:
-            self.logger.error(f"Pipeline coordination failed", 
-                            analysis_type=analysis_type, 
-                            error=str(e))
+            self.logger.exception(f"Pipeline coordination failed", 
+                            analysis_type=analysis_type)
             
             # Fallback to direct execution
             self.logger.info(f"Falling back to direct pipeline execution")

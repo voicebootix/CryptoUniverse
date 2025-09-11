@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import pipelineApi, { PipelineResult } from '@/lib/api/pipelineApi';
+import { pipelineApi, PipelineResult } from '@/lib/api/pipelineApi';
 import { ArbitrageOpportunity } from '@/types/arbitrage';
 
 // Enhanced interfaces using pipeline data
@@ -103,8 +103,9 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<number | null>(null);
   const isRefreshingRef = useRef<boolean>(false);
+  const isMountedRef = useRef<boolean>(true);
 
   const extractPipelineData = (result: PipelineResult) => {
     return {
@@ -196,7 +197,16 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
             confidence: aiConsensus.confidence_score ?? 0.5,
             ai_consensus_score: aiConsensus.consensus_score ?? 0.5,
             pipeline_source: true,
-            timestamp: result?.last_updated ?? Date.now()
+            timestamp: (() => {
+              if (result?.last_updated) {
+                if (typeof result.last_updated === 'number') {
+                  return new Date(result.last_updated).toISOString();
+                } else if (typeof result.last_updated === 'string') {
+                  return result.last_updated;
+                }
+              }
+              return new Date().toISOString();
+            })()
           };
         });
         
@@ -473,11 +483,14 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
         // Update multiple state variables with comprehensive asset data
         const assetData = pipelineData.marketAnalysis[symbol] || {};
         
+        // Get symbol-specific AI consensus with proper guarding
+        const consensus = pipelineData.aiConsensus?.[symbol] || {};
+        
         setTechnicalAnalysis(prev => ({
           ...prev,
           [symbol]: {
             symbol,
-            trend: pipelineData.aiConsensus.trend_direction || 'neutral',
+            trend: consensus.trend_direction || 'neutral',
             rsi: assetData.technical_indicators?.rsi || 50,
             macd: {
               line: assetData.technical_indicators?.macd || 0,
@@ -492,9 +505,9 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
             },
             support: assetData.support_levels?.[0] || 0,
             resistance: assetData.resistance_levels?.[0] || 0,
-            recommendation: pipelineData.aiConsensus.recommendation || 'hold',
-            confidence: pipelineData.aiConsensus.confidence_score || 0.5,
-            ai_consensus_score: pipelineData.aiConsensus.consensus_score || 0.5,
+            recommendation: consensus.recommendation || 'hold',
+            confidence: consensus.confidence_score || 0.5,
+            ai_consensus_score: consensus.consensus_score || 0.5,
             pipeline_source: true,
             timestamp: result.last_updated
           }
@@ -514,11 +527,7 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
     setError(null);
     try {
       const result = await pipelineApi.startAutonomousMode(config);
-      if (result.success) {
-        setAutonomousStatus({ ...result, active: true });
-      } else {
-        throw new Error('Failed to start autonomous mode');
-      }
+      setAutonomousStatus({ ...result, active: true });
     } catch (err: any) {
       setError(err?.message || 'Failed to start autonomous mode');
     } finally {
@@ -531,11 +540,7 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
     setError(null);
     try {
       const result = await pipelineApi.stopAutonomousMode();
-      if (result.success) {
-        setAutonomousStatus({ ...result, active: false });
-      } else {
-        throw new Error('Failed to stop autonomous mode');
-      }
+      setAutonomousStatus({ ...result, active: false });
     } catch (err: any) {
       setError(err?.message || 'Failed to stop autonomous mode');
     } finally {
@@ -546,8 +551,9 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
   const fetchAutonomousStatus = async (): Promise<void> => {
     try {
       const result = await pipelineApi.getAutonomousStatus();
-      if (result.success) {
-        setAutonomousStatus(result.data || result);
+      if (result && result.success === true) {
+        const statusData = result.data || result;
+        setAutonomousStatus(statusData);
       }
     } catch (err: any) {
       // Don't set error for status checks
@@ -556,6 +562,11 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
   };
 
   const fetchSystemMetrics = async (): Promise<void> => {
+    // Add gating condition - don't fetch if no userId or pipeline not initialized
+    if (!userId) {
+      return;
+    }
+    
     try {
       const result = await pipelineApi.getSystemMetrics();
       if (result.success) {
@@ -569,11 +580,14 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
   const fetchPipelineHistory = async (limit: number = 50): Promise<void> => {
     try {
       const result = await pipelineApi.getPipelineHistory(limit);
-      if (result.success) {
+      // Only update state if still mounted
+      if (isMountedRef.current && result.success) {
         setPipelineHistory(result.data?.history || result.history || []);
       }
     } catch (err: any) {
-      console.warn('Failed to fetch pipeline history:', err.message);
+      // Log full error object and only update if still mounted
+      console.warn('Failed to fetch pipeline history:', err);
+      // Don't set error state for history fetch failures to avoid UI disruption
     }
   };
 
@@ -621,7 +635,7 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
   useEffect(() => {
     // Clear any existing interval first
     if (intervalRef.current) {
-      clearInterval(intervalRef.current);
+      window.clearInterval(intervalRef.current);
     }
     
     refreshAll();
@@ -635,8 +649,9 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
     }, 120000); // Update every 2 minutes (pipeline coordination)
     
     return () => {
+      isMountedRef.current = false; // Mark as unmounted
       if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+        window.clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
     };
