@@ -65,7 +65,7 @@ class ChatIntegrationService(LoggerMixin):
                 "portfolio_summary": portfolio_summary,
                 "risk_metrics": risk_metrics,
                 "performance_data": performance_data,
-                "user_query": message.content,
+                "user_query": message,
                 "analysis_type": "comprehensive_portfolio_analysis"
             }
             
@@ -151,7 +151,7 @@ What would you like me to help you with next?"""
         try:
             
             # Extract trade parameters
-            trade_params = await chat_engine._extract_trade_parameters(message.content)
+            trade_params = await chat_engine._extract_trade_parameters(message)
             
             if not trade_params:
                 return {
@@ -179,7 +179,7 @@ Example: "Buy $1000 of Bitcoin" or "Sell 0.5 ETH at market price" """,
                 "trade_request": trade_params,
                 "market_analysis": market_data,
                 "portfolio_context": portfolio_data,
-                "user_message": message.content
+                "user_message": message
             }
             
             ai_analysis = await self.adapters.ai_consensus.analyze_opportunity(
@@ -275,7 +275,7 @@ Reply with:
                 "portfolio_data": portfolio_data,
                 "rebalance_analysis": rebalance_analysis,
                 "current_strategy": current_strategy,
-                "user_message": message.content
+                "user_message": message
             }
             
             ai_analysis = await self.adapters.ai_consensus.analyze_opportunity(
@@ -498,7 +498,7 @@ No significant opportunities detected in current market conditions.
                 "risk_analysis": risk_analysis,
                 "portfolio_data": portfolio_data,
                 "market_conditions": market_conditions,
-                "user_message": message.content
+                "user_message": message
             }
             
             ai_assessment = await self.adapters.ai_consensus.analyze_opportunity(
@@ -574,7 +574,7 @@ What risk management action would you like to take?"""
             market_context = {
                 "market_overview": market_overview,
                 "sector_analysis": sector_analysis,
-                "user_message": message.content,
+                "user_message": message,
                 "analysis_type": "comprehensive_market_analysis"
             }
             
