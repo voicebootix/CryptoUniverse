@@ -40,7 +40,13 @@ class ChatServiceAdaptersFixed:
             logger.info("Getting portfolio summary using UI method", user_id=user_id)
             
             # Handle system user ID - return empty portfolio for system queries
-            if user_id == "system":
+            # Check for both legacy "system" string and zero UUID (post-migration)
+            is_system_user = (
+                user_id == "system" or 
+                user_id == "00000000-0000-0000-0000-000000000000"
+            )
+            
+            if is_system_user:
                 return {
                     "total_value": 0,
                     "daily_pnl": 0,
