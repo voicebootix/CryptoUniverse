@@ -39,45 +39,41 @@ class ChatServiceAdaptersFixed:
         try:
             logger.info("Getting portfolio summary using UI method", user_id=user_id)
             
-            # Use the EXACT SAME approach as the UI
-            from app.api.v1.endpoints.exchanges import list_exchange_connections, get_exchange_balances
+            # Use the WORKING method that we know returns real data
+            from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
             from app.core.database import AsyncSessionLocal
-            from app.models.user import User
-            
-            total_value = 0
-            all_positions = []
-            connected_exchanges = []
-            
-            # Create a mock user object for the function calls
-            mock_user = User()
-            mock_user.id = user_id
             
             async with AsyncSessionLocal() as db:
-                # Step 1: Get exchange list (same as UI /exchanges/list)
-                exchanges_response = await list_exchange_connections(current_user=mock_user, db=db)
-                
-                if exchanges_response.get("connections"):
-                    # Step 2: Get balances for each exchange (same as UI /exchanges/{exchange}/balances)
-                    for exchange_conn in exchanges_response["connections"]:
-                        if exchange_conn.get("is_active"):
-                            exchange_name = exchange_conn.get("exchange")
-                            try:
-                                # Get balances using the same endpoint as UI
-                                balances_response = await get_exchange_balances(
-                                    exchange=exchange_name,
-                                    current_user=mock_user,
-                                    db=db
-                                )
-                                
-                                if balances_response and len(balances_response) > 0:
-                                    exchange_total = 0
-                                    for balance in balances_response:
-                                        if balance.get("total_balance", 0) > 0:
-                                            value_usd = balance.get("usd_value", 0)
-                                            exchange_total += value_usd
-                                            
-                                            all_positions.append({
-                                                "symbol": balance.get("symbol", "Unknown"),
+                # This method actually works and returns real data
+                portfolio_result = await get_user_portfolio_from_exchanges(user_id, db)
+            
+            if not portfolio_result.get("success"):
+                logger.warning("Portfolio from exchanges failed", error=portfolio_result.get("error"))
+                return {
+                    "total_value": 0,
+                    "daily_pnl": 0,
+                    "total_pnl": 0,
+                    "positions": [],
+                    "risk_level": "Unknown",
+                    "error": portfolio_result.get("error", "No portfolio data")
+                }
+            
+            # Extract the real data
+            total_value = portfolio_result.get("total_value_usd", 0)
+            balances = portfolio_result.get("balances", [])
+            exchanges = portfolio_result.get("exchanges", [])
+            
+            logger.info("Real portfolio data retrieved", 
+                       total_value=total_value, 
+                       balance_count=len(balances),
+                       exchange_count=len(exchanges))
+            
+            # Format positions for chat
+            formatted_positions = []
+            for balance in balances[:10]:  # Top 10 positions
+                if balance.get("value_usd", 0) > 0:
+                    formatted_positions.append({
+                        "symbol": balance.get("symbol", "Unknown"),
                                                 "amount": balance.get("total_balance", 0),
                                                 "value_usd": value_usd,
                                                 "exchange": exchange_name,
