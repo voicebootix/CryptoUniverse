@@ -25,7 +25,7 @@ from app.services.trade_execution import TradeExecutionService
 from app.services.market_analysis_core import MarketAnalysisService
 from app.services.trading_strategies import TradingStrategiesService
 from app.services.portfolio_risk_core import PortfolioRiskService
-from app.services.chat_service_adapters import ChatServiceAdapters
+from app.services.chat_service_adapters_fixed import ChatServiceAdaptersFixed as ChatServiceAdapters
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
