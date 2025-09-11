@@ -77,6 +77,7 @@ interface SystemMetrics {
   diskUsage?: number | null;
   networkLatency?: number | null;
   metricsSource?: 'psutil' | 'fallback' | 'error' | 'unknown';
+  timestamp?: string;
 }
 
 const auditLogs = [
@@ -175,7 +176,7 @@ const AdminPage: React.FC = () => {
       // Fetch all data using Promise.allSettled for better error handling
       const results = await Promise.allSettled([
         adminService.getUsers(),
-        adminService.getMetrics(),
+        adminService.getSystemStatus(),
         adminService.getPendingUsers(),
         adminService.getAuditLogs({ limit: 10 })
       ]);
@@ -534,7 +535,7 @@ const AdminPage: React.FC = () => {
                       <span className="text-sm font-medium">CPU Usage</span>
                     </div>
                     <span className="text-sm font-bold">
-                      {(['fallback', 'error'].includes(systemMetrics?.metricsSource || '')) || systemMetrics?.cpuUsage == null 
+                      {(['fallback', 'error', 'unknown'].includes(systemMetrics?.metricsSource || '')) || systemMetrics?.cpuUsage == null 
                         ? 'N/A' 
                         : `${systemMetrics.cpuUsage}%`
                       }
@@ -550,7 +551,7 @@ const AdminPage: React.FC = () => {
                       <span className="text-sm font-medium">Memory Usage</span>
                     </div>
                     <span className="text-sm font-bold">
-                      {(['fallback', 'error'].includes(systemMetrics?.metricsSource || '')) || systemMetrics?.memoryUsage == null 
+                      {(['fallback', 'error', 'unknown'].includes(systemMetrics?.metricsSource || '')) || systemMetrics?.memoryUsage == null 
                         ? 'N/A' 
                         : `${systemMetrics.memoryUsage}%`
                       }
@@ -566,7 +567,7 @@ const AdminPage: React.FC = () => {
                       <span className="text-sm font-medium">Disk Usage</span>
                     </div>
                     <span className="text-sm font-bold">
-                      {(['fallback', 'error'].includes(systemMetrics?.metricsSource || '')) || systemMetrics?.diskUsage == null 
+                      {(['fallback', 'error', 'unknown'].includes(systemMetrics?.metricsSource || '')) || systemMetrics?.diskUsage == null 
                         ? 'N/A' 
                         : `${systemMetrics.diskUsage}%`
                       }
@@ -582,7 +583,7 @@ const AdminPage: React.FC = () => {
                       <span className="text-sm font-medium">Network Latency</span>
                     </div>
                     <span className="text-sm font-bold">
-                      {(['fallback', 'error'].includes(systemMetrics?.metricsSource || '')) || systemMetrics?.networkLatency == null 
+                      {(['fallback', 'error', 'unknown'].includes(systemMetrics?.metricsSource || '')) || systemMetrics?.networkLatency == null 
                         ? 'N/A' 
                         : `${systemMetrics.networkLatency}ms`
                       }
