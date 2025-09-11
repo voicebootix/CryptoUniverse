@@ -102,31 +102,22 @@ async def send_message(
         # Enhanced: Process through unified AI manager for consistent experience
         session_id = request.session_id or f"chat_{uuid.uuid4().hex}"
         
-        # Map mode to interface type
-        interface_mapping = {
-            "trading": InterfaceType.WEB_CHAT,
-            "quick": InterfaceType.WEB_CHAT,
-            "analysis": InterfaceType.WEB_UI,
-            "support": InterfaceType.WEB_CHAT
-        }
-        
-        interface_type = interface_mapping.get(request.mode, InterfaceType.WEB_CHAT)
-        
-        # Build context for unified AI manager
-        unified_context = {
-            "session_id": session_id,
-            "interface_type": request.mode,
-            "platform": "web",
-            "user_context": request.context,
-            "conversation_continuity": True,
-            "enhanced_chat_endpoint": True
-        }
-        
-        # Process through ENHANCED CHAT ENGINE (primary system with memory)
-        logger.info("Processing with enhanced chat engine", 
+        logger.info("Chat endpoint called", 
                    session_id=session_id, 
                    user_id=str(current_user.id),
-                   mode=request.mode)
+                   mode=request.mode,
+                   message_length=len(request.message))
+        
+        # Test chat engine availability first
+        if not hasattr(chat_engine, 'process_message'):
+            logger.error("Chat engine missing process_message method")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Chat engine not properly initialized"
+            )
+        
+        # Process through ENHANCED CHAT ENGINE (primary system with memory)
+        logger.info("Calling chat engine process_message")
         
         response = await chat_engine.process_message(
             session_id=session_id,
@@ -134,10 +125,27 @@ async def send_message(
             user_id=str(current_user.id)
         )
         
+        logger.info("Chat engine response received", 
+                   success=response.get("success"),
+                   has_content=bool(response.get("content")),
+                   intent=response.get("intent"))
+        
         if not response.get("success"):
+            logger.error("Chat engine returned failure", error=response.get("error"))
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=response.get("error", "Failed to process message")
+            )
+        
+        # Validate required fields
+        required_fields = ["session_id", "message_id", "content", "intent"]
+        missing_fields = [field for field in required_fields if not response.get(field)]
+        
+        if missing_fields:
+            logger.error("Chat response missing required fields", missing=missing_fields)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Invalid chat response: missing {missing_fields}"
             )
         
         return ChatMessageResponse(
@@ -154,11 +162,18 @@ async def send_message(
             ai_analysis=response.get("ai_analysis")
         )
         
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
-        logger.error("Chat message processing failed", error=str(e), user_id=current_user.id)
+        logger.error("Chat message processing failed", 
+                    error=str(e), 
+                    error_type=type(e).__name__,
+                    user_id=current_user.id,
+                    exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process chat message"
+            detail=f"Chat processing error: {str(e)}"
         )
 
 

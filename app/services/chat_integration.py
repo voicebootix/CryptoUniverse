@@ -16,7 +16,7 @@ from app.core.logging import LoggerMixin
 from app.services.ai_chat_engine import enhanced_chat_engine as chat_engine, ChatIntent
 from app.services.master_controller import MasterSystemController
 from app.services.trade_execution import TradeExecutionService
-from app.services.chat_service_adapters import chat_adapters
+from app.services.chat_service_adapters_fixed import chat_adapters_fixed as chat_adapters
 from app.services.websocket import manager
 
 settings = get_settings()
@@ -50,23 +50,20 @@ class ChatIntegrationService(LoggerMixin):
         chat_engine._handle_market_analysis = self._enhanced_market_analysis
         chat_engine.execute_confirmed_action = self._execute_confirmed_action
     
-    async def _enhanced_portfolio_analysis(self, session, message) -> Dict[str, Any]:
+    async def _enhanced_portfolio_analysis(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Enhanced portfolio analysis with full service integration."""
         
         try:
-            user_id = session.user_id
             
-            # Get comprehensive portfolio data
+            # Get comprehensive portfolio data using FIXED adapters
             portfolio_summary = await self.adapters.get_portfolio_summary(user_id)
             risk_metrics = await self.adapters.comprehensive_risk_analysis(user_id)
-            performance_data = await self.adapters.get_performance_metrics(user_id)
             
             # Get AI analysis from multiple models
             analysis_context = {
                 "portfolio_summary": portfolio_summary,
                 "risk_metrics": risk_metrics,
-                "performance_data": performance_data,
-                "user_query": message.content,
+                "user_query": message,
                 "analysis_type": "comprehensive_portfolio_analysis"
             }
             
@@ -146,14 +143,13 @@ What would you like me to help you with next?"""
                 "metadata": {"error": str(e)}
             }
     
-    async def _enhanced_trade_execution(self, session, message) -> Dict[str, Any]:
+    async def _enhanced_trade_execution(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Enhanced trade execution with full market analysis."""
         
         try:
-            user_id = session.user_id
             
             # Extract trade parameters
-            trade_params = await chat_engine._extract_trade_parameters(message.content)
+            trade_params = await chat_engine._extract_trade_parameters(message)
             
             if not trade_params:
                 return {
@@ -181,7 +177,7 @@ Example: "Buy $1000 of Bitcoin" or "Sell 0.5 ETH at market price" """,
                 "trade_request": trade_params,
                 "market_analysis": market_data,
                 "portfolio_context": portfolio_data,
-                "user_message": message.content
+                "user_message": message
             }
             
             ai_analysis = await self.adapters.ai_consensus.analyze_opportunity(
@@ -257,11 +253,10 @@ Reply with:
                 "metadata": {"error": str(e)}
             }
     
-    async def _enhanced_rebalancing(self, session, message) -> Dict[str, Any]:
+    async def _enhanced_rebalancing(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Enhanced rebalancing with strategy optimization."""
         
         try:
-            user_id = session.user_id
             
             # Get current portfolio and strategy
             portfolio_data = await self.adapters.get_portfolio_summary(user_id)
@@ -278,7 +273,7 @@ Reply with:
                 "portfolio_data": portfolio_data,
                 "rebalance_analysis": rebalance_analysis,
                 "current_strategy": current_strategy,
-                "user_message": message.content
+                "user_message": message
             }
             
             ai_analysis = await self.adapters.ai_consensus.analyze_opportunity(
@@ -373,20 +368,19 @@ Your portfolio is well-balanced according to your current strategy. No rebalanci
                 "metadata": {"error": str(e)}
             }
     
-    async def _enhanced_opportunity_discovery(self, session, message) -> Dict[str, Any]:
+    async def _enhanced_opportunity_discovery(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Enhanced opportunity discovery with comprehensive market scanning."""
         
         try:
-            user_id = session.user_id
             
-            # Get comprehensive market opportunities
-            market_scan = await self.adapters.comprehensive_market_scan()
+            # Get comprehensive market opportunities using FIXED adapters
+            market_scan = await self.adapters.get_market_overview()
             portfolio_context = await self.adapters.get_portfolio_summary(user_id)
             
             # Use trading strategies service to find opportunities
             strategy_opportunities = await self.adapters.discover_opportunities(
                 user_id=user_id,
-                risk_tolerance=session.context.get("risk_tolerance", "balanced")
+                risk_tolerance=context.get("risk_tolerance", "balanced")
             )
             
             # Get AI consensus on opportunities
@@ -394,7 +388,7 @@ Your portfolio is well-balanced according to your current strategy. No rebalanci
                 "market_scan": market_scan,
                 "strategy_opportunities": strategy_opportunities,
                 "portfolio_context": portfolio_context,
-                "user_message": message.content
+                "user_message": message
             }
             
             ai_analysis = await self.adapters.ai_consensus.analyze_opportunity(
@@ -487,11 +481,10 @@ No significant opportunities detected in current market conditions.
                 "metadata": {"error": str(e)}
             }
     
-    async def _enhanced_risk_assessment(self, session, message) -> Dict[str, Any]:
+    async def _enhanced_risk_assessment(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Enhanced risk assessment with comprehensive analysis."""
         
         try:
-            user_id = session.user_id
             
             # Get comprehensive risk analysis
             risk_analysis = await self.adapters.comprehensive_risk_analysis(user_id)
@@ -503,7 +496,7 @@ No significant opportunities detected in current market conditions.
                 "risk_analysis": risk_analysis,
                 "portfolio_data": portfolio_data,
                 "market_conditions": market_conditions,
-                "user_message": message.content
+                "user_message": message
             }
             
             ai_assessment = await self.adapters.ai_consensus.analyze_opportunity(
@@ -567,19 +560,19 @@ What risk management action would you like to take?"""
                 "metadata": {"error": str(e)}
             }
     
-    async def _enhanced_market_analysis(self, session, message) -> Dict[str, Any]:
+    async def _enhanced_market_analysis(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Enhanced market analysis with multi-timeframe insights."""
         
         try:
-            # Get comprehensive market analysis
-            market_overview = await self.adapters.get_comprehensive_analysis()
-            sector_analysis = await self.adapters.get_sector_analysis()
+            # Get comprehensive market analysis using FIXED adapters
+            market_overview = await self.adapters.get_market_overview()
+            technical_analysis = await self.adapters.get_technical_analysis()
             
             # Get AI consensus on market conditions
             market_context = {
                 "market_overview": market_overview,
-                "sector_analysis": sector_analysis,
-                "user_message": message.content,
+                "technical_analysis": technical_analysis,
+                "user_message": message,
                 "analysis_type": "comprehensive_market_analysis"
             }
             
