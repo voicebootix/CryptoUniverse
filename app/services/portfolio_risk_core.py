@@ -1602,21 +1602,25 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
     
     async def _calculate_pnl_from_exchange_data(self, user_id: str, current_portfolio_value: float, db) -> tuple[float, float]:
         """SOPHISTICATED fallback P&L calculation using exchange balance data."""
-        # Use OPTIMIZED query with new index idx_exchange_balance_nonzero_cost
-        stmt = select(ExchangeBalance).join(ExchangeAccount).where(
+        # Use OPTIMIZED query with column-only select for active balances only
+        stmt = select(
+            ExchangeBalance.balance_change_24h,
+            ExchangeBalance.usd_value
+        ).join(ExchangeAccount).where(
             and_(
                 ExchangeAccount.user_id == user_id,
-                ExchangeBalance.total_balance > 0
+                ExchangeBalance.total_balance > 0,
+                ExchangeBalance.is_active == True
             )
         )
         result = await db.execute(stmt)
-        balances = result.scalars().all()
+        balance_rows = result.fetchall()
         
         total_daily_pnl = 0.0
-        for balance in balances:
+        for row in balance_rows:
             # ENTERPRISE LOGIC: Combine multiple data sources for accuracy
-            balance_change_24h = float(balance.balance_change_24h or 0)
-            position_value = float(balance.usd_value or 0)
+            balance_change_24h = float(row.balance_change_24h or 0)
+            position_value = float(row.usd_value or 0)
             
             # Apply position-weighted P&L calculation
             if position_value > 0:
