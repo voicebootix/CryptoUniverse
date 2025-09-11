@@ -1538,8 +1538,7 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
     async def calculate_daily_pnl(self, user_id: str, current_portfolio_value: float) -> tuple[float, float]:
         """Calculate daily P&L using historical portfolio values."""
         try:
-            from datetime import datetime, timedelta
-            from app.core.database import AsyncSessionLocal
+            from datetime import timedelta
             from app.models.trading import Portfolio  # Use existing Portfolio model
             
             # Get portfolio value from 24 hours ago
@@ -1569,65 +1568,80 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                 return daily_pnl, daily_pnl_pct
                 
         except Exception as e:
-            logger.error(f"Failed to calculate daily P&L: {str(e)}")
+            self.logger.exception(f"Failed to calculate daily P&L for user {user_id}", user_id=user_id)
             return 0.0, 0.0
     
     async def estimate_daily_pnl_from_price_changes(self, user_id: str, current_portfolio_value: float) -> tuple[float, float]:
         """Estimate daily P&L based on asset price changes when no historical data exists."""
         try:
-            from app.core.database import AsyncSessionLocal
-            # Get current positions
+            # Get current positions - optimized query for active balances only
             async with AsyncSessionLocal() as db:
-                stmt = select(ExchangeBalance).join(ExchangeAccount).where(
+                stmt = select(
+                    ExchangeBalance.balance_change_24h,
+                    ExchangeBalance.usd_value,
+                    ExchangeBalance.symbol
+                ).join(ExchangeAccount).where(
                     and_(
                         ExchangeAccount.user_id == user_id,
-                        ExchangeBalance.total_balance > 0
+                        ExchangeBalance.total_balance > 0,
+                        ExchangeBalance.is_active == True
                     )
                 )
                 result = await db.execute(stmt)
-                balances = result.scalars().all()
+                balance_rows = result.fetchall()
                 
-                # Calculate estimated P&L based on typical crypto volatility
-                # This is a rough estimate - real implementation would use actual price history
-                estimated_daily_change = 0.0
-                total_weight = 0.0
+                # Calculate P&L from lightweight balance data
+                total_daily_pnl = 0.0
+                total_value = sum(float(row.usd_value or 0) for row in balance_rows)
                 
-                for balance in balances:
-                    weight = float(balance.usd_value) / current_portfolio_value if current_portfolio_value > 0 else 0
-                    
-                    # Apply different volatility estimates based on asset type
-                    if balance.symbol in ['BTC', 'ETH']:
-                        daily_volatility = 0.03  # 3% typical daily volatility
-                    elif balance.symbol in ['USDT', 'USDC', 'BUSD']:
-                        daily_volatility = 0.001  # 0.1% for stablecoins
-                    else:
-                        daily_volatility = 0.05  # 5% for altcoins
-                    
-                    # Random walk estimation (could be positive or negative)
-                    import random
-                    random.seed()  # Ensure different results each time
-                    price_change = random.uniform(-daily_volatility, daily_volatility)
-                    estimated_daily_change += weight * price_change
-                    total_weight += weight
+                for row in balance_rows:
+                    # Use actual balance change if available
+                    if row.balance_change_24h is not None:
+                        total_daily_pnl += float(row.balance_change_24h)
                 
-                if total_weight > 0:
-                    avg_change = estimated_daily_change / total_weight
-                    daily_pnl = current_portfolio_value * avg_change
-                    daily_pnl_pct = avg_change * 100
+                if total_value > 0 and total_daily_pnl != 0:
+                    daily_pnl_pct = (total_daily_pnl / total_value) * 100
+                    daily_pnl = total_daily_pnl
                 else:
-                    daily_pnl = 0.0
-                    daily_pnl_pct = 0.0
+                    # Fallback estimation if no balance change data
+                    estimated_daily_change = 0.0
+                    total_weight = 0.0
+                    
+                    for row in balance_rows:
+                        weight = float(row.usd_value or 0) / current_portfolio_value if current_portfolio_value > 0 else 0
+                        
+                        # Apply volatility estimates based on asset type
+                        if row.symbol in ['BTC', 'ETH']:
+                            daily_volatility = 0.03  # 3% typical daily volatility
+                        elif row.symbol in ['USDT', 'USDC', 'BUSD']:
+                            daily_volatility = 0.001  # 0.1% for stablecoins
+                        else:
+                            daily_volatility = 0.05  # 5% for altcoins
+                        
+                        # Random walk estimation
+                        import random
+                        random.seed()
+                        price_change = random.uniform(-daily_volatility, daily_volatility)
+                        estimated_daily_change += weight * price_change
+                        total_weight += weight
+                    
+                    if total_weight > 0:
+                        avg_change = estimated_daily_change / total_weight
+                        daily_pnl = current_portfolio_value * avg_change
+                        daily_pnl_pct = avg_change * 100
+                    else:
+                        daily_pnl = 0.0
+                        daily_pnl_pct = 0.0
                 
                 return daily_pnl, daily_pnl_pct
                 
         except Exception as e:
-            logger.error(f"Failed to estimate daily P&L: {str(e)}")
+            self.logger.exception(f"Failed to estimate daily P&L for user {user_id}", user_id=user_id)
             return 0.0, 0.0
     
     async def calculate_total_pnl(self, user_id: str, positions: List[Dict]) -> tuple[float, float]:
         """Calculate total P&L using cost basis if available."""
         try:
-            from app.core.database import AsyncSessionLocal
             total_pnl = 0.0
             total_cost_basis = 0.0
             total_current_value = 0.0
@@ -1663,14 +1677,12 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                 return total_pnl, total_pnl_pct
                 
         except Exception as e:
-            logger.error(f"Failed to calculate total P&L: {str(e)}")
+            self.logger.exception(f"Failed to calculate total P&L for user {user_id}", user_id=user_id)
             return 0.0, 0.0
     
     async def estimate_total_pnl_percentage(self, user_id: str) -> float:
         """Estimate total P&L percentage based on account age and market performance."""
         try:
-            from datetime import datetime
-            from app.core.database import AsyncSessionLocal
             
             async with AsyncSessionLocal() as db:
                 # Get the oldest exchange account to estimate how long user has been trading
@@ -1703,7 +1715,7 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                 return estimated_pnl_pct
                 
         except Exception as e:
-            logger.error(f"Failed to estimate total P&L percentage: {str(e)}")
+            self.logger.exception(f"Failed to estimate total P&L percentage for user {user_id}", user_id=user_id)
             return 0.0
             
         except Exception as e:
