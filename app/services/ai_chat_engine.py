@@ -84,31 +84,43 @@ class EnhancedAIChatEngine(LoggerMixin):
         portfolio_risk: Optional['PortfolioRiskServiceExtended'] = None,
         market_analysis: Optional['MarketAnalysisService'] = None
     ):
-        # Initialize services - ACTUAL SERVICES NOW!
-        self.ai_consensus = AIConsensusService()  # VALIDATION ONLY
-        self.master_controller = MasterSystemController()
-        self.trade_executor = TradeExecutionService()
-        self.memory = chat_memory
-        self.unified_manager = None  # Will be set by unified manager
-        
-        # Initialize ALL your powerful services
-        self.market_analysis = MarketAnalysisService()
+        # Initialize core services only - LAZY LOADING for others
         try:
-            self.trading_strategies = TradingStrategiesService()
-        except:
-            self.trading_strategies = None
-            self.logger.warning("TradingStrategiesService not available")
-        
-        try:
-            from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
-            self.portfolio_risk = PortfolioRiskServiceExtended()
-        except:
-            self.portfolio_risk = PortfolioRiskService()
+            self.memory = chat_memory
+            self.unified_manager = None  # Will be set by unified manager
             
-        self.chat_adapters = ChatServiceAdapters()
+            # Initialize services lazily to prevent startup failures
+            self.ai_consensus = None
+            self.master_controller = None
+            self.trade_executor = None
+            self.market_analysis = None
+            self.trading_strategies = None
+            self.portfolio_risk = None
+            self.chat_adapters = None
+            
+            self.logger.info("✅ Enhanced chat engine initialized with lazy service loading")
+        except Exception as e:
+            self.logger.error("Enhanced chat engine initialization failed", error=str(e))
+            # Fallback to minimal initialization
+            self.memory = None
+            self.unified_manager = None
         
-        self.logger.info("✅ Enhanced chat engine initialized with ALL services connected")
-        
+    async def _ensure_services(self):
+        """Lazy initialization of services to prevent startup failures."""
+        try:
+            if self.ai_consensus is None:
+                self.ai_consensus = AIConsensusService()
+            if self.master_controller is None:
+                self.master_controller = MasterSystemController()
+            if self.trade_executor is None:
+                self.trade_executor = TradeExecutionService()
+            if self.market_analysis is None:
+                self.market_analysis = MarketAnalysisService()
+            if self.chat_adapters is None:
+                self.chat_adapters = ChatServiceAdapters()
+        except Exception as e:
+            self.logger.warning("Some services failed to initialize", error=str(e))
+    
         # Intent classification patterns
         self.intent_patterns = {
             ChatIntent.TRADE_EXECUTION: [
@@ -254,6 +266,9 @@ I'll remember our conversation and provide increasingly personalized assistance.
         processing_start = time.time()
         
         try:
+            # Ensure services are initialized (lazy loading)
+            await self._ensure_services()
+            
             # Create session if none provided
             if not session_id or session_id.strip() == "":
                 session_id = await self.start_chat_session(user_id)
