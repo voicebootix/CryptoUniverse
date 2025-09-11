@@ -21,7 +21,7 @@ from app.services.websocket import manager
 from app.services.ai_consensus_core import AIConsensusService
 from app.services.master_controller import MasterSystemController
 from app.services.trade_execution import TradeExecutionService
-from app.services.chat_memory import chat_memory
+# Chat memory will be initialized lazily
 from app.services.market_analysis_core import MarketAnalysisService
 from app.services.trading_strategies import TradingStrategiesService
 from app.services.portfolio_risk_core import PortfolioRiskService
@@ -85,29 +85,38 @@ class EnhancedAIChatEngine(LoggerMixin):
         market_analysis: Optional['MarketAnalysisService'] = None
     ):
         # Initialize core services only - LAZY LOADING for others
-        try:
-            self.memory = chat_memory
-            self.unified_manager = None  # Will be set by unified manager
+        # Initialize memory service lazily to prevent startup failures
+        self.memory = None
+        self._memory_initialized = False
             
-            # Initialize services lazily to prevent startup failures
-            self.ai_consensus = None
-            self.master_controller = None
-            self.trade_executor = None
-            self.market_analysis = None
-            self.trading_strategies = None
-            self.portfolio_risk = None
-            self.chat_adapters = None
-            
-            self.logger.info("✅ Enhanced chat engine initialized with lazy service loading")
-        except Exception as e:
-            self.logger.error("Enhanced chat engine initialization failed", error=str(e))
-            # Fallback to minimal initialization
-            self.memory = None
-            self.unified_manager = None
+        self.unified_manager = None  # Will be set by unified manager
+        
+        # Initialize services lazily to prevent startup failures
+        self.ai_consensus = None
+        self.master_controller = None
+        self.trade_executor = None
+        self.market_analysis = None
+        self.trading_strategies = None
+        self.portfolio_risk = None
+        self.chat_adapters = None
+        
+        self.logger.info("✅ Enhanced chat engine initialized")
         
     async def _ensure_services(self):
         """Lazy initialization of services to prevent startup failures."""
         try:
+            # Initialize memory service if not already done
+            if not self._memory_initialized:
+                try:
+                    from app.services.chat_memory import chat_memory
+                    self.memory = chat_memory
+                    self._memory_initialized = True
+                    self.logger.info("✅ Chat memory service initialized")
+                except Exception as e:
+                    self.logger.warning("Chat memory service failed, continuing without memory", error=str(e))
+                    self.memory = None
+                    self._memory_initialized = True  # Don't keep trying
+            
             if self.ai_consensus is None:
                 self.ai_consensus = AIConsensusService()
             if self.master_controller is None:
@@ -199,6 +208,12 @@ class EnhancedAIChatEngine(LoggerMixin):
     async def start_chat_session(self, user_id: str, session_type: str = "general") -> str:
         """Start a new chat session with persistent memory."""
         try:
+            # If memory service is not available, generate a simple session ID
+            if not self.memory:
+                session_id = f"session_{user_id}_{int(time.time())}"
+                self.logger.info("Created simple session without memory", session_id=session_id)
+                return session_id
+            
             # Check for recent active sessions
             recent_sessions = await self.memory.get_user_sessions(user_id, limit=1)
             
@@ -273,53 +288,76 @@ I'll remember our conversation and provide increasingly personalized assistance.
             if not session_id or session_id.strip() == "":
                 session_id = await self.start_chat_session(user_id)
             
-            # Save user message
-            user_message_id = await self.memory.save_message(
-                session_id=session_id,
-                user_id=user_id,
-                content=user_message,
-                message_type=ChatMessageType.USER.value,
-                processing_time_ms=0,
-                tokens_used=len(user_message.split())
-            )
+            # Save user message (with fallback if memory unavailable)
+            user_message_id = None
+            context = {}
             
-            # Get conversation context
-            context = await self.memory.get_conversation_context(session_id)
+            if self.memory:
+                try:
+                    user_message_id = await self.memory.save_message(
+                        session_id=session_id,
+                        user_id=user_id,
+                        content=user_message,
+                        message_type=ChatMessageType.USER.value,
+                        processing_time_ms=0,
+                        tokens_used=len(user_message.split())
+                    )
+                    # Get conversation context
+                    context = await self.memory.get_conversation_context(session_id)
+                except Exception as e:
+                    self.logger.warning("Memory service failed, continuing without memory", error=str(e))
+                    context = {}
             
-            # Classify intent
-            intent = await self._classify_intent(user_message, context)
-            
-            # Process with 5-phase execution for trading intents
-            if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
-                response = await self._process_with_5_phases(
-                    session_id, user_message, intent, context
-                )
-            else:
-                response = await self._process_intent(
-                    user_message, intent, context
-                )
+            # Try enhanced processing, fallback to simple response
+            try:
+                # Classify intent
+                intent = await self._classify_intent(user_message, context)
+                
+                # Process with 5-phase execution for trading intents
+                if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
+                    response = await self._process_with_5_phases(
+                        session_id, user_message, intent, context
+                    )
+                else:
+                    response = await self._process_intent(
+                        user_message, intent, context
+                    )
+            except Exception as e:
+                self.logger.warning("Enhanced processing failed, using simple fallback", error=str(e))
+                # Simple fallback response
+                intent = ChatIntent.GENERAL_QUERY
+                response = {
+                    "content": "I'm here to help with your cryptocurrency trading and portfolio management. What would you like to know?",
+                    "confidence": 0.7,
+                    "metadata": {"fallback": True, "error": str(e)}
+                }
             
             processing_time = (time.time() - processing_start) * 1000
             
-            # Save assistant response
-            assistant_message_id = await self.memory.save_message(
-                session_id=session_id,
-                user_id=user_id,
-                content=response["content"],
-                message_type=ChatMessageType.ASSISTANT.value,
-                intent=intent.value,
-                confidence=response.get("confidence", 0.8),
-                metadata=response.get("metadata", {}),
-                model_used=response.get("model_used", "ai_consensus"),
-                processing_time_ms=processing_time,
-                tokens_used=response.get("tokens_used", len(response["content"].split()))
-            )
-            
-            # Update session context if needed
-            if response.get("context_updates"):
-                await self.memory.update_session_context(
-                    session_id, response["context_updates"]
-                )
+            # Save assistant response (with fallback)
+            assistant_message_id = None
+            if self.memory:
+                try:
+                    assistant_message_id = await self.memory.save_message(
+                        session_id=session_id,
+                        user_id=user_id,
+                        content=response["content"],
+                        message_type=ChatMessageType.ASSISTANT.value,
+                        intent=intent.value,
+                        confidence=response.get("confidence", 0.8),
+                        metadata=response.get("metadata", {}),
+                        model_used=response.get("model_used", "enhanced_engine"),
+                        processing_time_ms=processing_time,
+                        tokens_used=response.get("tokens_used", len(response["content"].split()))
+                    )
+                    
+                    # Update session context if needed
+                    if response.get("context_updates"):
+                        await self.memory.update_session_context(
+                            session_id, response["context_updates"]
+                        )
+                except Exception as e:
+                    self.logger.warning("Failed to save response to memory", error=str(e))
             
             # Send real-time update via WebSocket
             await self._send_websocket_update(user_id, {
@@ -353,17 +391,21 @@ I'll remember our conversation and provide increasingly personalized assistance.
                 session_id=session_id
             )
             
-            # Save error message
-            await self.memory.save_message(
-                session_id=session_id,
-                user_id=user_id,
-                content="I apologize, but I encountered an error processing your message. Please try again.",
-                message_type=ChatMessageType.ASSISTANT.value,
-                intent=ChatIntent.GENERAL_QUERY.value,
-                confidence=0.0,
-                metadata={"error": True, "error_message": str(e)},
-                model_used="system"
-            )
+            # Save error message (if memory available)
+            if self.memory:
+                try:
+                    await self.memory.save_message(
+                        session_id=session_id,
+                        user_id=user_id,
+                        content="I apologize, but I encountered an error processing your message. Please try again.",
+                        message_type=ChatMessageType.ASSISTANT.value,
+                        intent=ChatIntent.GENERAL_QUERY.value,
+                        confidence=0.0,
+                        metadata={"error": True, "error_message": str(e)},
+                        model_used="system"
+                    )
+                except Exception as memory_error:
+                    self.logger.warning("Failed to save error message to memory", error=str(memory_error))
             
             return {
                 "success": False,
@@ -1014,10 +1056,14 @@ I encountered an error during the 5-phase execution. The trade was not completed
     
     async def get_chat_history(self, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """Get chat history from persistent storage."""
+        if not self.memory:
+            return []
         return await self.memory.get_session_messages(session_id, limit)
     
     async def get_active_sessions(self, user_id: str) -> List[str]:
         """Get active chat sessions for a user."""
+        if not self.memory:
+            return []
         sessions = await self.memory.get_user_sessions(user_id, limit=10)
         return [session["session_id"] for session in sessions]
     
@@ -1027,6 +1073,9 @@ I encountered an error during the 5-phase execution. The trade was not completed
         """Execute a confirmed action from a previous conversation."""
         
         # Get conversation context
+        if not self.memory:
+            return {"summary": "Memory service unavailable", "status": "error"}
+        
         context = await self.memory.get_conversation_context(session_id)
         
         # Process the command execution (simplified)
@@ -1036,15 +1085,19 @@ I encountered an error during the 5-phase execution. The trade was not completed
             "user_id": user_id
         }
         
-        # Save the execution result
-        await self.memory.save_message(
-            session_id=session_id,
-            user_id=user_id,
-            content=f"Executed command: {command}. Result: {result.get('summary', 'Command executed')}",
-            message_type=ChatMessageType.SYSTEM.value,
-            intent="command_execution",
-            metadata={"command": command, "result": result}
-        )
+        # Save the execution result (if memory available)
+        if self.memory:
+            try:
+                await self.memory.save_message(
+                    session_id=session_id,
+                    user_id=user_id,
+                    content=f"Executed command: {command}. Result: {result.get('summary', 'Command executed')}",
+                    message_type=ChatMessageType.SYSTEM.value,
+                    intent="command_execution",
+                    metadata={"command": command, "result": result}
+                )
+            except Exception as e:
+                self.logger.warning("Failed to save execution result to memory", error=str(e))
         
         return result
     
