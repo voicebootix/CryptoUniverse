@@ -85,37 +85,100 @@ class ChatServiceAdaptersFixed:
                        balance_count=len(balances),
                        exchange_count=len(exchanges))
             
-            # Format positions for chat
+            # Format positions for chat with ENTERPRISE RISK INTEGRATION
             formatted_positions = []
+            connected_exchanges = set()
+            
             for balance in balances[:10]:  # Top 10 positions
                 if balance.get("value_usd", 0) > 0:
+                    exchange_name = balance.get("exchange", "Unknown")
+                    connected_exchanges.add(exchange_name)
+                    
                     formatted_positions.append({
                         "symbol": balance.get("symbol", "Unknown"),
                         "amount": balance.get("total", 0),
                         "value_usd": balance.get("value_usd", 0),
                         "percentage": (balance.get("value_usd", 0) / total_value * 100) if total_value > 0 else 0,
-                        "exchange": balance.get("exchange", "Unknown"),
-                        "change_24h": 0
+                        "exchange": exchange_name,
+                        "change_24h": balance.get("balance_change_24h", 0)  # ENTERPRISE: Use real 24h change data
                     })
+            
+            # Sort positions by value (ENTERPRISE: Preserve sophisticated sorting)
+            formatted_positions.sort(key=lambda x: x["value_usd"], reverse=True)
+            connected_exchanges_list = list(connected_exchanges)
+            
+            # ENTERPRISE: Calculate sophisticated P&L with TIMEOUT PROTECTION
+            import asyncio
+            start_time = datetime.utcnow()
+            
+            try:
+                daily_pnl, daily_pnl_pct = await asyncio.wait_for(
+                    self.portfolio_risk.calculate_daily_pnl(user_id, total_value),
+                    timeout=3.0  # 3 second maximum - prevents chat slowdown
+                )
+                pnl_calculation_time = (datetime.utcnow() - start_time).total_seconds()
+                logger.info("P&L calculation completed", user_id=user_id, duration_ms=pnl_calculation_time*1000)
+            except asyncio.TimeoutError:
+                daily_pnl, daily_pnl_pct = 0.0, 0.0
+                logger.warning("P&L calculation timed out after 3s, using fallback", user_id=user_id)
+            except Exception as e:
+                daily_pnl, daily_pnl_pct = 0.0, 0.0
+                logger.error("P&L calculation failed, using fallback", error=str(e), user_id=user_id)
+            
+            # ENTERPRISE: Calculate sophisticated risk level with TIMEOUT PROTECTION
+            risk_start_time = datetime.utcnow()
+            try:
+                # Create proper balance objects for risk analysis
+                from dataclasses import dataclass
                 
-                # Sort positions by value
-                all_positions.sort(key=lambda x: x["value_usd"], reverse=True)
+                @dataclass
+                class RiskAnalysisBalance:
+                    symbol: str
+                    total_balance: float
+                    usd_value: float
+                    balance_change_24h: float
                 
-                logger.info(f"Portfolio summary: ${total_value:,.2f} across {len(connected_exchanges)} exchanges")
+                balance_objects = [
+                    RiskAnalysisBalance(
+                        symbol=balance.get("symbol", "Unknown"),
+                        total_balance=float(balance.get("total", 0)),
+                        usd_value=float(balance.get("value_usd", 0)),
+                        balance_change_24h=float(balance.get("balance_change_24h", 0))
+                    )
+                    for balance in balances if balance.get("value_usd", 0) > 0
+                ]
                 
-                return {
-                    "total_value": total_value,
-                    "daily_pnl": 0,  # TODO: Calculate from historical data
-                    "daily_pnl_pct": 0,
-                    "total_pnl": 0,  # TODO: Calculate from cost basis
-                    "total_pnl_pct": 0,
-                    "positions": all_positions[:10],  # Top 10 positions
-                    "risk_level": "Medium",  # TODO: Calculate based on positions
-                    "exchanges_connected": len(connected_exchanges),
-                    "exchanges": connected_exchanges,
-                    "data_source": "real_exchanges_ui_method",
-                    "last_updated": datetime.utcnow().isoformat()
-                }
+                risk_analysis = await asyncio.wait_for(
+                    self.portfolio_risk.calculate_portfolio_volatility_risk(user_id, balance_objects),
+                    timeout=2.0  # 2 second maximum - keeps chat fast
+                )
+                risk_level = risk_analysis.get("overall_risk_level", "Medium")
+                
+                risk_calculation_time = (datetime.utcnow() - risk_start_time).total_seconds()
+                logger.info("Risk analysis completed", user_id=user_id, duration_ms=risk_calculation_time*1000, risk_level=risk_level)
+                
+            except asyncio.TimeoutError:
+                risk_level = "Medium"
+                logger.warning("Risk analysis timed out after 2s, using fallback", user_id=user_id)
+            except Exception as e:
+                risk_level = "Medium"
+                logger.warning("Risk analysis failed, using fallback", error=str(e), user_id=user_id)
+            
+            logger.info(f"ENTERPRISE Portfolio: ${total_value:,.2f} across {len(connected_exchanges_list)} exchanges, Risk: {risk_level}")
+            
+            return {
+                "total_value": total_value,
+                "daily_pnl": daily_pnl,        # ENTERPRISE: Real P&L calculation
+                "daily_pnl_pct": daily_pnl_pct, # ENTERPRISE: Real P&L percentage
+                "total_pnl": 0,  # TODO: Implement total P&L with cost basis
+                "total_pnl_pct": 0,
+                "positions": formatted_positions[:10],  # Top 10 positions
+                "risk_level": risk_level,      # ENTERPRISE: Sophisticated risk analysis
+                "exchanges_connected": len(connected_exchanges_list),
+                "exchanges": connected_exchanges_list,
+                "data_source": "enterprise_optimized_method",
+                "last_updated": datetime.utcnow().isoformat()
+            }
             
         except Exception as e:
             logger.error("Portfolio summary failed", error=str(e), user_id=user_id, exc_info=True)
