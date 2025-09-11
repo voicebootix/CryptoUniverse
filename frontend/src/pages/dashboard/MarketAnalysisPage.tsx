@@ -26,7 +26,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useMarketAnalysis } from '@/hooks/useMarketAnalysis';
+import { usePipelineAnalysis } from '@/hooks/usePipelineAnalysis';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart as RechartsPieChart, Pie, Cell } from 'recharts';
 
@@ -45,29 +45,29 @@ const MarketAnalysisPage: React.FC = () => {
     sentimentAnalysis,
     arbitrageOpportunities,
     volatilityData,
-    supportResistance,
+    supportResistanceData: supportResistance,
     institutionalFlows,
     alphaSignals,
-    trendingCoins,
-    marketHealth,
-    exchangeAssets,
+    marketOverview,
+    systemMetrics,
+    autonomousStatus,
     isLoading,
     error,
     lastUpdated,
     fetchRealtimePrices,
     fetchTechnicalAnalysis,
     fetchSentimentAnalysis,
-    fetchArbitrageOpportunities,
+    fetchArbitrageData: fetchArbitrageOpportunities,
     fetchVolatilityAnalysis,
     fetchSupportResistance,
     fetchInstitutionalFlows,
     fetchAlphaSignals,
-    fetchTrendingCoins,
-    fetchMarketHealth,
-    fetchExchangeAssets,
+    fetchMarketOverview,
+    fetchSystemMetrics,
+    fetchAutonomousStatus,
     refreshAll,
     clearError
-  } = useMarketAnalysis();
+  } = usePipelineAnalysis('market_analysis_page');
 
   const [selectedSymbols, setSelectedSymbols] = useState('BTC,ETH,SOL,ADA,DOT');
   const [selectedTimeframe, setSelectedTimeframe] = useState('1h');
