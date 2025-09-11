@@ -71,11 +71,12 @@ interface SystemMetrics {
   error_rate?: number;
   response_time_avg?: number;
   uptime_percentage?: number;
-  // Additional fields that may exist
-  cpuUsage?: number;
-  memoryUsage?: number;
-  diskUsage?: number;
-  networkLatency?: number;
+  // System metrics that may be null if unavailable
+  cpuUsage?: number | null;
+  memoryUsage?: number | null;
+  diskUsage?: number | null;
+  networkLatency?: number | null;
+  metricsSource?: 'psutil' | 'fallback' | 'unknown';
 }
 
 const auditLogs = [
@@ -532,7 +533,12 @@ const AdminPage: React.FC = () => {
                       <Cpu className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">CPU Usage</span>
                     </div>
-                    <span className="text-sm font-bold">{systemMetrics?.cpuUsage ?? 0}%</span>
+                    <span className="text-sm font-bold">
+                      {systemMetrics?.metricsSource === 'fallback' || systemMetrics?.cpuUsage == null 
+                        ? 'N/A' 
+                        : `${systemMetrics.cpuUsage}%`
+                      }
+                    </span>
                   </div>
                   <Progress value={systemMetrics?.cpuUsage ?? 0} className="h-2" />
                 </div>
@@ -543,7 +549,12 @@ const AdminPage: React.FC = () => {
                       <Database className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">Memory Usage</span>
                     </div>
-                    <span className="text-sm font-bold">{systemMetrics?.memoryUsage ?? 0}%</span>
+                    <span className="text-sm font-bold">
+                      {systemMetrics?.metricsSource === 'fallback' || systemMetrics?.memoryUsage == null 
+                        ? 'N/A' 
+                        : `${systemMetrics.memoryUsage}%`
+                      }
+                    </span>
                   </div>
                   <Progress value={systemMetrics?.memoryUsage ?? 0} className="h-2" />
                 </div>
@@ -554,7 +565,12 @@ const AdminPage: React.FC = () => {
                       <HardDrive className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">Disk Usage</span>
                     </div>
-                    <span className="text-sm font-bold">{systemMetrics?.diskUsage ?? 0}%</span>
+                    <span className="text-sm font-bold">
+                      {systemMetrics?.metricsSource === 'fallback' || systemMetrics?.diskUsage == null 
+                        ? 'N/A' 
+                        : `${systemMetrics.diskUsage}%`
+                      }
+                    </span>
                   </div>
                   <Progress value={systemMetrics?.diskUsage ?? 0} className="h-2" />
                 </div>
@@ -565,7 +581,12 @@ const AdminPage: React.FC = () => {
                       <Wifi className="h-4 w-4 text-muted-foreground" />
                       <span className="text-sm font-medium">Network Latency</span>
                     </div>
-                    <span className="text-sm font-bold">{systemMetrics?.networkLatency ?? 0}ms</span>
+                    <span className="text-sm font-bold">
+                      {systemMetrics?.metricsSource === 'fallback' || systemMetrics?.networkLatency == null 
+                        ? 'N/A' 
+                        : `${systemMetrics.networkLatency}ms`
+                      }
+                    </span>
                   </div>
                   <Progress value={systemMetrics?.networkLatency ?? 0} max={200} className="h-2" />
                 </div>

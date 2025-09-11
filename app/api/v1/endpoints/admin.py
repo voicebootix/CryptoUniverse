@@ -197,22 +197,36 @@ async def get_system_overview(
             # Simple latency approximation
             system_metrics["networkLatency"] = round((time.time() - start_time) * 1000 + 5, 0)  # Add base latency
             
+            # Mark as real psutil data
+            system_metrics["metricsSource"] = "psutil"
+            
         except ImportError:
             # Fallback if psutil not available
-            logger.warning("psutil not available, using default system metrics")
+            logger.warning("psutil not available, using fallback system metrics")
             system_metrics = {
-                "cpuUsage": 25.0,
-                "memoryUsage": 68.0, 
-                "diskUsage": 45.0,
-                "networkLatency": 12.0
+                "cpuUsage": None,
+                "memoryUsage": None,
+                "diskUsage": None,
+                "networkLatency": None,
+                "metricsSource": "fallback"
+            }
+        except (OSError, PermissionError) as e:
+            logger.exception("System metrics access denied or OS error occurred")
+            system_metrics = {
+                "cpuUsage": None,
+                "memoryUsage": None,
+                "diskUsage": None,
+                "networkLatency": None,
+                "metricsSource": "fallback"
             }
         except Exception as e:
-            logger.warning(f"Failed to get system metrics: {e}")
+            logger.exception("Unexpected error while gathering system metrics")
             system_metrics = {
-                "cpuUsage": 0.0,
-                "memoryUsage": 0.0,
-                "diskUsage": 0.0, 
-                "networkLatency": 0.0
+                "cpuUsage": None,
+                "memoryUsage": None,
+                "diskUsage": None,
+                "networkLatency": None,
+                "metricsSource": "unknown"
             }
         
         return {
