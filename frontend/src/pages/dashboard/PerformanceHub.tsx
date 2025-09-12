@@ -30,12 +30,70 @@ const AnalyticsOverview: React.FC = () => {
     queryKey: ['performance-metrics', isPaperMode],
     queryFn: async () => {
       const endpoint = isPaperMode 
-        ? '/paper-trading/stats'
-        : '/portfolio/performance';
+        ? '/paper-trading/performance'
+        : '/trading/status';
       const response = await apiClient.get(endpoint);
-      return response.data.data;
+      
+      // Handle different response structures
+      if (isPaperMode) {
+        // Paper trading response structure
+        const data = response.data;
+        if (data.success && data.paper_portfolio) {
+          const portfolio = data.paper_portfolio;
+          const confidence = data.confidence_metrics || {};
+          
+          return {
+            totalProfit: portfolio.total_profit || 0,
+            profitChange: portfolio.profit_change_24h || 0,
+            winRate: confidence.win_rate || 0,
+            winRateChange: confidence.win_rate_trend || 0,
+            totalTrades: portfolio.total_trades || 0,
+            tradesChange: 0,
+            avgTradeTime: confidence.avg_trade_duration_minutes || 0,
+            timeChange: 0,
+            strategyPerformance: portfolio.strategy_breakdown || [],
+            maxDrawdown: confidence.max_drawdown || 0,
+            sharpeRatio: confidence.sharpe_ratio || 0,
+            riskRewardRatio: confidence.risk_reward_ratio || 0,
+            profitFactor: confidence.profit_factor || 0
+          };
+        } else {
+          // Return zeros if no paper trading setup
+          return {
+            totalProfit: 0, profitChange: 0, winRate: 0, winRateChange: 0,
+            totalTrades: 0, tradesChange: 0, avgTradeTime: 0, timeChange: 0,
+            strategyPerformance: [], maxDrawdown: 0, sharpeRatio: 0,
+            riskRewardRatio: 0, profitFactor: 0
+          };
+        }
+      } else {
+        // Trading status response structure
+        const statusData = response.data;
+        const perfToday = statusData.performance_today || {};
+        
+        return {
+          totalProfit: perfToday.total_pnl || 0,
+          profitChange: perfToday.change_24h || 0,
+          winRate: perfToday.win_rate || 0,
+          winRateChange: 0,
+          totalTrades: perfToday.total_trades || 0,
+          tradesChange: 0,
+          avgTradeTime: perfToday.avg_trade_time_minutes || 0,
+          timeChange: 0,
+          strategyPerformance: perfToday.strategy_performance || [],
+          maxDrawdown: perfToday.max_drawdown || 0,
+          sharpeRatio: perfToday.sharpe_ratio || 0,
+          riskRewardRatio: perfToday.risk_reward_ratio || 1,
+          profitFactor: perfToday.profit_factor || 0
+        };
+      }
     },
-    refetchInterval: 30000 // Refresh every 30 seconds
+    refetchInterval: 30000, // Refresh every 30 seconds
+    retry: 3,
+    staleTime: 10000, // Consider data stale after 10 seconds
+    onError: (error: any) => {
+      console.error('Performance data fetch error:', error);
+    }
   });
 
   if (isLoading) {
@@ -55,32 +113,40 @@ const AnalyticsOverview: React.FC = () => {
     );
   }
 
+  // Use fallback data if metrics is null or undefined
+  const safeMetrics = metrics || {
+    totalProfit: 0, profitChange: 0, winRate: 0, winRateChange: 0,
+    totalTrades: 0, tradesChange: 0, avgTradeTime: 0, timeChange: 0,
+    strategyPerformance: [], maxDrawdown: 0, sharpeRatio: 0,
+    riskRewardRatio: 0, profitFactor: 0
+  };
+
   const stats = [
     {
       title: 'Total Profit',
-      value: formatCurrency(metrics?.totalProfit || 0),
-      change: metrics?.profitChange || 0,
+      value: formatCurrency(safeMetrics.totalProfit),
+      change: safeMetrics.profitChange,
       icon: <DollarSign className="h-4 w-4" />,
-      color: metrics?.totalProfit >= 0 ? 'text-green-500' : 'text-red-500'
+      color: safeMetrics.totalProfit >= 0 ? 'text-green-500' : 'text-red-500'
     },
     {
       title: 'Win Rate',
-      value: formatPercentage(metrics?.winRate || 0),
-      change: metrics?.winRateChange || 0,
+      value: formatPercentage(safeMetrics.winRate / 100), // Convert to decimal if needed
+      change: safeMetrics.winRateChange,
       icon: <Percent className="h-4 w-4" />,
       color: 'text-blue-500'
     },
     {
       title: 'Total Trades',
-      value: metrics?.totalTrades || 0,
-      change: metrics?.tradesChange || 0,
+      value: safeMetrics.totalTrades,
+      change: safeMetrics.tradesChange,
       icon: <Activity className="h-4 w-4" />,
       color: 'text-purple-500'
     },
     {
       title: 'Avg Trade Time',
-      value: `${metrics?.avgTradeTime || 0}m`,
-      change: metrics?.timeChange || 0,
+      value: `${safeMetrics.avgTradeTime}m`,
+      change: safeMetrics.timeChange,
       icon: <Clock className="h-4 w-4" />,
       color: 'text-orange-500'
     }
@@ -129,24 +195,31 @@ const AnalyticsOverview: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {metrics?.strategyPerformance?.map((strategy: any, index: number) => (
-                <div key={index} className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">{strategy.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {strategy.trades} trades
-                    </p>
+              {safeMetrics.strategyPerformance && safeMetrics.strategyPerformance.length > 0 ? (
+                safeMetrics.strategyPerformance.map((strategy: any, index: number) => (
+                  <div key={index} className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{strategy.name || strategy.strategy_name || `Strategy ${index + 1}`}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {strategy.trades || strategy.total_trades || 0} trades
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`font-bold ${(strategy.profit || strategy.total_profit || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        {formatCurrency(strategy.profit || strategy.total_profit || 0)}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {formatPercentage((strategy.winRate || strategy.win_rate || 0) / 100)} win rate
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className={`font-bold ${strategy.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                      {formatCurrency(strategy.profit)}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {formatPercentage(strategy.winRate)} win rate
-                    </p>
-                  </div>
+                ))
+              ) : (
+                <div className="text-center text-muted-foreground py-4">
+                  <p>No strategy performance data available</p>
+                  <p className="text-sm">Start trading to see strategy breakdown</p>
                 </div>
-              ))}
+              )}
             </div>
           </CardContent>
         </Card>
@@ -166,25 +239,25 @@ const AnalyticsOverview: React.FC = () => {
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Max Drawdown</span>
                 <span className="font-bold text-red-500">
-                  {formatPercentage(metrics?.maxDrawdown || 0)}
+                  {formatPercentage(Math.abs(safeMetrics.maxDrawdown) / 100)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Sharpe Ratio</span>
                 <span className="font-bold">
-                  {metrics?.sharpeRatio?.toFixed(2) || '0.00'}
+                  {safeMetrics.sharpeRatio.toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Risk/Reward</span>
                 <span className="font-bold">
-                  1:{metrics?.riskRewardRatio?.toFixed(2) || '0.00'}
+                  1:{safeMetrics.riskRewardRatio.toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Profit Factor</span>
                 <span className="font-bold text-green-500">
-                  {metrics?.profitFactor?.toFixed(2) || '0.00'}
+                  {safeMetrics.profitFactor.toFixed(2)}
                 </span>
               </div>
             </div>
