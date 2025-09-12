@@ -204,7 +204,10 @@ export const useTelegram = () => {
   const verifyConnection = async () => {
     try {
       setLoading(true);
+      console.log("🔍 Starting Telegram connection verification...");
       const response = await apiClient.get("/telegram/verify-connection");
+      
+      console.log("📊 Verification response:", response.data);
       
       if (response.data.verified) {
         setConnection(prev => ({
@@ -231,6 +234,7 @@ export const useTelegram = () => {
         return false;
       }
     } catch (err: any) {
+      console.error("❌ Telegram verification error:", err);
       const errorMsg = err.response?.data?.detail || "Failed to verify connection";
       setError(errorMsg);
       

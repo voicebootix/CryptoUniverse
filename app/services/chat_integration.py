@@ -429,19 +429,29 @@ Your portfolio is well-balanced according to your current strategy. No rebalanci
         
         try:
             
-            # Get comprehensive market opportunities using FIXED adapters
-            market_scan = await self.adapters.get_market_overview()
-            portfolio_context = await self.adapters.get_portfolio_summary(user_id)
+            # Use REAL user opportunity discovery service instead of adapters
+            from app.services.user_opportunity_discovery import user_opportunity_discovery
+            from app.services.user_onboarding_service import user_onboarding_service
             
-            # Use trading strategies service to find opportunities
-            strategy_opportunities = await self.adapters.discover_opportunities(
+            # Ensure user is onboarded
+            onboarding_check = await user_onboarding_service.check_user_onboarding_status(user_id)
+            if onboarding_check.get("needs_onboarding", True):
+                await user_onboarding_service.onboard_new_user(user_id)
+            
+            # Initialize and use real opportunity discovery service
+            await user_opportunity_discovery.async_init()
+            
+            strategy_opportunities = await user_opportunity_discovery.discover_opportunities_for_user(
                 user_id=user_id,
-                risk_tolerance=context.get("risk_tolerance", "balanced")
+                force_refresh=False,
+                include_strategy_recommendations=True
             )
+            
+            # Get portfolio context for additional analysis
+            portfolio_context = await self.adapters.get_portfolio_summary(user_id)
             
             # Get AI consensus on opportunities
             opportunity_context = {
-                "market_scan": market_scan,
                 "strategy_opportunities": strategy_opportunities,
                 "portfolio_context": portfolio_context,
                 "user_message": message
@@ -488,9 +498,9 @@ Found **{len(opportunities)}** promising opportunities based on current market c
 {ai_analysis.get('analysis', 'Analyzing opportunities...')}
 
 **Market Context:**
-• Overall Sentiment: {market_scan.get('sentiment', 'Neutral')}
-• Market Phase: {market_scan.get('market_phase', 'Unknown')}
-• Volatility: {market_scan.get('volatility', 'Medium')}
+• Real-time strategy analysis active
+• Professional opportunity scanning enabled
+• Portfolio risk-aligned recommendations
 
 **Next Steps:**
 • "Analyze [symbol]" - Deep dive on specific opportunity
@@ -525,7 +535,8 @@ No significant opportunities detected in current market conditions.
                 "confidence": ai_analysis.get("confidence", 0.8),
                 "metadata": {
                     "opportunities": opportunities,
-                    "market_scan": market_scan,
+                    "service_used": "user_opportunity_discovery",
+                    "opportunities_count": len(opportunities),
                     "ai_analysis": ai_analysis
                 }
             }
