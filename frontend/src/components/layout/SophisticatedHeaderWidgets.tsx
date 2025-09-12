@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   ChevronDown,
   ChevronUp,
@@ -30,6 +31,8 @@ import { useExchanges } from '@/hooks/useExchanges';
 import { usePortfolioStore } from '@/hooks/usePortfolio';
 import { apiClient } from '@/lib/api/client';
 import PaperTradingToggle from '@/components/trading/PaperTradingToggle';
+import { useAuthStore } from '@/store/authStore';
+import { UserRole } from '@/types/auth';
 
 interface CreditInfo {
   total: number;
@@ -39,9 +42,11 @@ interface CreditInfo {
 }
 
 const SophisticatedHeaderWidgets: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuthStore();
   const { isPaperMode, paperStats, paperBalance } = useGlobalPaperModeStore();
   const { exchanges, aggregatedStats } = useExchanges();
-  const { totalValue, dailyPnL, totalPnL, positions } = usePortfolioStore();
+  const { totalValue, dailyPnL, totalPnL, positions, fetchPortfolio, fetchStatus, fetchMarketData } = usePortfolioStore();
 
   // Credits query
   const { data: credits } = useQuery({
@@ -52,6 +57,13 @@ const SophisticatedHeaderWidgets: React.FC = () => {
     },
     refetchInterval: 30000
   });
+
+  // Fetch portfolio data on component mount
+  useEffect(() => {
+    fetchPortfolio();
+    fetchStatus();
+    fetchMarketData();
+  }, [fetchPortfolio, fetchStatus, fetchMarketData]);
 
   // Calculate portfolio metrics
   const portfolioValue = isPaperMode ? paperBalance : totalValue;
@@ -155,7 +167,12 @@ const SophisticatedHeaderWidgets: React.FC = () => {
               )}
 
               <Separator />
-              <Button variant="outline" size="sm" className="w-full">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="w-full"
+                onClick={() => navigate('/dashboard/portfolio')}
+              >
                 View Full Portfolio
               </Button>
             </CardContent>
@@ -251,7 +268,12 @@ const SophisticatedHeaderWidgets: React.FC = () => {
               )}
 
               <Separator />
-              <Button variant="outline" size="sm" className="w-full">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="w-full"
+                onClick={() => navigate('/dashboard/exchanges')}
+              >
                 Manage Exchanges
               </Button>
             </CardContent>
@@ -347,6 +369,7 @@ const SophisticatedHeaderWidgets: React.FC = () => {
           </Card>
         </DropdownMenuContent>
       </DropdownMenu>
+
     </div>
   );
 };

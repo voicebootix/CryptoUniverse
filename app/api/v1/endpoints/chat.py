@@ -100,7 +100,20 @@ async def send_message(
     """
     try:
         # Enhanced: Process through unified AI manager for consistent experience
-        session_id = request.session_id or f"chat_{uuid.uuid4().hex}"
+        # Generate a proper UUID session ID
+        if request.session_id:
+            # Try to validate existing session ID is UUID format
+            try:
+                uuid.UUID(request.session_id)
+                session_id = request.session_id
+            except ValueError:
+                # If not valid UUID, generate a new one but keep for logging
+                session_id = str(uuid.uuid4())
+                logger.warning("Invalid session ID format, generated new UUID", 
+                             old_session_id=request.session_id, 
+                             new_session_id=session_id)
+        else:
+            session_id = str(uuid.uuid4())
         
         logger.info("Chat endpoint called", 
                    session_id=session_id, 
@@ -295,8 +308,8 @@ async def chat_websocket(
     """
     try:
         # Implement WebSocket bearer subprotocol authentication 
-        # Use unique per-connection ID to prevent message bleed between unauthenticated clients
-        user_id = f"guest:{uuid.uuid4()}"  # Unique fallback for each connection
+        # NO GUEST FALLBACK - Authentication required for serious trading platform
+        user_id = None
         selected_subprotocol = None  # Initialize to None, only set if safe subprotocol offered
         token = None
         
@@ -334,10 +347,14 @@ async def chat_websocket(
                         logger.info("Chat WebSocket user authenticated via bearer subprotocol", user_id=user_id)
                 except JWTError as e:
                     # Handle JWT-specific errors only, let other exceptions propagate
-                    logger.debug("Chat WebSocket JWT authentication failed, using guest ID", 
-                               guest_id=user_id, 
-                               error=str(e))
-                    # Don't log token details
+                    logger.warning("Chat WebSocket JWT authentication failed", error=str(e))
+                    user_id = None  # Ensure no fallback
+        
+        # AUTHENTICATION REQUIRED - Reject unauthenticated connections
+        if not user_id:
+            logger.warning("WebSocket connection rejected: Authentication required", session_id=session_id)
+            await websocket.close(code=1008, reason="Authentication required")
+            return
         
         # Accept WebSocket connection - only pass subprotocol if safe one was offered by client
         if selected_subprotocol:

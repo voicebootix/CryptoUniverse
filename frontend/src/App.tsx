@@ -22,6 +22,8 @@ import AIMoneyManager from '@/pages/dashboard/AIMoneyManager';
 import StrategyMarketplace from '@/pages/dashboard/StrategyMarketplace';
 import PerformanceHub from '@/pages/dashboard/PerformanceHub';
 import CopyTradingNetwork from '@/pages/dashboard/CopyTradingNetwork';
+import PortfolioPage from '@/pages/dashboard/PortfolioPage';
+import ExchangesPage from '@/pages/dashboard/ExchangesPage';
 import SettingsPage from '@/pages/dashboard/SettingsPage';
 import AdminPage from '@/pages/dashboard/AdminPage';
 
@@ -133,6 +135,12 @@ const App: React.FC = () => {
               
               {/* Copy Trading Network */}
               <Route path="copy-trading" element={<CopyTradingNetwork />} />
+              
+              {/* Portfolio */}
+              <Route path="portfolio" element={<PortfolioPage />} />
+              
+              {/* Exchanges */}
+              <Route path="exchanges" element={<ExchangesPage />} />
               
               {/* Settings */}
               <Route path="settings" element={<SettingsPage />} />

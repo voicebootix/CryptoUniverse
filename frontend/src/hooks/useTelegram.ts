@@ -200,6 +200,55 @@ export const useTelegram = () => {
     }
   };
 
+  // Verify connection status with backend
+  const verifyConnection = async () => {
+    try {
+      setLoading(true);
+      console.log("🔍 Starting Telegram connection verification...");
+      const response = await apiClient.get("/telegram/verify-connection");
+      
+      console.log("📊 Verification response:", response.data);
+      
+      if (response.data.verified) {
+        setConnection(prev => ({
+          ...prev,
+          is_authenticated: response.data.is_authenticated,
+          is_active: response.data.is_active,
+        }));
+        
+        if (response.data.is_authenticated) {
+          toast({
+            title: "Connection Verified",
+            description: "Your Telegram is properly connected and authenticated",
+            variant: "default",
+          });
+        }
+        
+        return response.data;
+      } else {
+        toast({
+          title: "Connection Issues",
+          description: response.data.message || "Please complete Telegram authentication",
+          variant: "destructive",
+        });
+        return false;
+      }
+    } catch (err: any) {
+      console.error("❌ Telegram verification error:", err);
+      const errorMsg = err.response?.data?.detail || "Failed to verify connection";
+      setError(errorMsg);
+      
+      toast({
+        title: "Verification Failed",
+        description: errorMsg,
+        variant: "destructive",
+      });
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Load connection on mount
   useEffect(() => {
     fetchConnection();
@@ -216,6 +265,7 @@ export const useTelegram = () => {
       sendMessage,
       testConnection,
       fetchConnection,
+      verifyConnection,
     },
   };
 };

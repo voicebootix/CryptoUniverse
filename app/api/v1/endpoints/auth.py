@@ -449,22 +449,29 @@ async def register(
     
     logger.info("User registered", user_id=str(user.id), email=user.email)
     
-    # 🎁 SETUP WELCOME PACKAGE: $100 FREE CREDITS + 3 BASIC STRATEGIES
+    # 🚀 ENTERPRISE USER ONBOARDING: FREE STRATEGIES + CREDITS + PORTFOLIO SETUP
     try:
-        from app.services.profit_sharing_service import profit_sharing_service
+        from app.services.user_onboarding_service import user_onboarding_service
         
-        welcome_result = await profit_sharing_service.setup_new_user_welcome_package(str(user.id))
+        # Trigger comprehensive onboarding with 3 free AI strategies
+        onboarding_result = await user_onboarding_service.onboard_new_user(
+            user_id=str(user.id),
+            referral_code=None,  # Could extract from request if needed
+            welcome_package="standard"
+        )
         
-        if welcome_result.get("success"):
+        if onboarding_result.get("success"):
             logger.info(
-                "🎁 Welcome package activated for new user",
+                "🎯 ENTERPRISE User Onboarding completed for new registration",
                 user_id=str(user.id),
-                free_credits=100,
-                free_strategies=3,
-                profit_potential="$400"
+                onboarding_id=onboarding_result.get("onboarding_id"),
+                free_strategies=len(onboarding_result.get("results", {}).get("free_strategies", {}).get("provisioned_strategies", [])),
+                welcome_credits=onboarding_result.get("results", {}).get("credit_account", {}).get("credits_granted", 0)
             )
         else:
-            logger.warning("Welcome package setup failed", user_id=str(user.id), error=welcome_result.get("error"))
+            logger.warning("Enterprise onboarding failed", 
+                         user_id=str(user.id), 
+                         error=onboarding_result.get("error"))
     
     except Exception as e:
         logger.error("Welcome package setup failed", user_id=str(user.id), error=str(e))
