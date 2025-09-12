@@ -1097,7 +1097,7 @@ class TradingStrategiesService(LoggerMixin):
             
             elif function == "risk_management":
                 return await self.risk_management(
-                    symbol=symbol, user_id=user_id
+                    symbols=symbol, user_id=user_id
                 )
             
             elif function in ["position_management", "portfolio_optimization"]:
@@ -1240,28 +1240,29 @@ class TradingStrategiesService(LoggerMixin):
         if function == "portfolio_optimization":
             # Call the actual position management method to get rebalancing data
             pm_result = await self.position_management(symbols=symbol, user_id=user_id)
-            if pm_result.get("success"):
+            rebalancing_recommendations = []
+            
+            if pm_result.get("success") and "position_analysis" in pm_result:
                 # Extract rebalancing recommendations from position analysis
-                rebalancing_recommendations = []
-                if "position_analysis" in pm_result:
-                    for pos_data in pm_result["position_analysis"].values():
-                        for rec in pos_data.get("recommendations", []):
-                            if rec.get("type") in ["REBALANCING", "SECTOR_REBALANCING", "DIVERSIFICATION"]:
-                                rebalancing_recommendations.append({
-                                    "symbol": symbol,
-                                    "action": rec.get("action", ""),
-                                    "rationale": rec.get("rationale", ""),
-                                    "improvement_potential": 0.15,  # Default 15% improvement
-                                    "urgency": rec.get("urgency", "MEDIUM")
-                                })
-                
-                return {
-                    "success": True,
-                    "function": function,
-                    "symbol": symbol,
-                    "rebalancing_recommendations": rebalancing_recommendations,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+                for pos_data in pm_result["position_analysis"].values():
+                    for rec in pos_data.get("recommendations", []):
+                        if rec.get("type") in ["REBALANCING", "SECTOR_REBALANCING", "DIVERSIFICATION"]:
+                            rebalancing_recommendations.append({
+                                "symbol": symbol,
+                                "action": rec.get("action", ""),
+                                "rationale": rec.get("rationale", ""),
+                                "improvement_potential": 0.15,  # Default 15% improvement
+                                "urgency": rec.get("urgency", "MEDIUM")
+                            })
+            
+            # Always return enhanced structure even if no recommendations found
+            return {
+                "success": True,
+                "function": function,
+                "symbol": symbol,
+                "rebalancing_recommendations": rebalancing_recommendations,
+                "timestamp": datetime.utcnow().isoformat()
+            }
         
         # Default response for other management functions
         return {
