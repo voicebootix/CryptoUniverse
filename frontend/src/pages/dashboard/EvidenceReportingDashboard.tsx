@@ -152,7 +152,7 @@ const EvidenceReportingDashboard: React.FC = () => {
     queryFn: async () => {
       const params = new URLSearchParams({
         limit: '50',
-        ...(selectedType !== 'all' && { action_filter: selectedType })
+        ...(selectedType !== 'all' && { action_type: selectedType })
       });
       
       try {
@@ -184,16 +184,53 @@ const EvidenceReportingDashboard: React.FC = () => {
 
       // Calculate real metrics from audit log data
       const totalDecisions = decisions.length;
-      const successfulDecisions = decisions.filter(d => d.action_type?.includes('success') || d.details?.includes('success')).length;
+      
+      // Strict success detection with whitelist and word boundary matching
+      const successfulDecisions = decisions.filter(d => {
+        // Check action_type with exact matching (case-insensitive)
+        const actionType = d.action_type?.toLowerCase();
+        const successActionTypes = ['success', 'completed', 'executed', 'approved'];
+        const isActionSuccess = actionType && successActionTypes.includes(actionType);
+        
+        // Check details with word boundary regex to avoid false positives like "unsuccessful"
+        const detailsText = d.details;
+        const isDetailsSuccess = detailsText && /\b(success|successful|completed|executed|approved)\b/i.test(detailsText);
+        
+        return isActionSuccess || isDetailsSuccess;
+      }).length;
+      
       const successRate = totalDecisions > 0 ? (successfulDecisions / totalDecisions) : 0;
       
-      // Extract profit data from audit logs where available
+      // Enhanced profit extraction with negative values, currencies, and context checking
       let totalProfit = 0;
       decisions.forEach(decision => {
-        if (decision.details) {
-          const profitMatch = decision.details.match(/\$([0-9,]+\.?\d*)/);
-          if (profitMatch) {
-            totalProfit += parseFloat(profitMatch[1].replace(/,/g, ''));
+        if (!decision.details) return;
+        
+        // Global regex for monetary values with optional sign, currencies, thousands separators
+        const monetaryRegex = /([-+]?)(?:\$|£|€|USD|GBP|EUR)?\s*([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)(\.\d+)?/g;
+        const profitKeywords = /\b(profit|loss|gain|revenue|earned|made|lost|pnl|p&l)\b/i;
+        
+        let match;
+        while ((match = monetaryRegex.exec(decision.details)) !== null) {
+          const [fullMatch, sign, integerPart, decimalPart] = match;
+          const matchIndex = match.index;
+          
+          // Check if monetary value is near profit/loss keywords (within 50 characters)
+          const contextStart = Math.max(0, matchIndex - 25);
+          const contextEnd = Math.min(decision.details.length, matchIndex + fullMatch.length + 25);
+          const context = decision.details.slice(contextStart, contextEnd);
+          
+          if (profitKeywords.test(context)) {
+            // Parse the monetary value
+            const numericValue = parseFloat((integerPart.replace(/,/g, '') + (decimalPart || '')));
+            const signMultiplier = sign === '-' ? -1 : 1;
+            const finalValue = numericValue * signMultiplier;
+            
+            // Apply loss context (if context contains "loss" or "lost", make it negative)
+            const isLossContext = /\b(loss|lost|deficit|down)\b/i.test(context);
+            const adjustedValue = isLossContext && finalValue > 0 ? -finalValue : finalValue;
+            
+            totalProfit += adjustedValue;
           }
         }
       });
@@ -343,50 +380,152 @@ const EvidenceReportingDashboard: React.FC = () => {
     }
   ];
 
-  // Transform audit log data to decision format
-  const transformAuditLogToDecision = (auditLog: any): DecisionRecord => {
-    return {
-      id: auditLog.id,
-      timestamp: auditLog.timestamp,
-      type: DecisionType.TRADE_EXECUTION, // Default type
-      status: auditLog.action_type?.includes('success') ? DecisionStatus.SUCCESS : DecisionStatus.PENDING,
-      phase: 'completed',
-      action: auditLog.action_type || 'UNKNOWN',
-      reasoning: {
-        primary: auditLog.details || 'Decision logged',
-        factors: [],
-        confidence: 0.8
-      },
-      aiConsensus: {
-        gpt4: { vote: 'unknown', confidence: 0.8, reasoning: 'No consensus data available' },
-        claude: { vote: 'unknown', confidence: 0.8, reasoning: 'No consensus data available' },
-        gemini: { vote: 'unknown', confidence: 0.8, reasoning: 'No consensus data available' },
-        final: 'unknown',
-        agreement: 0.8
-      },
-      marketConditions: {
-        trend: 'neutral' as const,
-        volatility: 'medium' as const,
-        volume: 'normal' as const,
-        signals: []
-      },
-      riskAnalysis: {
-        riskScore: 50,
-        exposureLevel: 0.1,
-        potentialLoss: 0,
-        potentialGain: 0,
-        riskRewardRatio: 1.0
-      },
-      phaseDetails: {
-        analysis: { duration: 300, dataPoints: 100 },
-        consensus: { duration: 200, iterations: 1 },
-        validation: { duration: 100, checks: 5 },
-        execution: { duration: 50, slippage: 0.01 }
+  // Transform audit log data to decision format with validation and error handling
+  const transformAuditLogToDecision = (auditLog: any): DecisionRecord | null => {
+    try {
+      // Input validation - check required fields
+      if (!auditLog || typeof auditLog !== 'object') {
+        console.warn('Invalid audit log: not an object', auditLog);
+        return null;
       }
-    };
+
+      if (!auditLog.id || !auditLog.timestamp) {
+        console.warn('Invalid audit log: missing required fields (id, timestamp)', auditLog);
+        return null;
+      }
+
+      // Safe field extraction with fallbacks
+      const safeId = String(auditLog.id);
+      const safeTimestamp = auditLog.timestamp || new Date().toISOString();
+      const safeActionType = auditLog.action_type ? String(auditLog.action_type) : 'UNKNOWN';
+      const safeDetails = auditLog.details ? String(auditLog.details) : 'No details available';
+
+      // Determine decision type from action_type
+      const getDecisionType = (actionType: string): DecisionType => {
+        const lower = actionType.toLowerCase();
+        if (lower.includes('trade') || lower.includes('buy') || lower.includes('sell')) {
+          return DecisionType.TRADE_EXECUTION;
+        }
+        if (lower.includes('risk') || lower.includes('assessment')) {
+          return DecisionType.RISK_ASSESSMENT;
+        }
+        if (lower.includes('rebalance') || lower.includes('portfolio')) {
+          return DecisionType.PORTFOLIO_REBALANCE;
+        }
+        if (lower.includes('strategy') || lower.includes('change')) {
+          return DecisionType.STRATEGY_CHANGE;
+        }
+        if (lower.includes('emergency') || lower.includes('stop')) {
+          return DecisionType.EMERGENCY_ACTION;
+        }
+        return DecisionType.TRADE_EXECUTION; // Default
+      };
+
+      // Determine status with strict checking
+      const getDecisionStatus = (actionType: string, details: string): DecisionStatus => {
+        const actionLower = actionType.toLowerCase();
+        const detailsLower = details.toLowerCase();
+        
+        const successPatterns = ['success', 'completed', 'executed', 'approved'];
+        const failurePatterns = ['failed', 'error', 'rejected', 'denied'];
+        const pendingPatterns = ['pending', 'processing', 'queued'];
+        
+        if (successPatterns.some(p => actionLower.includes(p) || detailsLower.includes(p))) {
+          return DecisionStatus.SUCCESS;
+        }
+        if (failurePatterns.some(p => actionLower.includes(p) || detailsLower.includes(p))) {
+          return DecisionStatus.FAILED;
+        }
+        if (pendingPatterns.some(p => actionLower.includes(p) || detailsLower.includes(p))) {
+          return DecisionStatus.PENDING;
+        }
+        return DecisionStatus.PENDING; // Default
+      };
+
+      // Safe numeric value extraction with clamping
+      const safeNumber = (value: any, min: number = 0, max: number = 100, fallback: number = 0): number => {
+        const num = Number(value);
+        if (isNaN(num)) return fallback;
+        return Math.max(min, Math.min(max, num));
+      };
+
+      const safeDuration = (value: any, fallback: number = 100): number => {
+        const num = Number(value);
+        return isNaN(num) || num < 0 ? fallback : Math.min(num, 86400000); // Max 24 hours
+      };
+
+      return {
+        id: safeId,
+        timestamp: safeTimestamp,
+        type: getDecisionType(safeActionType),
+        status: getDecisionStatus(safeActionType, safeDetails),
+        phase: 'completed',
+        action: safeActionType,
+        reasoning: {
+          primary: safeDetails,
+          factors: [],
+          confidence: safeNumber(auditLog.confidence, 0, 1, 0.5)
+        },
+        aiConsensus: {
+          gpt4: { vote: 'unknown', confidence: 0.5, reasoning: 'No consensus data available' },
+          claude: { vote: 'unknown', confidence: 0.5, reasoning: 'No consensus data available' },
+          gemini: { vote: 'unknown', confidence: 0.5, reasoning: 'No consensus data available' },
+          final: 'unknown',
+          agreement: 0.5
+        },
+        marketConditions: {
+          trend: 'neutral' as const,
+          volatility: 'medium' as const,
+          volume: 'normal' as const,
+          signals: []
+        },
+        riskAnalysis: {
+          riskScore: safeNumber(auditLog.risk_score, 0, 100, 50),
+          exposureLevel: safeNumber(auditLog.exposure_level, 0, 1, 0.1),
+          potentialLoss: Math.max(0, Number(auditLog.potential_loss) || 0),
+          potentialGain: Math.max(0, Number(auditLog.potential_gain) || 0),
+          riskRewardRatio: safeNumber(auditLog.risk_reward_ratio, 0, 10, 1.0)
+        },
+        phaseDetails: {
+          analysis: { 
+            duration: safeDuration(auditLog.analysis_duration, 300), 
+            dataPoints: safeNumber(auditLog.data_points, 1, 10000, 100) 
+          },
+          consensus: { 
+            duration: safeDuration(auditLog.consensus_duration, 200), 
+            iterations: safeNumber(auditLog.iterations, 1, 10, 1) 
+          },
+          validation: { 
+            duration: safeDuration(auditLog.validation_duration, 100), 
+            checks: safeNumber(auditLog.checks, 1, 50, 5) 
+          },
+          execution: { 
+            duration: safeDuration(auditLog.execution_duration, 50), 
+            slippage: safeNumber(auditLog.slippage, 0, 0.1, 0.01) 
+          }
+        }
+      };
+    } catch (error) {
+      console.error('Error transforming audit log to decision:', error, auditLog);
+      return null;
+    }
   };
 
-  const activeDecisions = decisions ? decisions.map(transformAuditLogToDecision) : [];
+  // Safe transformation of audit logs with error handling
+  const activeDecisions: DecisionRecord[] = decisions ? decisions.reduce((acc: DecisionRecord[], auditLog: any) => {
+    try {
+      const transformed = transformAuditLogToDecision(auditLog);
+      if (transformed) {
+        acc.push(transformed);
+      } else {
+        console.warn('Skipped malformed audit log:', auditLog?.id || 'unknown');
+      }
+    } catch (error) {
+      console.error('Failed to transform audit log, skipping:', error, auditLog?.id || 'unknown');
+      // Continue processing other logs instead of crashing
+    }
+    return acc;
+  }, []) : [];
   const performanceSummary = summary || {
     totalDecisions: 0,
     successRate: 0,
