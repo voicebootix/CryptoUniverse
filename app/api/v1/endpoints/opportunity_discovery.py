@@ -105,12 +105,20 @@ async def discover_opportunities(
     and enterprise asset discovery across thousands of assets.
     """
     
-    await rate_limiter.check_rate_limit(
+    # Enforce rate limiting
+    rate_limit_passed = await rate_limiter.check_rate_limit(
         key="opportunity:discovery",
         limit=30,  # 30 requests per minute
         window=60,
         user_id=str(current_user.id)
     )
+    
+    if not rate_limit_passed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded for opportunity discovery (30 requests per minute)",
+            headers={"Retry-After": "60"}
+        )
     
     try:
         logger.info("🔍 ENTERPRISE Opportunity Discovery API called",
@@ -296,12 +304,20 @@ async def trigger_user_onboarding(
 ):
     """Trigger user onboarding process (3 free strategies + credit account)."""
     
-    await rate_limiter.check_rate_limit(
+    # Enforce rate limiting for onboarding
+    rate_limit_passed = await rate_limiter.check_rate_limit(
         key="opportunity:onboard",
         limit=5,  # 5 onboarding attempts per hour
         window=3600,
         user_id=str(current_user.id)
     )
+    
+    if not rate_limit_passed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded for user onboarding (5 attempts per hour)",
+            headers={"Retry-After": "3600"}
+        )
     
     try:
         logger.info("🚀 User onboarding triggered via API",
