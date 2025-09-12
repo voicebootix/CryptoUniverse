@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 import structlog
-from redis.asyncio import Redis
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -79,7 +78,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     
     def __init__(self):
         super().__init__()
-        self.redis: Optional[Redis] = None
+        self.redis: Optional[Any] = None
         self.opportunity_cache = {}
         
         # Strategy scanning methods mapping
