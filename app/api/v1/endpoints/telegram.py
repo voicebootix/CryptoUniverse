@@ -360,15 +360,18 @@ async def verify_telegram_connection(
             }
         
         # Check if connection is properly authenticated
-        is_authenticated = (
+        # User has completed /auth command in Telegram if these are not "pending"
+        has_completed_auth = (
             connection.telegram_user_id != "pending" and
-            connection.telegram_chat_id != "pending" and
-            connection.is_active
+            connection.telegram_chat_id != "pending"
         )
         
-        # Test if bot can send messages (if authenticated)
+        # Combined verification flag - can we actually verify this connection?
+        can_verify = has_completed_auth and connection.is_authenticated and connection.is_active
+        
+        # Test if bot can send messages (if can verify)
         bot_reachable = False
-        if is_authenticated:
+        if can_verify:
             try:
                 # Try to get bot info to verify it's working
                 bot_status = await telegram_service.get_bot_info()
@@ -376,21 +379,29 @@ async def verify_telegram_connection(
             except Exception:
                 bot_reachable = False
         
-        # Update connection status
-        connection.is_authenticated = is_authenticated
+        # Note: is_authenticated is a property, don't try to set it
+        # It's calculated based on auth_token and auth_expires_at
         await db.commit()
         
         verification_result = {
-            "verified": is_authenticated and bot_reachable,
-            "is_authenticated": is_authenticated,
+            "verified": can_verify and bot_reachable,
+            "is_authenticated": connection.is_authenticated,  # Preserve model property semantics
             "is_active": connection.is_active,
             "bot_reachable": bot_reachable,
+            "has_completed_auth": has_completed_auth,
+            "can_verify": can_verify,
             "telegram_username": connection.telegram_username,
+            "telegram_user_id": connection.telegram_user_id if has_completed_auth else "pending",
             "last_active": connection.last_active_at.isoformat() if connection.last_active_at else None
         }
         
-        if not is_authenticated:
+        # Order checks by most actionable first
+        if not has_completed_auth:
             verification_result["message"] = "Please complete authentication in Telegram using /auth command"
+        elif not connection.is_authenticated:
+            verification_result["message"] = "Authentication token expired - please reconnect"
+        elif not connection.is_active:
+            verification_result["message"] = "Connection inactive - please reconnect or enable the connection"
         elif not bot_reachable:
             verification_result["message"] = "Bot is not reachable - please contact support"
         else:
