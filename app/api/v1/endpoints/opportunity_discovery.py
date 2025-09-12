@@ -430,7 +430,28 @@ async def test_discovery_system(
             except Exception as test_error:
                 logger.error("Test discovery failed", error=str(test_error))
         
-        background_tasks.add_task(run_test_discovery)
+        def start_test_discovery():
+            """Synchronous wrapper to schedule async test discovery."""
+            try:
+                # Schedule the async task in the event loop
+                task = asyncio.create_task(run_test_discovery())
+                
+                # Add done callback to log any unhandled exceptions
+                def log_task_result(future):
+                    try:
+                        if future.exception():
+                            logger.error("Background test discovery task failed", 
+                                       error=str(future.exception()),
+                                       user_id=str(current_user.id))
+                    except Exception as callback_error:
+                        logger.error("Error in task completion callback", error=str(callback_error))
+                
+                task.add_done_callback(log_task_result)
+                
+            except Exception as schedule_error:
+                logger.error("Failed to schedule test discovery task", error=str(schedule_error))
+        
+        background_tasks.add_task(start_test_discovery)
         
         return {
             "success": True,
