@@ -187,14 +187,13 @@ const TrustJourneyDashboard: React.FC = () => {
             
             return {
               score: Math.min(Math.max(Math.round((confidence.win_rate || 0) * 100 + (portfolio.total_profit > 0 ? 20 : 0)), 0), 100),
-              level: TrustLevel.BEGINNER,
               totalTrades: portfolio.total_trades || 0,
               successfulTrades: Math.round((portfolio.total_trades || 0) * (confidence.win_rate || 0)),
               totalProfit: portfolio.total_profit || 0,
               positionLimit: 100,
               winRate: confidence.win_rate || 0,
-              riskScore: Math.round(Math.max(100 - (confidence.max_drawdown || 0) * 1000, 0)),
-              consistencyScore: Math.round((confidence.profit_factor || 1) * 50),
+              riskScore: Math.min(Math.max(Math.round(100 - (confidence.max_drawdown || 0) * 100), 0), 100),
+              consistencyScore: Math.min(Math.max(Math.round((confidence.profit_factor || 1) * 50), 0), 100),
               profitFactor: confidence.profit_factor || 1.0,
               sharpeRatio: confidence.sharpe_ratio || 0.0
             };
@@ -205,14 +204,13 @@ const TrustJourneyDashboard: React.FC = () => {
           
           return {
             score: Math.min(Math.max(Math.round((perfToday.win_rate || 0) * 100 + (perfToday.total_pnl > 0 ? 20 : 0)), 0), 100),
-            level: TrustLevel.BEGINNER,
             totalTrades: perfToday.total_trades || 0,
             successfulTrades: Math.round((perfToday.total_trades || 0) * (perfToday.win_rate || 0)),
             totalProfit: perfToday.total_pnl || 0,
             positionLimit: 100,
             winRate: perfToday.win_rate || 0,
-            riskScore: Math.round(Math.max(100 - (perfToday.max_drawdown || 0) * 1000, 0)),
-            consistencyScore: Math.round((perfToday.profit_factor || 1) * 50),
+            riskScore: Math.min(Math.max(Math.round(100 - (perfToday.max_drawdown || 0) * 100), 0), 100),
+            consistencyScore: Math.min(Math.max(Math.round((perfToday.profit_factor || 1) * 50), 0), 100),
             profitFactor: perfToday.profit_factor || 1.0,
             sharpeRatio: perfToday.sharpe_ratio || 0.0
           };
@@ -223,7 +221,6 @@ const TrustJourneyDashboard: React.FC = () => {
       
       return {
         score: 0,
-        level: TrustLevel.BEGINNER,
         totalTrades: 0,
         successfulTrades: 0,
         totalProfit: 0,
@@ -267,11 +264,17 @@ const TrustJourneyDashboard: React.FC = () => {
           let successCount = 0;
           
           dayLogs.forEach((log: any) => {
-            // Extract profit from details
+            // Extract all dollar amounts from details (including negative amounts)
             const details = log.details || '';
-            const profitMatch = details.match(/\$(\d+(?:\.\d+)?)/g);
-            if (profitMatch) {
-              profit += parseFloat(profitMatch[0].replace('$', ''));
+            const dollarRegex = /-?\$([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)(?:\.[0-9]+)?/g;
+            let match;
+            while ((match = dollarRegex.exec(details)) !== null) {
+              const fullMatch = match[0]; // e.g., "-$123.45" or "$456.78"
+              const cleanAmount = fullMatch.replace(/[$,]/g, ''); // Remove $ and commas
+              const parsedValue = parseFloat(cleanAmount);
+              if (!isNaN(parsedValue)) {
+                profit += parsedValue;
+              }
             }
             
             // Check for success indicators
@@ -534,7 +537,7 @@ const TrustJourneyDashboard: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {formatPercentage(performanceMetrics.winRate)}
+              {formatPercentage(performanceMetrics.winRate * 100)}
             </div>
             <Progress value={performanceMetrics.winRate * 100} className="h-1 mt-2" />
             <p className="text-xs text-muted-foreground mt-2">
