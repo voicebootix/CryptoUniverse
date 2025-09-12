@@ -186,7 +186,7 @@ const EvidenceReportingDashboard: React.FC = () => {
       const totalDecisions = decisions.length;
       
       // Strict success detection with whitelist and word boundary matching
-      const successfulDecisions = decisions.filter(d => {
+      const successfulDecisions = decisions.filter((d: DecisionRecord) => {
         // Check action_type with exact matching (case-insensitive)
         const actionType = d.action_type?.toLowerCase();
         const successActionTypes = ['success', 'completed', 'executed', 'approved'];
@@ -203,7 +203,7 @@ const EvidenceReportingDashboard: React.FC = () => {
       
       // Enhanced profit extraction with negative values, currencies, and context checking
       let totalProfit = 0;
-      decisions.forEach(decision => {
+      decisions.forEach((decision: DecisionRecord) => {
         if (!decision.details) return;
         
         // Global regex for monetary values with optional sign, currencies, thousands separators
