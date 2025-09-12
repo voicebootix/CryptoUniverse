@@ -389,14 +389,35 @@ const EvidenceReportingDashboard: React.FC = () => {
         return null;
       }
 
-      if (!auditLog.id || !auditLog.timestamp) {
-        console.warn('Invalid audit log: missing required fields (id, timestamp)', auditLog);
+      // Check for timestamp variants (timestamp, created_at, createdAt)
+      const rawTimestamp = auditLog.timestamp || auditLog.created_at || auditLog.createdAt;
+      
+      if (!auditLog.id || !rawTimestamp) {
+        console.warn('Invalid audit log: missing required fields (id, timestamp variants)', auditLog);
         return null;
       }
 
-      // Safe field extraction with fallbacks
+      // Safe field extraction with fallbacks and timestamp validation
       const safeId = String(auditLog.id);
-      const safeTimestamp = auditLog.timestamp || new Date().toISOString();
+      
+      // Normalize and validate timestamp
+      const normalizeTimestamp = (timestamp: any): string => {
+        if (!timestamp) return new Date().toISOString();
+        
+        const timestampStr = String(timestamp);
+        
+        // Try to parse the timestamp to validate it
+        const parsedDate = Date.parse(timestampStr);
+        if (isNaN(parsedDate)) {
+          console.warn('Invalid timestamp format, using current time:', timestampStr);
+          return new Date().toISOString();
+        }
+        
+        // Convert to ISO string if it's a valid timestamp
+        return new Date(parsedDate).toISOString();
+      };
+      
+      const safeTimestamp = normalizeTimestamp(rawTimestamp);
       const safeActionType = auditLog.action_type ? String(auditLog.action_type) : 'UNKNOWN';
       const safeDetails = auditLog.details ? String(auditLog.details) : 'No details available';
 
