@@ -108,8 +108,8 @@ async def connect_telegram_account(
     
     await rate_limiter.check_rate_limit(
         key="telegram:connect",
-        limit=5,
-        window=300,  # 5 connections per 5 minutes
+        limit=10,
+        window=60,  # 10 connections per 1 minute - more reasonable for testing
         user_id=str(current_user.id)
     )
     
@@ -128,10 +128,15 @@ async def connect_telegram_account(
         existing_connection = result.scalar_one_or_none()
         
         if existing_connection:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Telegram account already connected. Disconnect first to reconnect."
-            )
+            # Allow reconnection if not authenticated (pending state)
+            if existing_connection.telegram_user_id != "pending" and existing_connection.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Telegram account already connected and authenticated. Disconnect first to reconnect."
+                )
+            # Delete the pending connection to create a new one
+            await db.delete(existing_connection)
+            await db.commit()
         
         # Generate authentication token for secure communication
         auth_token = secrets.token_urlsafe(32)
