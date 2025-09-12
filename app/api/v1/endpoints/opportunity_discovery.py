@@ -162,13 +162,13 @@ async def discover_opportunities(
                 if opp.get("risk_level") == request.filter_by_risk_level
             ]
         
-        if request.min_profit_potential:
+        if request.min_profit_potential is not None:
             opportunities = [
                 opp for opp in opportunities
                 if opp.get("profit_potential_usd", 0) >= request.min_profit_potential
             ]
         
-        if request.max_required_capital:
+        if request.max_required_capital is not None:
             opportunities = [
                 opp for opp in opportunities
                 if opp.get("required_capital_usd", float('inf')) <= request.max_required_capital
@@ -263,15 +263,25 @@ async def get_discovery_status(
             
             if last_scan_timestamp:
                 try:
+                    decoded_timestamp = last_scan_timestamp.decode()
                     last_scan_info = {
-                        "last_scan": last_scan_timestamp.decode(),
+                        "last_scan": decoded_timestamp,
                         "time_since_last_scan": (
                             datetime.utcnow() - 
-                            datetime.fromisoformat(last_scan_timestamp.decode())
+                            datetime.fromisoformat(decoded_timestamp)
                         ).total_seconds()
                     }
-                except:
-                    pass
+                except (UnicodeDecodeError, AttributeError, TypeError, ValueError) as e:
+                    logger.warning("Failed to parse last scan timestamp",
+                                 timestamp_value=last_scan_timestamp,
+                                 error=str(e),
+                                 user_id=str(current_user.id))
+                    # Set sensible default when parsing fails
+                    last_scan_info = {
+                        "last_scan": None,
+                        "time_since_last_scan": None,
+                        "parse_error": "Invalid timestamp format"
+                    }
         
         return {
             "success": True,
