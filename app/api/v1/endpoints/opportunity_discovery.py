@@ -42,7 +42,14 @@ class OpportunityDiscoveryRequest(BaseModel):
     min_profit_potential: Optional[float] = None  # USD
     max_required_capital: Optional[float] = None  # USD
     preferred_timeframes: Optional[List[str]] = None  # ["1h", "4h", "24h", "7d"]
-    strategy_types: Optional[List[str]] = None  # Filter by specific strategy types
+    opportunity_type: Optional[List[str]] = None  # Filter by specific opportunity types
+    strategy_types: Optional[List[str]] = None  # Legacy alias for opportunity_type (backward compatibility)
+    
+    def __init__(self, **data):
+        # Handle backward compatibility: map strategy_types to opportunity_type
+        if 'strategy_types' in data and 'opportunity_type' not in data:
+            data['opportunity_type'] = data['strategy_types']
+        super().__init__(**data)
 
 
 class OpportunityResponse(BaseModel):
@@ -136,13 +143,14 @@ async def discover_opportunities(
         )
         
         if not discovery_result.get("success"):
-            # Return error but with structured response
+            # Return error but with structured response, including fallback opportunities if available
+            fallback_opportunities = discovery_result.get("fallback_opportunities", [])
             return OpportunityDiscoveryResponse(
                 success=False,
                 scan_id=discovery_result.get("scan_id", "error"),
                 user_id=str(current_user.id),
-                opportunities=[],
-                total_opportunities=0,
+                opportunities=fallback_opportunities,
+                total_opportunities=len(fallback_opportunities),
                 user_profile={},
                 strategy_performance={},
                 asset_discovery={},
@@ -181,10 +189,10 @@ async def discover_opportunities(
                       for timeframe in request.preferred_timeframes)
             ]
         
-        if request.strategy_types:
+        if request.opportunity_type:
             opportunities = [
                 opp for opp in opportunities
-                if opp.get("opportunity_type") in request.strategy_types
+                if opp.get("opportunity_type") in request.opportunity_type
             ]
         
         # Convert to response format with validation error handling
