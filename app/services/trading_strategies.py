@@ -1095,7 +1095,12 @@ class TradingStrategiesService(LoggerMixin):
                     function, strategy_type, symbol, strategy_params, user_id
                 )
             
-            elif function in ["position_management", "risk_management", "portfolio_optimization"]:
+            elif function == "risk_management":
+                return await self.risk_management(
+                    symbol=symbol, user_id=user_id
+                )
+            
+            elif function in ["position_management", "portfolio_optimization"]:
                 return await self._execute_management_function(
                     function, symbol, strategy_params, user_id
                 )
@@ -1234,7 +1239,7 @@ class TradingStrategiesService(LoggerMixin):
         
         if function == "portfolio_optimization":
             # Call the actual position management method to get rebalancing data
-            pm_result = await self.position_management(symbol=symbol, user_id=user_id)
+            pm_result = await self.position_management(symbols=symbol, user_id=user_id)
             if pm_result.get("success"):
                 # Extract rebalancing recommendations from position analysis
                 rebalancing_recommendations = []
