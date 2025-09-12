@@ -134,6 +134,12 @@ class OptimizationResult:
     confidence: float
     rebalancing_needed: bool
     suggested_trades: List[Dict[str, Any]]
+    
+    def get(self, key: str, default=None):
+        """Make OptimizationResult compatible with dict.get() calls."""
+        if hasattr(self, key):
+            return getattr(self, key)
+        return default
 
 
 class ExchangePortfolioConnector(LoggerMixin):
