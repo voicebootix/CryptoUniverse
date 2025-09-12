@@ -1022,6 +1022,34 @@ class TradingStrategiesService(LoggerMixin):
             "total_pnl": 0.0
         }
     
+    async def get_active_strategy(self, user_id: str) -> Dict[str, Any]:
+        """Get the active trading strategy for a user."""
+        try:
+            user_strategy = self.active_strategies.get(user_id)
+            if user_strategy:
+                return {
+                    "name": user_strategy.get("strategy_name", "adaptive"),
+                    "allocation": user_strategy.get("allocation", {}),
+                    "risk_level": user_strategy.get("risk_level", "medium"),
+                    "active": True
+                }
+            else:
+                # Return default strategy if no active strategy found
+                return {
+                    "name": "adaptive", 
+                    "allocation": {"stocks": 0.6, "bonds": 0.3, "crypto": 0.1},
+                    "risk_level": "medium",
+                    "active": False
+                }
+        except Exception as e:
+            self.logger.error("Failed to get active strategy", user_id=user_id, error=str(e))
+            return {
+                "name": "adaptive",
+                "allocation": {},
+                "risk_level": "medium", 
+                "active": False
+            }
+    
     async def execute_strategy(
         self,
         function: str,
