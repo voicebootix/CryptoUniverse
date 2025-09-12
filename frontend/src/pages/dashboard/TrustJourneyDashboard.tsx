@@ -351,7 +351,7 @@ const TrustJourneyDashboard: React.FC = () => {
     sharpeRatio: trustData?.sharpeRatio || 0.0
   };
 
-  // Mock milestones data
+  // Real milestones data based on actual trading performance
   const defaultMilestones: Milestone[] = [
     {
       id: '1',
@@ -369,9 +369,9 @@ const TrustJourneyDashboard: React.FC = () => {
       title: 'Profitable Trader',
       description: 'Achieve overall profitability',
       requirement: 'Positive P&L',
-      progress: trustData?.totalProfit > 0 ? 1 : 0,
+      progress: (trustData?.totalProfit || 0) > 0 ? 1 : 0,
       target: 1,
-      completed: trustData?.totalProfit > 0,
+      completed: (trustData?.totalProfit || 0) > 0,
       reward: '+10 Trust Score',
       icon: <DollarSign className="h-4 w-4" />
     },
@@ -380,9 +380,9 @@ const TrustJourneyDashboard: React.FC = () => {
       title: 'Consistent Winner',
       description: 'Maintain 60% win rate',
       requirement: '60% win rate',
-      progress: Math.min(Math.max(performanceMetrics.winRate * 100, 0), 100),
+      progress: Math.round(Math.min(Math.max((performanceMetrics.winRate || 0) * 100, 0), 60)),
       target: 60,
-      completed: performanceMetrics.winRate >= 0.6,
+      completed: (performanceMetrics.winRate || 0) >= 0.6,
       reward: '+15 Trust Score',
       icon: <Trophy className="h-4 w-4" />
     },
@@ -391,15 +391,45 @@ const TrustJourneyDashboard: React.FC = () => {
       title: 'Risk Manager',
       description: 'Complete 50 trades without major loss',
       requirement: '50 safe trades',
-      progress: Math.min(performanceMetrics.totalTrades, 50),
+      progress: Math.min(performanceMetrics.totalTrades || 0, 50),
       target: 50,
-      completed: performanceMetrics.totalTrades >= 50,
+      completed: (performanceMetrics.totalTrades || 0) >= 50,
       reward: 'Unlock Advanced Strategies',
       icon: <Shield className="h-4 w-4" />
+    },
+    {
+      id: '5',
+      title: 'Active Trader',
+      description: 'Execute 10 successful trades',
+      requirement: '10 trades',
+      progress: Math.min(performanceMetrics.totalTrades || 0, 10),
+      target: 10,
+      completed: (performanceMetrics.totalTrades || 0) >= 10,
+      reward: '+8 Trust Score',
+      icon: <Activity className="h-4 w-4" />
+    },
+    {
+      id: '6',
+      title: 'Profit Milestone',
+      description: 'Reach $100 total profit',
+      requirement: '$100 profit',
+      progress: Math.min(Math.max(trustData?.totalProfit || 0, 0), 100),
+      target: 100,
+      completed: (trustData?.totalProfit || 0) >= 100,
+      reward: '+12 Trust Score',
+      icon: <Target className="h-4 w-4" />
     }
   ];
 
-  const activeMilestones = milestones || defaultMilestones;
+  // Filter milestones based on real data availability
+  const activeMilestones = (milestones && milestones.length > 0) ? milestones : defaultMilestones.filter(milestone => {
+    // Only show milestones that make sense with current data
+    if (milestone.id === '3' && (performanceMetrics.totalTrades || 0) < 5) {
+      // Don't show win rate milestone until user has some trades
+      return false;
+    }
+    return true;
+  });
 
   // Use real performance chart data with fallback
   const chartData = performanceHistory || [
