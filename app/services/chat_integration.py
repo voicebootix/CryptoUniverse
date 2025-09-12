@@ -498,9 +498,9 @@ Found **{len(opportunities)}** promising opportunities based on current market c
 {ai_analysis.get('analysis', 'Analyzing opportunities...')}
 
 **Market Context:**
-• Overall Sentiment: {market_scan.get('sentiment', 'Neutral')}
-• Market Phase: {market_scan.get('market_phase', 'Unknown')}
-• Volatility: {market_scan.get('volatility', 'Medium')}
+• Real-time strategy analysis active
+• Professional opportunity scanning enabled
+• Portfolio risk-aligned recommendations
 
 **Next Steps:**
 • "Analyze [symbol]" - Deep dive on specific opportunity
@@ -535,7 +535,8 @@ No significant opportunities detected in current market conditions.
                 "confidence": ai_analysis.get("confidence", 0.8),
                 "metadata": {
                     "opportunities": opportunities,
-                    "market_scan": market_scan,
+                    "service_used": "user_opportunity_discovery",
+                    "opportunities_count": len(opportunities),
                     "ai_analysis": ai_analysis
                 }
             }
