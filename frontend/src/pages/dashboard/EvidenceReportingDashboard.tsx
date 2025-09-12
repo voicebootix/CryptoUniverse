@@ -925,7 +925,7 @@ const EvidenceReportingDashboard: React.FC = () => {
             <div className="text-2xl font-bold text-green-500">
               {formatPercentage(performanceSummary.successRate)}
             </div>
-            <Progress value={performanceSummary.successRate} className="h-1 mt-2" />
+            <Progress value={performanceSummary.successRate * 100} className="h-1 mt-2" />
           </CardContent>
         </Card>
         
@@ -954,7 +954,7 @@ const EvidenceReportingDashboard: React.FC = () => {
             <div className="text-2xl font-bold">
               {formatPercentage(performanceSummary.avgConfidence)}
             </div>
-            <Progress value={performanceSummary.avgConfidence} className="h-1 mt-2" />
+            <Progress value={performanceSummary.avgConfidence * 100} className="h-1 mt-2" />
           </CardContent>
         </Card>
         
