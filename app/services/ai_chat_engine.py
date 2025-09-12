@@ -212,9 +212,9 @@ class EnhancedAIChatEngine(LoggerMixin):
     async def start_chat_session(self, user_id: str, session_type: str = "general") -> str:
         """Start a new chat session with persistent memory."""
         try:
-            # If memory service is not available, generate a simple session ID
+            # If memory service is not available, generate a simple session ID using proper UUID
             if not self.memory:
-                session_id = f"session_{user_id}_{int(time.time())}"
+                session_id = str(uuid.uuid4())
                 self.logger.info("Created simple session without memory", session_id=session_id)
                 return session_id
             
@@ -233,10 +233,14 @@ class EnhancedAIChatEngine(LoggerMixin):
                     )
                     return last_session["session_id"]
             
-            # Create new session
-            session_id = await self.memory.create_session(
+            # Generate proper UUID for new session
+            session_id = str(uuid.uuid4())
+            
+            # Create new session with the UUID
+            created_session_id = await self.memory.create_session(
                 user_id=user_id,
                 session_type=session_type,
+                session_id=session_id,  # Pass the UUID to ensure proper format
                 context={
                     "preferences": {},
                     "active_strategies": [],
@@ -244,6 +248,9 @@ class EnhancedAIChatEngine(LoggerMixin):
                     "created_via": "chat_interface"
                 }
             )
+            
+            # Use the created session ID (should be the same UUID we passed)
+            session_id = created_session_id if created_session_id else session_id
             
             # Add welcome message
             await self.memory.save_message(
@@ -288,8 +295,8 @@ I'll remember our conversation and provide increasingly personalized assistance.
             # Ensure services are initialized (lazy loading)
             await self._ensure_services()
             
-            # Create session if none provided
-            if not session_id or session_id.strip() == "":
+            # Create session if none provided or invalid format
+            if not session_id or session_id.strip() == "" or len(session_id) > 50:
                 session_id = await self.start_chat_session(user_id)
             
             # Save user message (with fallback if memory unavailable)
