@@ -575,7 +575,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 if pairs_result.get("success") and pairs_result.get("trading_signals"):
                     signals = pairs_result["trading_signals"]
                     
-                    if signals.get("signal_strength", 0) > 0.6:  # Only strong signals
+                    # More lenient threshold for pairs trading
+                    if signals.get("signal_strength", 0) > 5.0:  # Adjusted for 1-10 scale
                         opportunity = OpportunityResult(
                             strategy_id="ai_pairs_trading",
                             strategy_name="AI Pairs Trading",
@@ -627,28 +628,33 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     user_id=user_profile.user_id
                 )
                 
-                if momentum_result.get("success") and momentum_result.get("signals"):
-                    signals = momentum_result["signals"]
+                if momentum_result.get("success") and momentum_result.get("signal"):
+                    signals = momentum_result["signal"]
                     
-                    if signals.get("signal_strength", 0) > 0.7:  # Strong momentum signals
+                    if signals.get("strength", 0) > 6.0:  # Strong momentum signals (scale 1-10)
+                        # Get indicators from the full response
+                        indicators = momentum_result.get("indicators", {})
+                        risk_mgmt = momentum_result.get("risk_management", {})
+                        
                         opportunity = OpportunityResult(
                             strategy_id="ai_spot_momentum_strategy",
                             strategy_name="AI Spot Momentum",
                             opportunity_type="spot_momentum",
                             symbol=symbol,
                             exchange="binance",
-                            profit_potential_usd=float(signals.get("profit_target", 0)),
-                            confidence_score=float(signals.get("signal_strength", 0.7)),
+                            profit_potential_usd=float(risk_mgmt.get("take_profit", 100)),  # Default $100 profit target
+                            confidence_score=float(signals.get("confidence", 70)) / 100,  # Convert to 0-1 scale
                             risk_level="medium",
-                            required_capital_usd=float(signals.get("min_capital", 1000)),
+                            required_capital_usd=float(risk_mgmt.get("position_size", 1000)),
                             estimated_timeframe="4-12h",
-                            entry_price=signals.get("entry_price"),
-                            exit_price=signals.get("target_price"),
+                            entry_price=None,  # Will be filled by execution service
+                            exit_price=None,   # Will be calculated based on profit target
                             metadata={
-                                "momentum_score": signals.get("momentum_score", 0),
-                                "volume_increase": signals.get("volume_increase", 0),
-                                "trend_strength": signals.get("trend_strength", 0),
-                                "stop_loss": signals.get("stop_loss", 0)
+                                "momentum_score": indicators.get("momentum_score", 0),
+                                "rsi": indicators.get("rsi", 0),
+                                "macd_trend": indicators.get("macd_trend", "NEUTRAL"),
+                                "signal_strength": signals.get("strength", 0),
+                                "stop_loss": risk_mgmt.get("stop_loss", 0)
                             },
                             discovered_at=datetime.utcnow()
                         )
