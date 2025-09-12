@@ -107,8 +107,13 @@ class StrategyMarketplaceService(LoggerMixin):
             if strategy_pricing_data:
                 strategy_pricing = {}
                 for key, value in strategy_pricing_data.items():
-                    strategy_name = key.decode() if isinstance(key, bytes) else key
-                    credit_cost = int(value.decode()) if isinstance(value, bytes) else int(value)
+                    # Handle both bytes and string responses from Redis
+                    strategy_name = key.decode() if isinstance(key, bytes) else str(key)
+                    try:
+                        credit_cost = int(value.decode()) if isinstance(value, bytes) else int(value)
+                    except (ValueError, AttributeError):
+                        # Fallback to default if conversion fails
+                        credit_cost = 25
                     strategy_pricing[strategy_name] = credit_cost
                 
                 self.strategy_pricing = strategy_pricing
@@ -623,16 +628,24 @@ class StrategyMarketplaceService(LoggerMixin):
     
     async def _add_to_user_strategy_portfolio(self, user_id: str, strategy_id: str, db: AsyncSession):
         """Add strategy to user's active strategy portfolio."""
-        # This would create a user_strategy_subscriptions record
-        # For now, store in Redis for quick access
-        from app.core.redis import get_redis_client
-        redis = await get_redis_client()
-        
-        # Add to user's active strategies set
-        await redis.sadd(f"user_strategies:{user_id}", strategy_id)
-        
-        # Set expiry for monthly subscriptions
-        await redis.expire(f"user_strategies:{user_id}", 30 * 24 * 3600)  # 30 days
+        try:
+            # This would create a user_strategy_subscriptions record
+            # For now, store in Redis for quick access
+            from app.core.redis import get_redis_client
+            redis = await get_redis_client()
+            
+            if redis:
+                # Add to user's active strategies set
+                await redis.sadd(f"user_strategies:{user_id}", strategy_id)
+                
+                # Set expiry for monthly subscriptions
+                await redis.expire(f"user_strategies:{user_id}", 30 * 24 * 3600)  # 30 days
+                self.logger.info("Strategy added to user portfolio", user_id=user_id, strategy_id=strategy_id)
+            else:
+                self.logger.warning("Redis unavailable, strategy not cached", user_id=user_id, strategy_id=strategy_id)
+                
+        except Exception as e:
+            self.logger.error("Failed to add strategy to portfolio", user_id=user_id, strategy_id=strategy_id, error=str(e))
     
     async def get_user_strategy_portfolio(self, user_id: str) -> Dict[str, Any]:
         """Get user's purchased/active strategies."""
@@ -640,9 +653,14 @@ class StrategyMarketplaceService(LoggerMixin):
             from app.core.redis import get_redis_client
             redis = await get_redis_client()
             
+            if not redis:
+                self.logger.warning("Redis unavailable for strategy portfolio retrieval")
+                return {"success": False, "error": "Redis unavailable"}
+            
             # Get user's active strategies
             active_strategies = await redis.smembers(f"user_strategies:{user_id}")
-            active_strategies = [s.decode() for s in active_strategies]
+            # Handle both bytes and string responses from Redis
+            active_strategies = [s.decode() if isinstance(s, bytes) else s for s in active_strategies]
             
             strategy_portfolio = []
             total_monthly_cost = 0
