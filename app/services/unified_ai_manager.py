@@ -26,7 +26,7 @@ from app.services.master_controller import MasterSystemController, TradingMode
 from app.services.ai_consensus_core import AIConsensusService
 from app.services.trade_execution import TradeExecutionService
 from app.services.ai_chat_engine import enhanced_chat_engine as chat_engine, ChatIntent
-from app.services.chat_service_adapters import chat_adapters
+from app.services.chat_service_adapters_fixed import chat_adapters_fixed as chat_adapters
 from app.services.telegram_core import TelegramCommanderService
 from app.services.websocket import manager
 from app.services.chat_memory import ChatMemoryService
