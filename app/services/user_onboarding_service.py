@@ -75,9 +75,9 @@ class UserOnboardingService(LoggerMixin):
             }
         ]
         
-        # Welcome bonus configuration
-        self.welcome_bonus_credits = 100  # New users get 100 welcome credits
-        self.referral_bonus_credits = 50   # Additional credits for referred users
+        # Welcome bonus configuration (1 credit = $1)
+        self.welcome_bonus_credits = 25   # New users get $25 welcome credits  
+        self.referral_bonus_credits = 25  # Additional $25 credits for referred users
     
     async def onboard_new_user(
         self,
@@ -251,9 +251,7 @@ class UserOnboardingService(LoggerMixin):
                     description=f"Welcome bonus credits - {self.welcome_bonus_credits} + {self.referral_bonus_credits if referral_code else 0} referral",
                     balance_before=0,
                     balance_after=welcome_credits,
-                    reference_id=onboarding_id,
-                    status="completed",
-                    created_at=datetime.utcnow()
+                    source="system"
                 )
                 db.add(welcome_transaction)
                 
@@ -285,9 +283,7 @@ class UserOnboardingService(LoggerMixin):
                         description=f"Welcome bonus credits - onboarding completion",
                         balance_before=balance_before,
                         balance_after=balance_before + welcome_credits,
-                        reference_id=onboarding_id,
-                        status="completed",
-                        created_at=datetime.utcnow()
+                        source="system"
                     )
                     db.add(welcome_transaction)
                     
@@ -463,17 +459,20 @@ class UserOnboardingService(LoggerMixin):
             credit_account = credit_result.scalar_one_or_none()
             
             if credit_account:
-                credit_account.available_credits += premium_bonus_credits
-                credit_account.total_earned_credits += premium_bonus_credits
-                
                 # Create premium bonus transaction
+                balance_before = credit_account.available_credits
+                credit_account.available_credits += premium_bonus_credits
+                credit_account.total_credits += premium_bonus_credits
+                balance_after = credit_account.available_credits
+                
                 premium_transaction = CreditTransaction(
-                    user_id=user_id,
+                    account_id=credit_account.id,
                     amount=premium_bonus_credits,
                     transaction_type=CreditTransactionType.BONUS,
                     description="Premium welcome package bonus",
-                    reference_id=onboarding_id,
-                    status="completed"
+                    balance_before=balance_before,
+                    balance_after=balance_after,
+                    source="system"
                 )
                 db.add(premium_transaction)
             
@@ -537,17 +536,20 @@ class UserOnboardingService(LoggerMixin):
             referrer_bonus = 75  # Referrer gets 75 credits
             
             if referrer_credit_account:
+                balance_before = referrer_credit_account.available_credits
                 referrer_credit_account.available_credits += referrer_bonus
-                referrer_credit_account.total_earned_credits += referrer_bonus
+                referrer_credit_account.total_credits += referrer_bonus
+                balance_after = referrer_credit_account.available_credits
                 
                 # Create referrer bonus transaction
                 referrer_transaction = CreditTransaction(
-                    user_id=referrer_id,
+                    account_id=referrer_credit_account.id,
                     amount=referrer_bonus,
                     transaction_type=CreditTransactionType.BONUS,
                     description=f"Referral bonus - new user {user_id[:8]}...",
-                    reference_id=f"referral_{onboarding_id}",
-                    status="completed"
+                    balance_before=balance_before,
+                    balance_after=balance_after,
+                    source="system"
                 )
                 db.add(referrer_transaction)
             
