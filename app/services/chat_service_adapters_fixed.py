@@ -444,6 +444,7 @@ class ChatServiceAdaptersFixed:
             )
             
             # Handle case where optimization_result might be OptimizationResult object instead of dict
+            # MUST check this BEFORE any .get() calls
             if hasattr(optimization_result, 'success'):
                 # It's an OptimizationResult object directly
                 if not optimization_result.success:
