@@ -224,7 +224,7 @@ async def get_discovery_status(
         
         # Get last discovery info from cache
         from app.core.redis import get_redis_client
-        redis = get_redis_client()
+        redis = await get_redis_client()
         
         last_scan_info = None
         if redis:
@@ -330,7 +330,7 @@ async def get_discovery_metrics(
     
     try:
         from app.core.redis import get_redis_client
-        redis = get_redis_client()
+        redis = await get_redis_client()
         
         if not redis:
             return {"success": False, "error": "Redis not available"}

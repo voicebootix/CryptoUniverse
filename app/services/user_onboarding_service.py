@@ -124,7 +124,7 @@ class UserOnboardingService(LoggerMixin):
                 existing_credit_result = await db.execute(existing_credit_stmt)
                 existing_credit_account = existing_credit_result.scalar_one_or_none()
                 
-                if existing_credit_account and existing_credit_account.total_earned_credits > 0:
+                if existing_credit_account and existing_credit_account.total_credits > 0:
                     self.logger.info("User already onboarded, skipping",
                                    onboarding_id=onboarding_id, 
                                    user_id=user_id)
@@ -236,20 +236,21 @@ class UserOnboardingService(LoggerMixin):
                 credit_account = CreditAccount(
                     user_id=user_id,
                     available_credits=welcome_credits,
-                    total_earned_credits=welcome_credits,
-                    total_used_credits=0,
-                    credit_limit=1000,  # Default credit limit
-                    last_updated=datetime.utcnow()
+                    total_credits=welcome_credits,
+                    used_credits=0,
+                    updated_at=datetime.utcnow()
                 )
                 db.add(credit_account)
                 await db.flush()  # Get ID
                 
                 # Create welcome bonus transaction
                 welcome_transaction = CreditTransaction(
-                    user_id=user_id,
+                    account_id=credit_account.id,
                     amount=welcome_credits,
                     transaction_type=CreditTransactionType.BONUS,
                     description=f"Welcome bonus credits - {self.welcome_bonus_credits} + {self.referral_bonus_credits if referral_code else 0} referral",
+                    balance_before=0,
+                    balance_after=welcome_credits,
                     reference_id=onboarding_id,
                     status="completed",
                     created_at=datetime.utcnow()
@@ -270,17 +271,20 @@ class UserOnboardingService(LoggerMixin):
                 
             else:
                 # Update existing account with welcome bonus if not already given
-                if credit_account.total_earned_credits == 0:
+                if credit_account.total_credits == 0:
+                    balance_before = credit_account.available_credits
                     credit_account.available_credits += welcome_credits
-                    credit_account.total_earned_credits += welcome_credits
-                    credit_account.last_updated = datetime.utcnow()
+                    credit_account.total_credits += welcome_credits
+                    credit_account.updated_at = datetime.utcnow()
                     
                     # Create transaction
                     welcome_transaction = CreditTransaction(
-                        user_id=user_id,
+                        account_id=credit_account.id,
                         amount=welcome_credits,
                         transaction_type=CreditTransactionType.BONUS,
                         description=f"Welcome bonus credits - onboarding completion",
+                        balance_before=balance_before,
+                        balance_after=balance_before + welcome_credits,
                         reference_id=onboarding_id,
                         status="completed",
                         created_at=datetime.utcnow()

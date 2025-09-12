@@ -15,8 +15,14 @@ async def test_websocket():
     session_id = "test_session_123"
     ws_url = f"wss://cryptouniverse.onrender.com/api/v1/chat/ws/{session_id}"
     
-    # Authentication token (updated)
-    token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI3YTFlZThjZC1iZmM5LTRlNGUtODViMi02OWM4ZTkxMDU0YWYiLCJlbWFpbCI6ImFkbWluQGNyeXB0b3VuaXZlcnNlLmNvbSIsInJvbGUiOiJhZG1pbiIsInRlbmFudF9pZCI6IiIsImV4cCI6MTc1NzYxNjM2NywiaWF0IjoxNzU3NTg3NTY3LCJqdGkiOiJkNjQ1NjVkYzA1ZDM5YTU4MWRjZTk1OGFkZjlmOGQwNyIsInR5cGUiOiJhY2Nlc3MifQ.jHvphAjB9ezYP5_BawSz2hKZjCXTDhWvtmkyjabt5rk"
+    # Authentication token from environment (NEVER hardcode tokens!)
+    import os
+    token = os.environ.get("TEST_WS_TOKEN")
+    
+    if not token:
+        print("ERROR: TEST_WS_TOKEN environment variable is required")
+        print("Set it with: export TEST_WS_TOKEN='your_jwt_token_here'")
+        return
     
     try:
         print(f"Connecting to WebSocket: {ws_url}")
@@ -94,14 +100,14 @@ async def test_websocket():
         traceback.print_exc()
 
 if __name__ == "__main__":
-    # Install websockets if not available
+    # Check websockets dependency
     try:
         import websockets
     except ImportError:
-        print("Installing websockets package...")
-        import subprocess
-        subprocess.check_call(["pip", "install", "websockets"])
-        import websockets
+        print("ERROR: websockets package is required for testing")
+        print("Install with: pip install websockets")
+        print("Or add websockets to requirements-dev.txt")
+        exit(1)
     
     # Run the test
     asyncio.run(test_websocket())

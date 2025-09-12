@@ -1204,9 +1204,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Try to get cached opportunities from previous successful scans
             if self.redis:
                 cache_pattern = f"user_opportunities:{user_id}:*"
-                cache_keys = await self.redis.keys(cache_pattern)
                 
-                for cache_key in cache_keys:
+                # Use async scan instead of blocking keys()
+                async for cache_key in self.redis.scan_iter(match=cache_pattern):
                     try:
                         cached_data = await self.redis.get(cache_key)
                         if cached_data:

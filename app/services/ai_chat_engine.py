@@ -792,8 +792,10 @@ I encountered an error during the 5-phase execution. The trade was not completed
             )
             
             if not opportunities_result.get("success"):
+                error_message = "Unable to discover opportunities at this time. Please ensure you have active trading strategies."
                 return {
-                    "recommendation": "Unable to discover opportunities at this time. Please ensure you have active trading strategies.",
+                    "content": error_message,
+                    "recommendation": error_message,
                     "confidence": 0.3,
                     "error": opportunities_result.get("error", "Unknown error"),
                     "next_actions": [
