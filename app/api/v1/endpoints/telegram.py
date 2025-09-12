@@ -360,11 +360,14 @@ async def verify_telegram_connection(
             }
         
         # Check if connection is properly authenticated
-        is_authenticated = (
+        # User has completed /auth command in Telegram if these are not "pending"
+        has_completed_auth = (
             connection.telegram_user_id != "pending" and
-            connection.telegram_chat_id != "pending" and
-            connection.is_active
+            connection.telegram_chat_id != "pending"
         )
+        
+        # Also check the property-based authentication
+        is_authenticated = has_completed_auth and connection.is_authenticated and connection.is_active
         
         # Test if bot can send messages (if authenticated)
         bot_reachable = False
@@ -376,8 +379,8 @@ async def verify_telegram_connection(
             except Exception:
                 bot_reachable = False
         
-        # Update connection status
-        connection.is_authenticated = is_authenticated
+        # Note: is_authenticated is a property, don't try to set it
+        # It's calculated based on auth_token and auth_expires_at
         await db.commit()
         
         verification_result = {
@@ -385,12 +388,16 @@ async def verify_telegram_connection(
             "is_authenticated": is_authenticated,
             "is_active": connection.is_active,
             "bot_reachable": bot_reachable,
+            "has_completed_auth": has_completed_auth,
             "telegram_username": connection.telegram_username,
+            "telegram_user_id": connection.telegram_user_id if has_completed_auth else "pending",
             "last_active": connection.last_active_at.isoformat() if connection.last_active_at else None
         }
         
-        if not is_authenticated:
+        if not has_completed_auth:
             verification_result["message"] = "Please complete authentication in Telegram using /auth command"
+        elif not connection.is_authenticated:
+            verification_result["message"] = "Authentication token expired - please reconnect"
         elif not bot_reachable:
             verification_result["message"] = "Bot is not reachable - please contact support"
         else:
