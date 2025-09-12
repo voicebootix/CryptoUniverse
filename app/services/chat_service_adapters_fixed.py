@@ -199,8 +199,8 @@ class ChatServiceAdaptersFixed:
             # Use the CORRECT method signature that actually exists
             risk_result = await self.portfolio_risk.risk_analysis(
                 user_id=user_id,
-                assessment_type="comprehensive",  # Correct parameter name
-                include_stress_tests=True  # Correct parameter name
+                lookback_days=252,  # Correct parameter name
+                confidence_levels=[0.95, 0.99]  # Correct parameter name
             )
             
             if not risk_result.get("success"):
