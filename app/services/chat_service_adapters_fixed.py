@@ -390,6 +390,8 @@ class ChatServiceAdaptersFixed:
             
             # Extract opportunities from technical analysis
             tech_data = tech_analysis.get("data", {})  # Fixed: use "data" not "analysis"
+            logger.info("Technical analysis data received", symbols=list(tech_data.keys()), data_count=len(tech_data))
+            
             for symbol, analysis in tech_data.items():
                 if isinstance(analysis, dict):
                     # Create opportunity based on technical signals
@@ -397,8 +399,11 @@ class ChatServiceAdaptersFixed:
                     buy_signals = signals.get("buy", 0)
                     sell_signals = signals.get("sell", 0)
                     
-                    # Create opportunity if more buy signals than sell signals
-                    if buy_signals > sell_signals and buy_signals > 0:
+                    logger.info("Processing signals", symbol=symbol, buy_signals=buy_signals, sell_signals=sell_signals)
+                    
+                    # Create opportunity if buy signals >= sell signals and we have buy signals
+                    # Or if buy signals > 0 and sell signals == 0
+                    if (buy_signals >= sell_signals and buy_signals > 0) or (buy_signals > 0 and sell_signals == 0):
                         confidence = min(90, 50 + (buy_signals * 10))  # Higher confidence with more buy signals
                         potential_return = min(20, buy_signals * 3)    # Estimate return based on signal strength
                         
