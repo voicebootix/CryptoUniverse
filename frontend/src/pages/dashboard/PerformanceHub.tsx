@@ -22,6 +22,18 @@ import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api/client';
 import { usePaperModeStore } from '@/store/paperModeStore';
 
+// Helper function to safely convert to number and handle NaN
+const safeNumber = (value: any, fallback: number = 0): number => {
+  const num = Number(value);
+  return isNaN(num) ? fallback : num;
+};
+
+// Helper function to normalize percentage values (>1 means it's in percent form, divide by 100)
+const normalizePercent = (value: any, fallback: number = 0): number => {
+  const num = safeNumber(value, fallback);
+  return num > 1 ? num / 100 : num;
+};
+
 // Analytics Overview Component
 const AnalyticsOverview: React.FC = () => {
   const { isPaperMode } = usePaperModeStore();
@@ -43,19 +55,19 @@ const AnalyticsOverview: React.FC = () => {
           const confidence = data.confidence_metrics || {};
           
           return {
-            totalProfit: portfolio.total_profit || 0,
-            profitChange: portfolio.profit_change_24h || 0,
-            winRate: confidence.win_rate || 0,
-            winRateChange: confidence.win_rate_trend || 0,
-            totalTrades: portfolio.total_trades || 0,
+            totalProfit: safeNumber(portfolio.total_profit),
+            profitChange: normalizePercent(portfolio.profit_change_24h),
+            winRate: normalizePercent(confidence.win_rate),
+            winRateChange: normalizePercent(confidence.win_rate_trend),
+            totalTrades: safeNumber(portfolio.total_trades),
             tradesChange: 0,
-            avgTradeTime: confidence.avg_trade_duration_minutes || 0,
+            avgTradeTime: safeNumber(confidence.avg_trade_duration_minutes),
             timeChange: 0,
             strategyPerformance: portfolio.strategy_breakdown || [],
-            maxDrawdown: confidence.max_drawdown || 0,
-            sharpeRatio: confidence.sharpe_ratio || 0,
-            riskRewardRatio: confidence.risk_reward_ratio || 0,
-            profitFactor: confidence.profit_factor || 0
+            maxDrawdown: normalizePercent(confidence.max_drawdown),
+            sharpeRatio: safeNumber(confidence.sharpe_ratio),
+            riskRewardRatio: safeNumber(confidence.risk_reward_ratio),
+            profitFactor: safeNumber(confidence.profit_factor)
           };
         } else {
           // Return zeros if no paper trading setup
@@ -72,19 +84,19 @@ const AnalyticsOverview: React.FC = () => {
         const perfToday = statusData.performance_today || {};
         
         return {
-          totalProfit: perfToday.total_pnl || 0,
-          profitChange: perfToday.change_24h || 0,
-          winRate: perfToday.win_rate || 0,
+          totalProfit: safeNumber(perfToday.total_pnl),
+          profitChange: normalizePercent(perfToday.change_24h),
+          winRate: normalizePercent(perfToday.win_rate),
           winRateChange: 0,
-          totalTrades: perfToday.total_trades || 0,
+          totalTrades: safeNumber(perfToday.total_trades),
           tradesChange: 0,
-          avgTradeTime: perfToday.avg_trade_time_minutes || 0,
+          avgTradeTime: safeNumber(perfToday.avg_trade_time_minutes),
           timeChange: 0,
           strategyPerformance: perfToday.strategy_performance || [],
-          maxDrawdown: perfToday.max_drawdown || 0,
-          sharpeRatio: perfToday.sharpe_ratio || 0,
-          riskRewardRatio: perfToday.risk_reward_ratio || 1,
-          profitFactor: perfToday.profit_factor || 0
+          maxDrawdown: normalizePercent(perfToday.max_drawdown),
+          sharpeRatio: safeNumber(perfToday.sharpe_ratio),
+          riskRewardRatio: safeNumber(perfToday.risk_reward_ratio, 1),
+          profitFactor: safeNumber(perfToday.profit_factor)
         };
       }
     },
@@ -131,7 +143,7 @@ const AnalyticsOverview: React.FC = () => {
     },
     {
       title: 'Win Rate',
-      value: formatPercentage(safeMetrics.winRate / 100), // Convert to decimal if needed
+      value: formatPercentage(safeMetrics.winRate),
       change: safeMetrics.winRateChange,
       icon: <Percent className="h-4 w-4" />,
       color: 'text-blue-500'
@@ -239,25 +251,25 @@ const AnalyticsOverview: React.FC = () => {
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Max Drawdown</span>
                 <span className="font-bold text-red-500">
-                  {formatPercentage(Math.abs(safeMetrics.maxDrawdown) / 100)}
+                  {formatPercentage(Math.abs(safeMetrics.maxDrawdown))}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Sharpe Ratio</span>
                 <span className="font-bold">
-                  {safeMetrics.sharpeRatio.toFixed(2)}
+                  {safeNumber(safeMetrics.sharpeRatio).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Risk/Reward</span>
                 <span className="font-bold">
-                  1:{safeMetrics.riskRewardRatio.toFixed(2)}
+                  1:{safeNumber(safeMetrics.riskRewardRatio).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Profit Factor</span>
                 <span className="font-bold text-green-500">
-                  {safeMetrics.profitFactor.toFixed(2)}
+                  {safeNumber(safeMetrics.profitFactor).toFixed(2)}
                 </span>
               </div>
             </div>
