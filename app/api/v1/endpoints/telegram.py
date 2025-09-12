@@ -366,12 +366,12 @@ async def verify_telegram_connection(
             connection.telegram_chat_id != "pending"
         )
         
-        # Also check the property-based authentication
-        is_authenticated = has_completed_auth and connection.is_authenticated and connection.is_active
+        # Combined verification flag - can we actually verify this connection?
+        can_verify = has_completed_auth and connection.is_authenticated and connection.is_active
         
-        # Test if bot can send messages (if authenticated)
+        # Test if bot can send messages (if can verify)
         bot_reachable = False
-        if is_authenticated:
+        if can_verify:
             try:
                 # Try to get bot info to verify it's working
                 bot_status = await telegram_service.get_bot_info()
@@ -384,20 +384,24 @@ async def verify_telegram_connection(
         await db.commit()
         
         verification_result = {
-            "verified": is_authenticated and bot_reachable,
-            "is_authenticated": is_authenticated,
+            "verified": can_verify and bot_reachable,
+            "is_authenticated": connection.is_authenticated,  # Preserve model property semantics
             "is_active": connection.is_active,
             "bot_reachable": bot_reachable,
             "has_completed_auth": has_completed_auth,
+            "can_verify": can_verify,
             "telegram_username": connection.telegram_username,
             "telegram_user_id": connection.telegram_user_id if has_completed_auth else "pending",
             "last_active": connection.last_active_at.isoformat() if connection.last_active_at else None
         }
         
+        # Order checks by most actionable first
         if not has_completed_auth:
             verification_result["message"] = "Please complete authentication in Telegram using /auth command"
         elif not connection.is_authenticated:
             verification_result["message"] = "Authentication token expired - please reconnect"
+        elif not connection.is_active:
+            verification_result["message"] = "Connection inactive - please reconnect or enable the connection"
         elif not bot_reachable:
             verification_result["message"] = "Bot is not reachable - please contact support"
         else:
