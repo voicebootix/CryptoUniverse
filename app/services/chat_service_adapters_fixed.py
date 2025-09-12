@@ -426,17 +426,21 @@ class ChatServiceAdaptersFixed:
                 "error": str(e)
             }
     
-    async def analyze_rebalancing_needs(self, user_id: str, target_allocation: Optional[Dict] = None) -> Dict[str, Any]:
-        """Analyze rebalancing needs using CORRECT method call."""
+    async def analyze_rebalancing_needs(self, user_id: str, strategy: str = "adaptive", target_allocation: Optional[Dict] = None) -> Dict[str, Any]:
+        """Analyze rebalancing needs using CORRECT method call with fixed parameters."""
         try:
-            logger.info("Analyzing rebalancing needs", user_id=user_id)
+            logger.info("Analyzing rebalancing needs", user_id=user_id, strategy=strategy)
             
-            # Use the CORRECT method that actually exists
+            # Use the CORRECT method signature that actually exists
+            constraints = {}
+            if target_allocation:
+                constraints["target_allocation"] = target_allocation
+            constraints["rebalance_threshold"] = 0.05
+            
             optimization_result = await self.portfolio_risk.optimize_allocation(
                 user_id=user_id,
-                strategy="balanced",  # Correct parameter
-                target_allocation=target_allocation or {},
-                rebalance_threshold=0.05
+                strategy=strategy,  # Use the passed strategy
+                constraints=constraints  # Correct parameter name
             )
             
             if not optimization_result.get("success"):
