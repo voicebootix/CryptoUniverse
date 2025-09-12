@@ -95,7 +95,7 @@ class ChatServiceAdaptersFixed:
                     connected_exchanges.add(exchange_name)
                     
                     formatted_positions.append({
-                        "symbol": balance.get("symbol", "Unknown"),
+                        "symbol": balance.get("asset", "Unknown"),
                         "amount": balance.get("total", 0),
                         "value_usd": balance.get("value_usd", 0),
                         "percentage": (balance.get("value_usd", 0) / total_value * 100) if total_value > 0 else 0,
@@ -140,7 +140,7 @@ class ChatServiceAdaptersFixed:
                 
                 balance_objects = [
                     RiskAnalysisBalance(
-                        symbol=balance.get("symbol", "Unknown"),
+                        symbol=balance.get("asset", "Unknown"),
                         total_balance=float(balance.get("total", 0)),
                         usd_value=float(balance.get("value_usd", 0)),
                         balance_change_24h=float(balance.get("balance_change_24h", 0))
@@ -452,16 +452,26 @@ class ChatServiceAdaptersFixed:
                     "error": optimization_result.get("error")
                 }
             
-            # Extract optimization data - fix key name
-            optimization_data = optimization_result.get("optimization_result", {})
+            # Extract optimization data - get the actual OptimizationResult object
+            optimization_data = optimization_result.get("optimization_result")
             
-            return {
-                "needs_rebalancing": optimization_data.get("rebalancing_recommended", False),
-                "deviation_score": optimization_data.get("deviation_percentage", 0),
-                "recommended_trades": optimization_data.get("recommended_trades", []),
-                "risk_reduction": optimization_data.get("risk_reduction_percentage", 0),
-                "expected_improvement": optimization_data.get("expected_return_improvement", 0)
-            }
+            if optimization_data:
+                # Access OptimizationResult dataclass attributes
+                return {
+                    "needs_rebalancing": optimization_data.rebalancing_needed,
+                    "deviation_score": (1.0 - optimization_data.confidence) * 100,  # Convert confidence to deviation
+                    "recommended_trades": optimization_data.suggested_trades,
+                    "risk_reduction": (optimization_data.max_drawdown_estimate * -100),  # Convert to positive percentage
+                    "expected_improvement": optimization_data.expected_return * 100  # Convert to percentage
+                }
+            else:
+                return {
+                    "needs_rebalancing": False,
+                    "deviation_score": 0,
+                    "recommended_trades": [],
+                    "risk_reduction": 0,
+                    "expected_improvement": 0
+                }
             
         except Exception as e:
             logger.error("Rebalancing analysis failed", error=str(e), user_id=user_id, exc_info=True)
