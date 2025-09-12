@@ -443,13 +443,43 @@ class ChatServiceAdaptersFixed:
                 constraints=constraints  # Correct parameter name
             )
             
-            if not optimization_result.get("success"):
-                logger.warning("Optimization failed", error=optimization_result.get("error"))
+            # Handle case where optimization_result might be OptimizationResult object instead of dict
+            if hasattr(optimization_result, 'success'):
+                # It's an OptimizationResult object directly
+                if not optimization_result.success:
+                    logger.warning("Optimization failed", error="OptimizationResult object failed")
+                    return {
+                        "needs_rebalancing": False,
+                        "deviation_score": 0,
+                        "recommended_trades": [],
+                        "error": "OptimizationResult object failed"
+                    }
+                # Process OptimizationResult object directly
+                return {
+                    "needs_rebalancing": optimization_result.rebalancing_needed,
+                    "deviation_score": (1.0 - optimization_result.confidence) * 100,
+                    "recommended_trades": optimization_result.suggested_trades or [],
+                    "risk_reduction": (optimization_result.max_drawdown_estimate * -100) if optimization_result.max_drawdown_estimate else 0,
+                    "expected_improvement": optimization_result.expected_return * 100 if optimization_result.expected_return else 0
+                }
+            elif isinstance(optimization_result, dict):
+                # It's a dictionary as expected
+                if not optimization_result.get("success"):
+                    logger.warning("Optimization failed", error=optimization_result.get("error"))
+                    return {
+                        "needs_rebalancing": False,
+                        "deviation_score": 0,
+                        "recommended_trades": [],
+                        "error": optimization_result.get("error")
+                    }
+            else:
+                # Unknown type
+                logger.error("Unexpected optimization result type", type=type(optimization_result))
                 return {
                     "needs_rebalancing": False,
                     "deviation_score": 0,
                     "recommended_trades": [],
-                    "error": optimization_result.get("error")
+                    "error": f"Unexpected optimization result type: {type(optimization_result)}"
                 }
             
             # Extract optimization data - get the actual OptimizationResult object
@@ -460,17 +490,16 @@ class ChatServiceAdaptersFixed:
                 return {
                     "needs_rebalancing": optimization_data.rebalancing_needed,
                     "deviation_score": (1.0 - optimization_data.confidence) * 100,  # Convert confidence to deviation
-                    "recommended_trades": optimization_data.suggested_trades,
-                    "risk_reduction": (optimization_data.max_drawdown_estimate * -100),  # Convert to positive percentage
-                    "expected_improvement": optimization_data.expected_return * 100  # Convert to percentage
+                    "recommended_trades": optimization_data.suggested_trades or [],
+                    "risk_reduction": (optimization_data.max_drawdown_estimate * -100) if optimization_data.max_drawdown_estimate else 0,
+                    "expected_improvement": optimization_data.expected_return * 100 if optimization_data.expected_return else 0
                 }
             else:
                 return {
                     "needs_rebalancing": False,
                     "deviation_score": 0,
                     "recommended_trades": [],
-                    "risk_reduction": 0,
-                    "expected_improvement": 0
+                    "error": "No optimization data returned"
                 }
             
         except Exception as e:
