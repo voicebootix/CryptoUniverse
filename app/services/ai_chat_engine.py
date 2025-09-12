@@ -687,15 +687,25 @@ I encountered an error during the 5-phase execution. The trade was not completed
                 # Store monitoring configuration in Redis if available
                 if hasattr(self, 'redis') and self.redis:
                     try:
+                        # Serialize all mapping values to strings for Redis compatibility
+                        redis_mapping = {}
+                        for key, value in monitoring_config.items():
+                            if isinstance(value, (dict, list)):
+                                redis_mapping[str(key)] = json.dumps(value)
+                            elif value is None:
+                                redis_mapping[str(key)] = ""
+                            else:
+                                redis_mapping[str(key)] = str(value)
+                        
                         await self.redis.hset(
                             f"portfolio_monitoring:{monitoring_id}",
-                            mapping=monitoring_config
+                            mapping=redis_mapping
                         )
                         await self.redis.expire(f"portfolio_monitoring:{monitoring_id}", 86400 * 30)  # 30 days
                         
-                        # Add to user's active monitoring list
-                        await self.redis.sadd(f"active_monitoring:{user_id}", monitoring_id)
-                        await self.redis.expire(f"active_monitoring:{user_id}", 86400 * 30)
+                        # Add to user's active monitoring list (ensure user_id is string)
+                        await self.redis.sadd(f"active_monitoring:{str(user_id)}", str(monitoring_id))
+                        await self.redis.expire(f"active_monitoring:{str(user_id)}", 86400 * 30)
                         
                         self.logger.info("Portfolio monitoring setup completed", 
                                        monitoring_id=monitoring_id, user_id=user_id)
@@ -761,14 +771,16 @@ I encountered an error during the 5-phase execution. The trade was not completed
             
             # Store in Redis for background processor to pick up
             if hasattr(self, 'redis') and self.redis:
+                # Ensure all mapping values are strings
+                redis_schedule_mapping = {
+                    "user_id": str(user_id),
+                    "next_check": str(check_config["next_check"]),
+                    "config": json.dumps(config),
+                    "status": "scheduled"
+                }
                 await self.redis.hset(
                     f"monitoring_schedule:{monitoring_id}",
-                    mapping={
-                        "user_id": user_id,
-                        "next_check": check_config["next_check"],
-                        "config": json.dumps(config),
-                        "status": "scheduled"
-                    }
+                    mapping=redis_schedule_mapping
                 )
                 await self.redis.expire(f"monitoring_schedule:{monitoring_id}", 86400 * 30)
                 
@@ -1416,7 +1428,19 @@ This might indicate insufficient portfolio size or market conditions. Try again 
                     timeout=15.0  # 15 second timeout
                 )
                 
-                if analysis_result.get("success") is not False:  # Success or no explicit failure
+                # Ensure analysis_result is a dict and not null
+                if not isinstance(analysis_result, dict) or not analysis_result:
+                    error_msg = "Portfolio analysis returned invalid result"
+                    self.logger.warning("Portfolio analysis failed", 
+                                      attempt=attempt + 1, error=error_msg, user_id=user_id)
+                    if attempt < max_retries:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    else:
+                        return {"error": f"Portfolio analysis failed after {max_retries + 1} attempts: {error_msg}"}
+                
+                # Check for presence of error key - if no error, it's a success
+                if not analysis_result.get("error"):
                     return analysis_result
                 
                 # If explicit failure, log and potentially retry
@@ -1679,16 +1703,24 @@ Rebalancing can still proceed but with reduced features.""",
                     "error": f"Invalid trade parameters: symbol={symbol}, action={action}, amount={amount}"
                 }
             
-            # Execute trade with timeout
+            # Prepare trade request in correct format for TradeExecutionService
+            trade_request = {
+                "symbol": symbol,
+                "quantity": amount,  # TradeExecutionService expects 'quantity', not 'amount'
+                "exchange": trade.get("exchange", "auto"),
+                "side": action,      # 'buy' or 'sell'
+                "order_type": "market",
+                "source": "rebalancing",
+                "opportunity_data": trade.get("opportunity_data"),
+                "safety_checks": True
+            }
+            
+            # Execute trade with timeout using correct signature
             execution_result = await asyncio.wait_for(
                 self.trade_executor.execute_trade(
-                    user_id=user_id,
-                    symbol=symbol,
-                    action=action,
-                    amount=amount,
-                    order_type="market",
-                    source="rebalancing",
-                    safety_checks=True
+                    trade_request=trade_request, 
+                    user_id=user_id, 
+                    simulation_mode=False  # Real trades for rebalancing
                 ),
                 timeout=30.0  # 30 second timeout per trade
             )
