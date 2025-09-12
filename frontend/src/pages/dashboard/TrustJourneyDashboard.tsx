@@ -39,6 +39,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api/client';
 import { formatCurrency, formatPercentage, cn } from '@/lib/utils';
+import { usePaperModeStore } from '@/store/paperModeStore';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from 'recharts';
 
 // Trust Levels
@@ -166,40 +167,146 @@ interface PerformanceMetrics {
 const TrustJourneyDashboard: React.FC = () => {
   const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month' | 'all'>('month');
   const [showDetails, setShowDetails] = useState(false);
+  const { isPaperMode } = usePaperModeStore();
 
-  // Fetch trust score data
+  // Fetch real trading performance data
   const { data: trustData, isLoading: trustLoading } = useQuery({
-    queryKey: ['trust-score'],
+    queryKey: ['trust-score', isPaperMode],
     queryFn: async () => {
-      const response = await apiClient.get('/user/trust-score');
-      return response.data.data || {
+      try {
+        const endpoint = isPaperMode 
+          ? '/paper-trading/performance'
+          : '/trading/status';
+        const response = await apiClient.get(endpoint);
+        
+        if (isPaperMode) {
+          const data = response.data;
+          if (data.success && data.paper_portfolio) {
+            const portfolio = data.paper_portfolio;
+            const confidence = data.confidence_metrics || {};
+            
+            return {
+              score: Math.min(Math.max(Math.round((confidence.win_rate || 0) * 100 + (portfolio.total_profit > 0 ? 20 : 0)), 0), 100),
+              totalTrades: portfolio.total_trades || 0,
+              successfulTrades: Math.round((portfolio.total_trades || 0) * (confidence.win_rate || 0)),
+              totalProfit: portfolio.total_profit || 0,
+              positionLimit: 100,
+              winRate: confidence.win_rate || 0,
+              riskScore: Math.min(Math.max(Math.round(100 - (confidence.max_drawdown || 0) * 100), 0), 100),
+              consistencyScore: Math.min(Math.max(Math.round((confidence.profit_factor || 1) * 50), 0), 100),
+              profitFactor: confidence.profit_factor || 1.0,
+              sharpeRatio: confidence.sharpe_ratio || 0.0
+            };
+          }
+        } else {
+          const statusData = response.data;
+          const perfToday = statusData.performance_today || {};
+          
+          return {
+            score: Math.min(Math.max(Math.round((perfToday.win_rate || 0) * 100 + (perfToday.total_pnl > 0 ? 20 : 0)), 0), 100),
+            totalTrades: perfToday.total_trades || 0,
+            successfulTrades: Math.round((perfToday.total_trades || 0) * (perfToday.win_rate || 0)),
+            totalProfit: perfToday.total_pnl || 0,
+            positionLimit: 100,
+            winRate: perfToday.win_rate || 0,
+            riskScore: Math.min(Math.max(Math.round(100 - (perfToday.max_drawdown || 0) * 100), 0), 100),
+            consistencyScore: Math.min(Math.max(Math.round((perfToday.profit_factor || 1) * 50), 0), 100),
+            profitFactor: perfToday.profit_factor || 1.0,
+            sharpeRatio: perfToday.sharpe_ratio || 0.0
+          };
+        }
+      } catch (error) {
+        console.error('Failed to fetch performance data:', error);
+      }
+      
+      return {
         score: 0,
-        level: TrustLevel.BEGINNER,
         totalTrades: 0,
         successfulTrades: 0,
         totalProfit: 0,
-        positionLimit: 100
+        positionLimit: 100,
+        winRate: 0,
+        riskScore: 0,
+        consistencyScore: 0,
+        profitFactor: 1.0,
+        sharpeRatio: 0.0
       };
     },
     refetchInterval: 60000 // Refresh every minute
   });
 
-  // Fetch performance history
+  // Fetch performance history from audit logs
   const { data: performanceHistory, isLoading: historyLoading } = useQuery({
     queryKey: ['performance-history', selectedPeriod],
     queryFn: async () => {
-      const response = await apiClient.get(`/api/v1/user/performance-history?period=${selectedPeriod}`);
-      return response.data.data || [];
+      try {
+        const response = await apiClient.get('/admin/audit-logs?limit=30');
+        const auditLogs = response.data.audit_logs || [];
+        
+        // Transform audit logs into chart data
+        const chartData = [];
+        const days = selectedPeriod === 'week' ? 7 : selectedPeriod === 'month' ? 30 : 90;
+        
+        for (let i = days - 1; i >= 0; i--) {
+          const date = new Date();
+          date.setDate(date.getDate() - i);
+          const dateStr = date.toLocaleDateString('en-US', { weekday: 'short' });
+          
+          // Filter logs for this day
+          const dayLogs = auditLogs.filter((log: any) => {
+            const logDate = new Date(log.timestamp || log.created_at);
+            return logDate.toDateString() === date.toDateString();
+          });
+          
+          // Calculate metrics for this day
+          let profit = 0;
+          let trades = dayLogs.length;
+          let successCount = 0;
+          
+          dayLogs.forEach((log: any) => {
+            // Extract all dollar amounts from details (including negative amounts)
+            const details = log.details || '';
+            const dollarRegex = /-?\$([0-9]{1,3}(?:,[0-9]{3})*|[0-9]+)(?:\.[0-9]+)?/g;
+            let match;
+            while ((match = dollarRegex.exec(details)) !== null) {
+              const fullMatch = match[0]; // e.g., "-$123.45" or "$456.78"
+              const cleanAmount = fullMatch.replace(/[$,]/g, ''); // Remove $ and commas
+              const parsedValue = parseFloat(cleanAmount);
+              if (!isNaN(parsedValue)) {
+                profit += parsedValue;
+              }
+            }
+            
+            // Check for success indicators
+            if (/\b(success|successful|completed|executed|profit)\b/i.test(details)) {
+              successCount++;
+            }
+          });
+          
+          chartData.push({
+            date: dateStr,
+            profit: Math.round(profit),
+            trades: trades,
+            winRate: trades > 0 ? Math.round((successCount / trades) * 100) : 0
+          });
+        }
+        
+        return chartData;
+      } catch (error) {
+        console.error('Failed to fetch performance history:', error);
+        return [];
+      }
     }
   });
 
-  // Fetch milestones
+  // Generate milestones based on real data (since backend doesn't have milestones endpoint yet)
   const { data: milestones, isLoading: milestonesLoading } = useQuery({
-    queryKey: ['trust-milestones'],
+    queryKey: ['trust-milestones', trustData],
     queryFn: async () => {
-      const response = await apiClient.get('/user/milestones');
-      return mapMilestones(response.data.data || []);
-    }
+      // Return empty for now since we'll use default milestones with real data
+      return [];
+    },
+    enabled: false // Disable this query for now
   });
 
   const getCurrentLevel = (score: number): TrustLevel => {
@@ -232,16 +339,16 @@ const TrustJourneyDashboard: React.FC = () => {
     ? ((trustData.score - levelConfig.minScore) / (nextLevelConfig.minScore - levelConfig.minScore)) * 100
     : 100;
 
-  // Mock performance metrics (replace with real data)
+  // Real performance metrics from API data
   const performanceMetrics: PerformanceMetrics = {
-    winRate: trustData?.successfulTrades / Math.max(trustData?.totalTrades, 1) || 0,
+    winRate: trustData?.winRate || 0,
     avgProfit: trustData?.totalProfit / Math.max(trustData?.totalTrades, 1) || 0,
     totalTrades: trustData?.totalTrades || 0,
     successfulTrades: trustData?.successfulTrades || 0,
-    riskScore: 75,
-    consistencyScore: 82,
-    profitFactor: 1.8,
-    sharpeRatio: 1.2
+    riskScore: trustData?.riskScore || 0,
+    consistencyScore: trustData?.consistencyScore || 0,
+    profitFactor: trustData?.profitFactor || 1.0,
+    sharpeRatio: trustData?.sharpeRatio || 0.0
   };
 
   // Mock milestones data
@@ -294,25 +401,25 @@ const TrustJourneyDashboard: React.FC = () => {
 
   const activeMilestones = milestones || defaultMilestones;
 
-  // Mock performance chart data
+  // Use real performance chart data with fallback
   const chartData = performanceHistory || [
-    { date: 'Mon', profit: 120, trades: 5, winRate: 60 },
-    { date: 'Tue', profit: 250, trades: 8, winRate: 75 },
-    { date: 'Wed', profit: 180, trades: 6, winRate: 66 },
-    { date: 'Thu', profit: 420, trades: 10, winRate: 80 },
-    { date: 'Fri', profit: 380, trades: 9, winRate: 77 },
-    { date: 'Sat', profit: 520, trades: 12, winRate: 83 },
-    { date: 'Sun', profit: 480, trades: 11, winRate: 81 }
+    { date: 'Mon', profit: 0, trades: 0, winRate: 0 },
+    { date: 'Tue', profit: 0, trades: 0, winRate: 0 },
+    { date: 'Wed', profit: 0, trades: 0, winRate: 0 },
+    { date: 'Thu', profit: 0, trades: 0, winRate: 0 },
+    { date: 'Fri', profit: 0, trades: 0, winRate: 0 },
+    { date: 'Sat', profit: 0, trades: 0, winRate: 0 },
+    { date: 'Sun', profit: 0, trades: 0, winRate: 0 }
   ];
 
-  // Radar chart data for skills
+  // Radar chart data for skills using real metrics
   const skillsData = [
-    { skill: 'Trading', value: performanceMetrics.winRate * 100 },
+    { skill: 'Trading', value: Math.round(performanceMetrics.winRate * 100) },
     { skill: 'Risk Mgmt', value: performanceMetrics.riskScore },
     { skill: 'Consistency', value: performanceMetrics.consistencyScore },
-    { skill: 'Profit', value: Math.min(performanceMetrics.profitFactor * 50, 100) },
+    { skill: 'Profit', value: Math.min(Math.round(performanceMetrics.profitFactor * 50), 100) },
     { skill: 'Strategy', value: (trustData?.score || 0) },
-    { skill: 'Discipline', value: 70 }
+    { skill: 'Discipline', value: Math.round(Math.min(performanceMetrics.sharpeRatio * 50 + 25, 100)) }
   ];
 
   return (
