@@ -223,7 +223,7 @@ class ChatServiceAdapters:
             # Use existing portfolio optimization service
             optimization_result = await self.portfolio_risk.optimize_allocation(
                 user_id=user_id,
-                strategy="adaptive",  # Use adaptive strategy by default
+                strategy="equal_weight",  # Use equal_weight for proper detection
                 target_allocation=target_allocation,
                 rebalance_threshold=0.05  # 5% threshold
             )
@@ -235,7 +235,7 @@ class ChatServiceAdapters:
                     "recommended_trades": []
                 }
             
-            optimization_data = optimization_result.get("optimization", {})
+            optimization_data = optimization_result.get("optimization_result", {})
             
             # Check if rebalancing is needed
             needs_rebalancing = optimization_data.get("rebalancing_needed", False)
