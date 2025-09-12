@@ -66,8 +66,8 @@ class OpportunityResponse(BaseModel):
     estimated_timeframe: str
     entry_price: Optional[float]
     exit_price: Optional[float]
-    metadata: Dict[str, Any]
-    discovered_at: str
+    metadata: Optional[Dict[str, Any]]
+    discovered_at: datetime
 
 
 class OpportunityDiscoveryResponse(BaseModel):
@@ -112,9 +112,9 @@ async def discover_opportunities(
     and enterprise asset discovery across thousands of assets.
     """
     
-    # Enforce rate limiting
+    # Enforce rate limiting per user
     rate_limit_passed = await rate_limiter.check_rate_limit(
-        key="opportunity:discovery",
+        key=f"opportunity:discovery:{current_user.id}",
         limit=30,  # 30 requests per minute
         window=60,
         user_id=str(current_user.id)
@@ -143,14 +143,42 @@ async def discover_opportunities(
         )
         
         if not discovery_result.get("success"):
-            # Return error but with structured response, including fallback opportunities if available
-            fallback_opportunities = discovery_result.get("fallback_opportunities", [])
+            # Return error but with structured response, including validated fallback opportunities
+            raw_fallback_opportunities = discovery_result.get("fallback_opportunities", [])
+            
+            # Validate fallback opportunities using the same validation as success path
+            validated_fallback_opportunities = []
+            fallback_validation_errors = []
+            
+            for i, opp in enumerate(raw_fallback_opportunities):
+                try:
+                    validated_fallback_opportunities.append(OpportunityResponse(**opp))
+                except ValidationError as e:
+                    logger.warning("Skipping malformed fallback opportunity data",
+                                 opportunity_index=i,
+                                 validation_error=str(e),
+                                 opportunity_data=opp,
+                                 user_id=str(current_user.id))
+                    fallback_validation_errors.append({
+                        "index": i,
+                        "error": str(e),
+                        "data": opp
+                    })
+            
+            # Log summary if we had fallback validation errors
+            if fallback_validation_errors:
+                logger.warning("Fallback opportunity validation summary",
+                             total_fallback_opportunities=len(raw_fallback_opportunities),
+                             valid_fallback_opportunities=len(validated_fallback_opportunities),
+                             validation_errors_count=len(fallback_validation_errors),
+                             user_id=str(current_user.id))
+            
             return OpportunityDiscoveryResponse(
                 success=False,
                 scan_id=discovery_result.get("scan_id", "error"),
                 user_id=str(current_user.id),
-                opportunities=fallback_opportunities,
-                total_opportunities=len(fallback_opportunities),
+                opportunities=validated_fallback_opportunities,
+                total_opportunities=len(validated_fallback_opportunities),
                 user_profile={},
                 strategy_performance={},
                 asset_discovery={},
@@ -322,9 +350,9 @@ async def trigger_user_onboarding(
 ):
     """Trigger user onboarding process (3 free strategies + credit account)."""
     
-    # Enforce rate limiting for onboarding
+    # Enforce rate limiting for onboarding per user
     rate_limit_passed = await rate_limiter.check_rate_limit(
-        key="opportunity:onboard",
+        key=f"opportunity:onboard:{current_user.id}",
         limit=5,  # 5 onboarding attempts per hour
         window=3600,
         user_id=str(current_user.id)
