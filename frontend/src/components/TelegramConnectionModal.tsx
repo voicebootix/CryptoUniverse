@@ -84,10 +84,14 @@ const TelegramConnectionModal: React.FC<TelegramConnectionModalProps> = ({
       
       // Show more specific error messages
       let errorMessage = "Failed to create Telegram connection";
-      if (error.response?.status === 400) {
+      if (error.response?.status === 429) {
+        errorMessage = "Too many connection attempts. Please wait a minute before trying again.";
+      } else if (error.response?.status === 400) {
         errorMessage = error.response.data?.detail || "Connection already exists or invalid configuration";
       } else if (error.response?.status === 500) {
         errorMessage = "Server error - please try again later";
+      } else if (error.message?.includes("Rate limit exceeded")) {
+        errorMessage = "Rate limit exceeded. Please wait a moment before trying again.";
       } else if (error.message) {
         errorMessage = error.message;
       }
