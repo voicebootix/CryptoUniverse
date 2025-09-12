@@ -121,7 +121,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def async_init(self):
         """Initialize async components."""
         try:
-            self.redis = await get_redis_client()
+            # Try to get Redis client but don't fail if Redis is unavailable
+            try:
+                self.redis = await get_redis_client()
+                self.logger.info("Redis client initialized for opportunity discovery")
+            except Exception as redis_error:
+                self.logger.warning("Redis unavailable, continuing without caching", error=str(redis_error))
+                self.redis = None
             
             # Initialize enterprise asset filter
             await enterprise_asset_filter.async_init()
@@ -130,6 +136,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             
         except Exception as e:
             self.logger.error("Failed to initialize User Opportunity Discovery", error=str(e))
+            raise
     
     async def discover_opportunities_for_user(
         self,
@@ -1060,40 +1067,118 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         return recommendations
     
     async def _handle_no_strategies_user(self, user_id: str, scan_id: str) -> Dict[str, Any]:
-        """Handle users with no active strategies - guide them to get free strategies."""
+        """Handle users with no active strategies - automatically onboard them with 3 free strategies."""
         
-        self.logger.info("User has no active strategies", 
+        self.logger.info("User has no active strategies, triggering automatic onboarding", 
                         scan_id=scan_id, user_id=user_id)
         
-        return {
-            "success": True,
-            "scan_id": scan_id,
-            "user_id": user_id,
-            "opportunities": [],
-            "total_opportunities": 0,
-            "message": "No active trading strategies found. Get your 3 free strategies to start discovering opportunities!",
-            "free_strategies_available": [
-                {
-                    "strategy_id": "ai_risk_management",
-                    "name": "AI Risk Management",
-                    "description": "Essential portfolio protection - FREE",
-                    "cost": 0
-                },
-                {
-                    "strategy_id": "ai_portfolio_optimization", 
-                    "name": "AI Portfolio Optimization",
-                    "description": "Smart portfolio rebalancing - FREE",
-                    "cost": 0
-                },
-                {
-                    "strategy_id": "ai_spot_momentum_strategy",
-                    "name": "AI Momentum Trading",
-                    "description": "Catch trending moves - FREE", 
-                    "cost": 0
+        try:
+            # Import onboarding service
+            from app.services.user_onboarding_service import user_onboarding_service
+            
+            # Trigger automatic onboarding to get 3 free strategies
+            onboarding_result = await user_onboarding_service.trigger_onboarding_if_needed(user_id)
+            
+            if onboarding_result.get("success"):
+                self.logger.info("🎯 User automatically onboarded with free strategies", 
+                               scan_id=scan_id, user_id=user_id)
+                
+                # Now try to discover opportunities again with the new strategies
+                # Recursively call the main discovery method, but prevent infinite loop
+                if not hasattr(self, '_onboarding_attempt'):
+                    self._onboarding_attempt = True
+                    try:
+                        result = await self.discover_opportunities_for_user(
+                            user_id=user_id,
+                            force_refresh=True,
+                            include_strategy_recommendations=True
+                        )
+                        # Add onboarding metadata
+                        result["auto_onboarded"] = True
+                        result["onboarding_result"] = onboarding_result
+                        return result
+                    finally:
+                        delattr(self, '_onboarding_attempt')
+                else:
+                    # Prevent infinite recursion - return default response
+                    return {
+                        "success": True,
+                        "scan_id": scan_id,
+                        "user_id": user_id,
+                        "opportunities": [],
+                        "total_opportunities": 0,
+                        "message": "Onboarding completed! Please try discovering opportunities again.",
+                        "auto_onboarded": True,
+                        "onboarding_result": onboarding_result
+                    }
+            else:
+                # Onboarding failed, return helpful message
+                return {
+                    "success": True,
+                    "scan_id": scan_id,
+                    "user_id": user_id,
+                    "opportunities": [],
+                    "total_opportunities": 0,
+                    "message": "No active trading strategies found. Unable to automatically activate free strategies.",
+                    "onboarding_error": onboarding_result.get("error"),
+                    "free_strategies_available": [
+                        {
+                            "strategy_id": "ai_risk_management",
+                            "name": "AI Risk Management",
+                            "description": "Essential portfolio protection - FREE",
+                            "cost": 0
+                        },
+                        {
+                            "strategy_id": "ai_portfolio_optimization", 
+                            "name": "AI Portfolio Optimization",
+                            "description": "Smart portfolio rebalancing - FREE",
+                            "cost": 0
+                        },
+                        {
+                            "strategy_id": "ai_spot_momentum_strategy",
+                            "name": "AI Momentum Trading",
+                            "description": "Catch trending moves - FREE", 
+                            "cost": 0
+                        }
+                    ],
+                    "next_action": "Visit the Strategy Marketplace to manually activate your free strategies"
                 }
-            ],
-            "next_action": "Visit the Strategy Marketplace to activate your free strategies"
-        }
+                
+        except Exception as e:
+            self.logger.error("Automatic onboarding failed", 
+                            scan_id=scan_id, user_id=user_id, error=str(e))
+            
+            # Fallback to original response
+            return {
+                "success": True,
+                "scan_id": scan_id,
+                "user_id": user_id,
+                "opportunities": [],
+                "total_opportunities": 0,
+                "message": "No active trading strategies found. Get your 3 free strategies to start discovering opportunities!",
+                "onboarding_error": str(e),
+                "free_strategies_available": [
+                    {
+                        "strategy_id": "ai_risk_management",
+                        "name": "AI Risk Management",
+                        "description": "Essential portfolio protection - FREE",
+                        "cost": 0
+                    },
+                    {
+                        "strategy_id": "ai_portfolio_optimization", 
+                        "name": "AI Portfolio Optimization",
+                        "description": "Smart portfolio rebalancing - FREE",
+                        "cost": 0
+                    },
+                    {
+                        "strategy_id": "ai_spot_momentum_strategy",
+                        "name": "AI Momentum Trading",
+                        "description": "Catch trending moves - FREE", 
+                        "cost": 0
+                    }
+                ],
+                "next_action": "Visit the Strategy Marketplace to activate your free strategies"
+            }
     
     def _serialize_opportunity(self, opportunity: OpportunityResult) -> Dict[str, Any]:
         """Convert OpportunityResult to serializable dictionary."""
