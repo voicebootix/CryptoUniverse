@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -179,10 +179,32 @@ async def discover_opportunities(
                 if opp.get("opportunity_type") in request.strategy_types
             ]
         
-        # Convert to response format
-        opportunity_responses = [
-            OpportunityResponse(**opp) for opp in opportunities
-        ]
+        # Convert to response format with validation error handling
+        opportunity_responses = []
+        validation_errors = []
+        
+        for i, opp in enumerate(opportunities):
+            try:
+                opportunity_responses.append(OpportunityResponse(**opp))
+            except ValidationError as e:
+                logger.warning("Skipping malformed opportunity data",
+                             opportunity_index=i,
+                             validation_error=str(e),
+                             opportunity_data=opp,
+                             user_id=str(current_user.id))
+                validation_errors.append({
+                    "index": i,
+                    "error": str(e),
+                    "data": opp
+                })
+        
+        # Log summary if we had validation errors
+        if validation_errors:
+            logger.warning("Opportunity validation summary",
+                         total_opportunities=len(opportunities),
+                         valid_opportunities=len(opportunity_responses),
+                         validation_errors_count=len(validation_errors),
+                         user_id=str(current_user.id))
         
         return OpportunityDiscoveryResponse(
             success=True,
