@@ -332,6 +332,75 @@ async def send_telegram_message(
         )
 
 
+@router.get("/verify-connection")
+async def verify_telegram_connection(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
+):
+    """Verify and update Telegram connection status."""
+    
+    try:
+        stmt = select(UserTelegramConnection).where(
+            UserTelegramConnection.user_id == current_user.id
+        )
+        result = await db.execute(stmt)
+        connection = result.scalar_one_or_none()
+        
+        if not connection:
+            return {
+                "verified": False,
+                "message": "No Telegram connection found",
+                "is_authenticated": False,
+                "is_active": False
+            }
+        
+        # Check if connection is properly authenticated
+        is_authenticated = (
+            connection.telegram_user_id != "pending" and
+            connection.telegram_chat_id != "pending" and
+            connection.is_active
+        )
+        
+        # Test if bot can send messages (if authenticated)
+        bot_reachable = False
+        if is_authenticated:
+            try:
+                # Try to get bot info to verify it's working
+                bot_status = await telegram_service.get_bot_info()
+                bot_reachable = bot_status.get("success", False)
+            except Exception:
+                bot_reachable = False
+        
+        # Update connection status
+        connection.is_authenticated = is_authenticated
+        await db.commit()
+        
+        verification_result = {
+            "verified": is_authenticated and bot_reachable,
+            "is_authenticated": is_authenticated,
+            "is_active": connection.is_active,
+            "bot_reachable": bot_reachable,
+            "telegram_username": connection.telegram_username,
+            "last_active": connection.last_active_at.isoformat() if connection.last_active_at else None
+        }
+        
+        if not is_authenticated:
+            verification_result["message"] = "Please complete authentication in Telegram using /auth command"
+        elif not bot_reachable:
+            verification_result["message"] = "Bot is not reachable - please contact support"
+        else:
+            verification_result["message"] = "Connection verified and working properly"
+        
+        return verification_result
+        
+    except Exception as e:
+        logger.error("Connection verification failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Verification failed: {str(e)}"
+        )
+
+
 @router.delete("/disconnect")
 async def disconnect_telegram_account(
     current_user: User = Depends(get_current_user),

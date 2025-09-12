@@ -420,6 +420,16 @@ const TelegramCenter: React.FC = () => {
           <Button
             variant="outline"
             size="sm"
+            onClick={actions.verifyConnection}
+            disabled={loading}
+            className="bg-[#1a1c23] border-[#2a2d35] text-gray-300 hover:text-gray-200 hover:bg-[#1e2128] hover:shadow-lg hover:shadow-green-500/10 transition-all duration-300"
+          >
+            <Shield className="w-4 h-4 mr-2" />
+            {loading ? "Verifying..." : "Verify Connection"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             className="bg-[#1a1c23] border-[#2a2d35] text-gray-300 hover:text-gray-200 hover:bg-[#1e2128] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300"
           >
             <Settings className="w-4 h-4 mr-2" />
@@ -430,7 +440,7 @@ const TelegramCenter: React.FC = () => {
             onClick={() => setShowConnectionModal(true)}
           >
             <Link2 className="w-4 h-4 mr-2" />
-            Connect Channel
+            {connection.connected ? "Manage Connection" : "Connect Channel"}
           </Button>
         </div>
       </div>
@@ -788,6 +798,10 @@ const TelegramCenter: React.FC = () => {
           return await actions.connectTelegram(config);
         }}
         connecting={connecting}
+        onConnectionSuccess={() => {
+          // Refresh connection status after successful creation
+          actions.fetchConnection();
+        }}
       />
     </div>
   );
