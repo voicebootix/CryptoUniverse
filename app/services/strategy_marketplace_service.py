@@ -571,7 +571,11 @@ class StrategyMarketplaceService(LoggerMixin):
                         return {"success": False, "error": "Strategy not found"}
                     
                     config = self.ai_strategy_catalog[strategy_func]
-                    cost = config["credit_cost_monthly"] if subscription_type == "monthly" else config["credit_cost_per_execution"]
+                    # Handle different subscription types
+                    if subscription_type in ["monthly", "permanent"]:
+                        cost = config["credit_cost_monthly"]
+                    else:
+                        cost = config["credit_cost_per_execution"]
                 else:
                     # Community strategy
                     strategy_stmt = select(TradingStrategy).where(TradingStrategy.id == strategy_id)
@@ -613,6 +617,12 @@ class StrategyMarketplaceService(LoggerMixin):
                 await self._add_to_user_strategy_portfolio(user_id, strategy_id, db)
                 
                 await db.commit()
+                
+                self.logger.info("Strategy purchase successful", 
+                               user_id=user_id, 
+                               strategy_id=strategy_id, 
+                               cost=cost,
+                               subscription_type=subscription_type)
                 
                 return {
                     "success": True,
