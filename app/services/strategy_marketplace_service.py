@@ -27,7 +27,7 @@ from app.core.database import get_database
 from app.core.logging import LoggerMixin
 from app.models.trading import TradingStrategy, Trade
 from app.models.user import User
-from app.models.credit import CreditAccount, CreditTransaction
+from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.models.copy_trading import StrategyPublisher, StrategyPerformance
 from app.services.trading_strategies import trading_strategies_service
 
@@ -191,12 +191,12 @@ class StrategyMarketplaceService(LoggerMixin):
             "spot_momentum_strategy": {
                 "name": "AI Momentum Trading",
                 "category": "spot",
-                "credit_cost_monthly": 25,
-                "credit_cost_per_execution": 2,
+                "credit_cost_monthly": 0,  # FREE basic strategy
+                "credit_cost_per_execution": 0,  # FREE basic strategy
                 "risk_level": "medium",
                 "min_capital": 1000,
                 "estimated_monthly_return": "25-45%",
-                "tier": "basic"
+                "tier": "free"
             },
             "spot_mean_reversion": {
                 "name": "AI Mean Reversion",
@@ -261,22 +261,22 @@ class StrategyMarketplaceService(LoggerMixin):
                 "tier": "pro"
             },
             
-            # Portfolio Management (Essential, lower pricing)
+            # Portfolio Management (Essential, FREE basic strategies)
             "portfolio_optimization": {
                 "name": "AI Portfolio Optimizer",
                 "category": "portfolio",
-                "credit_cost_monthly": 20,
-                "credit_cost_per_execution": 1,
+                "credit_cost_monthly": 0,  # FREE basic strategy
+                "credit_cost_per_execution": 0,  # FREE basic strategy
                 "risk_level": "low",
                 "min_capital": 1000,
                 "estimated_monthly_return": "15-25%",
-                "tier": "basic"
+                "tier": "free"
             },
             "risk_management": {
                 "name": "AI Risk Manager",
                 "category": "portfolio",
-                "credit_cost_monthly": 15,
-                "credit_cost_per_execution": 1,
+                "credit_cost_monthly": 0,  # FREE basic strategy
+                "credit_cost_per_execution": 0,  # FREE basic strategy
                 "risk_level": "low",
                 "min_capital": 500,
                 "estimated_monthly_return": "10-20%",
@@ -578,27 +578,31 @@ class StrategyMarketplaceService(LoggerMixin):
                     
                     cost = self._calculate_strategy_pricing(strategy)
                 
-                # Check if user has enough credits
-                if credit_account.available_credits < cost:
+                # Check if user has enough credits (skip check for free strategies)
+                if cost > 0 and credit_account.available_credits < cost:
                     return {
                         "success": False, 
                         "error": f"Insufficient credits. Required: {cost}, Available: {credit_account.available_credits}"
                     }
                 
-                # Deduct credits
-                credit_account.available_credits -= cost
-                credit_account.total_used_credits += cost
-                
-                # Record transaction
-                transaction = CreditTransaction(
-                    user_id=user_id,
-                    amount=-cost,
-                    transaction_type="strategy_purchase",
-                    description=f"Strategy access: {strategy_id}",
-                    reference_id=strategy_id,
-                    status="completed"
-                )
-                db.add(transaction)
+                # Deduct credits (only for paid strategies)
+                if cost > 0:
+                    balance_before = credit_account.available_credits
+                    credit_account.available_credits -= cost
+                    credit_account.used_credits += cost
+                    balance_after = credit_account.available_credits
+                    
+                    # Record transaction (only for paid strategies)
+                    transaction = CreditTransaction(
+                        account_id=credit_account.id,
+                        transaction_type=CreditTransactionType.USAGE,
+                        amount=-cost,
+                        description=f"Strategy access: {strategy_id} ({subscription_type})",
+                        balance_before=balance_before,
+                        balance_after=balance_after,
+                        source="system"
+                    )
+                    db.add(transaction)
                 
                 # Add to user's active strategies
                 await self._add_to_user_strategy_portfolio(user_id, strategy_id, db)

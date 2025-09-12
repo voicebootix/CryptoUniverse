@@ -85,7 +85,7 @@ class CreditAccount(Base):
     current_profit_limit_usd = Column(Numeric(15, 2), default=0, nullable=False)
     
     # Credit value settings (configurable per user for VIP customers)
-    credit_to_usd_ratio = Column(Numeric(5, 2), default=10.0, nullable=False)  # 10 credits = $1 profit
+    credit_to_usd_ratio = Column(Numeric(5, 2), default=1.0, nullable=False)  # 1 credit = $1
     
     # VIP and bonus settings
     is_vip = Column(Boolean, default=False, nullable=False)
@@ -149,8 +149,15 @@ class CreditAccount(Base):
         return self.total_profit_realized_usd >= self.current_profit_limit_usd
     
     def calculate_profit_potential(self) -> Decimal:
-        """Calculate remaining profit potential in USD."""
-        return Decimal(self.available_credits) / self.credit_to_usd_ratio
+        """
+        Calculate remaining profit potential in USD.
+        
+        Business Logic: 1 credit = $1 commission (25% of profit)
+        So 1 credit allows $4 profit potential ($1 = 25% of $4)
+        """
+        # 1 credit = 25% commission, so credit allows 4x profit potential
+        commission_rate = 0.25
+        return Decimal(self.available_credits) / Decimal(commission_rate)
     
     def can_realize_profit(self, profit_amount_usd: Decimal) -> tuple[bool, str]:
         """
@@ -166,15 +173,22 @@ class CreditAccount(Base):
         if profit_amount_usd > remaining_limit:
             return False, f"Profit amount exceeds remaining limit (${remaining_limit})"
         
-        required_credits = int(profit_amount_usd * self.credit_to_usd_ratio)
+        # Calculate required credits based on 25% commission
+        commission_rate = 0.25
+        required_credits = int(profit_amount_usd * commission_rate)
         if required_credits > self.available_credits:
             return False, f"Insufficient credits (need {required_credits}, have {self.available_credits})"
         
         return True, "OK"
     
     def deduct_credits_for_profit(self, profit_amount_usd: Decimal) -> int:
-        """Calculate credits to deduct for realized profit."""
-        return int(profit_amount_usd * self.credit_to_usd_ratio)
+        """
+        Calculate credits to deduct for realized profit.
+        
+        Business Logic: Deduct 25% of profit as commission in credits.
+        """
+        commission_rate = 0.25
+        return int(profit_amount_usd * commission_rate)
 
 
 class CreditTransaction(Base):
