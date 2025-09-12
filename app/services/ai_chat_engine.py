@@ -311,9 +311,15 @@ I'll remember our conversation and provide increasingly personalized assistance.
                         user_message_id = saved_user_id
                     # Get conversation context
                     context = await self.memory.get_conversation_context(session_id)
+                    # Ensure user_id is in session_context for authenticated operations
+                    if "session_context" not in context:
+                        context["session_context"] = {}
+                    context["session_context"]["user_id"] = user_id
                 except Exception as e:
                     self.logger.warning("Memory service failed, continuing without memory", error=str(e))
-                    context = {}
+                    context = {
+                        "session_context": {"user_id": user_id}
+                    }
             
             # Try enhanced processing, fallback to simple response
             try:
@@ -606,7 +612,7 @@ I encountered an error during the 5-phase execution. The trade was not completed
                 }),
                 confidence_threshold=80.0,
                 ai_models="all",
-                user_id=user_id or "00000000-0000-0000-0000-000000000000"  # System UUID
+                user_id=user_id
             )
             
             return {
@@ -845,7 +851,10 @@ I encountered an error during the 5-phase execution. The trade was not completed
     ) -> Dict[str, Any]:
         """Process intents by ROUTING TO ACTUAL SERVICES first, then using AI consensus for validation."""
         
-        user_id = context.get("session_context", {}).get("user_id", "00000000-0000-0000-0000-000000000000")
+        user_id = context.get("session_context", {}).get("user_id")
+        
+        if not user_id:
+            raise ValueError("Authentication required: No valid user session found")
         
         try:
             # STEP 1: ROUTE TO APPROPRIATE SERVICE (Do the work!)
@@ -886,58 +895,124 @@ I encountered an error during the 5-phase execution. The trade was not completed
             }
     
     async def _handle_opportunity_discovery(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
-        """Handle opportunity discovery using REAL market analysis API."""
+        """Handle opportunity discovery using REAL user strategy-based system."""
         
         try:
-            # STEP 1: Use your REAL market analysis service
-            opportunities = await self.market_analysis.market_inefficiency_scanner(
-                symbols="BTC,ETH,SOL,ADA,DOT",
-                exchanges="all",
-                scan_types="spread,volume,time",
-                user_id=user_id
+            # Import the new enterprise services
+            from app.services.user_opportunity_discovery import user_opportunity_discovery
+            from app.services.user_onboarding_service import user_onboarding_service
+            
+            # STEP 0: Ensure user is onboarded with free strategies
+            onboarding_check = await user_onboarding_service.check_user_onboarding_status(user_id)
+            
+            if onboarding_check.get("needs_onboarding", True):
+                self.logger.info("Auto-triggering user onboarding for opportunity discovery", user_id=user_id)
+                onboarding_result = await user_onboarding_service.onboard_new_user(user_id)
+                
+                if onboarding_result.get("success"):
+                    self.logger.info("User onboarding completed successfully", user_id=user_id)
+                else:
+                    self.logger.warning("User onboarding failed", user_id=user_id, error=onboarding_result.get("error"))
+            
+            # STEP 1: Initialize discovery service if needed  
+            await user_opportunity_discovery.async_init()
+            
+            # STEP 2: Use REAL user strategy-based opportunity discovery
+            opportunities_result = await user_opportunity_discovery.discover_opportunities_for_user(
+                user_id=user_id,
+                force_refresh=False,
+                include_strategy_recommendations=True
             )
             
-            # STEP 2: Use AI consensus to VALIDATE and format results
-            validation_prompt = f"""
-            REAL MARKET OPPORTUNITIES FOUND:
-            {json.dumps(opportunities, indent=2)}
+            if not opportunities_result.get("success"):
+                error_message = "Unable to discover opportunities at this time. Please ensure you have active trading strategies."
+                return {
+                    "content": error_message,
+                    "recommendation": error_message,
+                    "confidence": 0.3,
+                    "error": opportunities_result.get("error", "Unknown error"),
+                    "next_actions": [
+                        "Visit the Strategy Marketplace to activate your free strategies",
+                        "Connect your exchange accounts for better opportunity discovery"
+                    ]
+                }
             
+            opportunities = opportunities_result.get("opportunities", [])
+            user_profile = opportunities_result.get("user_profile", {})
+            strategy_recommendations = opportunities_result.get("strategy_recommendations", [])
+            
+            # STEP 2: Use AI consensus to ANALYZE and format results based on user's request
+            analysis_prompt = f"""
             USER REQUEST: {message}
             
-            Analyze these REAL opportunities and provide:
-            1. Which opportunities best match the user's request
-            2. Risk assessment for each
-            3. Recommended actions
-            4. Clear next steps
+            REAL TRADING OPPORTUNITIES DISCOVERED:
+            Total Opportunities: {len(opportunities)}
+            User's Active Strategies: {user_profile.get('active_strategies', 0)}
+            User Tier: {user_profile.get('user_tier', 'basic')}
             
-            Present in a professional, actionable format.
+            TOP OPPORTUNITIES:
+            {json.dumps(opportunities[:10], indent=2)}
+            
+            STRATEGY RECOMMENDATIONS:
+            {json.dumps(strategy_recommendations, indent=2)}
+            
+            Based on the user's request and these REAL opportunities, provide:
+            1. Executive summary of opportunities that match their request
+            2. Top 3 recommended opportunities with specific profit potential
+            3. Risk assessment and required capital for each
+            4. Clear action steps the user should take
+            5. Strategy recommendations to unlock more opportunities
+            
+            Format as actionable investment advice with specific numbers and timeframes.
             """
             
             ai_validation = await self.ai_consensus.consensus_decision(
-                decision_request=validation_prompt,
+                decision_request=analysis_prompt,
                 confidence_threshold=75.0,
                 ai_models="all",
                 user_id=user_id
             )
             
-            # Combine service results with AI validation
-            response_content = f"""🔍 **REAL Market Opportunities Found**
+            # Build comprehensive response with real data and recommendations
+            total_opportunities = len(opportunities)
+            total_potential = sum(opp.get("profit_potential_usd", 0) for opp in opportunities)
+            
+            response_content = f"""🎯 **ENTERPRISE Opportunity Discovery Results**
 
-**Analysis Results:**
-{ai_validation.get('final_recommendation', 'Opportunities analyzed')}
+{ai_validation.get('final_recommendation', 'Market opportunities analyzed using your active trading strategies.')}
 
-**Data Source:** Live market analysis service
-**Confidence:** {ai_validation.get('consensus_score', 0.8):.1%}
-**Processing:** {len(opportunities.get('opportunities', []))} opportunities analyzed"""
+**📊 Discovery Summary:**
+• **{total_opportunities}** opportunities found using your **{user_profile.get('active_strategies', 0)}** active strategies
+• **${total_potential:,.0f}** total profit potential identified
+• **{user_profile.get('user_tier', 'basic').title()}** tier access - scanning {user_profile.get('scan_limit', 'limited')} assets
+• **Asset Discovery:** {opportunities_result.get('asset_discovery', {}).get('total_assets_scanned', 0)} assets analyzed across multiple exchanges
+
+**🚀 Strategy Performance:**
+{chr(10).join([f"• {strategy}: {perf.get('count', 0)} opportunities (avg confidence {perf.get('avg_confidence', 0):.0%})" 
+              for strategy, perf in opportunities_result.get('strategy_performance', {}).items()])}
+
+**💡 Recommendations to Unlock More Opportunities:**
+{chr(10).join([f"• {rec.get('name', '')}: {rec.get('benefit', '')}" 
+              for rec in strategy_recommendations[:3]])}
+
+**Next Steps:**
+1. Review detailed opportunities in your dashboard
+2. Connect exchange accounts for live trading
+3. Consider upgrading strategies for {'+50-200% more opportunities' if len(strategy_recommendations) > 0 else 'enhanced discovery'}"""
 
             return {
                 "content": response_content,
-                "confidence": ai_validation.get("consensus_score", 0.8),
+                "confidence": ai_validation.get("consensus_score", 0.85),
                 "metadata": {
-                    "service_used": "market_analysis_service",
-                    "opportunities_count": len(opportunities.get('opportunities', [])),
+                    "service_used": "user_opportunity_discovery",
+                    "opportunities_count": total_opportunities,
+                    "user_tier": user_profile.get('user_tier'),
+                    "active_strategies": user_profile.get('active_strategies'),
+                    "assets_scanned": opportunities_result.get('asset_discovery', {}).get('total_assets_scanned'),
+                    "strategy_recommendations": len(strategy_recommendations),
                     "ai_validated": True,
-                    "real_data": True
+                    "real_data": True,
+                    "enterprise_grade": True
                 }
             }
             

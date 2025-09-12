@@ -308,8 +308,8 @@ async def chat_websocket(
     """
     try:
         # Implement WebSocket bearer subprotocol authentication 
-        # Use unique per-connection ID to prevent message bleed between unauthenticated clients
-        user_id = f"guest:{uuid.uuid4()}"  # Unique fallback for each connection
+        # NO GUEST FALLBACK - Authentication required for serious trading platform
+        user_id = None
         selected_subprotocol = None  # Initialize to None, only set if safe subprotocol offered
         token = None
         
@@ -347,10 +347,14 @@ async def chat_websocket(
                         logger.info("Chat WebSocket user authenticated via bearer subprotocol", user_id=user_id)
                 except JWTError as e:
                     # Handle JWT-specific errors only, let other exceptions propagate
-                    logger.debug("Chat WebSocket JWT authentication failed, using guest ID", 
-                               guest_id=user_id, 
-                               error=str(e))
-                    # Don't log token details
+                    logger.warning("Chat WebSocket JWT authentication failed", error=str(e))
+                    user_id = None  # Ensure no fallback
+        
+        # AUTHENTICATION REQUIRED - Reject unauthenticated connections
+        if not user_id:
+            logger.warning("WebSocket connection rejected: Authentication required", session_id=session_id)
+            await websocket.close(code=1008, reason="Authentication required")
+            return
         
         # Accept WebSocket connection - only pass subprotocol if safe one was offered by client
         if selected_subprotocol:
