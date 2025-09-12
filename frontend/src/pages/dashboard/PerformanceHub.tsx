@@ -22,20 +22,104 @@ import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api/client';
 import { usePaperModeStore } from '@/store/paperModeStore';
 
+// Helper function to safely convert to number and handle NaN
+const safeNumber = (value: any, fallback: number = 0): number => {
+  const num = Number(value);
+  return isNaN(num) ? fallback : num;
+};
+
+// Helper function to normalize percentage values (>1 means it's in percent form, divide by 100)
+const normalizePercent = (value: any, fallback: number = 0): number => {
+  const num = safeNumber(value, fallback);
+  return num > 1 ? num / 100 : num;
+};
+
+// Define the expected metrics type
+interface PerformanceMetrics {
+  totalProfit: number;
+  profitChange: number;
+  winRate: number;
+  winRateChange: number;
+  totalTrades: number;
+  tradesChange: number;
+  avgTradeTime: number;
+  timeChange: number;
+  strategyPerformance: any[];
+  maxDrawdown: number;
+  sharpeRatio: number;
+  riskRewardRatio: number;
+  profitFactor: number;
+}
+
 // Analytics Overview Component
 const AnalyticsOverview: React.FC = () => {
   const { isPaperMode } = usePaperModeStore();
   
-  const { data: metrics, isLoading } = useQuery({
+  const { data: metrics, isLoading } = useQuery<PerformanceMetrics>({
     queryKey: ['performance-metrics', isPaperMode],
-    queryFn: async () => {
+    queryFn: async (): Promise<PerformanceMetrics> => {
       const endpoint = isPaperMode 
-        ? '/paper-trading/stats'
-        : '/portfolio/performance';
+        ? '/paper-trading/performance'
+        : '/trading/status';
       const response = await apiClient.get(endpoint);
-      return response.data.data;
+      
+      // Handle different response structures
+      if (isPaperMode) {
+        // Paper trading response structure
+        const data = response.data;
+        if (data.success && data.paper_portfolio) {
+          const portfolio = data.paper_portfolio;
+          const confidence = data.confidence_metrics || {};
+          
+          return {
+            totalProfit: safeNumber(portfolio.total_profit),
+            profitChange: normalizePercent(portfolio.profit_change_24h),
+            winRate: normalizePercent(confidence.win_rate),
+            winRateChange: normalizePercent(confidence.win_rate_trend),
+            totalTrades: safeNumber(portfolio.total_trades),
+            tradesChange: 0,
+            avgTradeTime: safeNumber(confidence.avg_trade_duration_minutes),
+            timeChange: 0,
+            strategyPerformance: portfolio.strategy_breakdown || [],
+            maxDrawdown: normalizePercent(confidence.max_drawdown),
+            sharpeRatio: safeNumber(confidence.sharpe_ratio),
+            riskRewardRatio: safeNumber(confidence.risk_reward_ratio),
+            profitFactor: safeNumber(confidence.profit_factor)
+          };
+        } else {
+          // Return zeros if no paper trading setup
+          return {
+            totalProfit: 0, profitChange: 0, winRate: 0, winRateChange: 0,
+            totalTrades: 0, tradesChange: 0, avgTradeTime: 0, timeChange: 0,
+            strategyPerformance: [], maxDrawdown: 0, sharpeRatio: 0,
+            riskRewardRatio: 0, profitFactor: 0
+          };
+        }
+      } else {
+        // Trading status response structure
+        const statusData = response.data;
+        const perfToday = statusData.performance_today || {};
+        
+        return {
+          totalProfit: safeNumber(perfToday.total_pnl),
+          profitChange: normalizePercent(perfToday.change_24h),
+          winRate: normalizePercent(perfToday.win_rate),
+          winRateChange: 0,
+          totalTrades: safeNumber(perfToday.total_trades),
+          tradesChange: 0,
+          avgTradeTime: safeNumber(perfToday.avg_trade_time_minutes),
+          timeChange: 0,
+          strategyPerformance: perfToday.strategy_performance || [],
+          maxDrawdown: normalizePercent(perfToday.max_drawdown),
+          sharpeRatio: safeNumber(perfToday.sharpe_ratio),
+          riskRewardRatio: safeNumber(perfToday.risk_reward_ratio, 1),
+          profitFactor: safeNumber(perfToday.profit_factor)
+        };
+      }
     },
-    refetchInterval: 30000 // Refresh every 30 seconds
+    refetchInterval: 30000, // Refresh every 30 seconds
+    retry: 3,
+    staleTime: 10000 // Consider data stale after 10 seconds
   });
 
   if (isLoading) {
@@ -55,32 +139,49 @@ const AnalyticsOverview: React.FC = () => {
     );
   }
 
+  // Use fallback data if metrics is null or undefined
+  const safeMetrics: PerformanceMetrics = metrics || {
+    totalProfit: 0, 
+    profitChange: 0, 
+    winRate: 0, 
+    winRateChange: 0,
+    totalTrades: 0, 
+    tradesChange: 0, 
+    avgTradeTime: 0, 
+    timeChange: 0,
+    strategyPerformance: [], 
+    maxDrawdown: 0, 
+    sharpeRatio: 0,
+    riskRewardRatio: 0, 
+    profitFactor: 0
+  };
+
   const stats = [
     {
       title: 'Total Profit',
-      value: formatCurrency(metrics?.totalProfit || 0),
-      change: metrics?.profitChange || 0,
+      value: formatCurrency(safeMetrics.totalProfit),
+      change: safeMetrics.profitChange,
       icon: <DollarSign className="h-4 w-4" />,
-      color: metrics?.totalProfit >= 0 ? 'text-green-500' : 'text-red-500'
+      color: safeMetrics.totalProfit >= 0 ? 'text-green-500' : 'text-red-500'
     },
     {
       title: 'Win Rate',
-      value: formatPercentage(metrics?.winRate || 0),
-      change: metrics?.winRateChange || 0,
+      value: formatPercentage(safeMetrics.winRate),
+      change: safeMetrics.winRateChange,
       icon: <Percent className="h-4 w-4" />,
       color: 'text-blue-500'
     },
     {
       title: 'Total Trades',
-      value: metrics?.totalTrades || 0,
-      change: metrics?.tradesChange || 0,
+      value: safeMetrics.totalTrades,
+      change: safeMetrics.tradesChange,
       icon: <Activity className="h-4 w-4" />,
       color: 'text-purple-500'
     },
     {
       title: 'Avg Trade Time',
-      value: `${metrics?.avgTradeTime || 0}m`,
-      change: metrics?.timeChange || 0,
+      value: `${safeMetrics.avgTradeTime}m`,
+      change: safeMetrics.timeChange,
       icon: <Clock className="h-4 w-4" />,
       color: 'text-orange-500'
     }
@@ -129,24 +230,31 @@ const AnalyticsOverview: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {metrics?.strategyPerformance?.map((strategy: any, index: number) => (
-                <div key={index} className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">{strategy.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {strategy.trades} trades
-                    </p>
+              {safeMetrics.strategyPerformance && safeMetrics.strategyPerformance.length > 0 ? (
+                safeMetrics.strategyPerformance.map((strategy: any, index: number) => (
+                  <div key={index} className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{strategy.name || strategy.strategy_name || `Strategy ${index + 1}`}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {strategy.trades || strategy.total_trades || 0} trades
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`font-bold ${(strategy.profit || strategy.total_profit || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        {formatCurrency(strategy.profit || strategy.total_profit || 0)}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {formatPercentage((strategy.winRate || strategy.win_rate || 0) / 100)} win rate
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className={`font-bold ${strategy.profit >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                      {formatCurrency(strategy.profit)}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {formatPercentage(strategy.winRate)} win rate
-                    </p>
-                  </div>
+                ))
+              ) : (
+                <div className="text-center text-muted-foreground py-4">
+                  <p>No strategy performance data available</p>
+                  <p className="text-sm">Start trading to see strategy breakdown</p>
                 </div>
-              ))}
+              )}
             </div>
           </CardContent>
         </Card>
@@ -166,25 +274,25 @@ const AnalyticsOverview: React.FC = () => {
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Max Drawdown</span>
                 <span className="font-bold text-red-500">
-                  {formatPercentage(metrics?.maxDrawdown || 0)}
+                  {formatPercentage(Math.abs(safeMetrics.maxDrawdown))}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Sharpe Ratio</span>
                 <span className="font-bold">
-                  {metrics?.sharpeRatio?.toFixed(2) || '0.00'}
+                  {safeNumber(safeMetrics.sharpeRatio).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Risk/Reward</span>
                 <span className="font-bold">
-                  1:{metrics?.riskRewardRatio?.toFixed(2) || '0.00'}
+                  1:{safeNumber(safeMetrics.riskRewardRatio).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Profit Factor</span>
                 <span className="font-bold text-green-500">
-                  {metrics?.profitFactor?.toFixed(2) || '0.00'}
+                  {safeNumber(safeMetrics.profitFactor).toFixed(2)}
                 </span>
               </div>
             </div>
