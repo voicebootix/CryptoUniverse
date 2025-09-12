@@ -361,7 +361,7 @@ I'll remember our conversation and provide increasingly personalized assistance.
                         metadata=response.get("metadata", {}),
                         model_used=response.get("model_used", "enhanced_engine"),
                         processing_time_ms=processing_time,
-                        tokens_used=response.get("tokens_used", len(response["content"].split()))
+                        tokens_used=response.get("tokens_used", len(str(response.get("content", "")).split()))
                     )
                     # Use the saved message ID if successful
                     if saved_message_id:

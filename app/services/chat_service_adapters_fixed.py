@@ -452,8 +452,8 @@ class ChatServiceAdaptersFixed:
                     "error": optimization_result.get("error")
                 }
             
-            # Extract optimization data
-            optimization_data = optimization_result.get("optimization", {})
+            # Extract optimization data - fix key name
+            optimization_data = optimization_result.get("optimization_result", {})
             
             return {
                 "needs_rebalancing": optimization_data.get("rebalancing_recommended", False),
