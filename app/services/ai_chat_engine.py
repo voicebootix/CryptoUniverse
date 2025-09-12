@@ -326,8 +326,8 @@ I'll remember our conversation and provide increasingly personalized assistance.
                 # Classify intent
                 intent = await self._classify_intent(user_message, context)
                 
-                # Process with 5-phase execution for trading intents
-                if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
+                # Process with 5-phase execution for trading intents (except rebalancing)
+                if intent == ChatIntent.TRADE_EXECUTION:
                     response = await self._process_with_5_phases(
                         session_id, user_message, intent, context
                     )
