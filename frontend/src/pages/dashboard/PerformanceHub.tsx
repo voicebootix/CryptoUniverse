@@ -34,13 +34,30 @@ const normalizePercent = (value: any, fallback: number = 0): number => {
   return num > 1 ? num / 100 : num;
 };
 
+// Define the expected metrics type
+interface PerformanceMetrics {
+  totalProfit: number;
+  profitChange: number;
+  winRate: number;
+  winRateChange: number;
+  totalTrades: number;
+  tradesChange: number;
+  avgTradeTime: number;
+  timeChange: number;
+  strategyPerformance: any[];
+  maxDrawdown: number;
+  sharpeRatio: number;
+  riskRewardRatio: number;
+  profitFactor: number;
+}
+
 // Analytics Overview Component
 const AnalyticsOverview: React.FC = () => {
   const { isPaperMode } = usePaperModeStore();
   
-  const { data: metrics, isLoading } = useQuery({
+  const { data: metrics, isLoading } = useQuery<PerformanceMetrics>({
     queryKey: ['performance-metrics', isPaperMode],
-    queryFn: async () => {
+    queryFn: async (): Promise<PerformanceMetrics> => {
       const endpoint = isPaperMode 
         ? '/paper-trading/performance'
         : '/trading/status';
@@ -102,10 +119,7 @@ const AnalyticsOverview: React.FC = () => {
     },
     refetchInterval: 30000, // Refresh every 30 seconds
     retry: 3,
-    staleTime: 10000, // Consider data stale after 10 seconds
-    onError: (error: any) => {
-      console.error('Performance data fetch error:', error);
-    }
+    staleTime: 10000 // Consider data stale after 10 seconds
   });
 
   if (isLoading) {
@@ -126,11 +140,20 @@ const AnalyticsOverview: React.FC = () => {
   }
 
   // Use fallback data if metrics is null or undefined
-  const safeMetrics = metrics || {
-    totalProfit: 0, profitChange: 0, winRate: 0, winRateChange: 0,
-    totalTrades: 0, tradesChange: 0, avgTradeTime: 0, timeChange: 0,
-    strategyPerformance: [], maxDrawdown: 0, sharpeRatio: 0,
-    riskRewardRatio: 0, profitFactor: 0
+  const safeMetrics: PerformanceMetrics = metrics || {
+    totalProfit: 0, 
+    profitChange: 0, 
+    winRate: 0, 
+    winRateChange: 0,
+    totalTrades: 0, 
+    tradesChange: 0, 
+    avgTradeTime: 0, 
+    timeChange: 0,
+    strategyPerformance: [], 
+    maxDrawdown: 0, 
+    sharpeRatio: 0,
+    riskRewardRatio: 0, 
+    profitFactor: 0
   };
 
   const stats = [
