@@ -205,6 +205,17 @@ class TelegramAPIConnector(LoggerMixin):
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    async def get_bot_info(self) -> Dict[str, Any]:
+        """Get bot information to verify connection."""
+        try:
+            response = await self._make_api_request("getMe", {})
+            return {
+                "success": True,
+                "bot_info": response
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
     
     async def _make_api_request(self, method: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Make HTTP request to Telegram Bot API."""
@@ -1131,6 +1142,13 @@ class TelegramCommanderService(LoggerMixin):
         """Setup Telegram webhook for real-time message processing."""
         from app.services.telegram_methods import setup_webhook
         return await setup_webhook(self, webhook_url, secret_token, verify_ssl)
+    
+    async def get_bot_info(self) -> Dict[str, Any]:
+        """Get bot information to verify connection."""
+        try:
+            return await self.telegram_api.get_bot_info()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
     
     def _generate_request_id(self) -> str:
         """Generate unique request ID."""

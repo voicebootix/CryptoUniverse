@@ -31,6 +31,7 @@ interface TelegramConnectionModalProps {
     setup_instructions: string;
   }>;
   connecting: boolean;
+  onConnectionSuccess?: () => void;
 }
 
 interface TelegramConfig {
@@ -47,6 +48,7 @@ const TelegramConnectionModal: React.FC<TelegramConnectionModalProps> = ({
   onClose,
   onConnect,
   connecting,
+  onConnectionSuccess,
 }) => {
   const [config, setConfig] = useState<TelegramConfig>({
     telegram_username: "",
@@ -67,15 +69,32 @@ const TelegramConnectionModal: React.FC<TelegramConnectionModalProps> = ({
       setAuthToken(result.auth_token);
       setStep("authenticate");
 
+      // Call success callback to refresh connection status
+      if (onConnectionSuccess) {
+        onConnectionSuccess();
+      }
+
       toast({
         title: "Connection Created",
         description: "Follow the authentication steps to complete setup",
         variant: "default",
       });
     } catch (error: any) {
+      console.error("Telegram connection error:", error);
+      
+      // Show more specific error messages
+      let errorMessage = "Failed to create Telegram connection";
+      if (error.response?.status === 400) {
+        errorMessage = error.response.data?.detail || "Connection already exists or invalid configuration";
+      } else if (error.response?.status === 500) {
+        errorMessage = "Server error - please try again later";
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       toast({
         title: "Connection Failed",
-        description: error.message || "Failed to create Telegram connection",
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -91,7 +110,9 @@ const TelegramConnectionModal: React.FC<TelegramConnectionModalProps> = ({
   };
 
   const openTelegram = () => {
-    window.open("https://t.me/CryptoUniverseBot", "_blank");
+    // Create deep link with start parameter containing auth token
+    const deepLink = `https://t.me/CryptoUniverseBot?start=auth_${authToken.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    window.open(deepLink, "_blank");
   };
 
   if (!isOpen) return null;
@@ -366,32 +387,42 @@ const TelegramConnectionModal: React.FC<TelegramConnectionModalProps> = ({
                     <h4 className="font-medium text-gray-300">
                       Step 1: Open CryptoUniverse Bot
                     </h4>
-                    <Button
-                      variant="outline"
-                      onClick={openTelegram}
-                      className="w-full bg-[#1a1c23] text-gray-300 border-[#2a2d35] hover:bg-[#1e2128] hover:text-gray-200"
-                    >
-                      <ExternalLink className="w-4 h-4 mr-2" />
-                      Open @CryptoUniverseBot in Telegram
-                    </Button>
+                    <div className="space-y-2">
+                      <Button
+                        variant="outline"
+                        onClick={openTelegram}
+                        className="w-full bg-gradient-to-r from-blue-600/10 to-purple-600/10 text-blue-400 border-blue-500/30 hover:bg-blue-600/20 hover:text-blue-300"
+                      >
+                        <ExternalLink className="w-4 h-4 mr-2" />
+                        Open @CryptoUniverseBot (Recommended)
+                      </Button>
+                      <p className="text-xs text-gray-400 text-center">
+                        This will automatically start the authentication process
+                      </p>
+                    </div>
                   </div>
 
                   <div className="space-y-3">
                     <h4 className="font-medium text-gray-300">
                       Step 2: Send Authentication Command
                     </h4>
-                    <div className="p-3 bg-[#1a1c23] border border-[#2a2d35] rounded-lg font-mono text-sm text-blue-400">
-                      /auth {authToken}
+                    <div className="space-y-3">
+                      <div className="p-3 bg-[#1a1c23] border border-[#2a2d35] rounded-lg">
+                        <p className="text-xs text-gray-400 mb-2">If the bot doesn't start automatically, send:</p>
+                        <div className="font-mono text-sm text-blue-400 bg-[#0f1115] p-2 rounded border">
+                          /auth {authToken}
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={copyAuthToken}
+                        className="w-full bg-[#1a1c23] text-gray-300 border-[#2a2d35] hover:bg-[#1e2128] hover:text-gray-200"
+                      >
+                        <Copy className="w-4 h-4 mr-2" />
+                        Copy Authentication Command
+                      </Button>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={copyAuthToken}
-                      className="w-full bg-[#1a1c23] text-gray-300 border-[#2a2d35] hover:bg-[#1e2128] hover:text-gray-200"
-                    >
-                      <Copy className="w-4 h-4 mr-2" />
-                      Copy Authentication Command
-                    </Button>
                   </div>
 
                   <div className="space-y-3">
