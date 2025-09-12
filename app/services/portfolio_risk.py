@@ -763,25 +763,73 @@ class PortfolioOptimizationEngine(LoggerMixin):
         )
     
     async def _optimize_equal_weight(self, positions: List[Dict]) -> OptimizationResult:
-        """Optimize for equal weight allocation."""
+        """Optimize for equal weight allocation with proper rebalancing detection."""
         
         symbols = list(set(pos["symbol"] for pos in positions))
         n_assets = len(symbols)
         
-        # Equal weights
+        if n_assets == 0:
+            return self._get_empty_optimization_result(OptimizationStrategy.EQUAL_WEIGHT)
+        
+        # Calculate target equal weights
         equal_weight = 1.0 / n_assets
-        weights = {symbol: equal_weight for symbol in symbols}
+        target_weights = {symbol: equal_weight for symbol in symbols}
+        
+        # Calculate current weights
+        total_value = sum(pos["value_usd"] for pos in positions)
+        current_weights = {}
+        
+        for pos in positions:
+            symbol = pos["symbol"]
+            current_weight = pos["value_usd"] / total_value if total_value > 0 else 0
+            if symbol in current_weights:
+                current_weights[symbol] += current_weight
+            else:
+                current_weights[symbol] = current_weight
+        
+        # Check if rebalancing is needed (threshold: 5% deviation)
+        rebalancing_needed = False
+        max_deviation = 0.0
+        
+        for symbol in symbols:
+            current = current_weights.get(symbol, 0.0)
+            target = equal_weight
+            deviation = abs(current - target)
+            max_deviation = max(max_deviation, deviation)
+            
+            # If any asset deviates more than 5% from target, rebalancing is needed
+            if deviation > 0.05:  # 5% threshold
+                rebalancing_needed = True
+        
+        # Generate rebalancing trades
+        suggested_trades = []
+        if rebalancing_needed:
+            for symbol in symbols:
+                current = current_weights.get(symbol, 0.0)
+                target = equal_weight
+                difference = target - current
+                
+                if abs(difference) > 0.01:  # Only trade if >1% difference
+                    trade_value = difference * total_value
+                    suggested_trades.append({
+                        "symbol": symbol,
+                        "action": "BUY" if difference > 0 else "SELL",
+                        "value_usd": abs(trade_value),
+                        "current_weight": current,
+                        "target_weight": target,
+                        "weight_change": difference
+                    })
         
         return OptimizationResult(
             strategy=OptimizationStrategy.EQUAL_WEIGHT,
-            weights=weights,
+            weights=target_weights,
             expected_return=0.19,
             expected_volatility=0.35,
             sharpe_ratio=0.49,
             max_drawdown_estimate=0.30,
             confidence=7.0,
-            rebalancing_needed=True,
-            suggested_trades=[]
+            rebalancing_needed=rebalancing_needed,  # Now properly calculated
+            suggested_trades=suggested_trades
         )
     
     async def _optimize_max_sharpe(

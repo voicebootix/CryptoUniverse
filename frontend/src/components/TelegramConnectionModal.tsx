@@ -175,9 +175,14 @@ const TelegramConnectionModal: React.FC<TelegramConnectionModalProps> = ({
                       }
                       className="bg-[#1a1c23] border-[#2a2d35] text-gray-200 placeholder:text-gray-500"
                     />
-                    <p className="text-sm text-gray-400 mt-1">
-                      Optional: Your Telegram username for identification
-                    </p>
+                    <div className="text-xs text-blue-300 bg-blue-500/10 border border-blue-500/20 rounded p-3 mt-2">
+                      <p className="font-medium mb-1">💡 How to find your Telegram info:</p>
+                      <ul className="space-y-1 list-disc list-inside text-blue-200/80">
+                        <li><strong>Username:</strong> Settings → Edit Profile → Username</li>
+                        <li><strong>User ID:</strong> Message @userinfobot to get your numeric ID</li>
+                        <li><strong>Alternative:</strong> Leave blank - we'll get it during authentication</li>
+                      </ul>
+                    </div>
                   </div>
 
                   {/* Feature Toggles */}
