@@ -130,7 +130,7 @@ class EnhancedAIChatEngine(LoggerMixin):
                 self.chat_adapters = ChatServiceAdapters()
             if self.redis is None:
                 from app.core.redis import get_redis_client
-                self.redis = get_redis_client()
+                self.redis = await get_redis_client()
         except Exception as e:
             self.logger.warning("Some services failed to initialize", error=str(e))
     
@@ -904,8 +904,11 @@ I encountered an error during the 5-phase execution. The trade was not completed
     async def _handle_opportunity_discovery(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Handle opportunity discovery using REAL user strategy-based system."""
         
+        self.logger.info("🎯 ENTERING _handle_opportunity_discovery", user_id=user_id, message=message)
+        
         try:
             # Import the new enterprise services
+            self.logger.info("🎯 Importing user_opportunity_discovery service")
             from app.services.user_opportunity_discovery import user_opportunity_discovery
             from app.services.user_onboarding_service import user_onboarding_service
             

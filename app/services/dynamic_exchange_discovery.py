@@ -33,7 +33,7 @@ class DynamicExchangeDiscovery:
     """
     
     def __init__(self):
-        self.redis_client = get_redis_client()
+        self.redis_client = None
         
         # Known exchange patterns and endpoints for discovery
         self.discovery_sources = {
@@ -81,6 +81,10 @@ class DynamicExchangeDiscovery:
         self.exchange_health = {}
         
         logger.info("✅ Dynamic Exchange Discovery initialized")
+    
+    async def async_init(self):
+        """Initialize async components."""
+        self.redis_client = await get_redis_client()
     
     async def discover_all_exchanges(self, force_refresh: bool = False) -> Dict[str, Any]:
         """
