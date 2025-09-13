@@ -48,14 +48,29 @@ const SophisticatedHeaderWidgets: React.FC = () => {
   const { exchanges, aggregatedStats } = useExchanges();
   const { totalValue, dailyPnL, totalPnL, positions, fetchPortfolio, fetchStatus, fetchMarketData } = usePortfolioStore();
 
-  // Credits query
-  const { data: credits } = useQuery({
+  // Credits query - backend returns direct object, not nested data.data
+  const { data: credits, isLoading: creditsLoading } = useQuery({
     queryKey: ['user-credits'],
     queryFn: async () => {
       const response = await apiClient.get('/credits/balance');
-      return response.data.data;
+      // Backend returns direct object: {available_credits, total_credits, used_credits, ...}
+      const creditData = response.data;
+      console.log('Credits API Response:', creditData); // Debug log
+      
+      // Normalize response to match expected format
+      return {
+        total: creditData?.total_credits || 0,
+        used: creditData?.used_credits || 0, 
+        remaining: creditData?.available_credits || 0,
+        usage_percentage: creditData?.utilization_percentage || 0,
+        profit_potential: creditData?.profit_potential || 0,
+        profit_earned: creditData?.profit_earned_to_date || 0,
+        nextRefresh: '1st of next month' // TODO: Calculate from real refresh date
+      };
     },
-    refetchInterval: 30000
+    refetchInterval: 30000,
+    retry: 3,
+    staleTime: 10000
   });
 
   // Fetch portfolio data on component mount
