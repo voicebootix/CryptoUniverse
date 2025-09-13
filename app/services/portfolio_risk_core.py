@@ -1158,11 +1158,12 @@ class PortfolioRiskService(LoggerMixin):
             )
             
             # Generate rebalancing trades if needed
-            if optimization_result.get("rebalancing_required"):
+            if optimization_result.rebalancing_needed:
                 rebalancing_trades = await self._generate_rebalancing_trades(
-                    portfolio, optimization_result["optimal_weights"]
+                    portfolio, optimization_result.weights
                 )
-                optimization_result["rebalancing_trades"] = rebalancing_trades
+                # Update the suggested_trades in the dataclass
+                optimization_result.suggested_trades = rebalancing_trades
             
             # Update service metrics
             self.service_metrics["successful_optimizations"] += 1

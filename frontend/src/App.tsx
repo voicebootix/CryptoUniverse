@@ -28,6 +28,10 @@ import SettingsPage from '@/pages/dashboard/SettingsPage';
 import AdminPage from '@/pages/dashboard/AdminPage';
 import CreditsUsagePage from '@/pages/dashboard/credits/CreditsUsagePage';
 import CreditsPurchasePage from '@/pages/dashboard/credits/CreditsPurchasePage';
+import StrategyIDE from '@/pages/dashboard/StrategyIDE';
+import StrategyPublisher from '@/pages/dashboard/StrategyPublisher';
+import PublisherDashboard from '@/pages/dashboard/PublisherDashboard';
+import ABTestingLab from '@/pages/dashboard/ABTestingLab';
 
 // Loading Component
 const LoadingScreen: React.FC = () => (
@@ -131,6 +135,18 @@ const App: React.FC = () => {
               
               {/* Strategy Marketplace */}
               <Route path="strategies" element={<StrategyMarketplace />} />
+              
+              {/* Strategy IDE */}
+              <Route path="strategy-ide" element={<StrategyIDE />} />
+              
+              {/* Strategy Publisher */}
+              <Route path="strategy-publisher" element={<StrategyPublisher />} />
+              
+              {/* Publisher Dashboard */}
+              <Route path="publisher-dashboard" element={<PublisherDashboard />} />
+              
+              {/* A/B Testing Lab */}
+              <Route path="ab-testing" element={<ABTestingLab />} />
               
               {/* Performance Hub */}
               <Route path="performance" element={<PerformanceHub />} />

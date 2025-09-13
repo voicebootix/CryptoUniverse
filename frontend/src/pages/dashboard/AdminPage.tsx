@@ -29,7 +29,11 @@ import {
   Search,
   Filter,
   MoreVertical,
+  CreditCard,
 } from 'lucide-react';
+import AdminCreditManagement from '@/components/admin/AdminCreditManagement';
+import RevenueAnalytics from '@/components/admin/RevenueAnalytics';
+import StrategyApproval from '@/components/admin/StrategyApproval';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -521,9 +525,12 @@ const AdminPage: React.FC = () => {
 
       {/* Main Content Tabs */}
       <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-8">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="credits">Credits</TabsTrigger>
+          <TabsTrigger value="revenue">Revenue</TabsTrigger>
+          <TabsTrigger value="strategies">Strategies</TabsTrigger>
           <TabsTrigger value="system">System</TabsTrigger>
           <TabsTrigger value="audit">Audit Logs</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
@@ -825,6 +832,21 @@ const AdminPage: React.FC = () => {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Credits Tab */}
+        <TabsContent value="credits" className="space-y-6">
+          <AdminCreditManagement />
+        </TabsContent>
+
+        {/* Revenue Analytics Tab */}
+        <TabsContent value="revenue" className="space-y-6">
+          <RevenueAnalytics />
+        </TabsContent>
+
+        {/* Strategy Approval Tab */}
+        <TabsContent value="strategies" className="space-y-6">
+          <StrategyApproval />
         </TabsContent>
 
         {/* System Tab */}
