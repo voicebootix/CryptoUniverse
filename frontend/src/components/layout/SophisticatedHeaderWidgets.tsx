@@ -379,10 +379,20 @@ const SophisticatedHeaderWidgets: React.FC = () => {
 
               <Separator />
               <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => navigate('/dashboard/credits/usage')}
+                  className="w-full"
+                >
                   View Usage
                 </Button>
-                <Button variant="default" size="sm">
+                <Button 
+                  variant="default" 
+                  size="sm"
+                  onClick={() => navigate('/dashboard/credits/purchase')}
+                  className="w-full"
+                >
                   <Zap className="h-3 w-3 mr-1" />
                   Buy More
                 </Button>

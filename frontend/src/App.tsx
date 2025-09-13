@@ -26,6 +26,8 @@ import PortfolioPage from '@/pages/dashboard/PortfolioPage';
 import ExchangesPage from '@/pages/dashboard/ExchangesPage';
 import SettingsPage from '@/pages/dashboard/SettingsPage';
 import AdminPage from '@/pages/dashboard/AdminPage';
+import CreditsUsagePage from '@/pages/dashboard/credits/CreditsUsagePage';
+import CreditsPurchasePage from '@/pages/dashboard/credits/CreditsPurchasePage';
 
 // Loading Component
 const LoadingScreen: React.FC = () => (
@@ -144,6 +146,10 @@ const App: React.FC = () => {
               
               {/* Settings */}
               <Route path="settings" element={<SettingsPage />} />
+              
+              {/* Credits Management */}
+              <Route path="credits/usage" element={<CreditsUsagePage />} />
+              <Route path="credits/purchase" element={<CreditsPurchasePage />} />
               
               {/* Admin Panel (Admin only) */}
               <Route path="admin" element={
