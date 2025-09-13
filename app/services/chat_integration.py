@@ -601,7 +601,7 @@ After comprehensive analysis, no significant trading opportunities meet the curr
             # Get comprehensive risk analysis
             risk_analysis = await self.adapters.comprehensive_risk_analysis(user_id)
             portfolio_data = await self.adapters.get_portfolio_summary(user_id)
-            market_conditions = await self.adapters.get_market_risk_factors()
+            market_conditions = await self.adapters.get_market_risk_factors(user_id)
             
             # Get AI risk assessment
             risk_context = {
