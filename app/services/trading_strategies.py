@@ -2203,8 +2203,8 @@ class TradingStrategiesService(LoggerMixin):
             elif hedge_type == "options_hedge":
                 # Options-based hedging
                 hedge_result["hedge_analysis"] = {
-                    "hedge_type": "OPTIONS_HEDGE", 
-                    "available_options": self._get_available_options(primary_symbol),
+                    "hedge_type": "OPTIONS_HEDGE",
+                    "available_options": await self._get_available_options(primary_symbol),
                     "hedge_strategies": []
                 }
                 
@@ -4461,9 +4461,12 @@ class TradingStrategiesService(LoggerMixin):
         try:
             if leverage <= 1:
                 return 0.0  # No liquidation risk for unlevered positions
-                
+
+            # Convert percent to fraction for consistent units
+            normalized_distance = liquidation_distance / 100 if liquidation_distance > 1 else liquidation_distance
+
             # Use normal distribution to estimate probability
-            z_score = liquidation_distance / (volatility * (leverage ** 0.5))
+            z_score = normalized_distance / (volatility * (leverage ** 0.5))
             
             # Simplified probability calculation
             if z_score >= 3:
@@ -4565,9 +4568,11 @@ class TradingStrategiesService(LoggerMixin):
     def _calculate_leverage_adjustment_cost(self, position: Dict, target_leverage: float) -> Dict[str, float]:
         """Calculate cost of adjusting leverage."""
         try:
+            # position_value is the notional value used for funding calculations
             position_value = position.get('position_size', 0) * position.get('entry_price', 1)
             trading_cost = position_value * 0.001  # 0.1% fee
-            daily_funding = position_value * target_leverage * 0.0001 * 3  # Daily funding
+            # Funding is applied to notional value only, not multiplied by leverage
+            daily_funding = position_value * 0.0001 * 3  # Daily funding rate × notional × 3 periods
             return {"total_immediate_cost": trading_cost, "estimated_daily_cost": daily_funding}
         except Exception:
             return {"total_immediate_cost": 0, "estimated_daily_cost": 0}
@@ -4659,13 +4664,21 @@ class TradingStrategiesService(LoggerMixin):
         except Exception:
             return 0.025
 
-    def _get_available_options(self, symbol: str) -> List[Dict]:
+    async def _get_available_options(self, symbol: str) -> List[Dict]:
         """Get available options for a symbol."""
         try:
-            # Simulate available options based on symbol
-            base_price = 45000 if "BTC" in symbol else 2500
+            # Get real market price instead of hardcoded values
+            price_data = await self._get_symbol_price("auto", symbol)
+            if not price_data or not price_data.get("success"):
+                # Fall back with clear error message
+                raise ValueError(f"Unable to fetch price for {symbol}")
+
+            base_price = float(price_data.get("price", 0))
+            if base_price <= 0:
+                raise ValueError(f"Invalid price received for {symbol}: {base_price}")
+
             options = []
-            
+
             for i, strike_offset in enumerate([-0.1, -0.05, 0, 0.05, 0.1]):
                 strike = base_price * (1 + strike_offset)
                 options.append({
@@ -4676,13 +4689,14 @@ class TradingStrategiesService(LoggerMixin):
                 })
                 options.append({
                     "strike": strike,
-                    "type": "put", 
+                    "type": "put",
                     "expiry": "2024-12-31",
                     "premium": base_price * 0.02 * (1 + abs(strike_offset))
                 })
-            
+
             return options
-        except Exception:
+        except Exception as e:
+            self.logger.exception(f"Options fetch failed for {symbol}: {e}")
             return []
 
     def _calculate_spread_percentile(self, z_score: float) -> float:
