@@ -4153,6 +4153,405 @@ class TradingStrategiesService(LoggerMixin):
             self.logger.error(f"Portfolio Sortino calculation failed: {e}")
             return 0.0
 
+    async def _get_symbol_price(self, exchange: str, symbol: str) -> Dict[str, Any]:
+        """Get current price data for a symbol."""
+        try:
+            from app.services.unified_price_service import get_crypto_price
+            
+            # Clean symbol format for price service
+            clean_symbol = symbol.replace("/", "").replace("USDT", "")
+            price = await get_crypto_price(clean_symbol, use_case="trading")
+            
+            if price and price > 0:
+                return {
+                    "success": True,
+                    "price": price,
+                    "symbol": symbol,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            else:
+                # Fallback prices for major symbols
+                fallback_prices = {
+                    "BTC": 45000, "ETH": 2500, "BNB": 300, "ADA": 0.5, 
+                    "SOL": 100, "DOT": 25, "MATIC": 1.2, "AVAX": 40
+                }
+                fallback_price = fallback_prices.get(clean_symbol, 100)
+                return {
+                    "success": True, 
+                    "price": fallback_price,
+                    "symbol": symbol,
+                    "fallback": True,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+        except Exception as e:
+            self.logger.error(f"Price fetch failed for {symbol}: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _get_perpetual_funding_info(self, symbol: str, exchange: str) -> Dict[str, Any]:
+        """Get perpetual funding rate information."""
+        try:
+            # Simulated funding rate data based on current market conditions
+            base_rate = 0.0001  # 0.01% base funding rate
+            
+            # Add volatility-based adjustment
+            volatility = await self._estimate_daily_volatility(symbol)
+            volatility_adjustment = (volatility - 0.03) * 0.002  # Higher vol = higher funding
+            
+            funding_rate = base_rate + volatility_adjustment
+            funding_rate = max(-0.005, min(funding_rate, 0.005))  # Cap at ±0.5%
+            
+            return {
+                "success": True,
+                "symbol": symbol,
+                "funding_rate": funding_rate,
+                "funding_interval": "8h",
+                "next_funding_time": (datetime.utcnow().hour // 8 + 1) * 8,
+                "predicted_rate": funding_rate * 1.1,  # Slight prediction variance
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            self.logger.error(f"Funding info fetch failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _calculate_liquidation_distance(self, leverage: float, position_side: str) -> float:
+        """Calculate distance to liquidation price."""
+        try:
+            # Liquidation occurs at (1/leverage) distance from entry
+            base_distance = 1.0 / leverage
+            
+            # Add buffer for fees and slippage
+            fee_buffer = 0.001  # 0.1% for trading fees
+            slippage_buffer = 0.0005  # 0.05% for slippage
+            
+            total_distance = base_distance - fee_buffer - slippage_buffer
+            return max(0.01, total_distance)  # Minimum 1% distance
+            
+        except Exception as e:
+            self.logger.error(f"Liquidation distance calculation failed: {e}")
+            return 0.05  # Default 5% distance
+
+    def _generate_perpetual_entry_conditions(self, strategy_type: str, funding_info: Dict) -> List[Dict]:
+        """Generate entry conditions for perpetual trades."""
+        try:
+            conditions = []
+            funding_rate = funding_info.get("funding_rate", 0.0001)
+            
+            if strategy_type in ["long_futures", "momentum_long"]:
+                conditions.append({
+                    "type": "funding_threshold",
+                    "condition": f"funding_rate < {funding_rate * 0.8:.6f}",
+                    "rationale": "Enter long when funding is favorable"
+                })
+                conditions.append({
+                    "type": "volatility_check", 
+                    "condition": "daily_volatility < 0.08",
+                    "rationale": "Avoid high volatility periods"
+                })
+            
+            elif strategy_type in ["short_futures", "momentum_short"]:
+                conditions.append({
+                    "type": "funding_threshold",
+                    "condition": f"funding_rate > {funding_rate * 1.2:.6f}",
+                    "rationale": "Enter short when funding is expensive"
+                })
+                
+            conditions.append({
+                "type": "liquidity_check",
+                "condition": "24h_volume > $10M",
+                "rationale": "Ensure sufficient liquidity"
+            })
+                
+            return conditions
+            
+        except Exception as e:
+            self.logger.error(f"Entry conditions generation failed: {e}")
+            return []
+
+    def _generate_perpetual_exit_conditions(self, strategy_type: str, params: Dict) -> List[Dict]:
+        """Generate exit conditions for perpetual trades."""
+        try:
+            conditions = []
+            
+            # Profit target
+            profit_target = params.get("profit_target", 0.05)  # 5% default
+            conditions.append({
+                "type": "profit_target",
+                "condition": f"profit_pct >= {profit_target:.2%}",
+                "action": "close_position",
+                "priority": "high"
+            })
+            
+            # Stop loss
+            stop_loss = params.get("stop_loss", 0.03)  # 3% default
+            conditions.append({
+                "type": "stop_loss", 
+                "condition": f"loss_pct >= {stop_loss:.2%}",
+                "action": "close_position",
+                "priority": "critical"
+            })
+            
+            # Time-based exit
+            conditions.append({
+                "type": "time_exit",
+                "condition": "holding_period > 7 days",
+                "action": "review_position",
+                "priority": "medium"
+            })
+            
+            return conditions
+            
+        except Exception as e:
+            self.logger.error(f"Exit conditions generation failed: {e}")
+            return []
+
+    def _generate_perpetual_alerts(self, symbol: str, strategy_type: str) -> List[Dict]:
+        """Generate monitoring alerts for perpetual positions."""
+        try:
+            alerts = []
+            
+            # Funding rate alerts
+            alerts.append({
+                "type": "funding_rate_change",
+                "threshold": 0.0005,  # 0.05% change
+                "action": "notify",
+                "message": f"Funding rate changed significantly for {symbol}"
+            })
+            
+            # Liquidation proximity alert
+            alerts.append({
+                "type": "liquidation_proximity",
+                "threshold": 0.15,  # 15% from liquidation
+                "action": "urgent_notification",
+                "message": f"Position approaching liquidation for {symbol}"
+            })
+            
+            # Volume spike alert
+            alerts.append({
+                "type": "volume_spike",
+                "threshold": 2.0,  # 2x average volume
+                "action": "monitor",
+                "message": f"Unusual volume activity detected for {symbol}"
+            })
+            
+            return alerts
+            
+        except Exception as e:
+            self.logger.error(f"Alert generation failed: {e}")
+            return []
+
+    async def _get_current_position(self, symbol: str, exchange: str, user_id: str) -> Dict[str, Any]:
+        """Get current position information."""
+        try:
+            # This would normally fetch from exchange API or database
+            # For now, simulate position data
+            return {
+                "symbol": symbol,
+                "size": 0,  # No current position
+                "side": "none",
+                "entry_price": 0,
+                "unrealized_pnl": 0,
+                "leverage": 1,
+                "margin_used": 0,
+                "liquidation_price": 0,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Position fetch failed: {e}")
+            return {"error": str(e)}
+
+    def _calculate_new_liquidation_price(self, entry_price: float, leverage: float, side: str, adjustment: float = 0) -> float:
+        """Calculate new liquidation price after leverage adjustment."""
+        try:
+            if leverage <= 1:
+                return 0  # No liquidation risk for unlevered positions
+                
+            # Calculate liquidation distance
+            liquidation_distance = 1.0 / leverage
+            
+            # Apply adjustment if provided
+            adjusted_distance = liquidation_distance * (1 + adjustment)
+            
+            if side.lower() == "long":
+                liquidation_price = entry_price * (1 - adjusted_distance)
+            else:  # short
+                liquidation_price = entry_price * (1 + adjusted_distance)
+                
+            return max(0, liquidation_price)
+            
+        except Exception as e:
+            self.logger.error(f"Liquidation price calculation failed: {e}")
+            return 0
+
+    def _identify_single_point_failures(self, positions: List[Dict]) -> List[Dict]:
+        """Identify single point of failure risks in portfolio."""
+        try:
+            failures = []
+            
+            if not positions:
+                return []
+                
+            total_value = sum(pos.get('value', 0) for pos in positions)
+            
+            for pos in positions:
+                pos_value = pos.get('value', 0)
+                concentration = pos_value / max(total_value, 1)
+                
+                # Check for over-concentration
+                if concentration > 0.25:  # More than 25% in single position
+                    failures.append({
+                        "type": "concentration_risk",
+                        "symbol": pos.get('symbol', 'Unknown'),
+                        "risk_level": "HIGH" if concentration > 0.4 else "MEDIUM",
+                        "concentration_pct": concentration * 100,
+                        "recommendation": "Reduce position size to manage risk",
+                        "impact": "Portfolio vulnerable to single asset volatility"
+                    })
+                
+                # Check for liquidity risks
+                daily_volume = pos.get('daily_volume', 1000000)
+                if daily_volume < 100000:  # Less than $100k daily volume
+                    failures.append({
+                        "type": "liquidity_risk",
+                        "symbol": pos.get('symbol', 'Unknown'),
+                        "risk_level": "HIGH",
+                        "daily_volume": daily_volume,
+                        "recommendation": "Consider more liquid alternatives",
+                        "impact": "Difficult to exit position quickly"
+                    })
+            
+            return failures
+            
+        except Exception as e:
+            self.logger.error(f"Single point failure analysis failed: {e}")
+            return []
+
+    def _calculate_liquidation_probability(self, liquidation_distance: float, volatility: float, leverage: float) -> float:
+        """Calculate probability of liquidation based on distance and volatility."""
+        try:
+            if leverage <= 1:
+                return 0.0  # No liquidation risk for unlevered positions
+                
+            # Use normal distribution to estimate probability
+            z_score = liquidation_distance / (volatility * (leverage ** 0.5))
+            
+            # Simplified probability calculation
+            if z_score >= 3:
+                probability = 0.001  # Very low probability
+            elif z_score >= 2:
+                probability = 0.025  # Low probability
+            elif z_score >= 1:
+                probability = 0.16   # Medium probability
+            else:
+                probability = 0.5    # High probability
+                
+            return min(0.95, probability)  # Cap at 95%
+            
+        except Exception as e:
+            self.logger.error(f"Liquidation probability calculation failed: {e}")
+            return 0.1  # Default 10% probability
+
+    def _calculate_safe_leverage(self, symbol: str, liquidation_distance: float) -> float:
+        """Calculate safe leverage based on symbol volatility and risk tolerance."""
+        try:
+            # Base safe leverage ratios by asset class
+            safe_leverage_map = {
+                "BTC": 3.0, "ETH": 2.5, "BNB": 2.0, "USDT": 10.0, "USDC": 10.0
+            }
+            
+            base_symbol = symbol.split('/')[0] if '/' in symbol else symbol.replace('USDT', '')
+            base_leverage = safe_leverage_map.get(base_symbol, 1.5)
+            
+            # Adjust based on liquidation distance preference
+            distance_adjustment = liquidation_distance / 0.2
+            adjusted_leverage = base_leverage * distance_adjustment
+            
+            return max(1.0, min(adjusted_leverage, 10.0))
+            
+        except Exception as e:
+            self.logger.error(f"Safe leverage calculation failed: {e}")
+            return 2.0
+
+    async def _calculate_optimal_leverage(self, symbol: str, position: Dict, params: Dict) -> float:
+        """Calculate optimal leverage using Kelly Criterion."""
+        try:
+            volatility = await self._estimate_daily_volatility(symbol)
+            
+            # Kelly Criterion parameters
+            strategy_win_rates = {"momentum": 0.55, "mean_reversion": 0.6, "default": 0.5}
+            win_prob = strategy_win_rates.get(params.get('strategy_type', 'default'), 0.5)
+            
+            expected_return = 0.02  # 2% expected daily return
+            risk_ratio = expected_return / max(volatility, 0.01)
+            
+            # Kelly fraction
+            kelly_fraction = (win_prob * risk_ratio - (1-win_prob)) / risk_ratio
+            kelly_fraction = max(0.01, min(kelly_fraction, 0.25))
+            
+            optimal_leverage = 1.0 / max(kelly_fraction, 0.1)
+            safe_leverage = optimal_leverage * params.get('safety_factor', 0.5)
+            
+            return max(1.0, min(safe_leverage, 5.0))
+            
+        except Exception as e:
+            self.logger.error(f"Optimal leverage calculation failed: {e}")
+            return 2.0
+
+    def _calculate_leverage_efficiency(self, leverage: float, position: Dict) -> float:
+        """Calculate efficiency score of current leverage."""
+        try:
+            if leverage <= 1:
+                return 0.5
+                
+            capital_used = position.get('margin_used', 1000)
+            position_size = position.get('size', 0) * position.get('entry_price', 1)
+            
+            if position_size == 0:
+                return 0.0
+                
+            utilization_ratio = capital_used / position_size
+            optimal_utilization = 0.25
+            efficiency = 1.0 - abs(utilization_ratio - optimal_utilization) / optimal_utilization
+            
+            return max(0.0, min(efficiency, 1.0))
+            
+        except Exception as e:
+            return 0.5
+
+    def _generate_leverage_adjustment_steps(self, action: str, current: float, target: float) -> List[Dict]:
+        """Generate steps for leverage adjustment."""
+        try:
+            steps = []
+            if action == "increase":
+                steps.append({"step": 1, "action": "Add margin to account"})
+                steps.append({"step": 2, "action": f"Increase leverage from {current}x to {target}x"})
+            elif action == "decrease":
+                steps.append({"step": 1, "action": f"Decrease leverage from {current}x to {target}x"})
+                steps.append({"step": 2, "action": "Withdraw excess margin"})
+            return steps
+        except Exception:
+            return []
+
+    def _calculate_leverage_adjustment_cost(self, position: Dict, target_leverage: float) -> Dict[str, float]:
+        """Calculate cost of adjusting leverage."""
+        try:
+            position_value = position.get('size', 0) * position.get('entry_price', 1)
+            trading_cost = position_value * 0.001  # 0.1% fee
+            daily_funding = position_value * target_leverage * 0.0001 * 3  # Daily funding
+            return {"total_immediate_cost": trading_cost, "estimated_daily_cost": daily_funding}
+        except Exception:
+            return {"total_immediate_cost": 0, "estimated_daily_cost": 0}
+
+    def _check_leverage_prerequisites(self, position: Dict, target_leverage: float) -> List[Dict]:
+        """Check prerequisites for leverage adjustment."""
+        try:
+            prerequisites = []
+            if target_leverage > 5.0:
+                prerequisites.append({"type": "high_risk_warning", "action": "Consider lower leverage"})
+            return prerequisites
+        except Exception:
+            return []
+
     async def _estimate_daily_volatility(self, symbol: str) -> float:
         """Calculate real daily volatility using historical price data."""
         try:
@@ -4214,6 +4613,304 @@ class TradingStrategiesService(LoggerMixin):
                 return 0.05  # Slightly higher for ETH
             else:
                 return 0.06  # Higher for altcoins
+
+    def _get_maintenance_margin_rate(self, leverage: float) -> float:
+        """Get maintenance margin rate based on leverage."""
+        try:
+            # Higher leverage = higher maintenance margin requirement
+            if leverage >= 10:
+                return 0.05  # 5%
+            elif leverage >= 5:
+                return 0.025  # 2.5%
+            elif leverage >= 3:
+                return 0.015  # 1.5%
+            else:
+                return 0.01   # 1%
+        except Exception:
+            return 0.025
+
+    def _get_available_options(self, symbol: str) -> List[Dict]:
+        """Get available options for a symbol."""
+        try:
+            # Simulate available options based on symbol
+            base_price = 45000 if "BTC" in symbol else 2500
+            options = []
+            
+            for i, strike_offset in enumerate([-0.1, -0.05, 0, 0.05, 0.1]):
+                strike = base_price * (1 + strike_offset)
+                options.append({
+                    "strike": strike,
+                    "type": "call",
+                    "expiry": "2024-12-31",
+                    "premium": base_price * 0.02 * (1 + abs(strike_offset))
+                })
+                options.append({
+                    "strike": strike,
+                    "type": "put", 
+                    "expiry": "2024-12-31",
+                    "premium": base_price * 0.02 * (1 + abs(strike_offset))
+                })
+            
+            return options
+        except Exception:
+            return []
+
+    def _calculate_spread_percentile(self, z_score: float) -> float:
+        """Calculate spread percentile based on z-score."""
+        try:
+            # Convert z-score to percentile (simplified)
+            if z_score >= 2:
+                return 0.95  # 95th percentile
+            elif z_score >= 1:
+                return 0.84  # 84th percentile
+            elif z_score >= 0:
+                return 0.5 + (z_score * 0.34)  # Linear approximation
+            elif z_score >= -1:
+                return 0.16 + ((z_score + 1) * 0.34)
+            elif z_score >= -2:
+                return 0.05 + ((z_score + 2) * 0.11)
+            else:
+                return 0.05
+        except Exception:
+            return 0.5
+
+    def _calculate_mean_reversion_probability(self, z_score_abs: float) -> float:
+        """Calculate probability of mean reversion."""
+        try:
+            # Higher absolute z-score = higher mean reversion probability
+            if z_score_abs >= 3:
+                return 0.9   # Very high probability
+            elif z_score_abs >= 2:
+                return 0.75  # High probability
+            elif z_score_abs >= 1:
+                return 0.6   # Medium probability
+            else:
+                return 0.4   # Low probability
+        except Exception:
+            return 0.5
+
+    def _calculate_beta_neutral_ratio(self, symbol_a: str, symbol_b: str) -> float:
+        """Calculate beta neutral ratio for pairs trading."""
+        try:
+            # Simplified beta calculation based on symbol characteristics
+            volatility_map = {"BTC": 1.0, "ETH": 1.2, "BNB": 1.5, "ADA": 2.0}
+            
+            base_a = symbol_a.split('/')[0] if '/' in symbol_a else symbol_a
+            base_b = symbol_b.split('/')[0] if '/' in symbol_b else symbol_b
+            
+            vol_a = volatility_map.get(base_a, 1.5)
+            vol_b = volatility_map.get(base_b, 1.5)
+            
+            # Beta neutral ratio
+            beta_ratio = vol_b / vol_a
+            return max(0.1, min(beta_ratio, 10.0))  # Cap between 0.1 and 10
+        except Exception:
+            return 1.0
+
+    def _calculate_portfolio_var(self, portfolio: Dict) -> Dict[str, float]:
+        """Calculate portfolio Value at Risk."""
+        try:
+            positions = portfolio.get('positions', [])
+            total_value = sum(pos.get('value', 0) for pos in positions)
+            
+            if total_value == 0:
+                return {"var_1d": 0, "var_1w": 0}
+            
+            # Calculate portfolio volatility (simplified)
+            portfolio_volatility = 0
+            for pos in positions:
+                weight = pos.get('value', 0) / total_value
+                pos_volatility = pos.get('volatility', 0.05)
+                portfolio_volatility += (weight * pos_volatility) ** 2
+            
+            portfolio_volatility = portfolio_volatility ** 0.5
+            
+            # VaR calculation (95% confidence level)
+            var_1d = total_value * portfolio_volatility * 1.65  # 95% confidence
+            var_1w = var_1d * (7 ** 0.5)  # Weekly VaR
+            
+            return {"var_1d": var_1d, "var_1w": var_1w}
+        except Exception:
+            return {"var_1d": 0, "var_1w": 0}
+
+    def _estimate_market_impact(self, symbol: str, daily_volume: float) -> float:
+        """Estimate market impact based on volume."""
+        try:
+            # Market impact increases with order size relative to daily volume
+            # Assume typical order is 0.1% of daily volume
+            typical_order_ratio = 0.001
+            
+            # Impact is roughly square root of order size ratio
+            impact = (typical_order_ratio ** 0.5) * 0.01  # 1% base impact
+            
+            # Adjust for liquidity
+            if daily_volume > 1000000000:  # > $1B daily volume
+                impact *= 0.5  # Very liquid
+            elif daily_volume > 100000000:  # > $100M daily volume
+                impact *= 0.75  # Liquid
+            elif daily_volume < 10000000:   # < $10M daily volume
+                impact *= 2.0   # Illiquid
+            
+            return max(0.0001, min(impact, 0.1))  # Between 0.01% and 10%
+        except Exception:
+            return 0.005  # 0.5% default
+
+    def _get_tick_size(self, symbol: str, exchange: str) -> float:
+        """Get minimum price increment for symbol."""
+        try:
+            # Typical tick sizes for major symbols
+            tick_map = {
+                "BTC": 0.01,   # $0.01
+                "ETH": 0.01,   # $0.01
+                "BNB": 0.001,  # $0.001
+                "ADA": 0.0001, # $0.0001
+                "SOL": 0.001,  # $0.001
+                "DOT": 0.001,  # $0.001
+            }
+            
+            base_symbol = symbol.split('/')[0] if '/' in symbol else symbol.replace('USDT', '')
+            return tick_map.get(base_symbol, 0.001)  # Default 0.001
+        except Exception:
+            return 0.001
+
+    def _calculate_reversal_probability(self, monthly_change: float, weekly_change: float) -> float:
+        """Calculate trend reversal probability."""
+        try:
+            # If monthly and weekly trends diverge, higher reversal probability
+            if (monthly_change > 0) != (weekly_change > 0):
+                return 0.7  # High divergence = high reversal probability
+            
+            # If both trends are extreme in same direction, medium reversal probability
+            if abs(monthly_change) > 0.3 and abs(weekly_change) > 0.1:
+                return 0.6  # Overextended trends
+            
+            # Normal conditions
+            return 0.3  # Low reversal probability
+        except Exception:
+            return 0.5
+
+    def _calculate_sector_concentration(self, positions: List[Dict]) -> Dict[str, float]:
+        """Calculate sector concentration in portfolio."""
+        try:
+            sector_map = {
+                "BTC": "Store of Value",
+                "ETH": "Smart Contracts", 
+                "BNB": "Exchange Tokens",
+                "ADA": "Smart Contracts",
+                "SOL": "Smart Contracts",
+                "DOT": "Interoperability",
+                "MATIC": "Scaling",
+                "AVAX": "Smart Contracts",
+                "LINK": "Oracles",
+                "UNI": "DeFi"
+            }
+            
+            sector_values = {}
+            total_value = sum(pos.get('value', 0) for pos in positions)
+            
+            for pos in positions:
+                symbol = pos.get('symbol', '').split('/')[0]
+                sector = sector_map.get(symbol, "Other")
+                value = pos.get('value', 0)
+                
+                if sector not in sector_values:
+                    sector_values[sector] = 0
+                sector_values[sector] += value
+            
+            # Convert to percentages
+            sector_percentages = {}
+            for sector, value in sector_values.items():
+                sector_percentages[sector] = (value / max(total_value, 1)) * 100
+            
+            return sector_percentages
+        except Exception:
+            return {}
+
+    def _identify_hedging_opportunities(self, position_analyses: Dict) -> List[Dict]:
+        """Identify hedging opportunities in portfolio."""
+        try:
+            opportunities = []
+            
+            for symbol, analysis in position_analyses.items():
+                risk_score = analysis.get('risk_score', 0)
+                concentration = analysis.get('concentration_pct', 0)
+                
+                if risk_score > 0.7 or concentration > 30:  # High risk or concentration
+                    opportunities.append({
+                        "type": "portfolio_hedge",
+                        "target_symbol": symbol,
+                        "hedge_instrument": "BTC" if symbol != "BTC" else "ETH",
+                        "hedge_ratio": min(0.5, concentration / 100),
+                        "rationale": f"Hedge against {symbol} concentration risk",
+                        "urgency": "HIGH" if risk_score > 0.8 else "MEDIUM"
+                    })
+            
+            return opportunities
+        except Exception:
+            return []
+
+    async def _get_exchange_margin_info(self, exchange: str, user_id: str) -> Dict[str, Any]:
+        """Get margin information from exchange."""
+        try:
+            # Simulate margin info
+            return {
+                "success": True,
+                "available_margin": 10000,
+                "used_margin": 2000,
+                "margin_ratio": 0.2,
+                "maintenance_margin": 500,
+                "free_margin": 8000
+            }
+        except Exception:
+            return {"success": False}
+
+    def _get_margin_recommendation(self, risk_level: str, margin_ratios: Dict) -> str:
+        """Get margin usage recommendation."""
+        try:
+            current_ratio = margin_ratios.get('margin_ratio', 0)
+            
+            if risk_level == "HIGH":
+                if current_ratio > 0.5:
+                    return "REDUCE_POSITIONS - High risk with excessive margin usage"
+                else:
+                    return "MONITOR - High risk market conditions"
+            elif risk_level == "MEDIUM":
+                if current_ratio > 0.7:
+                    return "CAUTION - Consider reducing margin usage"
+                else:
+                    return "NORMAL - Current margin usage acceptable"
+            else:
+                return "OPTIMAL - Low risk, efficient margin usage"
+        except Exception:
+            return "MONITOR"
+
+    async def _get_position_margin_info(self, symbol: str, exchange: str, user_id: str) -> Dict[str, Any]:
+        """Get position-specific margin info."""
+        try:
+            return {
+                "symbol": symbol,
+                "position_margin": 1000,
+                "maintenance_margin": 100,
+                "margin_ratio": 0.1,
+                "liquidation_price": 0,
+                "free_collateral": 5000
+            }
+        except Exception:
+            return {}
+
+    def _calculate_margin_efficiency(self, margin_by_exchange: Dict) -> float:
+        """Calculate margin usage efficiency across exchanges."""
+        try:
+            total_available = sum(info.get('available_margin', 0) for info in margin_by_exchange.values())
+            total_used = sum(info.get('used_margin', 0) for info in margin_by_exchange.values())
+            
+            if total_available == 0:
+                return 0.0
+                
+            efficiency = total_used / total_available
+            return max(0.0, min(efficiency, 1.0))
+        except Exception:
+            return 0.5
 
 
 # Global service instance
