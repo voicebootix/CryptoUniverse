@@ -56,9 +56,9 @@ interface NavigationItem {
 }
 
 const navigation: NavigationItem[] = [
-  { 
-    name: "AI Money Manager", 
-    href: "/dashboard", 
+  {
+    name: "AI Money Manager",
+    href: "/dashboard",
     icon: Brain,
     badge: "AI"
   },
@@ -103,11 +103,16 @@ const navigation: NavigationItem[] = [
     icon: Users,
     badge: "HOT",
   },
-  { 
-    name: "Admin", 
-    href: "/dashboard/admin", 
-    icon: Shield, 
-    adminOnly: true 
+  {
+    name: "Settings",
+    href: "/dashboard/settings",
+    icon: Settings,
+  },
+  {
+    name: "Admin",
+    href: "/dashboard/admin",
+    icon: Shield,
+    adminOnly: true
   },
 ];
 

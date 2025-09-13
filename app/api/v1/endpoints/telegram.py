@@ -30,6 +30,7 @@ from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
 from app.models.telegram_integration import UserTelegramConnection, TelegramMessage
 from app.services.telegram_core import TelegramCommanderService as TelegramService
+from app.services.telegram_commander import MessageType
 from app.services.rate_limit import rate_limiter
 
 settings = get_settings()
@@ -79,7 +80,7 @@ class TelegramConnectionResponse(BaseModel):
 
 class TelegramMessageRequest(BaseModel):
     message: str
-    message_type: str = "text"
+    message_type: str = "info"
     
     @field_validator('message')
     @classmethod
@@ -89,6 +90,19 @@ class TelegramMessageRequest(BaseModel):
         if len(v) > 4000:
             raise ValueError("Message too long (max 4000 characters)")
         return v.strip()
+
+    @field_validator('message_type')
+    @classmethod
+    def validate_message_type(cls, v):
+        if not v or len(v.strip()) == 0:
+            return "info"  # Default fallback
+        # Normalize and validate - basic validation here, detailed mapping in endpoint
+        valid_types = ["text", "info", "information", "alert", "warning", "trade", "trading", "portfolio", "system", "voice", "voice_response"]
+        normalized = v.lower().strip()
+        if normalized not in valid_types:
+            # Log warning but don't fail - let endpoint mapping handle fallback
+            return "info"
+        return normalized
 
 
 class TelegramWebhookPayload(BaseModel):
@@ -303,11 +317,47 @@ async def send_telegram_message(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No active Telegram connection found"
             )
-        
-        # Send message via Telegram service
-        send_result = await telegram_service.send_message(
+
+        # Validate connection has required chat ID and is authenticated
+        if not connection.telegram_chat_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Telegram connection missing chat ID - please complete authentication in Telegram"
+            )
+
+        # Check if connection is properly authenticated (has completed setup)
+        if connection.telegram_user_id == "pending" or not connection.telegram_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Telegram connection not authenticated - please complete /auth <token> in Telegram"
+            )
+
+        # Normalize and validate message_type from request
+        # Map common input values to valid MessageType enum values
+        message_type_mapping = {
+            "text": MessageType.INFO,
+            "info": MessageType.INFO,
+            "information": MessageType.INFO,
+            "alert": MessageType.ALERT,
+            "warning": MessageType.ALERT,
+            "trade": MessageType.TRADE,
+            "trading": MessageType.TRADE,
+            "portfolio": MessageType.PORTFOLIO,
+            "system": MessageType.SYSTEM,
+            "voice": MessageType.VOICE_RESPONSE,
+            "voice_response": MessageType.VOICE_RESPONSE,
+        }
+
+        # Normalize the request message type (case-insensitive)
+        normalized_type = request.message_type.lower().strip()
+        validated_message_type = message_type_mapping.get(normalized_type, MessageType.INFO)
+
+        # Send message via Telegram service directly to user's chat
+        send_result = await telegram_service.send_direct_message(
             chat_id=connection.telegram_chat_id,
-            text=request.message
+            message_content=request.message,
+            message_type=validated_message_type.value,
+            priority="normal"
         )
         
         if send_result.get("success"):
@@ -552,9 +602,9 @@ async def _process_telegram_message(webhook_data: Dict[str, Any], db: AsyncSessi
                 await _handle_authentication(message_data, db)
             else:
                 # Send instructions to connect
-                await telegram_service.send_message(
+                await telegram_service.send_direct_message(
                     chat_id=chat_id,
-                    text="⚠️ Please connect your account first. Go to the CryptoUniverse dashboard → Telegram Center to get started."
+                    message_content="⚠️ Please connect your account first. Go to the CryptoUniverse dashboard → Telegram Center to get started."
                 )
             return
         
@@ -588,9 +638,9 @@ async def _handle_authentication(message_data: Dict[str, Any], db: AsyncSession)
         connection = result.scalar_one_or_none()
         
         if not connection:
-            await telegram_service.send_message(
+            await telegram_service.send_direct_message(
                 chat_id=chat_id,
-                text="❌ Invalid authentication token. Please get a new token from the CryptoUniverse dashboard."
+                message_content="❌ Invalid authentication token. Please get a new token from the CryptoUniverse dashboard."
             )
             return
         
@@ -623,9 +673,9 @@ async def _handle_authentication(message_data: Dict[str, Any], db: AsyncSession)
 💡 **Tip**: Try `/help` for full command list
 """
         
-        await telegram_service.send_message(
+        await telegram_service.send_direct_message(
             chat_id=chat_id,
-            text=welcome_message
+            message_content=welcome_message
         )
         
         logger.info(
@@ -671,9 +721,9 @@ async def _process_authenticated_message(
         
         # Send response
         if response:
-            await telegram_service.send_message(
+            await telegram_service.send_direct_message(
                 chat_id=chat_id,
-                text=response
+                message_content=response
             )
             
             # Update message record
