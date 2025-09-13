@@ -40,12 +40,24 @@ async def trade_notification(
         # Format trade notification message
         notification_message = self._format_trade_notification(trade_info, notification_type)
         
-        # Send notification
-        result = await self.send_message(
+        # Send notification - resolve recipient to chat_id and send directly
+        from app.services.telegram_commander import RecipientType
+        recipient_type = RecipientType(recipient)
+        chat_id = await self._get_chat_id_for_recipient(recipient_type)
+
+        if not chat_id:
+            return {
+                "success": False,
+                "error": f"No chat ID found for recipient: {recipient}",
+                "function": "trade_notification",
+                "request_id": request_id
+            }
+
+        result = await self.send_direct_message(
+            chat_id=chat_id,
             message_content=notification_message,
             message_type="trade",
-            priority=priority,
-            recipient=recipient
+            priority=priority
         )
         
         return {
@@ -89,12 +101,24 @@ async def system_status(
         # Determine priority based on status
         priority = "critical" if system_status_data.get("has_critical_issues") else "normal"
         
-        # Send status update
-        result = await self.send_message(
+        # Send status update - resolve recipient to chat_id and send directly
+        from app.services.telegram_commander import RecipientType
+        recipient_type = RecipientType(recipient)
+        chat_id = await self._get_chat_id_for_recipient(recipient_type)
+
+        if not chat_id:
+            return {
+                "success": False,
+                "error": f"No chat ID found for recipient: {recipient}",
+                "function": "system_status",
+                "request_id": request_id
+            }
+
+        result = await self.send_direct_message(
+            chat_id=chat_id,
             message_content=status_message,
             message_type="system",
-            priority=priority,
-            recipient=recipient
+            priority=priority
         )
         
         return {

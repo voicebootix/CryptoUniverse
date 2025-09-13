@@ -1095,11 +1095,24 @@ class TelegramCommanderService(LoggerMixin):
             # Format as alert with emoji and urgency indicators
             alert_message = f"🚨 **ALERT** 🚨\n\n{message_content}\n\n⏰ {datetime.utcnow().strftime('%H:%M UTC')}"
             
-            result = await self.send_message(
+            # Resolve recipient to chat_id and send directly
+            from app.services.telegram_commander import RecipientType
+            recipient_type = RecipientType(recipient)
+            chat_id = await self._get_chat_id_for_recipient(recipient_type)
+
+            if not chat_id:
+                return {
+                    "success": False,
+                    "error": f"No chat ID found for recipient: {recipient}",
+                    "function": "send_alert",
+                    "request_id": request_id
+                }
+
+            result = await self.send_direct_message(
+                chat_id=chat_id,
                 message_content=alert_message,
                 message_type=message_type,
-                priority=priority,
-                recipient=recipient
+                priority=priority
             )
             
             # Update metrics
@@ -1149,11 +1162,24 @@ class TelegramCommanderService(LoggerMixin):
             # Format portfolio update message
             update_message = self._format_portfolio_update(portfolio_result, update_type)
             
-            result = await self.send_message(
+            # Resolve recipient to chat_id and send directly
+            from app.services.telegram_commander import RecipientType
+            recipient_type = RecipientType(recipient)
+            chat_id = await self._get_chat_id_for_recipient(recipient_type)
+
+            if not chat_id:
+                return {
+                    "success": False,
+                    "error": f"No chat ID found for recipient: {recipient}",
+                    "function": "portfolio_update",
+                    "request_id": request_id
+                }
+
+            result = await self.send_direct_message(
+                chat_id=chat_id,
                 message_content=update_message,
                 message_type="portfolio",
-                priority="normal",
-                recipient=recipient
+                priority="normal"
             )
             
             return {
