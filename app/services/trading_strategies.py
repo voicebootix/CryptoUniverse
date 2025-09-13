@@ -4104,6 +4104,25 @@ class TradingStrategiesService(LoggerMixin):
                 "timestamp": datetime.utcnow().isoformat()
             }
 
+    def _estimate_daily_volatility(self, symbol: str) -> float:
+        """Estimate daily volatility for a symbol (placeholder implementation)."""
+        # Simplified volatility estimates based on common crypto pairs
+        volatility_map = {
+            "BTC/USDT": 0.04,    # 4% daily volatility
+            "ETH/USDT": 0.05,    # 5% daily volatility
+            "BTC/USD": 0.04,
+            "ETH/USD": 0.05,
+            "DOGE/USDT": 0.08,   # Higher volatility for altcoins
+            "ADA/USDT": 0.06,
+            "SOL/USDT": 0.07,
+            "MATIC/USDT": 0.06,
+            "AVAX/USDT": 0.07,
+            "DOT/USDT": 0.06,
+        }
+        
+        # Return estimated volatility or default to 5%
+        return volatility_map.get(symbol, 0.05)
+
 
 # Global service instance
 trading_strategies_service = TradingStrategiesService()
