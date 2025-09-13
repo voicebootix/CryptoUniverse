@@ -304,10 +304,12 @@ async def send_telegram_message(
                 detail="No active Telegram connection found"
             )
         
-        # Send message via Telegram service
-        send_result = await telegram_service.send_message(
+        # Send message via Telegram service directly to user's chat
+        send_result = await telegram_service.send_direct_message(
             chat_id=connection.telegram_chat_id,
-            text=request.message
+            message_content=request.message,
+            message_type="text",
+            priority="normal"
         )
         
         if send_result.get("success"):
@@ -552,9 +554,9 @@ async def _process_telegram_message(webhook_data: Dict[str, Any], db: AsyncSessi
                 await _handle_authentication(message_data, db)
             else:
                 # Send instructions to connect
-                await telegram_service.send_message(
+                await telegram_service.send_direct_message(
                     chat_id=chat_id,
-                    text="⚠️ Please connect your account first. Go to the CryptoUniverse dashboard → Telegram Center to get started."
+                    message_content="⚠️ Please connect your account first. Go to the CryptoUniverse dashboard → Telegram Center to get started."
                 )
             return
         
@@ -588,9 +590,9 @@ async def _handle_authentication(message_data: Dict[str, Any], db: AsyncSession)
         connection = result.scalar_one_or_none()
         
         if not connection:
-            await telegram_service.send_message(
+            await telegram_service.send_direct_message(
                 chat_id=chat_id,
-                text="❌ Invalid authentication token. Please get a new token from the CryptoUniverse dashboard."
+                message_content="❌ Invalid authentication token. Please get a new token from the CryptoUniverse dashboard."
             )
             return
         
@@ -623,9 +625,9 @@ async def _handle_authentication(message_data: Dict[str, Any], db: AsyncSession)
 💡 **Tip**: Try `/help` for full command list
 """
         
-        await telegram_service.send_message(
+        await telegram_service.send_direct_message(
             chat_id=chat_id,
-            text=welcome_message
+            message_content=welcome_message
         )
         
         logger.info(
@@ -671,9 +673,9 @@ async def _process_authenticated_message(
         
         # Send response
         if response:
-            await telegram_service.send_message(
+            await telegram_service.send_direct_message(
                 chat_id=chat_id,
-                text=response
+                message_content=response
             )
             
             # Update message record

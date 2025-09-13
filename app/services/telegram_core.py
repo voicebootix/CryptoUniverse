@@ -1024,7 +1024,60 @@ class TelegramCommanderService(LoggerMixin):
                 "request_id": request_id,
                 "timestamp": datetime.utcnow().isoformat()
             }
-    
+
+    async def send_direct_message(
+        self,
+        chat_id: str,
+        message_content: str,
+        message_type: str = "text",
+        priority: str = "normal"
+    ) -> Dict[str, Any]:
+        """Send message directly to a specific chat ID."""
+
+        # Ensure background services are started
+        await self._ensure_background_services()
+
+        request_id = self._generate_request_id()
+        self.logger.info("Sending direct message", chat_id=chat_id, type=message_type, request_id=request_id)
+
+        try:
+            # Convert string enums
+            msg_type = MessageType(message_type if message_type in ["info", "alert", "trade", "portfolio", "system", "voice_response"] else "info")
+            msg_priority = MessagePriority(priority if priority in ["low", "normal", "high", "critical"] else "normal")
+
+            # Format message based on type
+            formatted_message = self._format_message_by_type(message_content, msg_type)
+
+            # Send message directly to chat ID
+            result = await self.telegram_api.send_message(
+                chat_id=chat_id,
+                text=formatted_message,
+                priority=msg_priority
+            )
+
+            # Update metrics
+            self.service_metrics["total_messages"] += 1
+
+            return {
+                "success": True,
+                "function": "send_direct_message",
+                "request_id": request_id,
+                "result": result,
+                "chat_id": chat_id,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        except Exception as e:
+            self.logger.error("Send direct message failed", error=str(e), chat_id=chat_id, request_id=request_id, exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "function": "send_direct_message",
+                "request_id": request_id,
+                "chat_id": chat_id,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
     async def send_alert(
         self,
         message_content: str,
