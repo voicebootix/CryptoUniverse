@@ -918,7 +918,7 @@ const RevenueAnalytics: React.FC = () => {
                         <Badge variant="outline" className="text-xs">#{index + 1}</Badge>
                       </div>
                       <div className="text-xs text-muted-foreground mb-2">
-                        {user.active_strategies} active strategies • Joined {formatRelativeTime(user.join_date)}
+                        {user.active_strategies} active strategies • Joined {formatRelativeTime(new Date(user.join_date))}
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-green-600 font-medium">

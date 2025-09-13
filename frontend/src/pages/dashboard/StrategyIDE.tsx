@@ -257,7 +257,7 @@ const StrategyIDE: React.FC = () => {
     
     // Configure Python language features
     completionProviderRef.current = monaco.languages.registerCompletionItemProvider('python', {
-      provideCompletionItems: (model, position) => {
+      provideCompletionItems: (model: monaco.editor.ITextModel, position: monaco.Position) => {
         const suggestions = [
           {
             label: 'buy_market',
@@ -439,7 +439,7 @@ const StrategyIDE: React.FC = () => {
           <Button
             variant="outline"
             size="sm"
-            onClick={validateCode}
+            onClick={() => validateCode()}
             disabled={isValidating}
           >
             {isValidating ? (
@@ -552,7 +552,7 @@ const StrategyIDE: React.FC = () => {
                   <Textarea
                     placeholder="Describe your strategy..."
                     value={metadata.description}
-                    onChange={(e) => setMetadata(prev => ({ ...prev, description: e.target.value }))}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setMetadata(prev => ({ ...prev, description: e.target.value }))}
                     rows={3}
                   />
                 </div>
