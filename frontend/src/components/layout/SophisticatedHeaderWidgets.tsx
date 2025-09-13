@@ -69,6 +69,13 @@ const SophisticatedHeaderWidgets: React.FC = () => {
   const portfolioValue = isPaperMode ? paperBalance : totalValue;
   const portfolioPnL = isPaperMode ? (paperStats?.totalProfit || 0) : totalPnL;
   const dailyPnLValue = isPaperMode ? ((paperStats?.totalProfit || 0) * 0.1) : dailyPnL;
+  
+  // Helper function to safely clamp percentage values to [0,100] range
+  const safePercentage = (value: any): number => {
+    const num = Number(value);
+    if (!isFinite(num) || isNaN(num)) return 0;
+    return Math.max(0, Math.min(100, num));
+  };
 
   return (
     <div className="flex items-center gap-4">
@@ -291,7 +298,7 @@ const SophisticatedHeaderWidgets: React.FC = () => {
               <CreditCard className="h-4 w-4 text-muted-foreground" />
               <div className="flex flex-col items-start">
                 <span className="text-sm font-semibold">
-                  {credits?.remaining || 250}
+                  {creditsLoading ? 'Loading...' : (credits?.remaining || 0)}
                 </span>
                 <span className="text-xs text-muted-foreground">
                   Credits
@@ -314,16 +321,16 @@ const SophisticatedHeaderWidgets: React.FC = () => {
               <div className="space-y-3">
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Total Credits</span>
-                  <span className="text-sm font-medium">{credits?.total || 500}</span>
+                  <span className="text-sm font-medium">{credits?.total || 0}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Used This Month</span>
-                  <span className="text-sm font-medium">{credits?.used || 250}</span>
+                  <span className="text-sm font-medium">{credits?.used || 0}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Remaining</span>
                   <span className="text-sm font-medium text-green-500">
-                    {credits?.remaining || 250}
+                    {credits?.remaining || 0}
                   </span>
                 </div>
               </div>
@@ -332,13 +339,13 @@ const SophisticatedHeaderWidgets: React.FC = () => {
               <div className="space-y-2">
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>Usage</span>
-                  <span>{Math.round(((credits?.used || 250) / (credits?.total || 500)) * 100)}%</span>
+                  <span>{Math.round(safePercentage(credits?.usage_percentage))}%</span>
                 </div>
                 <div className="w-full bg-secondary rounded-full h-2">
                   <div
                     className="bg-primary h-2 rounded-full"
                     style={{
-                      width: `${((credits?.used || 250) / (credits?.total || 500)) * 100}%`
+                      width: `${safePercentage(credits?.usage_percentage)}%`
                     }}
                   />
                 </div>
