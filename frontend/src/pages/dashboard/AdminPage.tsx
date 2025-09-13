@@ -211,9 +211,27 @@ const AdminPage: React.FC = () => {
         setUsers([]);
       }
       
-      // Process metrics result
+      // Process metrics result - backend returns direct object with metrics
       if (results[1].status === 'fulfilled') {
-        setSystemMetrics(results[1].value);
+        const systemData = results[1].value;
+        // Backend returns direct properties, no nested structure
+        const normalizedMetrics = {
+          system_health: systemData?.system_health || 'unknown',
+          active_users: systemData?.active_users || 0,
+          total_trades_today: systemData?.total_trades_today || 0,
+          total_volume_24h: systemData?.total_volume_24h || 0,
+          autonomous_sessions: systemData?.autonomous_sessions || 0,
+          error_rate: systemData?.error_rate || 0,
+          response_time_avg: systemData?.response_time_avg || 0,
+          uptime_percentage: systemData?.uptime_percentage || 0,
+          // System resource metrics
+          cpuUsage: systemData?.cpuUsage,
+          memoryUsage: systemData?.memoryUsage,
+          diskUsage: systemData?.diskUsage,
+          networkLatency: systemData?.networkLatency,
+          metricsSource: systemData?.metricsSource || 'unknown'
+        };
+        setSystemMetrics(normalizedMetrics);
         setHasLoadedOnce(true);
       } else {
         console.error('Failed to fetch metrics:', results[1].reason?.message);
@@ -248,23 +266,19 @@ const AdminPage: React.FC = () => {
         setPendingUsers([]);
       }
       
-      // Process audit logs result
+      // Process audit logs result - backend returns {audit_logs: [...], total_count: ...}
       if (results[3].status === 'fulfilled') {
         const logsData = results[3].value;
-        // Normalize the response
-        if (Array.isArray(logsData)) {
-          setAuditLogs(logsData);
-        } else if (logsData?.audit_logs && Array.isArray(logsData.audit_logs)) {
+        console.log('Audit logs API Response:', logsData); // Debug log
+        
+        // Backend returns direct audit_logs array in response
+        if (logsData?.audit_logs && Array.isArray(logsData.audit_logs)) {
           setAuditLogs(logsData.audit_logs);
-        } else if (logsData?.data) {
-          if (Array.isArray(logsData.data)) {
-            setAuditLogs(logsData.data);
-          } else if (logsData.data.audit_logs && Array.isArray(logsData.data.audit_logs)) {
-            setAuditLogs(logsData.data.audit_logs);
-          } else {
-            setAuditLogs([]);
-          }
+        } else if (Array.isArray(logsData)) {
+          // Fallback for direct array response
+          setAuditLogs(logsData);
         } else {
+          console.warn('Unexpected audit logs response format:', logsData);
           setAuditLogs([]);
         }
       } else {
