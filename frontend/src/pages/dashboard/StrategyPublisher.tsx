@@ -142,7 +142,7 @@ const StrategyPublisher: React.FC = () => {
     queryKey: ['publishing-requirements'],
     queryFn: async () => {
       const response = await apiClient.get('/strategies/publisher/requirements');
-      return response.data as PublishingRequirements;
+      return response.data.requirements as PublishingRequirements;
     }
   });
 
