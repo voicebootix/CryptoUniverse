@@ -323,8 +323,11 @@ const StrategyIDE: React.FC = () => {
     const targetCode = codeToValidate || code;
     if (!targetCode.trim()) return;
     setIsValidating(true);
-    await validateStrategyMutation.mutateAsync(targetCode);
-    setIsValidating(false);
+    try {
+      await validateStrategyMutation.mutateAsync(targetCode);
+    } finally {
+      setIsValidating(false);
+    }
   };
 
   const saveStrategy = (isDraft = true) => {
