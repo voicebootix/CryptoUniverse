@@ -308,7 +308,7 @@ async def send_telegram_message(
         send_result = await telegram_service.send_direct_message(
             chat_id=connection.telegram_chat_id,
             message_content=request.message,
-            message_type="text",
+            message_type="info",
             priority="normal"
         )
         

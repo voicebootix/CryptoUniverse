@@ -1029,7 +1029,7 @@ class TelegramCommanderService(LoggerMixin):
         self,
         chat_id: str,
         message_content: str,
-        message_type: str = "text",
+        message_type: str = "info",
         priority: str = "normal"
     ) -> Dict[str, Any]:
         """Send message directly to a specific chat ID."""
@@ -1063,6 +1063,7 @@ class TelegramCommanderService(LoggerMixin):
                 "function": "send_direct_message",
                 "request_id": request_id,
                 "result": result,
+                "message_id": result.get("message_id") if result else None,
                 "chat_id": chat_id,
                 "timestamp": datetime.utcnow().isoformat()
             }
