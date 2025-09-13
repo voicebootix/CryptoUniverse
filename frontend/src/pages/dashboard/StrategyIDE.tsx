@@ -257,42 +257,55 @@ const StrategyIDE: React.FC = () => {
     
     // Configure Python language features
     completionProviderRef.current = monaco.languages.registerCompletionItemProvider('python', {
-      provideCompletionItems: (model: monaco.editor.ITextModel, position: monaco.Position) => {
+      provideCompletionItems: (model, position) => {
+        const word = model.getWordUntilPosition(position);
+        const range = {
+          startLineNumber: position.lineNumber,
+          endLineNumber: position.lineNumber,
+          startColumn: word.startColumn,
+          endColumn: word.endColumn
+        };
+
         const suggestions = [
           {
             label: 'buy_market',
             kind: monaco.languages.CompletionItemKind.Function,
             insertText: 'buy_market(symbol="${1:BTC/USDT}", amount=${2:0.01})',
             insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-            documentation: 'Execute a market buy order'
+            documentation: 'Execute a market buy order',
+            range: range
           },
           {
             label: 'sell_market',
             kind: monaco.languages.CompletionItemKind.Function,
             insertText: 'sell_market(symbol="${1:BTC/USDT}", amount=${2:0.01})',
             insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-            documentation: 'Execute a market sell order'
+            documentation: 'Execute a market sell order',
+            range: range
           },
           {
             label: 'get_balance',
             kind: monaco.languages.CompletionItemKind.Function,
             insertText: 'get_balance("${1:USDT}")',
             insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-            documentation: 'Get account balance for a currency'
+            documentation: 'Get account balance for a currency',
+            range: range
           },
           {
             label: 'get_price',
             kind: monaco.languages.CompletionItemKind.Function,
             insertText: 'get_price("${1:BTC/USDT}")',
             insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-            documentation: 'Get current price for a trading pair'
+            documentation: 'Get current price for a trading pair',
+            range: range
           },
           {
             label: 'get_ohlcv',
             kind: monaco.languages.CompletionItemKind.Function,
             insertText: 'get_ohlcv("${1:BTC/USDT}", "${2:1h}", ${3:100})',
             insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-            documentation: 'Get OHLCV candle data'
+            documentation: 'Get OHLCV candle data',
+            range: range
           }
         ];
         
@@ -712,7 +725,7 @@ const StrategyIDE: React.FC = () => {
                 wordWrap: 'on',
                 lineNumbers: 'on',
                 folding: true,
-                bracketMatching: 'always',
+                matchBrackets: 'always',
                 autoIndent: 'full',
                 formatOnPaste: true,
                 formatOnType: true,
