@@ -215,7 +215,7 @@ class DerivativesEngine(LoggerMixin):
                     "size": position_size,
                     "leverage": parameters.leverage,
                     "entry_price": execution_result.get("execution_result", {}).get("execution_price"),
-                    "margin_required": position_size / parameters.leverage
+                    "margin_required": (position_size * execution_result.get("execution_result", {}).get("execution_price", 1)) / parameters.leverage
                 },
                 "risk_management": {
                     "stop_loss": parameters.stop_loss,
@@ -1332,8 +1332,8 @@ class TradingStrategiesService(LoggerMixin):
                 
                 # Calculate position size based on risk mode
                 risk_multipliers = {"conservative": 0.5, "balanced": 1.0, "aggressive": 2.0}
-                base_size = params.get("size", 1000)  # USD value
-                position_size_usd = base_size * risk_multipliers.get(risk_mode, 1.0)
+                base_position_usd = params.get("base_size", 1000)  # USD value
+                position_size_usd = base_position_usd * risk_multipliers.get(risk_mode, 1.0)
                 
                 # Set leverage based on strategy and risk mode
                 leverage_map = {
@@ -1413,7 +1413,7 @@ class TradingStrategiesService(LoggerMixin):
                 
                 leverage_result["leverage_analysis"] = {
                     "leverage_increase_pct": leverage_increase_pct,
-                    "new_margin_requirement": current_position.get("position_size", 0) / target_leverage,
+                    "new_margin_requirement": (current_position.get("position_size", 0) * current_position.get("entry_price", 1)) / target_leverage,
                     "margin_freed": current_position.get("margin_used", 0) * (1 - current_leverage / target_leverage),
                     "new_liquidation_price": self._calculate_new_liquidation_price(
                         current_position, target_leverage
@@ -1440,7 +1440,7 @@ class TradingStrategiesService(LoggerMixin):
                 
                 leverage_result["leverage_analysis"] = {
                     "leverage_decrease_pct": leverage_decrease_pct,
-                    "additional_margin_required": current_position.get("position_size", 0) * (1/target_leverage - 1/current_leverage),
+                    "additional_margin_required": (current_position.get("position_size", 0) * current_position.get("entry_price", 1)) * (1/target_leverage - 1/current_leverage),
                     "safety_improvement_pct": leverage_decrease_pct,
                     "new_liquidation_price": self._calculate_new_liquidation_price(
                         current_position, target_leverage
@@ -2827,7 +2827,13 @@ class TradingStrategiesService(LoggerMixin):
             
             # Get current market conditions
             price_data = await self._get_symbol_price(exchange, symbol)
-            current_price = float(price_data.get("price", 45000)) if price_data else 45000
+            if not price_data or not price_data.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Unable to get price for {symbol}",
+                    "function": "scalp_strategy"
+                }
+            current_price = float(price_data.get("price", 0))
             
             # Market condition analysis for scalping
             daily_volatility = await self._estimate_daily_volatility(symbol)
@@ -3002,7 +3008,13 @@ class TradingStrategiesService(LoggerMixin):
             
             # Get market data
             price_data = await self._get_symbol_price("binance", symbol)
-            current_price = float(price_data.get("price", 45000)) if price_data else 45000
+            if not price_data or not price_data.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Unable to get price for {symbol}",
+                    "function": "swing_strategy"
+                }
+            current_price = float(price_data.get("price", 0))
             
             # Trend analysis for swing trading
             weekly_change = params.get("weekly_change", 5.0)  # Mock weekly change
@@ -4169,22 +4181,11 @@ class TradingStrategiesService(LoggerMixin):
                     "symbol": symbol,
                     "timestamp": datetime.utcnow().isoformat()
                 }
-            else:
-                # Fallback prices for major symbols
-                fallback_prices = {
-                    "BTC": 45000, "ETH": 2500, "BNB": 300, "ADA": 0.5, 
-                    "SOL": 100, "DOT": 25, "MATIC": 1.2, "AVAX": 40
-                }
-                fallback_price = fallback_prices.get(clean_symbol, 100)
-                return {
-                    "success": True, 
-                    "price": fallback_price,
-                    "symbol": symbol,
-                    "fallback": True,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+
+            return {"success": False, "error": f"Price unavailable for {symbol}"}
+
         except Exception as e:
-            self.logger.error(f"Price fetch failed for {symbol}: {e}")
+            self.logger.exception(f"Price fetch failed for {symbol}: {e}")
             return {"success": False, "error": str(e)}
 
     async def _get_perpetual_funding_info(self, symbol: str, exchange: str) -> Dict[str, Any]:
@@ -4199,18 +4200,28 @@ class TradingStrategiesService(LoggerMixin):
             
             funding_rate = base_rate + volatility_adjustment
             funding_rate = max(-0.005, min(funding_rate, 0.005))  # Cap at ±0.5%
-            
+
+            # Calculate next funding time as proper ISO timestamp
+            now = datetime.utcnow()
+            current_hour = now.hour
+            next_funding_hour = (current_hour // 8 + 1) * 8
+            if next_funding_hour >= 24:
+                next_funding_hour = 0
+                next_funding_date = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            else:
+                next_funding_date = now.replace(hour=next_funding_hour, minute=0, second=0, microsecond=0)
+
             return {
                 "success": True,
                 "symbol": symbol,
-                "funding_rate": funding_rate,
+                "current_funding_rate": funding_rate,
+                "predicted_funding_rate": funding_rate * 1.1,  # Slight prediction variance
                 "funding_interval": "8h",
-                "next_funding_time": (datetime.utcnow().hour // 8 + 1) * 8,
-                "predicted_rate": funding_rate * 1.1,  # Slight prediction variance
+                "next_funding_time": next_funding_date.isoformat(),
                 "timestamp": datetime.utcnow().isoformat()
             }
         except Exception as e:
-            self.logger.error(f"Funding info fetch failed: {e}")
+            self.logger.exception(f"Funding info fetch failed: {e}")
             return {"success": False, "error": str(e)}
 
     def _calculate_liquidation_distance(self, leverage: float, position_side: str) -> float:
@@ -4234,7 +4245,7 @@ class TradingStrategiesService(LoggerMixin):
         """Generate entry conditions for perpetual trades."""
         try:
             conditions = []
-            funding_rate = funding_info.get("funding_rate", 0.0001)
+            funding_rate = funding_info.get("current_funding_rate", 0.0001)
             
             if strategy_type in ["long_futures", "momentum_long"]:
                 conditions.append({
@@ -4264,7 +4275,7 @@ class TradingStrategiesService(LoggerMixin):
             return conditions
             
         except Exception as e:
-            self.logger.error(f"Entry conditions generation failed: {e}")
+            self.logger.exception(f"Entry conditions generation failed: {e}")
             return []
 
     def _generate_perpetual_exit_conditions(self, strategy_type: str, params: Dict) -> List[Dict]:
@@ -4523,7 +4534,7 @@ class TradingStrategiesService(LoggerMixin):
                 return 0.5
                 
             capital_used = position.get('margin_used', 1000)
-            position_size = position.get('size', 0) * position.get('entry_price', 1)
+            position_size = position.get('position_size', 0) * position.get('entry_price', 1)
             
             if position_size == 0:
                 return 0.0
@@ -4554,7 +4565,7 @@ class TradingStrategiesService(LoggerMixin):
     def _calculate_leverage_adjustment_cost(self, position: Dict, target_leverage: float) -> Dict[str, float]:
         """Calculate cost of adjusting leverage."""
         try:
-            position_value = position.get('size', 0) * position.get('entry_price', 1)
+            position_value = position.get('position_size', 0) * position.get('entry_price', 1)
             trading_cost = position_value * 0.001  # 0.1% fee
             daily_funding = position_value * target_leverage * 0.0001 * 3  # Daily funding
             return {"total_immediate_cost": trading_cost, "estimated_daily_cost": daily_funding}
