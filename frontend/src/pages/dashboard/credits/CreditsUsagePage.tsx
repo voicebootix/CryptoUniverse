@@ -14,11 +14,14 @@ import {
   DollarSign,
   Calendar,
   Download,
-  FileText
+  FileText,
+  AlertTriangle
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '@/lib/api/client';
 import { formatCurrency } from '@/lib/utils';
+import { exportCreditTransactionsCsv } from '@/lib/csvExport';
 
 interface CreditTransaction {
   id: string;
@@ -44,15 +47,36 @@ const CreditsUsagePage: React.FC = () => {
     refetchInterval: 30000
   });
 
-  // Fetch transaction history
-  const { data: transactions, isLoading } = useQuery({
+  // Fetch transaction history with period filtering
+  const { data: transactions, isLoading, error, refetch } = useQuery({
     queryKey: ['credit-transactions', selectedPeriod],
     queryFn: async () => {
-      const response = await apiClient.get('/credits/transaction-history?limit=50');
+      const response = await apiClient.get('/credits/transaction-history', {
+        params: {
+          period: selectedPeriod,
+          limit: 50
+        }
+      });
       return response.data.transactions || [];
     },
-    refetchInterval: 30000
+    refetchInterval: 30000,
+    retry: 3
   });
+  
+  // CSV Export handler
+  const handleExportCsv = () => {
+    if (!transactions || transactions.length === 0) {
+      toast.error('No transactions to export');
+      return;
+    }
+    
+    try {
+      exportCreditTransactionsCsv(transactions);
+      toast.success('CSV exported successfully!');
+    } catch (error) {
+      toast.error('Failed to export CSV');
+    }
+  };
 
   const getTransactionIcon = (type: string) => {
     switch (type) {
@@ -148,7 +172,12 @@ const CreditsUsagePage: React.FC = () => {
               <CardTitle>Transaction History</CardTitle>
               <CardDescription>Detailed record of all credit transactions</CardDescription>
             </div>
-            <Button variant="outline" size="sm">
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={handleExportCsv}
+              disabled={!transactions || transactions.length === 0}
+            >
               <Download className="h-4 w-4 mr-2" />
               Export CSV
             </Button>
@@ -163,7 +192,29 @@ const CreditsUsagePage: React.FC = () => {
             </TabsList>
             
             <TabsContent value={selectedPeriod} className="space-y-4">
-              {isLoading ? (
+              {error ? (
+                <div className="text-center py-12">
+                  <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2 text-red-600">Failed to Load Transactions</h3>
+                  <p className="text-muted-foreground mb-4">
+                    {error instanceof Error ? error.message : 'An error occurred while loading transaction history'}
+                  </p>
+                  <Button 
+                    onClick={() => refetch()}
+                    variant="outline"
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2" />
+                        Retrying...
+                      </>
+                    ) : (
+                      'Retry Loading'
+                    )}
+                  </Button>
+                </div>
+              ) : isLoading ? (
                 <div className="space-y-3">
                   {[1, 2, 3, 4, 5].map(i => (
                     <div key={i} className="flex items-center justify-between p-4 border rounded-lg animate-pulse">
