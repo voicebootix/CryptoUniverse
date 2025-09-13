@@ -158,7 +158,7 @@ const StrategyMarketplace: React.FC = () => {
       params.append('sort_by', filters.sort_by);
       params.append('include_performance', 'true');
       
-      const response = await apiClient.get(`/marketplace/strategies?${params}`);
+      const response = await apiClient.get(`/strategies/marketplace?${params}`);
       return response.data.strategies as MarketplaceStrategy[];
     },
     refetchInterval: 60000, // Refresh every minute
@@ -180,7 +180,7 @@ const StrategyMarketplace: React.FC = () => {
   // Purchase strategy mutation
   const purchaseStrategyMutation = useMutation({
     mutationFn: async (strategyId: string) => {
-      const response = await apiClient.post(`/marketplace/strategies/${strategyId}/purchase`);
+      const response = await apiClient.post(`/strategies/purchase`, { strategy_id: strategyId });
       return response.data;
     },
     onSuccess: (data, strategyId) => {
