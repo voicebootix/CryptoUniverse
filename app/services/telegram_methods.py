@@ -42,7 +42,17 @@ async def trade_notification(
         
         # Send notification - resolve recipient to chat_id and send directly
         from app.services.telegram_commander import RecipientType
-        recipient_type = RecipientType(recipient)
+
+        try:
+            recipient_type = RecipientType(recipient)
+        except ValueError:
+            return {
+                "success": False,
+                "error": f"Invalid recipient type: {recipient}",
+                "function": "trade_notification",
+                "request_id": request_id
+            }
+
         chat_id = await self._get_chat_id_for_recipient(recipient_type)
 
         if not chat_id:
@@ -103,7 +113,17 @@ async def system_status(
         
         # Send status update - resolve recipient to chat_id and send directly
         from app.services.telegram_commander import RecipientType
-        recipient_type = RecipientType(recipient)
+
+        try:
+            recipient_type = RecipientType(recipient)
+        except ValueError:
+            return {
+                "success": False,
+                "error": f"Invalid recipient type: {recipient}",
+                "function": "system_status",
+                "request_id": request_id
+            }
+
         chat_id = await self._get_chat_id_for_recipient(recipient_type)
 
         if not chat_id:
