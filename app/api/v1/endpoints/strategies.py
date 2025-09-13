@@ -854,6 +854,43 @@ class StrategySubmissionRequest(BaseModel):
         return self
 
 
+class StrategySubmissionUpdate(BaseModel):
+    """Model for updating strategy submissions with optional fields."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    risk_level: Optional[str] = None
+    expected_return_range: Optional[conlist(Decimal, min_length=2, max_length=2)] = None
+    required_capital: Optional[conint(ge=0)] = None
+    pricing_model: Optional[str] = None
+    price_amount: Optional[Decimal] = None
+    profit_share_percentage: Optional[conint(ge=0, le=100)] = None
+    tags: Optional[List[str]] = None
+    target_audience: Optional[List[str]] = None
+    complexity_level: Optional[str] = None
+    support_level: Optional[str] = None
+    
+    @model_validator(mode='after')
+    def validate_pricing_model_update(self):
+        """Validate pricing model requirements for updates."""
+        if self.pricing_model == "one_time" or self.pricing_model == "subscription":
+            if self.price_amount is not None and self.price_amount <= 0:
+                raise ValueError(f"pricing_model '{self.pricing_model}' requires a positive price_amount")
+        elif self.pricing_model == "profit_share":
+            if self.profit_share_percentage is not None and self.profit_share_percentage <= 0:
+                raise ValueError("pricing_model 'profit_share' requires a positive profit_share_percentage")
+        return self
+    
+    @model_validator(mode='after')
+    def validate_expected_return_range_update(self):
+        """Validate that min return <= max return for updates."""
+        if self.expected_return_range is not None and len(self.expected_return_range) == 2:
+            min_return, max_return = self.expected_return_range
+            if min_return > max_return:
+                raise ValueError("Minimum expected return must be less than or equal to maximum expected return")
+        return self
+
+
 @router.get("/publisher/submissions")
 async def get_user_strategy_submissions(
     current_user: User = Depends(get_current_user)
@@ -1105,10 +1142,10 @@ async def withdraw_strategy_submission(
 @router.put("/publisher/submissions/{submission_id}")
 async def update_strategy_submission(
     submission_id: str,
-    updates: Dict[str, Any],
+    updates: StrategySubmissionUpdate,
     current_user: User = Depends(get_current_user)
 ):
-    """Update a strategy submission."""
+    """Update a strategy submission with typed validation."""
     
     # Check if user has publisher permissions (ADMIN or TRADER roles)
     if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
@@ -1125,22 +1162,28 @@ async def update_strategy_submission(
     )
     
     try:
-        # In a real system, this would update the submission record
+        # Convert to dict and filter out None values for logging
+        update_fields = {k: v for k, v in updates.model_dump().items() if v is not None}
+        
+        # In a real system, this would update the submission record with validated fields
         logger.info(
             "Strategy submission updated",
             user_id=str(current_user.id),
             submission_id=submission_id,
-            updates=list(updates.keys())
+            updates=list(update_fields.keys())
         )
         
         return {
             "success": True,
-            "message": "Submission updated successfully"
+            "message": "Submission updated successfully",
+            "updated_fields": list(update_fields.keys())
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Failed to update submission", user_id=str(current_user.id))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update submission: {str(e)}"
+            detail="Failed to update submission"
         ) from e
