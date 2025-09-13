@@ -17,6 +17,11 @@ from typing import Dict, List, Optional, Any, Tuple
 import uuid
 import math
 
+try:
+    from fastapi.encoders import jsonable_encoder
+except ImportError:
+    jsonable_encoder = None
+
 import numpy as np
 import pandas as pd
 import structlog
@@ -1021,12 +1026,12 @@ class PortfolioRiskService(LoggerMixin):
         # Risk-based recommendations
         risk_analysis = assessment_results.get("risk_analysis")
         if risk_analysis:
-            if risk_analysis.get("var_95_percent", 0) > 0.1:
+            if risk_analysis.get("var_95", 0) > 0.1:
                 recommendations.append({
                     "category": "RISK_MANAGEMENT",
-                    "priority": "HIGH",
+                    "priority": "HIGH", 
                     "recommendation": "High portfolio risk detected - consider position size reduction",
-                    "metric": f"VaR 95%: {risk_analysis.get('var_95_percent', 0)*100:.1f}%"
+                    "metric": f"VaR 95%: {risk_analysis.get('var_95_percent', 0):.1f}%"
                 })
             
             if risk_analysis.get("sharpe_ratio", 0) < 1.0:
@@ -1052,7 +1057,7 @@ class PortfolioRiskService(LoggerMixin):
         risk_analysis = assessment_results.get("risk_analysis")
         if risk_analysis:
             sharpe_ratio = risk_analysis.get("sharpe_ratio", 0)
-            var_95 = risk_analysis.get("var_95_percent", 0)
+            var_95 = risk_analysis.get("var_95", 0)
             
             # Sharpe ratio component (0-5 points)
             sharpe_score = min(5, max(0, sharpe_ratio * 2.5))
@@ -1172,7 +1177,16 @@ class PortfolioRiskService(LoggerMixin):
             self.service_metrics["successful_optimizations"] += 1
             
             # Convert OptimizationResult dataclass to dict for serialization
-            optimization_result_dict = dataclasses.asdict(optimization_result) if hasattr(optimization_result, '__dataclass_fields__') else optimization_result
+            if hasattr(optimization_result, '__dataclass_fields__'):
+                if jsonable_encoder:
+                    optimization_result_dict = jsonable_encoder(optimization_result)
+                else:
+                    # Fallback for environments without FastAPI
+                    optimization_result_dict = dataclasses.asdict(optimization_result)
+                    # Handle potential Enums and numpy types
+                    optimization_result_dict = self._make_json_serializable(optimization_result_dict)
+            else:
+                optimization_result_dict = optimization_result
             
             return {
                 "success": True,
@@ -1272,6 +1286,22 @@ class PortfolioRiskService(LoggerMixin):
     def _generate_request_id(self) -> str:
         """Generate unique request ID."""
         return f"PRS_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    
+    def _make_json_serializable(self, obj: Any) -> Any:
+        """Convert objects to JSON-serializable format."""
+        if isinstance(obj, dict):
+            return {key: self._make_json_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._make_json_serializable(item) for item in obj]
+        elif hasattr(obj, '__dict__') and hasattr(obj, '__class__'):
+            # Handle Enum types
+            if hasattr(obj.__class__, '__members__'):
+                return obj.value if hasattr(obj, 'value') else str(obj)
+        elif hasattr(obj, 'item'):  # numpy scalar
+            return obj.item()
+        elif hasattr(obj, 'tolist'):  # numpy array
+            return obj.tolist()
+        return obj
     
     async def _generate_rebalancing_trades(
         self, 

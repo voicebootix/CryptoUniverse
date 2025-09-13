@@ -152,14 +152,19 @@ const StrategyIDE: React.FC = () => {
 
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const completionProviderRef = useRef<monaco.IDisposable | null>(null);
+  const debounceTimerRef = useRef<number | null>(null);
   const queryClient = useQueryClient();
 
-  // Cleanup completion provider on unmount
+  // Cleanup completion provider and timers on unmount
   useEffect(() => {
     return () => {
       if (completionProviderRef.current) {
         completionProviderRef.current.dispose();
         completionProviderRef.current = null;
+      }
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
       }
     };
   }, []);
@@ -298,10 +303,14 @@ const StrategyIDE: React.FC = () => {
     // Set up auto-validation on code change
     editor.onDidChangeModelContent(() => {
       if (autoSave) {
-        const debounceTimer = setTimeout(() => {
+        // Clear previous debounce timer
+        if (debounceTimerRef.current) {
+          clearTimeout(debounceTimerRef.current);
+        }
+        // Set new debounce timer
+        debounceTimerRef.current = window.setTimeout(() => {
           validateCode();
         }, 2000);
-        return () => clearTimeout(debounceTimer);
       }
     });
   };

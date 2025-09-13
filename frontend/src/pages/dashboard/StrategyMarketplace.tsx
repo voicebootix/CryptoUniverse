@@ -678,7 +678,7 @@ const StrategyMarketplace: React.FC = () => {
                         <span className="text-muted-foreground">Total Trades:</span>
                         <span>{formatNumber(selectedStrategy.total_trades)}</span>
                       </div>
-                      {selectedStrategy.sharpe_ratio && (
+                      {(selectedStrategy.sharpe_ratio !== null && selectedStrategy.sharpe_ratio !== undefined && Number.isFinite(selectedStrategy.sharpe_ratio)) && (
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">Sharpe Ratio:</span>
                           <span>{selectedStrategy.sharpe_ratio.toFixed(2)}</span>
