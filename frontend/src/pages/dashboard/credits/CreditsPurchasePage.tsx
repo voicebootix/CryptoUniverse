@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
@@ -458,25 +458,26 @@ const CreditsPurchasePage: React.FC = () => {
               <CardDescription>Choose your preferred cryptocurrency</CardDescription>
             </CardHeader>
             <CardContent>
-              <RadioGroup value={selectedPaymentMethod} onValueChange={setSelectedPaymentMethod}>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {paymentMethods.map((method) => (
-                    <div key={method.id} className="flex items-center space-x-2">
-                      <RadioGroupItem value={method.id} id={method.id} />
-                      <Label 
-                        htmlFor={method.id} 
-                        className="flex items-center gap-3 cursor-pointer flex-1 p-3 border rounded-lg hover:bg-muted/50"
-                      >
-                        {method.icon}
-                        <div>
-                          <div className="font-medium">{method.name}</div>
-                          <div className="text-xs text-muted-foreground">{method.description}</div>
+              <div className="space-y-4">
+                <Select value={selectedPaymentMethod} onValueChange={setSelectedPaymentMethod}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select payment method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paymentMethods.map((method) => (
+                      <SelectItem key={method.id} value={method.id}>
+                        <div className="flex items-center gap-3">
+                          {method.icon}
+                          <div>
+                            <div className="font-medium">{method.name}</div>
+                            <div className="text-xs text-muted-foreground">{method.description}</div>
+                          </div>
                         </div>
-                      </Label>
-                    </div>
-                  ))}
-                </div>
-              </RadioGroup>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </CardContent>
           </Card>
         </div>
