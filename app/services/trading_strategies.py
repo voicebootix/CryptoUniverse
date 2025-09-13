@@ -2013,7 +2013,7 @@ class TradingStrategiesService(LoggerMixin):
             }
             
             # Risk metrics
-            price_volatility = self._estimate_daily_volatility(symbol)  # Estimated daily volatility
+            price_volatility = await self._estimate_daily_volatility(symbol)  # Estimated daily volatility
             liquidation_probability = self._calculate_liquidation_probability(
                 liquidation_distance_pct, price_volatility, leverage
             )
@@ -2244,7 +2244,7 @@ class TradingStrategiesService(LoggerMixin):
             
             elif hedge_type == "volatility_hedge":
                 # Hedge against volatility using VIX-like instruments
-                current_volatility = self._estimate_daily_volatility(primary_symbol)
+                current_volatility = await self._estimate_daily_volatility(primary_symbol)
                 
                 volatility_hedge = {
                     "strategy": "VOLATILITY_HEDGE",
@@ -2445,8 +2445,8 @@ class TradingStrategiesService(LoggerMixin):
             }
             
             # Risk assessment
-            volatility_a = self._estimate_daily_volatility(symbol_a)
-            volatility_b = self._estimate_daily_volatility(symbol_b)
+            volatility_a = await self._estimate_daily_volatility(symbol_a)
+            volatility_b = await self._estimate_daily_volatility(symbol_b)
             spread_volatility = (volatility_a + volatility_b) / 2  # Simplified
             
             pairs_result["risk_assessment"] = {
@@ -2689,7 +2689,7 @@ class TradingStrategiesService(LoggerMixin):
                 "order_book_depth_usd": order_book_depth,
                 "daily_volume_usd": daily_volume,
                 "market_impact": self._estimate_market_impact(symbol, daily_volume),
-                "volatility": self._estimate_daily_volatility(symbol),
+                "volatility": await self._estimate_daily_volatility(symbol),
                 "liquidity_score": min(100, daily_volume / 100000000),  # Volume-based liquidity score
                 "market_making_suitability": daily_volume > 100000000 and bid_ask_spread_bps > 5
             }
@@ -2830,7 +2830,7 @@ class TradingStrategiesService(LoggerMixin):
             current_price = float(price_data.get("price", 45000)) if price_data else 45000
             
             # Market condition analysis for scalping
-            daily_volatility = self._estimate_daily_volatility(symbol)
+            daily_volatility = await self._estimate_daily_volatility(symbol)
             intraday_volatility = daily_volatility / 4  # Approximate hourly volatility
             tick_size = self._get_tick_size(symbol, exchange)
             
@@ -3092,7 +3092,7 @@ class TradingStrategiesService(LoggerMixin):
             # Dynamic position sizing based on confidence and volatility
             if swing_signals:
                 best_signal = max(swing_signals, key=lambda x: x.get("confidence", 0))
-                volatility_adjustment = 1 - (self._estimate_daily_volatility(symbol) - 0.03)  # Reduce size for high vol
+                volatility_adjustment = 1 - (await self._estimate_daily_volatility(symbol) - 0.03)  # Reduce size for high vol
                 confidence_adjustment = best_signal.get("confidence", 50) / 100
                 
                 optimal_size = base_position_size * confidence_adjustment * volatility_adjustment
@@ -3112,7 +3112,7 @@ class TradingStrategiesService(LoggerMixin):
             
             # Risk assessment for swing trading
             holding_period_days = 14  # Average 2 weeks
-            daily_vol = self._estimate_daily_volatility(symbol)
+            daily_vol = await self._estimate_daily_volatility(symbol)
             position_var = optimal_size * daily_vol * (holding_period_days ** 0.5) * 2.33 if swing_signals else 0  # 99% VaR
             
             swing_result["risk_assessment"] = {
@@ -3254,7 +3254,7 @@ class TradingStrategiesService(LoggerMixin):
                 
                 # Risk metrics
                 position_size = position.get("market_value", 0)
-                daily_vol = self._estimate_daily_volatility(symbol)
+                daily_vol = await self._estimate_daily_volatility(symbol)
                 
                 pos_analysis["risk_metrics"] = {
                     "daily_var_95": position_size * daily_vol * 1.65,
@@ -3435,7 +3435,7 @@ class TradingStrategiesService(LoggerMixin):
             for position in current_positions:
                 symbol = position.get("symbol", "BTC")
                 position_value = position.get("market_value", 0)
-                daily_vol = self._estimate_daily_volatility(symbol)
+                daily_vol = await self._estimate_daily_volatility(symbol)
                 
                 # Calculate VaR for each position
                 position_var_1d = position_value * daily_vol * 1.65  # 95% VaR
@@ -3469,7 +3469,7 @@ class TradingStrategiesService(LoggerMixin):
             for position in current_positions:
                 symbol = position.get("symbol", "BTC")
                 position_value = position.get("market_value", 0)
-                daily_vol = self._estimate_daily_volatility(symbol)
+                daily_vol = await self._estimate_daily_volatility(symbol)
                 leverage = position.get("leverage", 1.0)
                 
                 position_risk = {
@@ -4104,24 +4104,67 @@ class TradingStrategiesService(LoggerMixin):
                 "timestamp": datetime.utcnow().isoformat()
             }
 
-    def _estimate_daily_volatility(self, symbol: str) -> float:
-        """Estimate daily volatility for a symbol (placeholder implementation)."""
-        # Simplified volatility estimates based on common crypto pairs
-        volatility_map = {
-            "BTC/USDT": 0.04,    # 4% daily volatility
-            "ETH/USDT": 0.05,    # 5% daily volatility
-            "BTC/USD": 0.04,
-            "ETH/USD": 0.05,
-            "DOGE/USDT": 0.08,   # Higher volatility for altcoins
-            "ADA/USDT": 0.06,
-            "SOL/USDT": 0.07,
-            "MATIC/USDT": 0.06,
-            "AVAX/USDT": 0.07,
-            "DOT/USDT": 0.06,
-        }
-        
-        # Return estimated volatility or default to 5%
-        return volatility_map.get(symbol, 0.05)
+    async def _estimate_daily_volatility(self, symbol: str) -> float:
+        """Calculate real daily volatility using historical price data."""
+        try:
+            # Initialize market analysis service if needed
+            if not hasattr(self, '_market_analysis'):
+                from app.services.market_analysis_core import MarketAnalysisService
+                self._market_analysis = MarketAnalysisService()
+            
+            # Get 30 days of historical price data for volatility calculation
+            historical_data = await self._market_analysis._get_historical_price_data(
+                symbol=symbol, 
+                timeframe="1d", 
+                periods=30
+            )
+            
+            if not historical_data or len(historical_data) < 5:
+                # Fallback to conservative estimate if no data
+                self.logger.warning(f"No historical data for {symbol}, using fallback volatility")
+                return 0.05  # 5% default
+            
+            # Extract closing prices
+            closes = []
+            for data_point in historical_data:
+                close_price = data_point.get('close', 0)
+                if close_price > 0:
+                    closes.append(float(close_price))
+            
+            if len(closes) < 2:
+                return 0.05  # Default if insufficient data
+                
+            # Calculate daily returns
+            daily_returns = []
+            for i in range(1, len(closes)):
+                return_pct = (closes[i] - closes[i-1]) / closes[i-1]
+                daily_returns.append(return_pct)
+            
+            if not daily_returns:
+                return 0.05
+                
+            # Calculate volatility (standard deviation of returns)
+            mean_return = sum(daily_returns) / len(daily_returns)
+            variance = sum((r - mean_return) ** 2 for r in daily_returns) / len(daily_returns)
+            volatility = variance ** 0.5
+            
+            # Cap volatility between reasonable bounds
+            volatility = max(0.01, min(volatility, 0.20))  # Between 1% and 20%
+            
+            self.logger.info(f"Calculated volatility for {symbol}: {volatility:.4f}")
+            return volatility
+            
+        except Exception as e:
+            self.logger.error(f"Volatility calculation failed for {symbol}: {e}")
+            # Fallback volatility based on asset class
+            if any(stable in symbol.upper() for stable in ['USDT', 'USDC', 'DAI']):
+                return 0.01  # Low volatility for stablecoins
+            elif 'BTC' in symbol.upper():
+                return 0.04  # Moderate for BTC
+            elif 'ETH' in symbol.upper(): 
+                return 0.05  # Slightly higher for ETH
+            else:
+                return 0.06  # Higher for altcoins
 
 
 # Global service instance
