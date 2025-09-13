@@ -458,20 +458,8 @@ class ChatServiceAdaptersFixed:
                 constraints=constraints  # Correct parameter name
             )
             
-            # Handle case where optimization_result might be OptimizationResult object instead of dict
-            # MUST check this BEFORE any .get() calls
-            if hasattr(optimization_result, 'rebalancing_needed'):
-                # It's an OptimizationResult object directly
-                logger.info("Processing OptimizationResult object directly")
-                return {
-                    "needs_rebalancing": optimization_result.rebalancing_needed,
-                    "deviation_score": (1.0 - optimization_result.confidence) * 100 if optimization_result.confidence else 0,
-                    "recommended_trades": optimization_result.suggested_trades or [],
-                    "risk_reduction": (optimization_result.max_drawdown_estimate * -100) if optimization_result.max_drawdown_estimate else 0,
-                    "expected_improvement": optimization_result.expected_return * 100 if optimization_result.expected_return else 0
-                }
-            elif isinstance(optimization_result, dict):
-                # It's a dictionary as expected
+            # FIXED: Handle the actual return structure from optimize_allocation
+            if isinstance(optimization_result, dict):
                 if not optimization_result.get("success"):
                     logger.warning("Optimization failed", error=optimization_result.get("error"))
                     return {
@@ -480,35 +468,66 @@ class ChatServiceAdaptersFixed:
                         "recommended_trades": [],
                         "error": optimization_result.get("error")
                     }
+                
+                # Extract the actual OptimizationResult object from the response
+                optimization_data = optimization_result.get("optimization_result")
+                
+                if optimization_data:
+                    # Check if it's an OptimizationResult dataclass object
+                    if hasattr(optimization_data, 'rebalancing_needed'):
+                        logger.info("Processing OptimizationResult dataclass object")
+                        return {
+                            "needs_rebalancing": optimization_data.rebalancing_needed,
+                            "deviation_score": (1.0 - optimization_data.confidence) * 100 if optimization_data.confidence else 0,
+                            "recommended_trades": optimization_data.suggested_trades or [],
+                            "risk_reduction": (optimization_data.max_drawdown_estimate * -100) if optimization_data.max_drawdown_estimate else 0,
+                            "expected_improvement": optimization_data.expected_return * 100 if optimization_data.expected_return else 0
+                        }
+                    elif isinstance(optimization_data, dict):
+                        # It's a dictionary representation of the optimization result
+                        logger.info("Processing optimization result as dictionary")
+                        return {
+                            "needs_rebalancing": optimization_data.get("rebalancing_needed", False),
+                            "deviation_score": (1.0 - optimization_data.get("confidence", 0.8)) * 100,
+                            "recommended_trades": optimization_data.get("suggested_trades", []),
+                            "risk_reduction": (optimization_data.get("max_drawdown_estimate", 0) * -100),
+                            "expected_improvement": optimization_data.get("expected_return", 0) * 100
+                        }
+                    else:
+                        logger.error("Unexpected optimization_data type", type=type(optimization_data))
+                        return {
+                            "needs_rebalancing": False,
+                            "deviation_score": 0,
+                            "recommended_trades": [],
+                            "error": f"Unexpected optimization_data type: {type(optimization_data)}"
+                        }
+                else:
+                    logger.warning("No optimization_result found in response")
+                    return {
+                        "needs_rebalancing": False,
+                        "deviation_score": 0,
+                        "recommended_trades": [],
+                        "error": "No optimization data returned"
+                    }
             else:
-                # Unknown type
-                logger.error("Unexpected optimization result type", type=type(optimization_result))
-                return {
-                    "needs_rebalancing": False,
-                    "deviation_score": 0,
-                    "recommended_trades": [],
-                    "error": f"Unexpected optimization result type: {type(optimization_result)}"
-                }
-            
-            # Extract optimization data - get the actual OptimizationResult object
-            optimization_data = optimization_result.get("optimization_result")
-            
-            if optimization_data:
-                # Access OptimizationResult dataclass attributes
-                return {
-                    "needs_rebalancing": optimization_data.rebalancing_needed,
-                    "deviation_score": (1.0 - optimization_data.confidence) * 100,  # Convert confidence to deviation
-                    "recommended_trades": optimization_data.suggested_trades or [],
-                    "risk_reduction": (optimization_data.max_drawdown_estimate * -100) if optimization_data.max_drawdown_estimate else 0,
-                    "expected_improvement": optimization_data.expected_return * 100 if optimization_data.expected_return else 0
-                }
-            else:
-                return {
-                    "needs_rebalancing": False,
-                    "deviation_score": 0,
-                    "recommended_trades": [],
-                    "error": "No optimization data returned"
-                }
+                # Handle case where optimization_result is directly an OptimizationResult object
+                if hasattr(optimization_result, 'rebalancing_needed'):
+                    logger.info("Processing direct OptimizationResult object")
+                    return {
+                        "needs_rebalancing": optimization_result.rebalancing_needed,
+                        "deviation_score": (1.0 - optimization_result.confidence) * 100 if optimization_result.confidence else 0,
+                        "recommended_trades": optimization_result.suggested_trades or [],
+                        "risk_reduction": (optimization_result.max_drawdown_estimate * -100) if optimization_result.max_drawdown_estimate else 0,
+                        "expected_improvement": optimization_result.expected_return * 100 if optimization_result.expected_return else 0
+                    }
+                else:
+                    logger.error("Unexpected optimization result type", type=type(optimization_result))
+                    return {
+                        "needs_rebalancing": False,
+                        "deviation_score": 0,
+                        "recommended_trades": [],
+                        "error": f"Unexpected optimization result type: {type(optimization_result)}"
+                    }
             
         except Exception as e:
             logger.error("Rebalancing analysis failed", error=str(e), user_id=user_id, exc_info=True)
