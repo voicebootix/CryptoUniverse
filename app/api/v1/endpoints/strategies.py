@@ -1165,6 +1165,20 @@ async def update_strategy_submission(
         # Convert to dict and filter out None values for logging
         update_fields = {k: v for k, v in updates.model_dump().items() if v is not None}
         
+        # Cross-field invariants for partial updates (prevent inconsistent state)
+        if "pricing_model" in update_fields:
+            pm = update_fields["pricing_model"]
+            if pm in {"one_time", "subscription"} and ("price_amount" not in update_fields):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="price_amount is required when pricing_model is one_time/subscription"
+                )
+            if pm == "profit_share" and ("profit_share_percentage" not in update_fields):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="profit_share_percentage is required when pricing_model is profit_share"
+                )
+        
         # In a real system, this would update the submission record with validated fields
         logger.info(
             "Strategy submission updated",
