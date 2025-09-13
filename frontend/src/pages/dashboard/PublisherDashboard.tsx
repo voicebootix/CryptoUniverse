@@ -607,7 +607,7 @@ const PublisherDashboard: React.FC = () => {
                             <Badge variant="outline">{strategy.pricing_model.replace('_', ' ')}</Badge>
                           </div>
                           <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
-                            <span>Published {formatRelativeTime(strategy.published_at)}</span>
+                            <span>Published {formatRelativeTime(new Date(strategy.published_at))}</span>
                             <span>•</span>
                             <div className="flex items-center gap-1">
                               <Star className="h-3 w-3 text-yellow-500 fill-current" />
@@ -720,7 +720,7 @@ const PublisherDashboard: React.FC = () => {
                           </div>
                           
                           <div className="text-sm text-muted-foreground mt-1">
-                            {review.strategy_name} • {formatRelativeTime(review.created_at)}
+                            {review.strategy_name} • {formatRelativeTime(new Date(review.created_at))}
                           </div>
                           
                           <p className="text-sm mt-2">{review.review_text}</p>
@@ -784,8 +784,8 @@ const PublisherDashboard: React.FC = () => {
                       <div>
                         <div className="font-medium">{formatCurrency(payout.amount)}</div>
                         <div className="text-sm text-muted-foreground">
-                          Requested {formatRelativeTime(payout.requested_at)}
-                          {payout.processed_at && ` • Processed ${formatRelativeTime(payout.processed_at)}`}
+                          Requested {formatRelativeTime(new Date(payout.requested_at))}
+                          {payout.processed_at && ` • Processed ${formatRelativeTime(new Date(payout.processed_at))}`}
                         </div>
                         <div className="text-xs text-muted-foreground mt-1">
                           {payout.payment_method}

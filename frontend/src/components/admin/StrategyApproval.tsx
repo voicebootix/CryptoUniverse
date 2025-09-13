@@ -474,7 +474,7 @@ const StrategyApproval: React.FC = () => {
                       </span>
                       <span className="flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
-                        Submitted {formatRelativeTime(strategy.submitted_at)}
+                        Submitted {formatRelativeTime(new Date(strategy.submitted_at))}
                       </span>
                       <span className="flex items-center gap-1">
                         <Target className="h-3 w-3" />
@@ -669,7 +669,7 @@ const StrategyApproval: React.FC = () => {
                     'Describe what changes are needed...'
                   }
                   value={reviewComment}
-                  onChange={(e) => setReviewComment(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setReviewComment(e.target.value)}
                   rows={4}
                 />
               </div>
@@ -1017,7 +1017,7 @@ const StrategyApproval: React.FC = () => {
                                   {entry.action.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
                                 </div>
                                 <div className="text-xs text-muted-foreground">
-                                  {formatRelativeTime(entry.timestamp)}
+                                  {formatRelativeTime(new Date(entry.timestamp))}
                                 </div>
                               </div>
                               <div className="text-xs text-muted-foreground">

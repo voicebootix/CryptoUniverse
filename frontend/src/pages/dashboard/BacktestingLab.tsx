@@ -356,7 +356,7 @@ const BacktestingLab: React.FC = () => {
                         <div>
                           <div className="font-medium">{backtest.strategy_function}</div>
                           <div className="text-sm text-muted-foreground">
-                            {backtest.symbol} • {formatRelativeTime(backtest.created_at)}
+                            {backtest.symbol} • {formatRelativeTime(new Date(backtest.created_at))}
                           </div>
                         </div>
                       </div>
@@ -507,7 +507,7 @@ const BacktestingLab: React.FC = () => {
                         <div>
                           <div className="font-semibold">{result.strategy_function}</div>
                           <div className="text-sm text-muted-foreground">
-                            {result.symbol} • {result.period.days} days • {formatRelativeTime(result.created_at)}
+                            {result.symbol} • {result.period.days} days • {formatRelativeTime(new Date(result.created_at))}
                           </div>
                         </div>
                       </div>

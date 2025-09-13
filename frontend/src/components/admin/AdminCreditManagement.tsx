@@ -365,7 +365,7 @@ const AdminCreditManagement: React.FC = () => {
                       id="reason"
                       placeholder="Enter reason for credit transfer..."
                       value={transferReason}
-                      onChange={(e) => setTransferReason(e.target.value)}
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTransferReason(e.target.value)}
                     />
                   </div>
                   <div className="flex justify-end gap-2">

@@ -5,7 +5,7 @@ import {
   FlaskConical,
   Play,
   Pause,
-  Stop,
+  Square as Stop,
   Settings,
   TrendingUp,
   TrendingDown,
@@ -670,8 +670,8 @@ const ABTestingLab: React.FC = () => {
                         <p className="text-sm text-muted-foreground mb-3">{test.description}</p>
                         
                         <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
-                          <span>Created {formatRelativeTime(test.created_at)}</span>
-                          {test.started_at && <span>• Started {formatRelativeTime(test.started_at)}</span>}
+                          <span>Created {formatRelativeTime(new Date(test.created_at))}</span>
+                          {test.started_at && <span>• Started {formatRelativeTime(new Date(test.started_at))}</span>}
                           <span>• {test.variants.length} variants</span>
                           <span>• {formatNumber(test.total_participants)} participants</span>
                         </div>
@@ -901,7 +901,7 @@ const ABTestingLab: React.FC = () => {
                   placeholder="Describe what you're testing and why..."
                   rows={3}
                   value={testForm.description}
-                  onChange={(e) => setTestForm(prev => ({ ...prev, description: e.target.value }))}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTestForm(prev => ({ ...prev, description: e.target.value }))}
                 />
               </div>
 
@@ -912,7 +912,7 @@ const ABTestingLab: React.FC = () => {
                   placeholder="e.g., Reducing stop loss from 3% to 2% will improve risk-adjusted returns..."
                   rows={2}
                   value={testForm.hypothesis}
-                  onChange={(e) => setTestForm(prev => ({ ...prev, hypothesis: e.target.value }))}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTestForm(prev => ({ ...prev, hypothesis: e.target.value }))}
                 />
               </div>
 

@@ -524,7 +524,7 @@ const StrategyPerformanceAttribution: React.FC = () => {
                               fill="#22c55e"
                               fillOpacity={0.2}
                             />
-                            <Tooltip formatter={([value]) => [formatCurrency(value as number), 'Cumulative P&L']} />
+                            <Tooltip formatter={(value: number) => [formatCurrency(value), 'Cumulative P&L']} />
                           </AreaChart>
                         </ResponsiveContainer>
                       </div>
@@ -559,7 +559,7 @@ const StrategyPerformanceAttribution: React.FC = () => {
                               <div>
                                 <div className="font-medium">{trade.symbol}</div>
                                 <div className="text-sm text-muted-foreground">
-                                  {formatRelativeTime(trade.executed_at)}
+                                  {formatRelativeTime(new Date(trade.executed_at))}
                                 </div>
                               </div>
                             </div>

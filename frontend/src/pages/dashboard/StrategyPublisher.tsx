@@ -562,7 +562,7 @@ const StrategyPublisher: React.FC = () => {
                   placeholder="Provide a detailed description of your strategy, its approach, and key features..."
                   rows={4}
                   value={submissionForm.description}
-                  onChange={(e) => setSubmissionForm(prev => ({ ...prev, description: e.target.value }))}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSubmissionForm(prev => ({ ...prev, description: e.target.value }))}
                 />
               </div>
 

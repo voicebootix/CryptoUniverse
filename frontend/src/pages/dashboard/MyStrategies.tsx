@@ -40,7 +40,8 @@ import {
   MoreVertical,
   Calendar,
   Award,
-  Shield
+  Shield,
+  Rocket
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { toast } from 'sonner';
@@ -691,7 +692,7 @@ const MyStrategies: React.FC = () => {
                                 {formatCurrency(trade.pnl_usd)}
                               </div>
                               <div className="text-sm text-muted-foreground">
-                                {formatRelativeTime(trade.executed_at)}
+                                {formatRelativeTime(new Date(trade.executed_at))}
                               </div>
                             </div>
                           </div>
