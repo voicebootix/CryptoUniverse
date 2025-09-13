@@ -397,25 +397,38 @@ const TelegramCenter: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 min-h-screen bg-[#0f1115] p-6">
+    <div className="space-y-4 sm:space-y-6 min-h-screen bg-[#0f1115] p-3 sm:p-6">
       {/* Header */}
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
+      <div className="flex flex-col space-y-4 sm:flex-row sm:justify-between sm:items-start sm:space-y-0">
+        <div className="flex-1">
+          <h1 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">
             Telegram Command Center
           </h1>
-          <p className="text-gray-500 mt-1">
+          <p className="text-gray-500 mt-1 text-sm sm:text-base">
             Control your trading bot through Telegram
           </p>
         </div>
-        <div className="flex gap-3">
+
+        {/* Mobile: Dropdown Menu */}
+        <div className="flex sm:hidden">
+          <Button
+            className="bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600 text-white hover:shadow-lg hover:shadow-blue-500/20 transition-all duration-300 w-full"
+            onClick={() => setShowConnectionModal(true)}
+          >
+            <Link2 className="w-4 h-4 mr-2" />
+            {connection.connected ? "Manage Connection" : "Connect Telegram"}
+          </Button>
+        </div>
+
+        {/* Desktop: All Buttons */}
+        <div className="hidden sm:flex gap-2 lg:gap-3 flex-wrap">
           <Button
             variant="outline"
             size="sm"
             className="bg-[#1a1c23] border-[#2a2d35] text-gray-300 hover:text-gray-200 hover:bg-[#1e2128] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300"
           >
-            <Download className="w-4 h-4 mr-2" />
-            Export Chat
+            <Download className="w-4 h-4 lg:mr-2" />
+            <span className="hidden lg:inline">Export Chat</span>
           </Button>
           <Button
             variant="outline"
@@ -424,23 +437,23 @@ const TelegramCenter: React.FC = () => {
             disabled={loading}
             className="bg-[#1a1c23] border-[#2a2d35] text-gray-300 hover:text-gray-200 hover:bg-[#1e2128] hover:shadow-lg hover:shadow-green-500/10 transition-all duration-300"
           >
-            <Shield className="w-4 h-4 mr-2" />
-            {loading ? "Verifying..." : "Verify Connection"}
+            <Shield className="w-4 h-4 lg:mr-2" />
+            <span className="hidden lg:inline">{loading ? "Verifying..." : "Verify"}</span>
           </Button>
           <Button
             variant="outline"
             size="sm"
             className="bg-[#1a1c23] border-[#2a2d35] text-gray-300 hover:text-gray-200 hover:bg-[#1e2128] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300"
           >
-            <Settings className="w-4 h-4 mr-2" />
-            Bot Settings
+            <Settings className="w-4 h-4 lg:mr-2" />
+            <span className="hidden lg:inline">Settings</span>
           </Button>
           <Button
             className="bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600 text-white hover:shadow-lg hover:shadow-blue-500/20 transition-all duration-300"
             onClick={() => setShowConnectionModal(true)}
           >
-            <Link2 className="w-4 h-4 mr-2" />
-            {connection.connected ? "Manage Connection" : "Connect Channel"}
+            <Link2 className="w-4 h-4 lg:mr-2" />
+            <span className="hidden lg:inline">{connection.connected ? "Manage" : "Connect"}</span>
           </Button>
         </div>
       </div>
@@ -514,42 +527,28 @@ const TelegramCenter: React.FC = () => {
       </div>
 
       {/* Main Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         {/* Chat Interface */}
         <div className="lg:col-span-2">
-          <Card className="h-[600px] flex flex-col bg-[#1a1c23] border-[#2a2d35] rounded-lg">
-            <div className="p-4 border-b border-[#2a2d35] flex items-center justify-between">
-              <div className="flex items-center gap-3">
+          <Card className="h-[70vh] sm:h-[600px] flex flex-col bg-[#1a1c23] border-[#2a2d35] rounded-lg">
+            <div className="p-3 sm:p-4 border-b border-[#2a2d35] flex items-center justify-between">
+              <div className="flex items-center gap-2 sm:gap-3">
                 <div className="relative">
-                  <Bot className="w-8 h-8 text-blue-400" />
-                  <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-emerald-500 rounded-full border-2 border-[#1a1c23]" />
+                  <Bot className="w-6 h-6 sm:w-8 sm:h-8 text-blue-400" />
+                  <div className="absolute -bottom-1 -right-1 w-2 h-2 sm:w-3 sm:h-3 bg-emerald-500 rounded-full border-2 border-[#1a1c23]" />
                 </div>
                 <div>
-                  <p className="font-semibold text-gray-200">
+                  <p className="font-semibold text-gray-200 text-sm sm:text-base">
                     CryptoUniverse Bot
                   </p>
-                  <p className="text-xs text-gray-400">@CryptoUniverseBot</p>
+                  <p className="text-xs text-gray-400 hidden sm:block">@CryptoUniverseBot</p>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-1 sm:gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="bg-[#1e2128] border-[#2a2d35] text-gray-400 hover:text-gray-200 hover:bg-[#222429] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300"
-                >
-                  <Phone className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="bg-[#1e2128] border-[#2a2d35] text-gray-400 hover:text-gray-200 hover:bg-[#222429] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300"
-                >
-                  <Video className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="bg-[#1e2128] border-[#2a2d35] text-gray-400 hover:text-gray-200 hover:bg-[#222429] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300"
+                  className="bg-[#1e2128] border-[#2a2d35] text-gray-400 hover:text-gray-200 hover:bg-[#222429] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300 p-2"
                 >
                   <MoreVertical className="w-4 h-4" />
                 </Button>
@@ -557,7 +556,7 @@ const TelegramCenter: React.FC = () => {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 messages-container">
+            <div className="flex-1 overflow-y-auto p-2 sm:p-4 space-y-3 messages-container">
               {messages.map((msg) => (
                 <motion.div
                   key={msg.id}
@@ -618,29 +617,29 @@ const TelegramCenter: React.FC = () => {
             </div>
 
             {/* Quick Actions */}
-            <div className="p-3 border-t border-b border-[#2a2d35] bg-[#1e2128]">
-              <div className="flex gap-2 overflow-x-auto">
+            <div className="p-2 sm:p-3 border-t border-b border-[#2a2d35] bg-[#1e2128] overflow-hidden">
+              <div className="flex gap-1 sm:gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-600">
                 {quickActions.map((action, idx) => (
                   <Button
                     key={idx}
                     variant="outline"
                     size="sm"
                     onClick={() => handleQuickAction(action.command)}
-                    className="flex-shrink-0 bg-[#1a1c23] border-[#2a2d35] text-gray-300 hover:text-gray-200 hover:bg-[#222429] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300"
+                    className="flex-shrink-0 bg-[#1a1c23] border-[#2a2d35] text-gray-300 hover:text-gray-200 hover:bg-[#222429] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300 text-xs sm:text-sm px-2 sm:px-3"
                   >
                     {action.icon}
-                    <span className="ml-1">{action.label}</span>
+                    <span className="ml-1 hidden sm:inline">{action.label}</span>
                   </Button>
                 ))}
               </div>
             </div>
 
             {/* Input */}
-            <div className="p-4 flex gap-2 bg-[#1e2128] border-t border-[#2a2d35] rounded-b-lg">
+            <div className="p-2 sm:p-4 flex gap-2 bg-[#1e2128] border-t border-[#2a2d35] rounded-b-lg">
               <Button
                 variant="outline"
                 size="sm"
-                className="bg-[#1a1c23] border-[#2a2d35] text-gray-400 hover:text-gray-200 hover:bg-[#222429] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300"
+                className="bg-[#1a1c23] border-[#2a2d35] text-gray-400 hover:text-gray-200 hover:bg-[#222429] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300 hidden sm:flex"
               >
                 <Paperclip className="w-4 h-4" />
               </Button>
@@ -649,11 +648,12 @@ const TelegramCenter: React.FC = () => {
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyPress={(e) => e.key === "Enter" && sendMessage()}
-                className="flex-1 bg-[#1a1c23] border-[#2a2d35] text-gray-200 placeholder:text-gray-500"
+                className="flex-1 bg-[#1a1c23] border-[#2a2d35] text-gray-200 placeholder:text-gray-500 text-sm sm:text-base"
               />
               <Button
                 onClick={sendMessage}
-                className="bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600 text-white hover:shadow-lg hover:shadow-blue-500/20 transition-all duration-300"
+                size="sm"
+                className="bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600 text-white hover:shadow-lg hover:shadow-blue-500/20 transition-all duration-300 px-3 sm:px-4"
               >
                 <Send className="w-4 h-4" />
               </Button>
@@ -662,15 +662,15 @@ const TelegramCenter: React.FC = () => {
         </div>
 
         {/* Sidebar */}
-        <div className="space-y-6">
+        <div className="space-y-4 lg:space-y-6">
           {/* Commands */}
-          <Card className="p-4 bg-[#1a1c23] border-[#2a2d35]">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-gray-200">Commands</h3>
+          <Card className="p-3 sm:p-4 bg-[#1a1c23] border-[#2a2d35]">
+            <div className="flex items-center justify-between mb-3 sm:mb-4">
+              <h3 className="font-semibold text-gray-200 text-sm sm:text-base">Commands</h3>
               <Button
                 variant="outline"
                 size="sm"
-                className="bg-[#1e2128] border-[#2a2d35] text-gray-400 hover:text-gray-200 hover:bg-[#222429] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300"
+                className="bg-[#1e2128] border-[#2a2d35] text-gray-400 hover:text-gray-200 hover:bg-[#222429] hover:shadow-lg hover:shadow-blue-500/10 transition-all duration-300 p-2"
               >
                 <Code className="w-4 h-4" />
               </Button>
@@ -684,7 +684,7 @@ const TelegramCenter: React.FC = () => {
                 className="pl-10 text-sm bg-[#1e2128] border-[#2a2d35] text-gray-200 placeholder:text-gray-500"
               />
             </div>
-            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+            <div className="space-y-2 max-h-[250px] sm:max-h-[300px] overflow-y-auto">
               {commands
                 .filter(
                   (cmd) =>

@@ -12,10 +12,11 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
+import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from pydantic import BaseModel, field_validator
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Response
+from pydantic import BaseModel, field_validator, Field, model_validator, conint, conlist
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 
@@ -812,3 +813,391 @@ async def execute_strategy_trades(
                 user_id=user_id,
                 signal=signal
             )
+
+
+# Strategy Publisher Endpoints
+
+class StrategySubmissionRequest(BaseModel):
+    strategy_id: str
+    name: str
+    description: str
+    category: str
+    risk_level: str
+    expected_return_range: conlist(Decimal, min_length=2, max_length=2)
+    required_capital: conint(ge=0)
+    pricing_model: str
+    price_amount: Optional[Decimal] = None
+    profit_share_percentage: Optional[conint(ge=0, le=100)] = None
+    tags: List[str] = Field(default_factory=list)
+    target_audience: List[str] = Field(default_factory=list)
+    complexity_level: str = "intermediate"
+    support_level: str = "standard"
+    
+    @model_validator(mode='after')
+    def validate_expected_return_range(self):
+        """Validate that min return <= max return."""
+        if len(self.expected_return_range) == 2:
+            min_return, max_return = self.expected_return_range
+            if min_return > max_return:
+                raise ValueError("Minimum expected return must be less than or equal to maximum expected return")
+        return self
+    
+    @model_validator(mode='after')
+    def validate_pricing_model(self):
+        """Validate pricing model requirements."""
+        if self.pricing_model == "one_time" or self.pricing_model == "subscription":
+            if self.price_amount is None or self.price_amount <= 0:
+                raise ValueError(f"pricing_model '{self.pricing_model}' requires a positive price_amount")
+        elif self.pricing_model == "profit_share":
+            if self.profit_share_percentage is None or self.profit_share_percentage <= 0:
+                raise ValueError("pricing_model 'profit_share' requires a positive profit_share_percentage")
+        return self
+
+
+class StrategySubmissionUpdate(BaseModel):
+    """Model for updating strategy submissions with optional fields."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    risk_level: Optional[str] = None
+    expected_return_range: Optional[conlist(Decimal, min_length=2, max_length=2)] = None
+    required_capital: Optional[conint(ge=0)] = None
+    pricing_model: Optional[str] = None
+    price_amount: Optional[Decimal] = None
+    profit_share_percentage: Optional[conint(ge=0, le=100)] = None
+    tags: Optional[List[str]] = None
+    target_audience: Optional[List[str]] = None
+    complexity_level: Optional[str] = None
+    support_level: Optional[str] = None
+    
+    @model_validator(mode='after')
+    def validate_pricing_model_update(self):
+        """Validate pricing model requirements for updates."""
+        if self.pricing_model == "one_time" or self.pricing_model == "subscription":
+            if self.price_amount is not None and self.price_amount <= 0:
+                raise ValueError(f"pricing_model '{self.pricing_model}' requires a positive price_amount")
+        elif self.pricing_model == "profit_share":
+            if self.profit_share_percentage is not None and self.profit_share_percentage <= 0:
+                raise ValueError("pricing_model 'profit_share' requires a positive profit_share_percentage")
+        return self
+    
+    @model_validator(mode='after')
+    def validate_expected_return_range_update(self):
+        """Validate that min return <= max return for updates."""
+        if self.expected_return_range is not None and len(self.expected_return_range) == 2:
+            min_return, max_return = self.expected_return_range
+            if min_return > max_return:
+                raise ValueError("Minimum expected return must be less than or equal to maximum expected return")
+        return self
+
+
+@router.get("/publisher/submissions")
+async def get_user_strategy_submissions(
+    current_user: User = Depends(get_current_user)
+):
+    """Get user's strategy submissions for publishing."""
+    
+    # Check if user has publisher permissions (ADMIN or TRADER roles)
+    if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and traders can view strategy submissions"
+        )
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:publisher:submissions",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # Return mock data for now - in a real system this would query a strategy_submissions table
+        submissions = [
+            {
+                "id": "sub_001",
+                "name": "AI Momentum Strategy",
+                "description": "Advanced momentum-based trading strategy using machine learning",
+                "category": "algorithmic",
+                "risk_level": "medium",
+                "expected_return_range": [15.0, 35.0],
+                "required_capital": 5000,
+                "pricing_model": "profit_share",
+                "profit_share_percentage": 25,
+                "status": "submitted",
+                "created_at": "2025-01-10T10:00:00Z",
+                "submitted_at": "2025-01-10T10:30:00Z",
+                "backtest_results": {
+                    "total_return": 28.5,
+                    "sharpe_ratio": 1.85,
+                    "max_drawdown": -12.3,
+                    "win_rate": 0.67,
+                    "total_trades": 156,
+                    "profit_factor": 2.1,
+                    "period_days": 365
+                },
+                "validation_results": {
+                    "is_valid": True,
+                    "security_score": 92,
+                    "performance_score": 85,
+                    "code_quality_score": 88,
+                    "overall_score": 88
+                },
+                "tags": ["momentum", "ai", "crypto"],
+                "target_audience": ["intermediate", "advanced"],
+                "complexity_level": "intermediate",
+                "documentation_quality": 85,
+                "support_level": "standard"
+            },
+            {
+                "id": "sub_002", 
+                "name": "Mean Reversion Pro",
+                "description": "Statistical mean reversion strategy with dynamic thresholds",
+                "category": "mean_reversion",
+                "risk_level": "low",
+                "expected_return_range": [8.0, 18.0],
+                "required_capital": 2000,
+                "pricing_model": "subscription",
+                "price_amount": 49.99,
+                "status": "approved",
+                "created_at": "2025-01-05T14:00:00Z",
+                "submitted_at": "2025-01-05T14:30:00Z",
+                "reviewed_at": "2025-01-08T09:15:00Z",
+                "reviewer_feedback": "Excellent strategy with solid backtesting results. Well documented.",
+                "backtest_results": {
+                    "total_return": 16.2,
+                    "sharpe_ratio": 2.1,
+                    "max_drawdown": -8.7,
+                    "win_rate": 0.72,
+                    "total_trades": 203,
+                    "profit_factor": 1.8,
+                    "period_days": 365
+                },
+                "validation_results": {
+                    "is_valid": True,
+                    "security_score": 95,
+                    "performance_score": 91,
+                    "code_quality_score": 93,
+                    "overall_score": 93
+                },
+                "tags": ["mean_reversion", "statistical", "low_risk"],
+                "target_audience": ["beginner", "intermediate"],
+                "complexity_level": "beginner",
+                "documentation_quality": 95,
+                "support_level": "premium"
+            }
+        ]
+        
+        return {
+            "success": True,
+            "submissions": submissions,
+            "total_count": len(submissions)
+        }
+        
+    except Exception as e:
+        logger.error("Failed to get strategy submissions", error=str(e), user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get submissions: {str(e)}"
+        )
+
+
+@router.get("/publisher/requirements")
+async def get_publishing_requirements(
+    current_user: User = Depends(get_current_user)
+):
+    """Get strategy publishing requirements."""
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:publisher:requirements",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        requirements = {
+            "min_backtest_period": 90,
+            "min_sharpe_ratio": 1.2,
+            "min_win_rate": 0.55,
+            "max_drawdown": 0.25,
+            "min_total_trades": 50,
+            "min_security_score": 80,
+            "min_code_quality_score": 75,
+            "min_overall_score": 80,
+            "required_documentation": [
+                "Strategy Description",
+                "Risk Management Rules", 
+                "Entry/Exit Conditions",
+                "Backtest Results",
+                "Performance Analysis",
+                "Code Documentation"
+            ]
+        }
+        
+        return {
+            "success": True,
+            "requirements": requirements
+        }
+        
+    except Exception as e:
+        logger.exception("Failed to get publishing requirements")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get requirements: {str(e)}"
+        ) from e
+
+
+@router.post("/publisher/submit", status_code=status.HTTP_201_CREATED)
+async def submit_strategy_for_review(
+    request: StrategySubmissionRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Submit a strategy for review and potential publication."""
+    
+    # Check if user has publisher permissions (ADMIN or TRADER roles)
+    if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and traders can submit strategies for review"
+        )
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:publisher:submit",
+        limit=10,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # In a real system, this would create a new submission record
+        submission_id = str(uuid.uuid4())
+        
+        logger.info(
+            "Strategy submitted for review",
+            user_id=str(current_user.id),
+            strategy_name=request.name,
+            submission_id=submission_id,
+            category=request.category,
+            risk_level=request.risk_level
+        )
+        
+        return {
+            "success": True,
+            "submission_id": submission_id,
+            "message": f"Strategy '{request.name}' submitted for review successfully",
+            "estimated_review_time": "3-5 business days"
+        }
+        
+    except Exception as e:
+        logger.exception("Strategy submission failed", user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Submission failed: {str(e)}"
+        ) from e
+
+
+@router.post("/publisher/withdraw/{submission_id}")
+async def withdraw_strategy_submission(
+    submission_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Withdraw a strategy submission from review."""
+    
+    # Check if user has publisher permissions (ADMIN or TRADER roles)
+    if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and traders can withdraw strategy submissions"
+        )
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:publisher:withdraw",
+        limit=20,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # In a real system, this would update the submission status to 'withdrawn'
+        logger.info(
+            "Strategy submission withdrawn",
+            user_id=str(current_user.id),
+            submission_id=submission_id
+        )
+        
+        return {
+            "success": True,
+            "message": "Submission withdrawn successfully"
+        }
+        
+    except Exception as e:
+        logger.exception("Failed to withdraw submission", user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to withdraw submission: {str(e)}"
+        ) from e
+
+
+@router.put("/publisher/submissions/{submission_id}")
+async def update_strategy_submission(
+    submission_id: str,
+    updates: StrategySubmissionUpdate,
+    current_user: User = Depends(get_current_user)
+):
+    """Update a strategy submission with typed validation."""
+    
+    # Check if user has publisher permissions (ADMIN or TRADER roles)
+    if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and traders can update strategy submissions"
+        )
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:publisher:update",
+        limit=20,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # Convert to dict and filter out None values for logging
+        update_fields = {k: v for k, v in updates.model_dump().items() if v is not None}
+        
+        # Cross-field invariants for partial updates (prevent inconsistent state)
+        if "pricing_model" in update_fields:
+            pm = update_fields["pricing_model"]
+            if pm in {"one_time", "subscription"} and ("price_amount" not in update_fields):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="price_amount is required when pricing_model is one_time/subscription"
+                )
+            if pm == "profit_share" and ("profit_share_percentage" not in update_fields):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="profit_share_percentage is required when pricing_model is profit_share"
+                )
+        
+        # In a real system, this would update the submission record with validated fields
+        logger.info(
+            "Strategy submission updated",
+            user_id=str(current_user.id),
+            submission_id=submission_id,
+            updates=list(update_fields.keys())
+        )
+        
+        return {
+            "success": True,
+            "message": "Submission updated successfully",
+            "updated_fields": list(update_fields.keys())
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to update submission", user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update submission"
+        ) from e
