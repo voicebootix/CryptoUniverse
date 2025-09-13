@@ -4346,7 +4346,7 @@ class TradingStrategiesService(LoggerMixin):
             # For now, simulate position data
             return {
                 "symbol": symbol,
-                "size": 0,  # No current position
+                "position_size": 0,  # No current position
                 "side": "none",
                 "entry_price": 0,
                 "unrealized_pnl": 0,
@@ -4360,25 +4360,44 @@ class TradingStrategiesService(LoggerMixin):
             self.logger.error(f"Position fetch failed: {e}")
             return {"error": str(e)}
 
-    def _calculate_new_liquidation_price(self, entry_price: float, leverage: float, side: str, adjustment: float = 0) -> float:
+    def _calculate_new_liquidation_price(self, position: Dict[str, Any], adjustment: float = 0) -> float:
         """Calculate new liquidation price after leverage adjustment."""
         try:
+            # Extract values from position dict with validation
+            entry_price = position.get('entry_price')
+            leverage = position.get('leverage')
+            side = position.get('side')
+
+            # Validate required fields
+            if entry_price is None or not isinstance(entry_price, (int, float)):
+                self.logger.error(f"Invalid or missing entry_price: {entry_price}")
+                return 0
+
+            if leverage is None or not isinstance(leverage, (int, float)):
+                self.logger.error(f"Invalid or missing leverage: {leverage}")
+                return 0
+
             if leverage <= 1:
+                self.logger.error(f"Invalid leverage value: {leverage}, must be > 1")
                 return 0  # No liquidation risk for unlevered positions
-                
+
+            if side not in {"long", "short"}:
+                self.logger.error(f"Invalid side value: {side}, must be 'long' or 'short'")
+                return 0
+
             # Calculate liquidation distance
             liquidation_distance = 1.0 / leverage
-            
+
             # Apply adjustment if provided
             adjusted_distance = liquidation_distance * (1 + adjustment)
-            
+
             if side.lower() == "long":
                 liquidation_price = entry_price * (1 - adjusted_distance)
             else:  # short
                 liquidation_price = entry_price * (1 + adjusted_distance)
-                
+
             return max(0, liquidation_price)
-            
+
         except Exception as e:
             self.logger.error(f"Liquidation price calculation failed: {e}")
             return 0
@@ -4776,14 +4795,26 @@ class TradingStrategiesService(LoggerMixin):
     def _calculate_reversal_probability(self, monthly_change: float, weekly_change: float) -> float:
         """Calculate trend reversal probability."""
         try:
+            # Constants for thresholds (as percentages)
+            MONTHLY_EXTREME_THRESHOLD = 30.0  # 30%
+            WEEKLY_EXTREME_THRESHOLD = 10.0   # 10%
+
+            # Validate and handle None inputs
+            if monthly_change is None or weekly_change is None:
+                return 0.5  # Default probability
+
+            # Ensure inputs are within reasonable range (-100% to 1000%)
+            monthly_change = max(-100.0, min(monthly_change, 1000.0))
+            weekly_change = max(-100.0, min(weekly_change, 1000.0))
+
             # If monthly and weekly trends diverge, higher reversal probability
             if (monthly_change > 0) != (weekly_change > 0):
                 return 0.7  # High divergence = high reversal probability
-            
+
             # If both trends are extreme in same direction, medium reversal probability
-            if abs(monthly_change) > 0.3 and abs(weekly_change) > 0.1:
+            if abs(monthly_change) > MONTHLY_EXTREME_THRESHOLD and abs(weekly_change) > WEEKLY_EXTREME_THRESHOLD:
                 return 0.6  # Overextended trends
-            
+
             # Normal conditions
             return 0.3  # Low reversal probability
         except Exception:
@@ -4792,27 +4823,138 @@ class TradingStrategiesService(LoggerMixin):
     def _calculate_sector_concentration(self, positions: List[Dict]) -> Dict[str, float]:
         """Calculate sector concentration in portfolio."""
         try:
+            # Comprehensive sector mapping for major cryptocurrencies
             sector_map = {
+                # Store of Value
                 "BTC": "Store of Value",
-                "ETH": "Smart Contracts", 
-                "BNB": "Exchange Tokens",
+                "LTC": "Store of Value",
+                "BCH": "Store of Value",
+
+                # Smart Contracts Platforms
+                "ETH": "Smart Contracts",
                 "ADA": "Smart Contracts",
                 "SOL": "Smart Contracts",
-                "DOT": "Interoperability",
-                "MATIC": "Scaling",
                 "AVAX": "Smart Contracts",
+                "ATOM": "Smart Contracts",
+                "NEAR": "Smart Contracts",
+                "FTM": "Smart Contracts",
+                "ALGO": "Smart Contracts",
+                "TRX": "Smart Contracts",
+                "EOS": "Smart Contracts",
+                "VET": "Smart Contracts",
+                "HBAR": "Smart Contracts",
+                "FLOW": "Smart Contracts",
+                "ICP": "Smart Contracts",
+                "EGLD": "Smart Contracts",
+                "ONE": "Smart Contracts",
+                "ROSE": "Smart Contracts",
+
+                # DeFi
+                "UNI": "DeFi",
+                "AAVE": "DeFi",
+                "COMP": "DeFi",
+                "MKR": "DeFi",
+                "SNX": "DeFi",
+                "SUSHI": "DeFi",
+                "CRV": "DeFi",
+                "YFI": "DeFi",
+                "1INCH": "DeFi",
+                "BAL": "DeFi",
+                "LDO": "DeFi",
+                "GMX": "DeFi",
+                "DYDX": "DeFi",
+                "CAKE": "DeFi",
+
+                # Layer 2 & Scaling
+                "MATIC": "Scaling",
+                "ARB": "Scaling",
+                "OP": "Scaling",
+                "LRC": "Scaling",
+                "IMX": "Scaling",
+                "MINA": "Scaling",
+
+                # Exchange Tokens
+                "BNB": "Exchange Tokens",
+                "CRO": "Exchange Tokens",
+                "FTT": "Exchange Tokens",
+                "KCS": "Exchange Tokens",
+                "HT": "Exchange Tokens",
+                "OKB": "Exchange Tokens",
+                "LEO": "Exchange Tokens",
+
+                # Interoperability
+                "DOT": "Interoperability",
+                "KSM": "Interoperability",
+                "RUNE": "Interoperability",
+                "REN": "Interoperability",
+                "BAND": "Interoperability",
+
+                # Oracles & Data
                 "LINK": "Oracles",
-                "UNI": "DeFi"
+                "API3": "Oracles",
+                "TRB": "Oracles",
+                "PYTH": "Oracles",
+
+                # Gaming & Metaverse
+                "AXS": "Gaming/Metaverse",
+                "SAND": "Gaming/Metaverse",
+                "MANA": "Gaming/Metaverse",
+                "ENJ": "Gaming/Metaverse",
+                "GALA": "Gaming/Metaverse",
+                "APE": "Gaming/Metaverse",
+                "GMT": "Gaming/Metaverse",
+
+                # Privacy Coins
+                "XMR": "Privacy",
+                "ZEC": "Privacy",
+                "DASH": "Privacy",
+                "SCRT": "Privacy",
+
+                # Infrastructure
+                "FIL": "Infrastructure",
+                "AR": "Infrastructure",
+                "STORJ": "Infrastructure",
+                "SC": "Infrastructure",
+                "GRT": "Infrastructure",
+                "OCEAN": "Infrastructure",
+                "RLC": "Infrastructure",
+
+                # Stablecoins
+                "USDT": "Stablecoins",
+                "USDC": "Stablecoins",
+                "BUSD": "Stablecoins",
+                "DAI": "Stablecoins",
+                "FRAX": "Stablecoins",
+                "TUSD": "Stablecoins",
+                "USDD": "Stablecoins",
+
+                # Meme/Social
+                "DOGE": "Meme/Social",
+                "SHIB": "Meme/Social",
+                "PEPE": "Meme/Social",
+                "FLOKI": "Meme/Social",
+
+                # Payments
+                "XRP": "Payments",
+                "XLM": "Payments",
+                "NANO": "Payments",
+                "IOTA": "IoT/Payments",
+
+                # Specialized
+                "THETA": "Media/Streaming",
+                "CHZ": "Fan Tokens",
+                "BAT": "Digital Advertising",
+                "ZIL": "Blockchain Platform"
             }
             
             sector_values = {}
-            total_value = sum(pos.get('value', 0) for pos in positions)
-            
+            total_value = sum(pos.get('market_value', 0) for pos in positions)
+
             for pos in positions:
                 symbol = pos.get('symbol', '').split('/')[0]
                 sector = sector_map.get(symbol, "Other")
-                value = pos.get('value', 0)
-                
+                value = pos.get('market_value', 0)
+
                 if sector not in sector_values:
                     sector_values[sector] = 0
                 sector_values[sector] += value
@@ -4852,23 +4994,42 @@ class TradingStrategiesService(LoggerMixin):
     async def _get_exchange_margin_info(self, exchange: str, user_id: str) -> Dict[str, Any]:
         """Get margin information from exchange."""
         try:
-            # Simulate margin info
+            # Simulate margin info with full schema expected by margin_status
             return {
                 "success": True,
-                "available_margin": 10000,
-                "used_margin": 2000,
+                "available_margin": 10000.0,
+                "used_margin": 2000.0,
+                "total_margin_balance": 12000.0,
                 "margin_ratio": 0.2,
-                "maintenance_margin": 500,
-                "free_margin": 8000
+                "margin_level": 6.0,  # total_margin_balance / used_margin
+                "margin_call_flag": False,
+                "maintenance_margin": 500.0,
+                "free_margin": 8000.0
             }
         except Exception:
-            return {"success": False}
+            # Return same schema shape with safe defaults on exception
+            return {
+                "success": False,
+                "available_margin": 0.0,
+                "used_margin": 0.0,
+                "total_margin_balance": 0.0,
+                "margin_ratio": 0.0,
+                "margin_level": 0.0,
+                "margin_call_flag": False,
+                "maintenance_margin": 0.0,
+                "free_margin": 0.0
+            }
 
     def _get_margin_recommendation(self, risk_level: str, margin_ratios: Dict) -> str:
         """Get margin usage recommendation."""
         try:
-            current_ratio = margin_ratios.get('margin_ratio', 0)
-            
+            # Use caller-provided keys with fallback logic
+            current_ratio = margin_ratios.get('utilization_ratio')
+            if current_ratio is None:
+                current_ratio = margin_ratios.get('margin_level_ratio')
+            if current_ratio is None:
+                current_ratio = 0
+
             if risk_level == "HIGH":
                 if current_ratio > 0.5:
                     return "REDUCE_POSITIONS - High risk with excessive margin usage"
@@ -4901,12 +5062,16 @@ class TradingStrategiesService(LoggerMixin):
     def _calculate_margin_efficiency(self, margin_by_exchange: Dict) -> float:
         """Calculate margin usage efficiency across exchanges."""
         try:
+            # Handle nested structure - unwrap if contains "margin_summary"
+            if isinstance(margin_by_exchange, dict) and "margin_summary" in margin_by_exchange:
+                margin_by_exchange = margin_by_exchange["margin_summary"]
+
             total_available = sum(info.get('available_margin', 0) for info in margin_by_exchange.values())
             total_used = sum(info.get('used_margin', 0) for info in margin_by_exchange.values())
-            
+
             if total_available == 0:
                 return 0.0
-                
+
             efficiency = total_used / total_available
             return max(0.0, min(efficiency, 1.0))
         except Exception:
