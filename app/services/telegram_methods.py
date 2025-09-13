@@ -11,6 +11,7 @@ Contains the remaining methods to complete the Telegram Commander Service:
 import json
 from datetime import datetime
 from typing import Dict, Any, Optional
+from sqlalchemy import text
 
 
 async def trade_notification(
@@ -526,8 +527,8 @@ async def _get_chat_id_for_user(self, user_id: str) -> Optional[str]:
         async with AsyncSessionLocal() as db:
             # Query user's telegram chat ID from database
             user_chat = await db.execute(
-                "SELECT telegram_chat_id FROM users WHERE id = %s AND telegram_chat_id IS NOT NULL",
-                (user_id,)
+                text("SELECT telegram_chat_id FROM users WHERE id = :user_id AND telegram_chat_id IS NOT NULL"),
+                {"user_id": user_id}
             )
             result = user_chat.fetchone()
 
