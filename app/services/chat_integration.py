@@ -619,17 +619,52 @@ After comprehensive analysis, no significant trading opportunities meet the curr
                 user_id=user_id
             )
             
-            response_content = f"""🛡️ **Comprehensive Risk Assessment**
+# ENHANCED SAFETY GUARD: Detect fake/zero data and show explicit warnings
+            var_24h = risk_analysis.get('var_24h', 0)
+            var_7d = risk_analysis.get('var_7d', 0) 
+            max_drawdown = risk_analysis.get('max_drawdown', 0)
+            sharpe_ratio = risk_analysis.get('sharpe_ratio', 0)
+            
+            # Check if this looks like fake/template data
+            is_fake_data = (
+                var_24h == 0 and var_7d == 0 and max_drawdown == 0 and 
+                sharpe_ratio == 0 and risk_analysis.get('overall_risk') in ['Medium', 'Unknown']
+            )
+            
+            if is_fake_data:
+                response_content = """⚠️ **Risk Analysis System Unavailable**
+
+**Status:** Risk calculation systems are currently unavailable
+**Issue:** Core risk analysis methods are not functional
+**Safety Warning:** Do not make trading decisions without proper risk analysis
+
+**What This Means:**
+• Portfolio risk metrics cannot be calculated
+• Value at Risk (VaR) calculations unavailable  
+• Sharpe ratios and drawdown analysis offline
+• Market risk factor analysis incomplete
+
+**Immediate Actions:**
+• Do not execute large trades without risk analysis
+• Contact technical support for system status
+• Use direct API endpoints to verify portfolio data
+• Wait for risk analysis systems to come online
+
+**For Real-Time Status:** Check /api/v1/health/risk-analysis endpoint
+
+⚠️ **This is a safety message - trading systems have been designed to show explicit errors instead of fake analysis data to protect your capital.**"""
+                
+            else:
+                response_content = f"""🛡️ **Comprehensive Risk Assessment**
 
 **Overall Risk Profile:** {risk_analysis.get('overall_risk', 'Medium')}
 
 **Key Risk Metrics:**
-• Value at Risk (24h): ${risk_analysis.get('var_24h', 0):,.2f}
-• Value at Risk (7d): ${risk_analysis.get('var_7d', 0):,.2f}
-• Maximum Drawdown: {risk_analysis.get('max_drawdown', 0):.1f}%
-• Sharpe Ratio: {risk_analysis.get('sharpe_ratio', 0):.2f}
+• Value at Risk (24h): ${var_24h:,.2f}
+• Value at Risk (7d): ${var_7d:,.2f}
+• Maximum Drawdown: {max_drawdown:.1f}%
+• Sharpe Ratio: {sharpe_ratio:.2f}
 • Portfolio Beta: {risk_analysis.get('beta', 1.0):.2f}
-
 **Risk Breakdown:**
 • Concentration Risk: {risk_analysis.get('concentration_risk', 'Low')}
 • Volatility Risk: {risk_analysis.get('volatility_risk', 'Medium')}
