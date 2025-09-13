@@ -12,10 +12,11 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
+import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from pydantic import BaseModel, field_validator
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Response
+from pydantic import BaseModel, field_validator, Field, model_validator, conint, conlist
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 
@@ -822,15 +823,35 @@ class StrategySubmissionRequest(BaseModel):
     description: str
     category: str
     risk_level: str
-    expected_return_range: List[float]
-    required_capital: int
+    expected_return_range: conlist(Decimal, min_length=2, max_length=2)
+    required_capital: conint(ge=0)
     pricing_model: str
-    price_amount: Optional[float] = None
-    profit_share_percentage: Optional[int] = None
-    tags: List[str] = []
-    target_audience: List[str] = []
+    price_amount: Optional[Decimal] = None
+    profit_share_percentage: Optional[conint(ge=0, le=100)] = None
+    tags: List[str] = Field(default_factory=list)
+    target_audience: List[str] = Field(default_factory=list)
     complexity_level: str = "intermediate"
     support_level: str = "standard"
+    
+    @model_validator(mode='after')
+    def validate_expected_return_range(self):
+        """Validate that min return <= max return."""
+        if len(self.expected_return_range) == 2:
+            min_return, max_return = self.expected_return_range
+            if min_return > max_return:
+                raise ValueError("Minimum expected return must be less than or equal to maximum expected return")
+        return self
+    
+    @model_validator(mode='after')
+    def validate_pricing_model(self):
+        """Validate pricing model requirements."""
+        if self.pricing_model == "one_time" or self.pricing_model == "subscription":
+            if self.price_amount is None or self.price_amount <= 0:
+                raise ValueError(f"pricing_model '{self.pricing_model}' requires a positive price_amount")
+        elif self.pricing_model == "profit_share":
+            if self.profit_share_percentage is None or self.profit_share_percentage <= 0:
+                raise ValueError("pricing_model 'profit_share' requires a positive profit_share_percentage")
+        return self
 
 
 @router.get("/publisher/submissions")
@@ -838,6 +859,13 @@ async def get_user_strategy_submissions(
     current_user: User = Depends(get_current_user)
 ):
     """Get user's strategy submissions for publishing."""
+    
+    # Check if user has publisher permissions (ADMIN or TRADER roles)
+    if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and traders can view strategy submissions"
+        )
     
     await rate_limiter.check_rate_limit(
         key="strategies:publisher:submissions",
@@ -970,22 +998,32 @@ async def get_publishing_requirements(
             ]
         }
         
-        return requirements
+        return {
+            "success": True,
+            "requirements": requirements
+        }
         
     except Exception as e:
-        logger.error("Failed to get publishing requirements", error=str(e))
+        logger.exception("Failed to get publishing requirements")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get requirements: {str(e)}"
-        )
+        ) from e
 
 
-@router.post("/publisher/submit")
+@router.post("/publisher/submit", status_code=status.HTTP_201_CREATED)
 async def submit_strategy_for_review(
     request: StrategySubmissionRequest,
     current_user: User = Depends(get_current_user)
 ):
     """Submit a strategy for review and potential publication."""
+    
+    # Check if user has publisher permissions (ADMIN or TRADER roles)
+    if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and traders can submit strategies for review"
+        )
     
     await rate_limiter.check_rate_limit(
         key="strategies:publisher:submit",
@@ -996,7 +1034,7 @@ async def submit_strategy_for_review(
     
     try:
         # In a real system, this would create a new submission record
-        submission_id = f"sub_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        submission_id = str(uuid.uuid4())
         
         logger.info(
             "Strategy submitted for review",
@@ -1015,11 +1053,11 @@ async def submit_strategy_for_review(
         }
         
     except Exception as e:
-        logger.error("Strategy submission failed", error=str(e), user_id=str(current_user.id))
+        logger.exception("Strategy submission failed", user_id=str(current_user.id))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Submission failed: {str(e)}"
-        )
+        ) from e
 
 
 @router.post("/publisher/withdraw/{submission_id}")
@@ -1028,6 +1066,13 @@ async def withdraw_strategy_submission(
     current_user: User = Depends(get_current_user)
 ):
     """Withdraw a strategy submission from review."""
+    
+    # Check if user has publisher permissions (ADMIN or TRADER roles)
+    if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and traders can withdraw strategy submissions"
+        )
     
     await rate_limiter.check_rate_limit(
         key="strategies:publisher:withdraw",
@@ -1050,11 +1095,11 @@ async def withdraw_strategy_submission(
         }
         
     except Exception as e:
-        logger.error("Failed to withdraw submission", error=str(e), user_id=str(current_user.id))
+        logger.exception("Failed to withdraw submission", user_id=str(current_user.id))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to withdraw submission: {str(e)}"
-        )
+        ) from e
 
 
 @router.put("/publisher/submissions/{submission_id}")
@@ -1064,6 +1109,13 @@ async def update_strategy_submission(
     current_user: User = Depends(get_current_user)
 ):
     """Update a strategy submission."""
+    
+    # Check if user has publisher permissions (ADMIN or TRADER roles)
+    if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and traders can update strategy submissions"
+        )
     
     await rate_limiter.check_rate_limit(
         key="strategies:publisher:update",
@@ -1087,8 +1139,8 @@ async def update_strategy_submission(
         }
         
     except Exception as e:
-        logger.error("Failed to update submission", error=str(e), user_id=str(current_user.id))
+        logger.exception("Failed to update submission", user_id=str(current_user.id))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update submission: {str(e)}"
-        )
+        ) from e
