@@ -402,9 +402,9 @@ const TrustJourneyDashboard: React.FC = () => {
       title: 'Active Trader',
       description: 'Execute 10 successful trades',
       requirement: '10 trades',
-      progress: Math.min(performanceMetrics.totalTrades || 0, 10),
+      progress: Math.min(performanceMetrics.successfulTrades || 0, 10),
       target: 10,
-      completed: (performanceMetrics.totalTrades || 0) >= 10,
+      completed: (performanceMetrics.successfulTrades || 0) >= 10,
       reward: '+8 Trust Score',
       icon: <Activity className="h-4 w-4" />
     },
