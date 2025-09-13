@@ -245,7 +245,10 @@ const StrategyMarketplace: React.FC = () => {
     }
     
     if (!strategy.user_can_afford) {
-      toast.error(`Insufficient credits. You need ${strategy.credit_cost_monthly} credits but only have ${userCredits?.available_credits || 0}.`);
+      const requiredCredits = strategy.pricing_model === 'per_execution' 
+        ? strategy.credit_cost_per_execution 
+        : strategy.credit_cost_monthly || 0;
+      toast.error(`Insufficient credits. You need ${requiredCredits} credits but only have ${userCredits?.available_credits || 0}.`);
       return;
     }
     
@@ -724,7 +727,12 @@ const StrategyMarketplace: React.FC = () => {
                     </div>
                     <div className="text-sm text-muted-foreground">
                       {selectedStrategy.user_has_purchased ? 'You own this strategy' :
-                       !selectedStrategy.user_can_afford ? `Need ${selectedStrategy.credit_cost_monthly - (userCredits?.available_credits || 0)} more credits` :
+                       !selectedStrategy.user_can_afford ? (() => {
+                         const requiredCredits = selectedStrategy.pricing_model === 'per_execution' 
+                           ? selectedStrategy.credit_cost_per_execution 
+                           : selectedStrategy.credit_cost_monthly || 0;
+                         return `Need ${requiredCredits - (userCredits?.available_credits || 0)} more credits`;
+                       })() :
                        selectedStrategy.requires_higher_tier ? 'Requires higher subscription tier' :
                        'Ready to purchase'}
                     </div>

@@ -974,8 +974,10 @@ class PortfolioRiskService(LoggerMixin):
                 "request_id": request_id,
                 "portfolio_value": portfolio.get("total_value_usd", 0),
                 "risk_metrics": {
-                    "var_95_percent": risk_metrics.var_95,
-                    "var_99_percent": risk_metrics.var_99,
+                    "var_95": risk_metrics.var_95,
+                    "var_95_percent": risk_metrics.var_95 * 100,
+                    "var_99": risk_metrics.var_99,
+                    "var_99_percent": risk_metrics.var_99 * 100,
                     "expected_shortfall": risk_metrics.expected_shortfall,
                     "maximum_drawdown": risk_metrics.maximum_drawdown,
                     "volatility_annual": risk_metrics.volatility_annual,
@@ -1217,10 +1219,9 @@ class PortfolioRiskService(LoggerMixin):
             if risk_result.get("success"):
                 assessment_result["risk_analysis"] = risk_result["risk_metrics"]
             
-            # Position sizing analysis
-            sizing_result = await self.position_sizing(user_id)
-            if sizing_result.get("success"):
-                assessment_result["position_sizing"] = sizing_result["position_sizing"]
+            # Position sizing analysis - skip for general assessment since no specific opportunity
+            # Note: position_sizing requires a specific trading opportunity
+            # assessment_result["position_sizing"] = "Requires specific trading opportunity"
             
             # Correlation analysis
             correlation_result = await self.correlation_analysis(user_id)

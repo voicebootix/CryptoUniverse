@@ -151,7 +151,18 @@ const StrategyIDE: React.FC = () => {
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const completionProviderRef = useRef<monaco.IDisposable | null>(null);
   const queryClient = useQueryClient();
+
+  // Cleanup completion provider on unmount
+  useEffect(() => {
+    return () => {
+      if (completionProviderRef.current) {
+        completionProviderRef.current.dispose();
+        completionProviderRef.current = null;
+      }
+    };
+  }, []);
 
   // Fetch strategy templates
   const { data: templates, isLoading: templatesLoading } = useQuery({
@@ -240,7 +251,7 @@ const StrategyIDE: React.FC = () => {
     editorRef.current = editor;
     
     // Configure Python language features
-    monaco.languages.registerCompletionItemProvider('python', {
+    completionProviderRef.current = monaco.languages.registerCompletionItemProvider('python', {
       provideCompletionItems: (model, position) => {
         const suggestions = [
           {
@@ -299,10 +310,11 @@ const StrategyIDE: React.FC = () => {
     setCode(value || '');
   };
 
-  const validateCode = async () => {
-    if (!code.trim()) return;
+  const validateCode = async (codeToValidate?: string) => {
+    const targetCode = codeToValidate || code;
+    if (!targetCode.trim()) return;
     setIsValidating(true);
-    await validateStrategyMutation.mutateAsync(code);
+    await validateStrategyMutation.mutateAsync(targetCode);
     setIsValidating(false);
   };
 
@@ -330,7 +342,7 @@ const StrategyIDE: React.FC = () => {
         description: template.description,
         category: template.category
       }));
-      validateCode();
+      validateCode(template.code_template);
     }
   };
 
