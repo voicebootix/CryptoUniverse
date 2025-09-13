@@ -1266,11 +1266,17 @@ class MasterSystemController(LoggerMixin):
             
             # Enhanced notification with coordination details
             if trades_executed > 0:
-                await telegram_commander_service.send_message(
-                    message_content=f"🚀 Multi-Exchange Arbitrage: {len(coordinated_executions)} coordinated trades, ${profit_generated:.4f} profit across {len(connected_exchanges)} exchanges",
-                    message_type="arbitrage",
-                    priority="normal"
-                )
+                # Get owner chat ID and send directly
+                from app.services.telegram_core import telegram_service
+                from app.services.telegram_commander import RecipientType
+                owner_chat_id = await telegram_service._get_chat_id_for_recipient(RecipientType.OWNER)
+                if owner_chat_id:
+                    await telegram_service.send_direct_message(
+                        chat_id=owner_chat_id,
+                        message_content=f"🚀 Multi-Exchange Arbitrage: {len(coordinated_executions)} coordinated trades, ${profit_generated:.4f} profit across {len(connected_exchanges)} exchanges",
+                        message_type="trade",
+                        priority="normal"
+                    )
             
             return {
                 "success": True,
@@ -2419,14 +2425,19 @@ class MasterSystemController(LoggerMixin):
             self.current_mode = new_mode
             
             try:
-                from app.services.telegram_commander import telegram_commander_service
-                await telegram_commander_service.send_message(
-                    message_content=f"🎯 Trading mode changed: {old_mode.value} → {new_mode.value}",
-                    message_type="system",
-                    priority="normal"
-                )
-            except:
-                pass
+                from app.services.telegram_core import telegram_service
+                from app.services.telegram_commander import RecipientType
+                # Get owner chat ID and send directly
+                owner_chat_id = await telegram_service._get_chat_id_for_recipient(RecipientType.OWNER)
+                if owner_chat_id:
+                    await telegram_service.send_direct_message(
+                        chat_id=owner_chat_id,
+                        message_content=f"🎯 Trading mode changed: {old_mode.value} → {new_mode.value}",
+                        message_type="system",
+                        priority="normal"
+                    )
+            except Exception as e:
+                logger.exception("Failed to send trading mode change notification", error=str(e))
             
             return {
                 "success": True,

@@ -11,6 +11,7 @@ Contains the remaining methods to complete the Telegram Commander Service:
 import json
 from datetime import datetime
 from typing import Dict, Any, Optional
+from sqlalchemy import text
 
 
 async def trade_notification(
@@ -40,12 +41,34 @@ async def trade_notification(
         # Format trade notification message
         notification_message = self._format_trade_notification(trade_info, notification_type)
         
-        # Send notification
-        result = await self.send_message(
+        # Send notification - resolve recipient to chat_id and send directly
+        from app.services.telegram_commander import RecipientType
+
+        try:
+            recipient_type = RecipientType(recipient)
+        except ValueError:
+            return {
+                "success": False,
+                "error": f"Invalid recipient type: {recipient}",
+                "function": "trade_notification",
+                "request_id": request_id
+            }
+
+        chat_id = await self._get_chat_id_for_recipient(recipient_type)
+
+        if not chat_id:
+            return {
+                "success": False,
+                "error": f"No chat ID found for recipient: {recipient}",
+                "function": "trade_notification",
+                "request_id": request_id
+            }
+
+        result = await self.send_direct_message(
+            chat_id=chat_id,
             message_content=notification_message,
             message_type="trade",
-            priority=priority,
-            recipient=recipient
+            priority=priority
         )
         
         return {
@@ -89,12 +112,34 @@ async def system_status(
         # Determine priority based on status
         priority = "critical" if system_status_data.get("has_critical_issues") else "normal"
         
-        # Send status update
-        result = await self.send_message(
+        # Send status update - resolve recipient to chat_id and send directly
+        from app.services.telegram_commander import RecipientType
+
+        try:
+            recipient_type = RecipientType(recipient)
+        except ValueError:
+            return {
+                "success": False,
+                "error": f"Invalid recipient type: {recipient}",
+                "function": "system_status",
+                "request_id": request_id
+            }
+
+        chat_id = await self._get_chat_id_for_recipient(recipient_type)
+
+        if not chat_id:
+            return {
+                "success": False,
+                "error": f"No chat ID found for recipient: {recipient}",
+                "function": "system_status",
+                "request_id": request_id
+            }
+
+        result = await self.send_direct_message(
+            chat_id=chat_id,
             message_content=status_message,
             message_type="system",
-            priority=priority,
-            recipient=recipient
+            priority=priority
         )
         
         return {
@@ -480,20 +525,19 @@ async def _get_chat_id_for_user(self, user_id: str) -> Optional[str]:
         from app.core.database import AsyncSessionLocal
         
         async with AsyncSessionLocal() as db:
-        
-        # Query user's telegram chat ID from database
-        user_chat = await db.execute(
-            "SELECT telegram_chat_id FROM users WHERE id = %s AND telegram_chat_id IS NOT NULL",
-            (user_id,)
-        )
-        result = user_chat.fetchone()
-        
-        if result:
-            return result[0]
-        
-        # If no chat ID found, log warning and return None
-        self.logger.warning("No Telegram chat ID found for user", user_id=user_id)
-        return None
+            # Query user's telegram chat ID from database
+            user_chat = await db.execute(
+                text("SELECT telegram_chat_id FROM users WHERE id = :user_id AND telegram_chat_id IS NOT NULL"),
+                {"user_id": user_id}
+            )
+            result = user_chat.fetchone()
+
+            if result:
+                return result[0]
+
+            # If no chat ID found, log warning and return None
+            self.logger.warning("No Telegram chat ID found for user", user_id=user_id)
+            return None
         
     except Exception as e:
         self.logger.error("Failed to resolve user chat ID", user_id=user_id, error=str(e))

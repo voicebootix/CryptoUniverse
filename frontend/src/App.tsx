@@ -26,6 +26,13 @@ import PortfolioPage from '@/pages/dashboard/PortfolioPage';
 import ExchangesPage from '@/pages/dashboard/ExchangesPage';
 import SettingsPage from '@/pages/dashboard/SettingsPage';
 import AdminPage from '@/pages/dashboard/AdminPage';
+import CreditsUsagePage from '@/pages/dashboard/credits/CreditsUsagePage';
+import CreditsPurchasePage from '@/pages/dashboard/credits/CreditsPurchasePage';
+import StrategyIDE from '@/pages/dashboard/StrategyIDE';
+import StrategyPublisher from '@/pages/dashboard/StrategyPublisher';
+import PublisherDashboard from '@/pages/dashboard/PublisherDashboard';
+import ABTestingLab from '@/pages/dashboard/ABTestingLab';
+import MyStrategies from '@/pages/dashboard/MyStrategies';
 
 // Loading Component
 const LoadingScreen: React.FC = () => (
@@ -130,6 +137,21 @@ const App: React.FC = () => {
               {/* Strategy Marketplace */}
               <Route path="strategies" element={<StrategyMarketplace />} />
               
+              {/* Strategy IDE */}
+              <Route path="strategy-ide" element={<StrategyIDE />} />
+              
+              {/* Strategy Publisher */}
+              <Route path="strategy-publisher" element={<StrategyPublisher />} />
+              
+              {/* Publisher Dashboard */}
+              <Route path="publisher-dashboard" element={<PublisherDashboard />} />
+              
+              {/* A/B Testing Lab */}
+              <Route path="ab-testing" element={<ABTestingLab />} />
+              
+              {/* My Strategies */}
+              <Route path="my-strategies" element={<MyStrategies />} />
+              
               {/* Performance Hub */}
               <Route path="performance" element={<PerformanceHub />} />
               
@@ -144,6 +166,10 @@ const App: React.FC = () => {
               
               {/* Settings */}
               <Route path="settings" element={<SettingsPage />} />
+              
+              {/* Credits Management */}
+              <Route path="credits/usage" element={<CreditsUsagePage />} />
+              <Route path="credits/purchase" element={<CreditsPurchasePage />} />
               
               {/* Admin Panel (Admin only) */}
               <Route path="admin" element={

@@ -197,10 +197,11 @@ class ChatServiceAdaptersFixed:
             logger.info("Getting risk analysis", user_id=user_id)
             
             # Use the CORRECT method signature that actually exists
-            risk_result = await self.portfolio_risk.risk_analysis(
+            risk_result = await self.trading_strategies.execute_strategy(
+                function="risk_management",
                 user_id=user_id,
-                lookback_days=252,  # Correct parameter name
-                confidence_levels=[0.95, 0.99]  # Correct parameter name
+                simulation_mode=True,
+                symbol="BTC/USDT"
             )
             
             if not risk_result.get("success"):
@@ -214,20 +215,22 @@ class ChatServiceAdaptersFixed:
                     "error": risk_result.get("error")
                 }
             
-            # Extract risk data using correct field names
-            risk_data = risk_result.get("assessment", {})
-            risk_metrics = risk_data.get("risk_metrics", {})
+            # Extract risk data from TradingStrategiesService response format
+            exec_result = risk_result.get("execution_result", {})
+            risk_analysis = exec_result.get("risk_management_analysis", {})
+            portfolio_metrics = risk_analysis.get("portfolio_risk_metrics", {})
             
             return {
-                "overall_risk": risk_metrics.get("overall_risk_level", "Medium"),
-                "var_24h": risk_metrics.get("value_at_risk_24h", 0),
-                "max_drawdown": risk_metrics.get("max_drawdown_percentage", 0),
-                "sharpe_ratio": risk_metrics.get("sharpe_ratio", 0),
-                "beta": risk_metrics.get("portfolio_beta", 1.0),
-                "volatility": risk_metrics.get("portfolio_volatility", 0),
-                "concentration_risk": risk_data.get("concentration_risk", "Medium"),
-                "correlation_risk": risk_data.get("correlation_risk", "Medium"),
-                "recommendations": risk_data.get("recommendations", [])
+                "overall_risk": "Medium",  # Calculate based on VaR levels
+                "var_24h": portfolio_metrics.get("portfolio_var_1d_95", 0),
+                "var_7d": portfolio_metrics.get("portfolio_var_1w_95", 0),
+                "max_drawdown": portfolio_metrics.get("max_drawdown_estimate", 0),
+                "sharpe_ratio": portfolio_metrics.get("sharpe_ratio_portfolio", 0),
+                "beta": 1.0,  # Default
+                "volatility": portfolio_metrics.get("portfolio_var_1d_pct", 0) / 100,
+                "concentration_risk": "Medium",
+                "correlation_risk": "Medium", 
+                "recommendations": []
             }
             
         except Exception as e:

@@ -26,6 +26,10 @@ import {
   CreditCard,
   MessageSquare,
   FileText,
+  Code2,
+  Upload,
+  DollarSign,
+  FlaskConical,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -52,9 +56,9 @@ interface NavigationItem {
 }
 
 const navigation: NavigationItem[] = [
-  { 
-    name: "AI Money Manager", 
-    href: "/dashboard", 
+  {
+    name: "AI Money Manager",
+    href: "/dashboard",
     icon: Brain,
     badge: "AI"
   },
@@ -63,6 +67,30 @@ const navigation: NavigationItem[] = [
     href: "/dashboard/strategies",
     icon: Zap,
     badge: "25+",
+  },
+  {
+    name: "Strategy IDE",
+    href: "/dashboard/strategy-ide",
+    icon: Code2,
+    badge: "NEW",
+  },
+  {
+    name: "Strategy Publisher",
+    href: "/dashboard/strategy-publisher",
+    icon: Upload,
+    badge: "EARN",
+  },
+  {
+    name: "Publisher Dashboard",
+    href: "/dashboard/publisher-dashboard",
+    icon: DollarSign,
+    badge: "$",
+  },
+  {
+    name: "A/B Testing Lab",
+    href: "/dashboard/ab-testing",
+    icon: FlaskConical,
+    badge: "BETA",
   },
   {
     name: "Performance Hub",
@@ -75,11 +103,16 @@ const navigation: NavigationItem[] = [
     icon: Users,
     badge: "HOT",
   },
-  { 
-    name: "Admin", 
-    href: "/dashboard/admin", 
-    icon: Shield, 
-    adminOnly: true 
+  {
+    name: "Settings",
+    href: "/dashboard/settings",
+    icon: Settings,
+  },
+  {
+    name: "Admin",
+    href: "/dashboard/admin",
+    icon: Shield,
+    adminOnly: true
   },
 ];
 

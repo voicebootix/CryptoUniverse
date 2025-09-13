@@ -9,12 +9,18 @@ Contains the main service class and all risk management functions:
 """
 
 import asyncio
+import dataclasses
 import json
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 import uuid
 import math
+
+try:
+    from fastapi.encoders import jsonable_encoder
+except ImportError:
+    jsonable_encoder = None
 
 import numpy as np
 import pandas as pd
@@ -973,8 +979,10 @@ class PortfolioRiskService(LoggerMixin):
                 "request_id": request_id,
                 "portfolio_value": portfolio.get("total_value_usd", 0),
                 "risk_metrics": {
-                    "var_95_percent": risk_metrics.var_95,
-                    "var_99_percent": risk_metrics.var_99,
+                    "var_95": risk_metrics.var_95,
+                    "var_95_percent": risk_metrics.var_95 * 100,
+                    "var_99": risk_metrics.var_99,
+                    "var_99_percent": risk_metrics.var_99 * 100,
                     "expected_shortfall": risk_metrics.expected_shortfall,
                     "maximum_drawdown": risk_metrics.maximum_drawdown,
                     "volatility_annual": risk_metrics.volatility_annual,
@@ -1018,12 +1026,12 @@ class PortfolioRiskService(LoggerMixin):
         # Risk-based recommendations
         risk_analysis = assessment_results.get("risk_analysis")
         if risk_analysis:
-            if risk_analysis.get("var_95_percent", 0) > 0.1:
+            if risk_analysis.get("var_95", 0) > 0.1:
                 recommendations.append({
                     "category": "RISK_MANAGEMENT",
-                    "priority": "HIGH",
+                    "priority": "HIGH", 
                     "recommendation": "High portfolio risk detected - consider position size reduction",
-                    "metric": f"VaR 95%: {risk_analysis.get('var_95_percent', 0)*100:.1f}%"
+                    "metric": f"VaR 95%: {risk_analysis.get('var_95_percent', 0):.1f}%"
                 })
             
             if risk_analysis.get("sharpe_ratio", 0) < 1.0:
@@ -1049,7 +1057,7 @@ class PortfolioRiskService(LoggerMixin):
         risk_analysis = assessment_results.get("risk_analysis")
         if risk_analysis:
             sharpe_ratio = risk_analysis.get("sharpe_ratio", 0)
-            var_95 = risk_analysis.get("var_95_percent", 0)
+            var_95 = risk_analysis.get("var_95", 0)
             
             # Sharpe ratio component (0-5 points)
             sharpe_score = min(5, max(0, sharpe_ratio * 2.5))
@@ -1158,20 +1166,33 @@ class PortfolioRiskService(LoggerMixin):
             )
             
             # Generate rebalancing trades if needed
-            if optimization_result.get("rebalancing_required"):
+            if optimization_result.rebalancing_needed:
                 rebalancing_trades = await self._generate_rebalancing_trades(
-                    portfolio, optimization_result["optimal_weights"]
+                    portfolio, optimization_result.weights
                 )
-                optimization_result["rebalancing_trades"] = rebalancing_trades
+                # Update the suggested_trades in the dataclass
+                optimization_result.suggested_trades = rebalancing_trades
             
             # Update service metrics
             self.service_metrics["successful_optimizations"] += 1
+            
+            # Convert OptimizationResult dataclass to dict for serialization
+            if hasattr(optimization_result, '__dataclass_fields__'):
+                if jsonable_encoder:
+                    optimization_result_dict = jsonable_encoder(optimization_result)
+                else:
+                    # Fallback for environments without FastAPI
+                    optimization_result_dict = dataclasses.asdict(optimization_result)
+                    # Handle potential Enums and numpy types
+                    optimization_result_dict = self._make_json_serializable(optimization_result_dict)
+            else:
+                optimization_result_dict = optimization_result
             
             return {
                 "success": True,
                 "function": "optimize_allocation",
                 "request_id": request_id,
-                "optimization_result": optimization_result,
+                "optimization_result": optimization_result_dict,
                 "timestamp": datetime.utcnow().isoformat()
             }
             
@@ -1212,10 +1233,9 @@ class PortfolioRiskService(LoggerMixin):
             if risk_result.get("success"):
                 assessment_result["risk_analysis"] = risk_result["risk_metrics"]
             
-            # Position sizing analysis
-            sizing_result = await self.position_sizing(user_id)
-            if sizing_result.get("success"):
-                assessment_result["position_sizing"] = sizing_result["position_sizing"]
+            # Position sizing analysis - skip for general assessment since no specific opportunity
+            # Note: position_sizing requires a specific trading opportunity
+            # assessment_result["position_sizing"] = "Requires specific trading opportunity"
             
             # Correlation analysis
             correlation_result = await self.correlation_analysis(user_id)
@@ -1267,6 +1287,22 @@ class PortfolioRiskService(LoggerMixin):
         """Generate unique request ID."""
         return f"PRS_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     
+    def _make_json_serializable(self, obj: Any) -> Any:
+        """Convert objects to JSON-serializable format."""
+        if isinstance(obj, dict):
+            return {key: self._make_json_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._make_json_serializable(item) for item in obj]
+        elif hasattr(obj, '__dict__') and hasattr(obj, '__class__'):
+            # Handle Enum types
+            if hasattr(obj.__class__, '__members__'):
+                return obj.value if hasattr(obj, 'value') else str(obj)
+        elif hasattr(obj, 'item'):  # numpy scalar
+            return obj.item()
+        elif hasattr(obj, 'tolist'):  # numpy array
+            return obj.tolist()
+        return obj
+    
     async def _generate_rebalancing_trades(
         self, 
         current_portfolio: Dict[str, Any], 
@@ -1274,7 +1310,8 @@ class PortfolioRiskService(LoggerMixin):
     ) -> List[Dict[str, Any]]:
         """Generate trades needed for rebalancing to optimal weights."""
         trades = []
-        total_value = current_portfolio.get("total_value", 0)
+        # Use consolidated field with fallback to legacy field
+        total_value = current_portfolio.get("total_value_usd", 0) or current_portfolio.get("total_value", 0)
         
         for symbol, optimal_weight in optimal_weights.items():
             current_weight = 0
@@ -1283,7 +1320,8 @@ class PortfolioRiskService(LoggerMixin):
             # Find current position
             for position in current_portfolio.get("positions", []):
                 if position.get("symbol") == symbol:
-                    current_value = position.get("market_value", 0)
+                    # Use consolidated field with fallback to legacy field
+                    current_value = position.get("value_usd", 0) or position.get("market_value", 0)
                     current_weight = current_value / total_value if total_value > 0 else 0
                     break
             

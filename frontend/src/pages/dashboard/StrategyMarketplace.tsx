@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Store,
@@ -13,8 +15,6 @@ import {
   DollarSign,
   Star,
   Play,
-  Pause,
-  Settings,
   Eye,
   Filter,
   Search,
@@ -24,919 +24,748 @@ import {
   Layers,
   Cpu,
   Brain,
-  Flame,
   Crown,
   Rocket,
-  Timer,
   Bot,
-  Crosshair,
-  Gauge,
   Sparkles,
-  LineChart,
+  LineChart as LineChartIcon,
   CheckCircle,
   ShoppingCart,
-  X,
   Users,
   AlertTriangle,
+  RefreshCw,
+  ArrowLeft,
+  Gem,
+  Award,
+  TrendingUp as TrendUp
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
-import { Label } from '@/components/ui/label';
-import { Slider } from '@/components/ui/slider';
-import { formatCurrency, formatPercentage, formatNumber } from '@/lib/utils';
-import { LineChart as RechartsLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { useStrategies } from '@/hooks/useStrategies';
-import { useCredits } from '@/hooks/useCredits';
-import StrategyExecutionModal from '@/components/modals/StrategyExecutionModal';
-import StrategyPurchaseModal from '@/components/modals/StrategyPurchaseModal';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { apiClient } from '@/lib/api/client';
+import { toast } from 'sonner';
+import { formatCurrency, formatPercentage, formatNumber, formatRelativeTime } from '@/lib/utils';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-// Trading Strategies Data based on your backend
-const tradingStrategies = [
-  // Derivatives Trading
-  {
-    id: 'futures_trade',
-    name: 'Futures Trading',
-    category: 'derivatives',
-    icon: Rocket,
-    color: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
-    description: 'Advanced futures contract trading with leverage management',
-    riskLevel: 'High',
-    avgReturn: '45-80%',
-    winRate: 78.5,
-    activeUsers: 247,
-    minCapital: 5000,
-    maxLeverage: '20x',
-    timeframe: '1m-4h',
-    features: ['Leverage control', 'Risk management', 'Auto-liquidation protection'],
-    performance: [
-      { date: '2024-01', return: 12.5 },
-      { date: '2024-02', return: 18.2 },
-      { date: '2024-03', return: -3.1 },
-      { date: '2024-04', return: 24.7 },
-      { date: '2024-05', return: 31.2 },
-      { date: '2024-06', return: 28.9 }
-    ],
-    status: 'active',
-    tier: 'pro'
-  },
-  {
-    id: 'options_trade',
-    name: 'Options Trading',
-    category: 'derivatives',
-    icon: Target,
-    color: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
-    description: 'Sophisticated options strategies with Greeks calculation',
-    riskLevel: 'High',
-    avgReturn: '35-65%',
-    winRate: 82.1,
-    activeUsers: 156,
-    minCapital: 10000,
-    maxLeverage: '10x',
-    timeframe: '1d-1w',
-    features: ['Greeks calculation', 'Volatility analysis', 'Multi-leg strategies'],
-    performance: [
-      { date: '2024-01', return: 8.7 },
-      { date: '2024-02', return: 15.4 },
-      { date: '2024-03', return: 22.1 },
-      { date: '2024-04', return: 18.9 },
-      { date: '2024-05', return: 29.3 },
-      { date: '2024-06', return: 34.8 }
-    ],
-    status: 'active',
-    tier: 'enterprise'
-  },
-  {
-    id: 'perpetual_trade',
-    name: 'Perpetual Swaps',
-    category: 'derivatives',
-    icon: Layers,
-    color: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
-    description: 'Perpetual contract trading with funding rate optimization',
-    riskLevel: 'High',
-    avgReturn: '40-70%',
-    winRate: 75.8,
-    activeUsers: 389,
-    minCapital: 2000,
-    maxLeverage: '50x',
-    timeframe: '5m-1h',
-    features: ['Funding rate arbitrage', 'Cross-margin', 'Auto-deleveraging'],
-    performance: [
-      { date: '2024-01', return: 16.3 },
-      { date: '2024-02', return: 21.7 },
-      { date: '2024-03', return: 12.4 },
-      { date: '2024-04', return: 28.9 },
-      { date: '2024-05', return: 35.2 },
-      { date: '2024-06', return: 41.6 }
-    ],
-    status: 'active',
-    tier: 'pro'
-  },
-  // Spot Algorithms
-  {
-    id: 'spot_momentum',
-    name: 'Spot Momentum',
-    category: 'spot',
-    icon: TrendingUp,
-    color: 'bg-green-500/10 text-green-500 border-green-500/20',
-    description: 'Momentum-based spot trading with trend confirmation',
-    riskLevel: 'Medium',
-    avgReturn: '25-45%',
-    winRate: 84.2,
-    activeUsers: 1247,
-    minCapital: 500,
-    maxLeverage: '3x',
-    timeframe: '15m-4h',
-    features: ['Trend analysis', 'Volume confirmation', 'Breakout detection'],
-    performance: [
-      { date: '2024-01', return: 7.8 },
-      { date: '2024-02', return: 12.3 },
-      { date: '2024-03', return: 18.7 },
-      { date: '2024-04', return: 15.2 },
-      { date: '2024-05', return: 22.9 },
-      { date: '2024-06', return: 26.4 }
-    ],
-    status: 'active',
-    tier: 'basic'
-  },
-  {
-    id: 'mean_reversion',
-    name: 'Mean Reversion',
-    category: 'spot',
-    icon: Activity,
-    color: 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20',
-    description: 'Statistical mean reversion with Bollinger Band analysis',
-    riskLevel: 'Medium',
-    avgReturn: '20-35%',
-    winRate: 87.6,
-    activeUsers: 892,
-    minCapital: 1000,
-    maxLeverage: '2x',
-    timeframe: '1h-1d',
-    features: ['Statistical analysis', 'Bollinger Bands', 'RSI confirmation'],
-    performance: [
-      { date: '2024-01', return: 5.4 },
-      { date: '2024-02', return: 9.8 },
-      { date: '2024-03', return: 14.2 },
-      { date: '2024-04', return: 11.7 },
-      { date: '2024-05', return: 18.9 },
-      { date: '2024-06', return: 21.3 }
-    ],
-    status: 'active',
-    tier: 'basic'
-  },
-  {
-    id: 'breakout_strategy',
-    name: 'Breakout Trading',
-    category: 'spot',
-    icon: Zap,
-    color: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
-    description: 'Support/resistance breakout with volume validation',
-    riskLevel: 'Medium',
-    avgReturn: '30-50%',
-    winRate: 79.3,
-    activeUsers: 634,
-    minCapital: 750,
-    maxLeverage: '4x',
-    timeframe: '30m-2h',
-    features: ['S/R levels', 'Volume analysis', 'False breakout filter'],
-    performance: [
-      { date: '2024-01', return: 9.1 },
-      { date: '2024-02', return: 16.8 },
-      { date: '2024-03', return: 23.4 },
-      { date: '2024-04', return: 19.7 },
-      { date: '2024-05', return: 27.2 },
-      { date: '2024-06', return: 32.6 }
-    ],
-    status: 'active',
-    tier: 'pro'
-  },
-  // Algorithmic Trading
-  {
-    id: 'pairs_trading',
-    name: 'Pairs Trading',
-    category: 'algorithmic',
-    icon: Layers,
-    color: 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20',
-    description: 'Statistical arbitrage between correlated pairs',
-    riskLevel: 'Low',
-    avgReturn: '15-25%',
-    winRate: 91.2,
-    activeUsers: 445,
-    minCapital: 2000,
-    maxLeverage: '2x',
-    timeframe: '4h-1d',
-    features: ['Correlation analysis', 'Z-score calculation', 'Market neutral'],
-    performance: [
-      { date: '2024-01', return: 3.8 },
-      { date: '2024-02', return: 6.2 },
-      { date: '2024-03', return: 9.7 },
-      { date: '2024-04', return: 12.4 },
-      { date: '2024-05', return: 15.8 },
-      { date: '2024-06', return: 18.9 }
-    ],
-    status: 'active',
-    tier: 'pro'
-  },
-  {
-    id: 'statistical_arbitrage',
-    name: 'Statistical Arbitrage',
-    category: 'algorithmic',
-    icon: BarChart3,
-    color: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
-    description: 'Advanced statistical models for price inefficiencies',
-    riskLevel: 'Medium',
-    avgReturn: '28-42%',
-    winRate: 85.7,
-    activeUsers: 278,
-    minCapital: 5000,
-    maxLeverage: '3x',
-    timeframe: '1h-8h',
-    features: ['ML models', 'Price prediction', 'Risk parity'],
-    performance: [
-      { date: '2024-01', return: 6.9 },
-      { date: '2024-02', return: 11.4 },
-      { date: '2024-03', return: 17.8 },
-      { date: '2024-04', return: 24.2 },
-      { date: '2024-05', return: 29.7 },
-      { date: '2024-06', return: 35.1 }
-    ],
-    status: 'active',
-    tier: 'enterprise'
-  },
-  {
-    id: 'market_making',
-    name: 'Market Making',
-    category: 'algorithmic',
-    icon: Crosshair,
-    color: 'bg-rose-500/10 text-rose-500 border-rose-500/20',
-    description: 'Automated market making with spread optimization',
-    riskLevel: 'Low',
-    avgReturn: '18-30%',
-    winRate: 88.9,
-    activeUsers: 167,
-    minCapital: 10000,
-    maxLeverage: '2x',
-    timeframe: '1s-5m',
-    features: ['Spread optimization', 'Inventory management', 'Latency arbitrage'],
-    performance: [
-      { date: '2024-01', return: 4.2 },
-      { date: '2024-02', return: 7.8 },
-      { date: '2024-03', return: 11.6 },
-      { date: '2024-04', return: 15.9 },
-      { date: '2024-05', return: 20.3 },
-      { date: '2024-06', return: 24.7 }
-    ],
-    status: 'active',
-    tier: 'enterprise'
-  },
-  {
-    id: 'scalping_strategy',
-    name: 'Scalping',
-    category: 'algorithmic',
-    icon: Timer,
-    color: 'bg-red-500/10 text-red-500 border-red-500/20',
-    description: 'High-frequency scalping with micro-profit targeting',
-    riskLevel: 'Medium',
-    avgReturn: '35-55%',
-    winRate: 76.4,
-    activeUsers: 523,
-    minCapital: 1000,
-    maxLeverage: '10x',
-    timeframe: '1s-1m',
-    features: ['HFT execution', 'Micro-profits', 'Low latency'],
-    performance: [
-      { date: '2024-01', return: 11.7 },
-      { date: '2024-02', return: 19.3 },
-      { date: '2024-03', return: 26.8 },
-      { date: '2024-04', return: 31.2 },
-      { date: '2024-05', return: 38.7 },
-      { date: '2024-06', return: 44.9 }
-    ],
-    status: 'active',
-    tier: 'pro'
-  }
-];
+interface MarketplaceStrategy {
+  strategy_id: string;
+  name: string;
+  description: string;
+  category: string;
+  subcategory?: string;
+  
+  // Publisher Info
+  publisher_id: string;
+  publisher_name: string;
+  publisher_verified: boolean;
+  publisher_avatar_url?: string;
+  
+  // Pricing & Access
+  credit_cost_monthly: number;
+  credit_cost_per_execution: number;
+  pricing_model: 'monthly' | 'per_execution' | 'free';
+  tier: 'free' | 'basic' | 'pro' | 'enterprise';
+  
+  // Performance Metrics (Real from backend)
+  total_subscribers: number;
+  win_rate: number;
+  total_trades: number;
+  avg_return_per_trade: number;
+  max_drawdown: number;
+  sharpe_ratio?: number;
+  volatility: number;
+  
+  // Risk Assessment
+  risk_level: 'very_low' | 'low' | 'medium' | 'high' | 'very_high';
+  complexity_score: number;
+  min_account_balance: number;
+  
+  // Availability & Status
+  is_active: boolean;
+  is_backtested: boolean;
+  backtest_required_days: number;
+  last_performance_update: string;
+  
+  // User Status
+  user_has_purchased: boolean;
+  user_can_afford: boolean;
+  requires_higher_tier: boolean;
+  
+  // Performance History
+  performance_chart: Array<{
+    date: string;
+    cumulative_return: number;
+    daily_return: number;
+  }>;
+  
+  // Tags & Features
+  tags: string[];
+  features: string[];
+  supported_exchanges: string[];
+  min_trade_amount: number;
+}
 
-const categories = [
-  { id: 'all', name: 'All Strategies', count: tradingStrategies.length },
-  { id: 'derivatives', name: 'Derivatives', count: tradingStrategies.filter(s => s.category === 'derivatives').length },
-  { id: 'spot', name: 'Spot Trading', count: tradingStrategies.filter(s => s.category === 'spot').length },
-  { id: 'algorithmic', name: 'Algorithmic', count: tradingStrategies.filter(s => s.category === 'algorithmic').length },
-];
+interface MarketplaceFilters {
+  search: string;
+  category: string;
+  risk_level: string;
+  pricing_model: string;
+  min_win_rate: number;
+  max_credit_cost: number;
+  sort_by: 'performance' | 'popularity' | 'newest' | 'price_low' | 'price_high';
+}
 
-const tiers = [
-  { id: 'all', name: 'All Tiers' },
-  { id: 'basic', name: 'Basic', color: 'bg-gray-500' },
-  { id: 'pro', name: 'Pro', color: 'bg-blue-500' },
-  { id: 'enterprise', name: 'Enterprise', color: 'bg-purple-500' },
-];
+interface UserCredits {
+  available_credits: number;
+  total_credits: number;
+  profit_potential: number;
+}
 
 const StrategyMarketplace: React.FC = () => {
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [selectedTier, setSelectedTier] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState('winRate');
-  const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
-  const [showExecutionModal, setShowExecutionModal] = useState(false);
-  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
-  const [strategyToExecute, setStrategyToExecute] = useState<any>(null);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   
-  const { strategies, availableStrategies, loading, executing, actions } = useStrategies();
-  const { balance, profitPotential, actions: creditActions } = useCredits();
-
-  const filteredStrategies = tradingStrategies.filter(strategy => {
-    const matchesCategory = selectedCategory === 'all' || strategy.category === selectedCategory;
-    const matchesTier = selectedTier === 'all' || strategy.tier === selectedTier;
-    const matchesSearch = strategy.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         strategy.description.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    return matchesCategory && matchesTier && matchesSearch;
-  }).sort((a, b) => {
-    if (sortBy === 'winRate') return b.winRate - a.winRate;
-    if (sortBy === 'return') return parseFloat(b.avgReturn.split('-')[1]) - parseFloat(a.avgReturn.split('-')[1]);
-    if (sortBy === 'users') return b.activeUsers - a.activeUsers;
-    return 0;
+  const [selectedStrategy, setSelectedStrategy] = useState<MarketplaceStrategy | null>(null);
+  const [showStrategyModal, setShowStrategyModal] = useState(false);
+  const [filters, setFilters] = useState<MarketplaceFilters>({
+    search: '',
+    category: 'all',
+    risk_level: 'all',
+    pricing_model: 'all',
+    min_win_rate: 0,
+    max_credit_cost: 1000,
+    sort_by: 'performance'
   });
 
-  // Use the helper functions defined above
+  // Fetch marketplace strategies with real API
+  const { data: strategies, isLoading: strategiesLoading, error: strategiesError } = useQuery({
+    queryKey: ['marketplace-strategies', filters],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      
+      if (filters.search) params.append('search', filters.search);
+      if (filters.category !== 'all') params.append('category', filters.category);
+      if (filters.risk_level !== 'all') params.append('risk_level', filters.risk_level);
+      if (filters.pricing_model !== 'all') params.append('pricing_model', filters.pricing_model);
+      if (filters.min_win_rate > 0) params.append('min_win_rate', filters.min_win_rate.toString());
+      if (filters.max_credit_cost < 1000) params.append('max_credit_cost', filters.max_credit_cost.toString());
+      params.append('sort_by', filters.sort_by);
+      params.append('include_performance', 'true');
+      
+      const response = await apiClient.get(`/strategies/marketplace?${params}`);
+      return response.data.strategies as MarketplaceStrategy[];
+    },
+    refetchInterval: 60000, // Refresh every minute
+    retry: 2,
+    staleTime: 30000
+  });
+
+  // Fetch user credits
+  const { data: userCredits } = useQuery({
+    queryKey: ['user-credits'],
+    queryFn: async () => {
+      const response = await apiClient.get('/credits/balance');
+      return response.data as UserCredits;
+    },
+    refetchInterval: 30000,
+    retry: 2
+  });
+
+  // Purchase strategy mutation
+  const purchaseStrategyMutation = useMutation({
+    mutationFn: async (strategyId: string) => {
+      const response = await apiClient.post(`/strategies/purchase`, { strategy_id: strategyId });
+      return response.data;
+    },
+    onSuccess: (data, strategyId) => {
+      toast.success(`Strategy purchased successfully! ${data.credits_deducted} credits deducted.`);
+      queryClient.invalidateQueries({ queryKey: ['marketplace-strategies'] });
+      queryClient.invalidateQueries({ queryKey: ['user-credits'] });
+      queryClient.invalidateQueries({ queryKey: ['user-strategy-portfolio'] });
+      setShowStrategyModal(false);
+    },
+    onError: (error: any) => {
+      const message = error.response?.data?.detail || error.message;
+      toast.error(`Purchase failed: ${message}`);
+    }
+  });
+
+  const getStrategyIcon = (category: string) => {
+    const icons: Record<string, React.ReactNode> = {
+      'derivatives': <Rocket className="h-5 w-5 text-orange-500" />,
+      'spot': <TrendingUp className="h-5 w-5 text-green-500" />,
+      'algorithmic': <Bot className="h-5 w-5 text-blue-500" />,
+      'portfolio': <Target className="h-5 w-5 text-purple-500" />,
+      'ai_powered': <Brain className="h-5 w-5 text-pink-500" />,
+      'arbitrage': <Activity className="h-5 w-5 text-yellow-500" />
+    };
+    return icons[category.toLowerCase()] || <BarChart3 className="h-5 w-5 text-gray-500" />;
+  };
+
+  const getTierBadge = (tier: string) => {
+    const configs = {
+      free: { variant: 'secondary' as const, icon: Star, label: 'Free' },
+      basic: { variant: 'outline' as const, icon: Zap, label: 'Basic' },
+      pro: { variant: 'default' as const, icon: Crown, label: 'Pro' },
+      enterprise: { variant: 'destructive' as const, icon: Gem, label: 'Enterprise' }
+    };
+    
+    const config = configs[tier as keyof typeof configs] || configs.basic;
+    const Icon = config.icon;
+    
+    return (
+      <Badge variant={config.variant} className="flex items-center gap-1">
+        <Icon className="h-3 w-3" />
+        {config.label}
+      </Badge>
+    );
+  };
+
+  const getRiskColor = (risk: string) => {
+    const colors: Record<string, string> = {
+      very_low: 'text-green-600',
+      low: 'text-green-500',
+      medium: 'text-yellow-500',
+      high: 'text-orange-500',
+      very_high: 'text-red-500'
+    };
+    return colors[risk] || 'text-gray-500';
+  };
+
+  const handlePurchaseStrategy = (strategy: MarketplaceStrategy) => {
+    if (strategy.user_has_purchased) {
+      toast.info('You already own this strategy');
+      return;
+    }
+    
+    if (!strategy.user_can_afford) {
+      const requiredCredits = strategy.pricing_model === 'per_execution' 
+        ? strategy.credit_cost_per_execution 
+        : strategy.credit_cost_monthly || 0;
+      toast.error(`Insufficient credits. You need ${requiredCredits} credits but only have ${userCredits?.available_credits || 0}.`);
+      return;
+    }
+    
+    if (strategy.requires_higher_tier) {
+      toast.error('This strategy requires a higher subscription tier');
+      return;
+    }
+    
+    purchaseStrategyMutation.mutate(strategy.strategy_id);
+  };
+
+  if (strategiesError) {
+    return (
+      <div className="container mx-auto p-6">
+        <div className="text-center py-12">
+          <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold mb-2">Failed to Load Marketplace</h3>
+          <p className="text-muted-foreground mb-4">
+            {strategiesError instanceof Error ? strategiesError.message : 'Unable to fetch strategies'}
+          </p>
+          <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['marketplace-strategies'] })}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="container mx-auto p-6 space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <Store className="h-8 w-8 text-primary" />
-            Strategy Marketplace
-            <Crown className="h-6 w-6 text-yellow-500" />
-          </h1>
-          <p className="text-muted-foreground">
-            Professional trading strategies with institutional-grade performance
-          </p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center gap-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Dashboard
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold flex items-center gap-3">
+              <Store className="h-8 w-8 text-primary" />
+              Strategy Marketplace
+            </h1>
+            <p className="text-muted-foreground">
+              Discover and purchase professional trading strategies
+            </p>
+          </div>
         </div>
-
+        
         <div className="flex items-center gap-3">
-          <Button variant="outline" className="gap-2">
-            <Filter className="h-4 w-4" />
-            Advanced Filters
-          </Button>
-          <Button className="gap-2">
-            <Sparkles className="h-4 w-4" />
-            Create Strategy
+          {userCredits && (
+            <div className="text-right">
+              <div className="text-sm text-muted-foreground">Available Credits</div>
+              <div className="text-lg font-bold text-green-500">
+                {formatNumber(userCredits.available_credits)}
+              </div>
+            </div>
+          )}
+          <Button onClick={() => navigate('/dashboard/my-strategies')}>
+            <Eye className="h-4 w-4 mr-2" />
+            My Strategies
           </Button>
         </div>
       </div>
 
-      {/* Search and Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search strategies..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
-        </div>
-        <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Category" />
-          </SelectTrigger>
-          <SelectContent>
-            {categories.map(category => (
-              <SelectItem key={category.id} value={category.id}>
-                {category.name} ({category.count})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={selectedTier} onValueChange={setSelectedTier}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="Tier" />
-          </SelectTrigger>
-          <SelectContent>
-            {tiers.map(tier => (
-              <SelectItem key={tier.id} value={tier.id}>
-                {tier.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={sortBy} onValueChange={setSortBy}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="Sort by" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="winRate">Win Rate</SelectItem>
-            <SelectItem value="return">Return</SelectItem>
-            <SelectItem value="users">Users</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {/* Filters */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Filter Strategies</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-6">
+            <div className="relative">
+              <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search strategies..."
+                value={filters.search}
+                onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                className="pl-10"
+              />
+            </div>
+            
+            <Select value={filters.category} onValueChange={(value) => setFilters(prev => ({ ...prev, category: value }))}>
+              <SelectTrigger>
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                <SelectItem value="derivatives">Derivatives</SelectItem>
+                <SelectItem value="spot">Spot Trading</SelectItem>
+                <SelectItem value="algorithmic">Algorithmic</SelectItem>
+                <SelectItem value="portfolio">Portfolio</SelectItem>
+                <SelectItem value="ai_powered">AI Powered</SelectItem>
+                <SelectItem value="arbitrage">Arbitrage</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            <Select value={filters.risk_level} onValueChange={(value) => setFilters(prev => ({ ...prev, risk_level: value }))}>
+              <SelectTrigger>
+                <SelectValue placeholder="Risk Level" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Risk Levels</SelectItem>
+                <SelectItem value="very_low">Very Low</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="very_high">Very High</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            <Select value={filters.pricing_model} onValueChange={(value) => setFilters(prev => ({ ...prev, pricing_model: value }))}>
+              <SelectTrigger>
+                <SelectValue placeholder="Pricing" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Pricing</SelectItem>
+                <SelectItem value="free">Free</SelectItem>
+                <SelectItem value="monthly">Monthly</SelectItem>
+                <SelectItem value="per_execution">Per Trade</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            <Select value={filters.sort_by} onValueChange={(value) => setFilters(prev => ({ ...prev, sort_by: value as any }))}>
+              <SelectTrigger>
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="performance">Best Performance</SelectItem>
+                <SelectItem value="popularity">Most Popular</SelectItem>
+                <SelectItem value="newest">Newest</SelectItem>
+                <SelectItem value="price_low">Price: Low to High</SelectItem>
+                <SelectItem value="price_high">Price: High to Low</SelectItem>
+              </SelectContent>
+            </Select>
+            
+            <Button
+              variant="outline"
+              onClick={() => setFilters({
+                search: '',
+                category: 'all',
+                risk_level: 'all',
+                pricing_model: 'all',
+                min_win_rate: 0,
+                max_credit_cost: 1000,
+                sort_by: 'performance'
+              })}
+            >
+              Clear Filters
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Strategy Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredStrategies.map((strategy, index) => (
-          <motion.div
-            key={strategy.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.1 }}
-          >
-            <Card className="relative overflow-hidden hover:shadow-lg transition-shadow cursor-pointer" 
-                  onClick={() => setSelectedStrategy(strategy.id)}>
-              <div 
-                className="absolute top-0 left-0 w-full h-1" 
-                style={{ backgroundColor: strategy.color.match(/text-(\w+)-500/)?.[0]?.replace('text-', '') }}
-              />
-              
+      {strategiesLoading ? (
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <Card key={i} className="animate-pulse">
               <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className={`p-2 rounded ${strategy.color}`}>
-                      <strategy.icon className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <CardTitle className="text-lg">{strategy.name}</CardTitle>
-                      <CardDescription className="capitalize">{strategy.category}</CardDescription>
-                    </div>
-                  </div>
-                  {getTierBadge(strategy.tier)}
-                </div>
+                <div className="h-6 bg-muted rounded" />
+                <div className="h-4 bg-muted rounded w-3/4" />
               </CardHeader>
-              
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                  {strategy.description}
-                </p>
-
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <div className="text-muted-foreground">Win Rate</div>
-                    <div className="font-medium text-green-500">{strategy.winRate}%</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Avg Return</div>
-                    <div className="font-medium">{strategy.avgReturn}</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Risk Level</div>
-                    <div className={`font-medium ${getRiskColor(strategy.riskLevel)}`}>
-                      {strategy.riskLevel}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Users</div>
-                    <div className="font-medium">{formatNumber(strategy.activeUsers)}</div>
-                  </div>
-                </div>
-
+              <CardContent>
                 <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>Performance</span>
-                    <span className="text-green-500">+{strategy.performance[strategy.performance.length - 1].return}%</span>
-                  </div>
-                  <Progress value={strategy.winRate} className="h-2" />
-                </div>
-
-                <div className="flex flex-wrap gap-1">
-                  {strategy.features.slice(0, 2).map((feature, idx) => (
-                    <Badge key={idx} variant="secondary" className="text-xs">
-                      {feature}
-                    </Badge>
-                  ))}
-                  {strategy.features.length > 2 && (
-                    <Badge variant="secondary" className="text-xs">
-                      +{strategy.features.length - 2} more
-                    </Badge>
-                  )}
-                </div>
-
-                <div className="flex gap-2">
-                  <Button 
-                    size="sm" 
-                    className="flex-1"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      // Check if user owns this strategy or needs to purchase
-                      const creditCost = 25; // Would come from API
-                      if (balance.available_credits >= creditCost) {
-                        setStrategyToExecute(strategy);
-                        setShowExecutionModal(true);
-                      } else {
-                        // Show purchase modal
-                        setStrategyToExecute({
-                          ...strategy,
-                          credit_cost: creditCost
-                        });
-                        setShowPurchaseModal(true);
-                      }
-                    }}
-                    disabled={executing}
-                  >
-                    <Play className="h-3 w-3 mr-1" />
-                    {balance.available_credits >= 25 ? 'Execute' : 'Purchase'}
-                  </Button>
-                  <Button size="sm" variant="outline">
-                    <Eye className="h-3 w-3" />
-                  </Button>
+                  <div className="h-4 bg-muted rounded" />
+                  <div className="h-4 bg-muted rounded w-1/2" />
                 </div>
               </CardContent>
             </Card>
-          </motion.div>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : strategies && strategies.length > 0 ? (
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {strategies.map((strategy) => (
+            <motion.div
+              key={strategy.strategy_id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <Card 
+                className="hover:shadow-lg transition-all cursor-pointer h-full"
+                onClick={() => {
+                  setSelectedStrategy(strategy);
+                  setShowStrategyModal(true);
+                }}
+              >
+                <CardHeader>
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      {getStrategyIcon(strategy.category)}
+                      <div>
+                        <CardTitle className="text-lg">{strategy.name}</CardTitle>
+                        <CardDescription>
+                          by {strategy.publisher_name}
+                          {strategy.publisher_verified && (
+                            <CheckCircle className="inline h-4 w-4 ml-1 text-blue-500" />
+                          )}
+                        </CardDescription>
+                      </div>
+                    </div>
+                    {getTierBadge(strategy.tier)}
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">{strategy.category}</Badge>
+                    <Badge variant="outline" className={getRiskColor(strategy.risk_level)}>
+                      {strategy.risk_level.replace('_', ' ')} risk
+                    </Badge>
+                  </div>
+                </CardHeader>
 
-      {filteredStrategies.length === 0 && (
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted-foreground line-clamp-2">
+                    {strategy.description}
+                  </p>
+
+                  {/* Performance Metrics */}
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <div className="text-muted-foreground">Win Rate</div>
+                      <div className="font-bold text-green-500">
+                        {formatPercentage(strategy.win_rate)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Subscribers</div>
+                      <div className="font-bold">{formatNumber(strategy.total_subscribers)}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Avg Return</div>
+                      <div className="font-bold text-blue-500">
+                        {formatPercentage(strategy.avg_return_per_trade)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Max Drawdown</div>
+                      <div className="font-bold text-red-500">
+                        {formatPercentage(strategy.max_drawdown)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Performance Chart */}
+                  {strategy.performance_chart && strategy.performance_chart.length > 0 && (
+                    <div className="h-20">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={strategy.performance_chart}>
+                          <Line
+                            type="monotone"
+                            dataKey="cumulative_return"
+                            stroke="#22c55e"
+                            strokeWidth={2}
+                            dot={false}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+
+                  <Separator />
+
+                  {/* Pricing and Action */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      {strategy.pricing_model === 'free' ? (
+                        <span className="text-lg font-bold text-green-500">Free</span>
+                      ) : strategy.pricing_model === 'monthly' ? (
+                        <div>
+                          <span className="text-lg font-bold">
+                            {formatNumber(strategy.credit_cost_monthly)} credits
+                          </span>
+                          <span className="text-sm text-muted-foreground">/month</span>
+                        </div>
+                      ) : (
+                        <div>
+                          <span className="text-lg font-bold">
+                            {formatNumber(strategy.credit_cost_per_execution)} credits
+                          </span>
+                          <span className="text-sm text-muted-foreground">/trade</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <Button
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handlePurchaseStrategy(strategy);
+                      }}
+                      disabled={strategy.user_has_purchased || !strategy.user_can_afford || purchaseStrategyMutation.isPending}
+                      className={strategy.user_has_purchased ? 'bg-green-500' : ''}
+                    >
+                      {strategy.user_has_purchased ? (
+                        <>
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                          Owned
+                        </>
+                      ) : purchaseStrategyMutation.isPending ? (
+                        'Purchasing...'
+                      ) : !strategy.user_can_afford ? (
+                        'Need Credits'
+                      ) : (
+                        <>
+                          <ShoppingCart className="h-4 w-4 mr-2" />
+                          {strategy.pricing_model === 'free' ? 'Add' : 'Purchase'}
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))}
+        </div>
+      ) : (
         <div className="text-center py-12">
           <Store className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-medium">No strategies found</h3>
-          <p className="text-muted-foreground">Try adjusting your filters or search terms</p>
-        </div>
-      )}
-
-      {/* Strategy Execution Modal */}
-      {showExecutionModal && strategyToExecute && (
-        <StrategyExecutionModal
-          isOpen={showExecutionModal}
-          onClose={() => {
-            setShowExecutionModal(false);
-            setStrategyToExecute(null);
-          }}
-          strategy={strategyToExecute}
-          executing={executing}
-        />
-      )}
-
-      {/* Strategy Purchase Modal */}
-      {showPurchaseModal && strategyToExecute && (
-        <StrategyPurchaseModal
-          isOpen={showPurchaseModal}
-          onClose={() => {
-            setShowPurchaseModal(false);
-            setStrategyToExecute(null);
-          }}
-          strategy={strategyToExecute}
-        />
-      )}
-
-      {/* Strategy Detail Modal */}
-      <AnimatePresence>
-        {selectedStrategy && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
-            onClick={() => setSelectedStrategy(null)}
+          <h3 className="text-lg font-semibold mb-2">No strategies found</h3>
+          <p className="text-muted-foreground mb-4">
+            Try adjusting your filters or search terms
+          </p>
+          <Button
+            onClick={() => setFilters(prev => ({ ...prev, search: '', category: 'all', risk_level: 'all' }))}
           >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-background rounded-lg max-w-6xl w-full max-h-[90vh] overflow-auto"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <StrategyDetailContent 
-                strategy={tradingStrategies.find(s => s.id === selectedStrategy)} 
-                onClose={() => setSelectedStrategy(null)}
-                onExecute={(strategy) => {
-                  setSelectedStrategy(null);
-                  setStrategyToExecute(strategy);
-                  setShowExecutionModal(true);
-                }}
-                onPurchase={(strategy) => {
-                  setSelectedStrategy(null);
-                  setStrategyToExecute(strategy);
-                  setShowPurchaseModal(true);
-                }}
-                userCredits={balance.available_credits}
-              />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
-// Helper functions moved outside component
-const getRiskColor = (risk: string) => {
-  switch (risk) {
-    case 'Low': return 'text-green-500';
-    case 'Medium': return 'text-yellow-500';
-    case 'High': return 'text-red-500';
-    default: return 'text-gray-500';
-  }
-};
-
-const getTierBadge = (tier: string) => {
-  const tierConfig = tiers.find(t => t.id === tier);
-  if (!tierConfig) return null;
-  
-  return (
-    <Badge className={`${tierConfig.color} text-white`}>
-      {tierConfig.name}
-    </Badge>
-  );
-};
-
-// Strategy Detail Content Component
-interface StrategyDetailContentProps {
-  strategy: any;
-  onClose: () => void;
-  onExecute: (strategy: any) => void;
-  onPurchase: (strategy: any) => void;
-  userCredits: number;
-}
-
-const StrategyDetailContent: React.FC<StrategyDetailContentProps> = ({
-  strategy,
-  onClose,
-  onExecute,
-  onPurchase,
-  userCredits
-}) => {
-  if (!strategy) return null;
-
-  const canAfford = userCredits >= 25; // Mock credit cost
-  const hasStrategy = Math.random() > 0.5; // Mock ownership
-
-  return (
-    <div className="p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <div className={`p-3 rounded-lg ${strategy.color}`}>
-            <strategy.icon className="h-8 w-8" />
-          </div>
-          <div>
-            <h2 className="text-3xl font-bold">{strategy.name}</h2>
-            <div className="flex items-center gap-2 mt-2">
-              <Badge variant="secondary" className="capitalize">
-                {strategy.category} Trading
-              </Badge>
-              {getTierBadge(strategy.tier)}
-              <Badge variant="outline" className={getRiskColor(strategy.riskLevel)}>
-                {strategy.riskLevel} Risk
-              </Badge>
-            </div>
-          </div>
+            Clear Filters
+          </Button>
         </div>
-        <Button variant="ghost" size="icon" onClick={onClose}>
-          <X className="h-6 w-6" />
-        </Button>
-      </div>
+      )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Performance Chart */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <LineChart className="h-5 w-5" />
-                Performance History
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
-                  <RechartsLineChart data={strategy.performance}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
-                    <YAxis />
-                    <Tooltip 
-                      formatter={(value) => [`${value}%`, 'Return']}
-                      labelFormatter={(label) => `Month: ${label}`}
-                    />
-                    <Line 
-                      type="monotone" 
-                      dataKey="return" 
-                      stroke="#22c55e" 
-                      strokeWidth={2}
-                      dot={{ fill: '#22c55e', strokeWidth: 2 }}
-                    />
-                  </RechartsLineChart>
-                </ResponsiveContainer>
-              </div>
-            </CardContent>
-          </Card>
+      {/* Strategy Details Modal */}
+      <Dialog open={showStrategyModal} onOpenChange={setShowStrategyModal}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          {selectedStrategy && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-3">
+                  {getStrategyIcon(selectedStrategy.category)}
+                  {selectedStrategy.name}
+                  {getTierBadge(selectedStrategy.tier)}
+                </DialogTitle>
+                <DialogDescription>
+                  by {selectedStrategy.publisher_name}
+                  {selectedStrategy.publisher_verified && (
+                    <CheckCircle className="inline h-4 w-4 ml-1 text-blue-500" />
+                  )}
+                </DialogDescription>
+              </DialogHeader>
 
-          {/* Strategy Description */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Strategy Overview</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-muted-foreground">
-                {strategy.description} This advanced trading algorithm leverages cutting-edge 
-                market analysis techniques combined with risk management protocols to maximize 
-                returns while protecting capital.
-              </p>
-              
-              <div className="space-y-3">
-                <h4 className="font-semibold">Key Features:</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {strategy.features.map((feature: string, index: number) => (
-                    <div key={index} className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4 text-green-500" />
-                      <span className="text-sm">{feature}</span>
+              <div className="space-y-6">
+                <p className="text-muted-foreground">{selectedStrategy.description}</p>
+
+                {/* Key Metrics */}
+                <div className="grid gap-4 md:grid-cols-4">
+                  <div className="text-center p-4 bg-muted/50 rounded-lg">
+                    <div className="text-2xl font-bold text-green-500">
+                      {formatPercentage(selectedStrategy.win_rate)}
                     </div>
-                  ))}
+                    <div className="text-sm text-muted-foreground">Win Rate</div>
+                  </div>
+                  <div className="text-center p-4 bg-muted/50 rounded-lg">
+                    <div className="text-2xl font-bold">
+                      {formatNumber(selectedStrategy.total_subscribers)}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Subscribers</div>
+                  </div>
+                  <div className="text-center p-4 bg-muted/50 rounded-lg">
+                    <div className="text-2xl font-bold text-blue-500">
+                      {formatPercentage(selectedStrategy.avg_return_per_trade)}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Avg Return</div>
+                  </div>
+                  <div className="text-center p-4 bg-muted/50 rounded-lg">
+                    <div className="text-2xl font-bold text-red-500">
+                      {formatPercentage(selectedStrategy.max_drawdown)}
+                    </div>
+                    <div className="text-sm text-muted-foreground">Max Drawdown</div>
+                  </div>
                 </div>
-              </div>
 
-              <div className="pt-4 border-t">
-                <h4 className="font-semibold mb-3">Trading Specifications:</h4>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {/* Performance Chart */}
+                {selectedStrategy.performance_chart && selectedStrategy.performance_chart.length > 0 && (
                   <div>
-                    <div className="text-sm text-muted-foreground">Timeframe</div>
-                    <div className="font-medium">{strategy.timeframe}</div>
+                    <h4 className="font-semibold mb-3">Performance History</h4>
+                    <div className="h-64">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={selectedStrategy.performance_chart}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" />
+                          <YAxis />
+                          <Tooltip />
+                          <Line
+                            type="monotone"
+                            dataKey="cumulative_return"
+                            stroke="#22c55e"
+                            strokeWidth={2}
+                            name="Cumulative Return"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
+                )}
+
+                {/* Strategy Details */}
+                <div className="grid gap-6 md:grid-cols-2">
                   <div>
-                    <div className="text-sm text-muted-foreground">Min Capital</div>
-                    <div className="font-medium">{formatCurrency(strategy.minCapital)}</div>
+                    <h4 className="font-semibold mb-3">Strategy Details</h4>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Category:</span>
+                        <span>{selectedStrategy.category}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Risk Level:</span>
+                        <span className={getRiskColor(selectedStrategy.risk_level)}>
+                          {selectedStrategy.risk_level.replace('_', ' ')}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Total Trades:</span>
+                        <span>{formatNumber(selectedStrategy.total_trades)}</span>
+                      </div>
+                      {(selectedStrategy.sharpe_ratio !== null && selectedStrategy.sharpe_ratio !== undefined && Number.isFinite(selectedStrategy.sharpe_ratio)) && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Sharpe Ratio:</span>
+                          <span>{selectedStrategy.sharpe_ratio.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Min Account:</span>
+                        <span>{formatCurrency(selectedStrategy.min_account_balance)}</span>
+                      </div>
+                    </div>
                   </div>
+
                   <div>
-                    <div className="text-sm text-muted-foreground">Max Leverage</div>
-                    <div className="font-medium">{strategy.maxLeverage}</div>
+                    <h4 className="font-semibold mb-3">Features</h4>
+                    <div className="space-y-2">
+                      {selectedStrategy.features.map((feature, index) => (
+                        <div key={index} className="flex items-center gap-2 text-sm">
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                          <span>{feature}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
+                </div>
+
+                {/* Tags */}
+                {selectedStrategy.tags && selectedStrategy.tags.length > 0 && (
                   <div>
-                    <div className="text-sm text-muted-foreground">Category</div>
-                    <div className="font-medium capitalize">{strategy.category}</div>
+                    <h4 className="font-semibold mb-3">Tags</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedStrategy.tags.map((tag, index) => (
+                        <Badge key={index} variant="outline">{tag}</Badge>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+                )}
 
-          {/* Risk Analysis */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Shield className="h-5 w-5" />
-                Risk Analysis
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="text-center p-4 bg-muted/50 rounded-lg">
-                  <div className="text-2xl font-bold text-red-500">
-                    {strategy.riskLevel === 'High' ? '8.5' : strategy.riskLevel === 'Medium' ? '5.2' : '2.8'}
-                  </div>
-                  <div className="text-sm text-muted-foreground">Risk Score</div>
-                  <div className="text-xs mt-1">(1-10 scale)</div>
-                </div>
-                <div className="text-center p-4 bg-muted/50 rounded-lg">
-                  <div className="text-2xl font-bold text-blue-500">
-                    {strategy.riskLevel === 'High' ? '15.2%' : strategy.riskLevel === 'Medium' ? '8.7%' : '4.1%'}
-                  </div>
-                  <div className="text-sm text-muted-foreground">Max Drawdown</div>
-                  <div className="text-xs mt-1">Historical</div>
-                </div>
-                <div className="text-center p-4 bg-muted/50 rounded-lg">
-                  <div className="text-2xl font-bold text-green-500">
-                    {(strategy.winRate / 20).toFixed(1)}
-                  </div>
-                  <div className="text-sm text-muted-foreground">Sharpe Ratio</div>
-                  <div className="text-xs mt-1">Risk-adjusted</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Sidebar */}
-        <div className="space-y-6">
-          {/* Key Metrics */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Performance Metrics</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Win Rate</span>
-                  <span className="font-bold text-green-500">{strategy.winRate}%</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Avg Return</span>
-                  <span className="font-bold">{strategy.avgReturn}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Active Users</span>
-                  <span className="font-bold">{formatNumber(strategy.activeUsers)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Risk Level</span>
-                  <span className={`font-bold ${getRiskColor(strategy.riskLevel)}`}>
-                    {strategy.riskLevel}
-                  </span>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t">
-                <div className="text-sm text-muted-foreground mb-2">Performance Trend</div>
-                <div className="flex items-center gap-2">
-                  <TrendingUp className="h-4 w-4 text-green-500" />
-                  <span className="text-sm font-medium text-green-500">
-                    +{strategy.performance[strategy.performance.length - 1].return}% Last Month
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* User Reviews */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Star className="h-5 w-5" />
-                User Reviews
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <div className="flex">
-                    {[1,2,3,4,5].map((star) => (
-                      <Star key={star} className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                    ))}
-                  </div>
-                  <span className="text-sm text-muted-foreground">4.8 (127 reviews)</span>
-                </div>
-                
-                <div className="space-y-3">
-                  <div className="border-l-2 border-green-500 pl-3">
-                    <div className="text-sm font-medium">CryptoTrader_Pro</div>
-                    <div className="text-xs text-muted-foreground">2 days ago</div>
-                    <div className="text-sm mt-1">
-                      "Excellent strategy! Made 15% profit in just one week."
+                {/* Purchase Section */}
+                <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+                  <div>
+                    <div className="font-semibold">
+                      {selectedStrategy.pricing_model === 'free' ? 'Free Strategy' : 
+                       selectedStrategy.pricing_model === 'monthly' 
+                         ? `${formatNumber(selectedStrategy.credit_cost_monthly)} credits/month`
+                         : `${formatNumber(selectedStrategy.credit_cost_per_execution)} credits/trade`}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {selectedStrategy.user_has_purchased ? 'You own this strategy' :
+                       !selectedStrategy.user_can_afford ? (() => {
+                         const requiredCredits = selectedStrategy.pricing_model === 'per_execution' 
+                           ? selectedStrategy.credit_cost_per_execution 
+                           : selectedStrategy.credit_cost_monthly || 0;
+                         return `Need ${requiredCredits - (userCredits?.available_credits || 0)} more credits`;
+                       })() :
+                       selectedStrategy.requires_higher_tier ? 'Requires higher subscription tier' :
+                       'Ready to purchase'}
                     </div>
                   </div>
                   
-                  <div className="border-l-2 border-blue-500 pl-3">
-                    <div className="text-sm font-medium">InvestorAlpha</div>
-                    <div className="text-xs text-muted-foreground">1 week ago</div>
-                    <div className="text-sm mt-1">
-                      "Consistent returns with good risk management."
-                    </div>
-                  </div>
+                  <Button
+                    onClick={() => handlePurchaseStrategy(selectedStrategy)}
+                    disabled={selectedStrategy.user_has_purchased || !selectedStrategy.user_can_afford || purchaseStrategyMutation.isPending}
+                    className={selectedStrategy.user_has_purchased ? 'bg-green-500' : ''}
+                    size="lg"
+                  >
+                    {selectedStrategy.user_has_purchased ? (
+                      <>
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Owned
+                      </>
+                    ) : purchaseStrategyMutation.isPending ? (
+                      'Purchasing...'
+                    ) : !selectedStrategy.user_can_afford ? (
+                      'Insufficient Credits'
+                    ) : (
+                      <>
+                        <ShoppingCart className="h-4 w-4 mr-2" />
+                        {selectedStrategy.pricing_model === 'free' ? 'Add to Portfolio' : 'Purchase Strategy'}
+                      </>
+                    )}
+                  </Button>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Action Buttons */}
-          <Card>
-            <CardContent className="pt-6">
-              <div className="space-y-3">
-                {hasStrategy ? (
-                  <Button 
-                    className="w-full" 
-                    onClick={() => onExecute(strategy)}
-                  >
-                    <Play className="h-4 w-4 mr-2" />
-                    Execute Strategy
-                  </Button>
-                ) : canAfford ? (
-                  <Button 
-                    className="w-full" 
-                    onClick={() => onPurchase({...strategy, credit_cost: 25})}
-                  >
-                    <ShoppingCart className="h-4 w-4 mr-2" />
-                    Purchase for 25 Credits
-                  </Button>
-                ) : (
-                  <Button className="w-full" disabled>
-                    <AlertTriangle className="h-4 w-4 mr-2" />
-                    Insufficient Credits
-                  </Button>
-                )}
-                
-                <Button variant="outline" className="w-full">
-                  <Users className="h-4 w-4 mr-2" />
-                  Join Community
-                </Button>
-              </div>
-              
-              <div className="mt-4 p-3 bg-muted/50 rounded-lg">
-                <div className="text-xs text-muted-foreground text-center">
-                  💡 Pro Tip: Start with paper trading to test the strategy risk-free
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
