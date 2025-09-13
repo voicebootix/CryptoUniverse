@@ -4104,6 +4104,55 @@ class TradingStrategiesService(LoggerMixin):
                 "timestamp": datetime.utcnow().isoformat()
             }
 
+    def _calculate_portfolio_sharpe(self, positions: List[Dict]) -> float:
+        """Calculate portfolio Sharpe ratio."""
+        try:
+            if not positions or len(positions) == 0:
+                return 0.0
+                
+            # Calculate portfolio returns (simplified)
+            total_return = sum(pos.get('return_pct', 0) for pos in positions) / len(positions)
+            total_volatility = sum(pos.get('volatility', 0.05) for pos in positions) / len(positions)
+            
+            # Risk-free rate assumption (3% annually = 0.082% daily)
+            risk_free_rate = 0.0003  
+            
+            if total_volatility == 0:
+                return 0.0
+                
+            sharpe_ratio = (total_return - risk_free_rate) / total_volatility
+            return max(-3.0, min(sharpe_ratio, 3.0))  # Cap between -3 and 3
+            
+        except Exception as e:
+            self.logger.error(f"Portfolio Sharpe calculation failed: {e}")
+            return 0.0
+    
+    def _calculate_portfolio_sortino(self, positions: List[Dict]) -> float:
+        """Calculate portfolio Sortino ratio (focuses on downside volatility)."""
+        try:
+            if not positions or len(positions) == 0:
+                return 0.0
+                
+            # Calculate downside deviation (simplified)
+            negative_returns = [pos.get('return_pct', 0) for pos in positions if pos.get('return_pct', 0) < 0]
+            
+            if not negative_returns:
+                return 2.0  # Good performance if no negative returns
+                
+            downside_volatility = (sum(r**2 for r in negative_returns) / len(negative_returns)) ** 0.5
+            total_return = sum(pos.get('return_pct', 0) for pos in positions) / len(positions)
+            risk_free_rate = 0.0003
+            
+            if downside_volatility == 0:
+                return 2.0
+                
+            sortino_ratio = (total_return - risk_free_rate) / downside_volatility  
+            return max(-3.0, min(sortino_ratio, 3.0))  # Cap between -3 and 3
+            
+        except Exception as e:
+            self.logger.error(f"Portfolio Sortino calculation failed: {e}")
+            return 0.0
+
     async def _estimate_daily_volatility(self, symbol: str) -> float:
         """Calculate real daily volatility using historical price data."""
         try:

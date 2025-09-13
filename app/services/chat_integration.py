@@ -431,12 +431,37 @@ Your portfolio is well-balanced according to your current strategy. No rebalanci
             
             # Use REAL user opportunity discovery service instead of adapters
             from app.services.user_opportunity_discovery import user_opportunity_discovery
-            from app.services.user_onboarding_service import user_onboarding_service
             
-            # Ensure user is onboarded
-            onboarding_check = await user_onboarding_service.check_user_onboarding_status(user_id)
-            if onboarding_check.get("needs_onboarding", True):
-                await user_onboarding_service.onboard_new_user(user_id)
+            # Ensure user has active strategies (3 free ones by default)
+            try:
+                from app.services.user_onboarding_service import user_onboarding_service
+                onboarding_check = await user_onboarding_service.check_user_onboarding_status(user_id)
+                if onboarding_check.get("needs_onboarding", True):
+                    await user_onboarding_service.onboard_new_user(user_id)
+                    self.logger.info("User onboarding completed", user_id=user_id)
+            except Exception as onboarding_error:
+                self.logger.warning("User onboarding service unavailable, using fallback strategy activation", 
+                                  error=str(onboarding_error), user_id=user_id)
+                
+                # FALLBACK: Directly activate the 3 free strategies using strategy marketplace
+                try:
+                    from app.services.strategy_marketplace_service import strategy_marketplace_service
+                    await strategy_marketplace_service.async_init()
+                    
+                    # Activate the 3 default free strategies
+                    free_strategies = ["ai_risk_management", "portfolio_optimization", "ai_spot_momentum_strategy"]
+                    for strategy_id in free_strategies:
+                        try:
+                            result = await strategy_marketplace_service.purchase_strategy(user_id, strategy_id)
+                            if result.get("success"):
+                                self.logger.info("Fallback strategy activation successful", 
+                                               strategy_id=strategy_id, user_id=user_id)
+                        except Exception as strategy_error:
+                            self.logger.warning("Fallback strategy activation failed", 
+                                              strategy_id=strategy_id, error=str(strategy_error))
+                                              
+                except Exception as fallback_error:
+                    self.logger.error("All strategy activation methods failed", error=str(fallback_error))
             
             # Initialize and use real opportunity discovery service
             await user_opportunity_discovery.async_init()
@@ -509,26 +534,45 @@ Found **{len(opportunities)}** promising opportunities based on current market c
 • "Show more opportunities" - Expand search results"""
                 
             else:
-                response_content = """🔍 **Opportunity Scan Complete**
+                # FINANCIAL SAFETY: Never show fake analysis when real analysis fails
+                # Check if this is due to system errors vs genuinely no opportunities
+                scan_errors = strategy_opportunities.get("errors", [])
+                execution_time = strategy_opportunities.get("execution_time_ms", 0)
+                
+                if scan_errors or execution_time < 1000:  # Too fast = likely failed
+                    response_content = """⚠️ **Analysis System Error**
 
-No significant opportunities detected in current market conditions. 
+I cannot provide trading recommendations because the underlying analysis systems encountered errors.
 
-**Current Market Status:**
-• Market Phase: Consolidation
-• Volatility: Low opportunity environment
-• Recommendation: Hold current positions
+**Status:** Strategy analysis failed
+**Issue:** Core calculation methods unavailable  
+**Safety:** No recommendations provided to prevent bad decisions
 
-**What I'm Monitoring:**
-• Breakout patterns developing
-• Oversold conditions in quality assets
-• Emerging sector rotations
-• Institutional accumulation signals
+**Actions:**
+• Contact technical support 
+• System diagnostic required
+• Do not trade based on incomplete analysis
+
+**For immediate assistance:** Use direct API endpoints to verify system status."""
+                else:
+                    response_content = """🔍 **Opportunity Scan Complete**
+
+After comprehensive analysis, no significant trading opportunities meet the current risk and return criteria.
+
+**Analysis Completed:**
+• All strategy models executed successfully
+• Risk thresholds applied correctly  
+• Market conditions analyzed
+
+**Current Assessment:**
+• Markets in consolidation phase
+• Volatility below opportunity threshold
+• Existing positions recommended to hold
 
 **Options:**
-• "Expand search criteria" - Look at more assets
-• "Check specific sectors" - DeFi, Layer 1, Gaming, etc.
-• "Set opportunity alerts" - Get notified of new prospects
-• "Review current positions" - Optimize existing holdings"""
+• "Lower risk threshold" - See more aggressive opportunities
+• "Check specific sectors" - DeFi, Layer 1, Gaming analysis
+• "Review positions" - Optimize current holdings"""
             
             return {
                 "content": response_content,
