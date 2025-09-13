@@ -4371,12 +4371,11 @@ class TradingStrategiesService(LoggerMixin):
             self.logger.error(f"Position fetch failed: {e}")
             return {"error": str(e)}
 
-    def _calculate_new_liquidation_price(self, position: Dict[str, Any], adjustment: float = 0) -> float:
+    def _calculate_new_liquidation_price(self, position: Dict[str, Any], adjustment: float = 0, target_leverage: float = None) -> float:
         """Calculate new liquidation price after leverage adjustment."""
         try:
             # Extract values from position dict with validation
             entry_price = position.get('entry_price')
-            leverage = position.get('leverage')
             side = position.get('side')
 
             # Validate required fields
@@ -4384,6 +4383,17 @@ class TradingStrategiesService(LoggerMixin):
                 self.logger.error(f"Invalid or missing entry_price: {entry_price}")
                 return 0
 
+            if side not in {"long", "short"}:
+                self.logger.error(f"Invalid side value: {side}, must be 'long' or 'short'")
+                return 0
+
+            # Use target_leverage if provided, otherwise fallback to position leverage
+            if target_leverage is not None:
+                leverage = target_leverage
+            else:
+                leverage = position.get('leverage')
+
+            # Validate leverage
             if leverage is None or not isinstance(leverage, (int, float)):
                 self.logger.error(f"Invalid or missing leverage: {leverage}")
                 return 0
@@ -4392,11 +4402,7 @@ class TradingStrategiesService(LoggerMixin):
                 self.logger.error(f"Invalid leverage value: {leverage}, must be > 1")
                 return 0  # No liquidation risk for unlevered positions
 
-            if side not in {"long", "short"}:
-                self.logger.error(f"Invalid side value: {side}, must be 'long' or 'short'")
-                return 0
-
-            # Calculate liquidation distance
+            # Calculate liquidation distance using target_leverage
             liquidation_distance = 1.0 / leverage
 
             # Apply adjustment if provided
@@ -4685,18 +4691,21 @@ class TradingStrategiesService(LoggerMixin):
 
             options = []
 
-            for i, strike_offset in enumerate([-0.1, -0.05, 0, 0.05, 0.1]):
+            # Calculate dynamic expiry date (90 days from now)
+            expiry_str = (datetime.utcnow() + timedelta(days=90)).date().isoformat()
+
+            for _, strike_offset in enumerate([-0.1, -0.05, 0, 0.05, 0.1]):
                 strike = base_price * (1 + strike_offset)
                 options.append({
                     "strike": strike,
                     "type": "call",
-                    "expiry": "2024-12-31",
+                    "expiry": expiry_str,
                     "premium": base_price * 0.02 * (1 + abs(strike_offset))
                 })
                 options.append({
                     "strike": strike,
                     "type": "put",
-                    "expiry": "2024-12-31",
+                    "expiry": expiry_str,
                     "premium": base_price * 0.02 * (1 + abs(strike_offset))
                 })
 
