@@ -396,7 +396,7 @@ const StrategyIDE: React.FC = () => {
             />
             {lastSaved && (
               <div className="text-sm text-muted-foreground">
-                Saved {formatRelativeTime(lastSaved.toISOString())}
+                Saved {formatRelativeTime(lastSaved)}
               </div>
             )}
           </div>

@@ -32,6 +32,7 @@ import StrategyIDE from '@/pages/dashboard/StrategyIDE';
 import StrategyPublisher from '@/pages/dashboard/StrategyPublisher';
 import PublisherDashboard from '@/pages/dashboard/PublisherDashboard';
 import ABTestingLab from '@/pages/dashboard/ABTestingLab';
+import MyStrategies from '@/pages/dashboard/MyStrategies';
 
 // Loading Component
 const LoadingScreen: React.FC = () => (
@@ -147,6 +148,9 @@ const App: React.FC = () => {
               
               {/* A/B Testing Lab */}
               <Route path="ab-testing" element={<ABTestingLab />} />
+              
+              {/* My Strategies */}
+              <Route path="my-strategies" element={<MyStrategies />} />
               
               {/* Performance Hub */}
               <Route path="performance" element={<PerformanceHub />} />

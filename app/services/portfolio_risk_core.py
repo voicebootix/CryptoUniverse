@@ -9,6 +9,7 @@ Contains the main service class and all risk management functions:
 """
 
 import asyncio
+import dataclasses
 import json
 import time
 from datetime import datetime, timedelta
@@ -1168,11 +1169,14 @@ class PortfolioRiskService(LoggerMixin):
             # Update service metrics
             self.service_metrics["successful_optimizations"] += 1
             
+            # Convert OptimizationResult dataclass to dict for serialization
+            optimization_result_dict = dataclasses.asdict(optimization_result) if hasattr(optimization_result, '__dataclass_fields__') else optimization_result
+            
             return {
                 "success": True,
                 "function": "optimize_allocation",
                 "request_id": request_id,
-                "optimization_result": optimization_result,
+                "optimization_result": optimization_result_dict,
                 "timestamp": datetime.utcnow().isoformat()
             }
             
@@ -1275,7 +1279,8 @@ class PortfolioRiskService(LoggerMixin):
     ) -> List[Dict[str, Any]]:
         """Generate trades needed for rebalancing to optimal weights."""
         trades = []
-        total_value = current_portfolio.get("total_value", 0)
+        # Use consolidated field with fallback to legacy field
+        total_value = current_portfolio.get("total_value_usd", 0) or current_portfolio.get("total_value", 0)
         
         for symbol, optimal_weight in optimal_weights.items():
             current_weight = 0
@@ -1284,7 +1289,8 @@ class PortfolioRiskService(LoggerMixin):
             # Find current position
             for position in current_portfolio.get("positions", []):
                 if position.get("symbol") == symbol:
-                    current_value = position.get("market_value", 0)
+                    # Use consolidated field with fallback to legacy field
+                    current_value = position.get("value_usd", 0) or position.get("market_value", 0)
                     current_weight = current_value / total_value if total_value > 0 else 0
                     break
             

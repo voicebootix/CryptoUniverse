@@ -107,7 +107,6 @@ interface PublishingRequirements {
 const StrategyPublisher: React.FC = () => {
   const [selectedTab, setSelectedTab] = useState<'submissions' | 'create' | 'requirements'>('submissions');
   const [selectedSubmission, setSelectedSubmission] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   
   // Form state for new submission
   const [submissionForm, setSubmissionForm] = useState({
@@ -238,15 +237,15 @@ const StrategyPublisher: React.FC = () => {
       return;
     }
     
-    setIsSubmitting(true);
     try {
       // This would be connected to a strategy ID from the IDE
       await submitStrategyMutation.mutateAsync({
         ...submissionForm,
         strategy_id: 'temp-strategy-id' // Would come from strategy IDE
       });
-    } finally {
-      setIsSubmitting(false);
+    } catch (error) {
+      // Error handling is already in the mutation
+      console.error('Submission failed:', error);
     }
   };
 
@@ -433,7 +432,7 @@ const StrategyPublisher: React.FC = () => {
                             {submission.status.replace('_', ' ').toUpperCase()}
                           </Badge>
                           <span className="text-xs text-muted-foreground">
-                            {formatRelativeTime(submission.created_at)}
+                            {formatRelativeTime(new Date(submission.created_at))}
                           </span>
                         </div>
 
@@ -671,14 +670,14 @@ const StrategyPublisher: React.FC = () => {
                 </div>
                 <Button
                   onClick={handleSubmitStrategy}
-                  disabled={isSubmitting || !submissionForm.name || !submissionForm.description}
+                  disabled={submitStrategyMutation.isPending || !submissionForm.name || !submissionForm.description}
                 >
-                  {isSubmitting ? (
+                  {submitStrategyMutation.isPending ? (
                     <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
                   ) : (
                     <Send className="h-4 w-4 mr-2" />
                   )}
-                  Submit for Review
+                  {submitStrategyMutation.isPending ? 'Submitting...' : 'Submit for Review'}
                 </Button>
               </div>
             </CardContent>

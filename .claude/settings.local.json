@@ -4,10 +4,13 @@
       "Bash(git show-branch:*)",
       "Bash(python test_chat_endpoints.py)",
       "Bash(curl:*)",
-      "Bash(python:*)",
-      "Bash(git add:*)"
+      "Bash(python:./scripts/*)",
+      "Bash(python:./app/tests/*)"
     ],
     "deny": [],
-    "ask": []
+    "ask": [
+      "Bash(python:*)",
+      "Bash(git add:*)"
+    ]
   }
 }

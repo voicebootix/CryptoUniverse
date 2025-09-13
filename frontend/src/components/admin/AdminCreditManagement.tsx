@@ -170,9 +170,9 @@ const AdminCreditManagement: React.FC = () => {
       return;
     }
 
-    const amount = parseInt(creditAmount);
-    if (amount <= 0 || amount > 10000) {
-      toast.error('Credit amount must be between 1 and 10,000');
+    const amount = parseInt(creditAmount.trim(), 10);
+    if (!Number.isInteger(amount) || Number.isNaN(amount) || amount < 1 || amount > 10000) {
+      toast.error('Credit amount must be a valid integer between 1 and 10,000');
       return;
     }
 
@@ -477,7 +477,13 @@ const AdminCreditManagement: React.FC = () => {
                   <div>
                     <div className="text-sm text-muted-foreground">Last Activity</div>
                     <div className="text-sm">
-                      {formatRelativeTime(selectedUser.last_activity)}
+                      {selectedUser.last_activity ? 
+                        (() => {
+                          const date = new Date(selectedUser.last_activity);
+                          return isNaN(date.getTime()) ? 'No activity' : formatRelativeTime(date);
+                        })() 
+                        : 'No activity'
+                      }
                     </div>
                   </div>
                 </div>

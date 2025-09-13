@@ -28,7 +28,7 @@ import {
   Rocket,
   Bot,
   Sparkles,
-  LineChart,
+  LineChart as LineChartIcon,
   CheckCircle,
   ShoppingCart,
   Users,
