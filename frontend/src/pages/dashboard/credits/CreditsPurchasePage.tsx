@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -56,6 +56,11 @@ const CreditsPurchasePage: React.FC = () => {
   const [paymentData, setPaymentData] = useState<any>(null);
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'checking' | 'confirmed' | 'failed'>('pending');
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
+  
+  // Refs to track polling intervals and timeouts for cleanup
+  const statusPollRef = useRef<NodeJS.Timeout | null>(null);
+  const statusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const paymentMethods: PaymentMethod[] = [
     {
@@ -130,38 +135,104 @@ const CreditsPurchasePage: React.FC = () => {
     }
   });
   
-  // Countdown timer for payment expiry
+  // Countdown timer for payment expiry with proper cleanup
   useEffect(() => {
+    // Clear existing countdown timer
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    
     if (timeRemaining > 0) {
-      const timer = setInterval(() => {
+      countdownTimerRef.current = setInterval(() => {
         setTimeRemaining(prev => {
           if (prev <= 1) {
-            clearInterval(timer);
+            if (countdownTimerRef.current) {
+              clearInterval(countdownTimerRef.current);
+              countdownTimerRef.current = null;
+            }
             return 0;
           }
           return prev - 1;
         });
       }, 1000);
-      return () => clearInterval(timer);
     }
+    
+    // Cleanup on dependency change or unmount
+    return () => {
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+    };
   }, [timeRemaining]);
   
-  // Status polling for payment confirmation
+  // Cleanup all timers on component unmount
+  useEffect(() => {
+    return () => {
+      // Clear status polling interval
+      if (statusPollRef.current) {
+        clearInterval(statusPollRef.current);
+        statusPollRef.current = null;
+      }
+      
+      // Clear status polling timeout
+      if (statusTimeoutRef.current) {
+        clearTimeout(statusTimeoutRef.current);
+        statusTimeoutRef.current = null;
+      }
+      
+      // Clear countdown timer
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+    };
+  }, []);
+  
+  // Status polling for payment confirmation with proper cleanup
   const startStatusPolling = (paymentId: string) => {
-    const pollInterval = setInterval(async () => {
+    // Clear any existing polling intervals and timeouts
+    if (statusPollRef.current) {
+      clearInterval(statusPollRef.current);
+      statusPollRef.current = null;
+    }
+    if (statusTimeoutRef.current) {
+      clearTimeout(statusTimeoutRef.current);
+      statusTimeoutRef.current = null;
+    }
+    
+    // Start new polling interval
+    statusPollRef.current = setInterval(async () => {
       try {
         const response = await apiClient.get(`/credits/payment-status/${paymentId}`);
         const status = response.data.status;
         
         if (status === 'confirmed') {
           setPaymentStatus('confirmed');
-          clearInterval(pollInterval);
+          // Clear polling since payment is confirmed
+          if (statusPollRef.current) {
+            clearInterval(statusPollRef.current);
+            statusPollRef.current = null;
+          }
+          if (statusTimeoutRef.current) {
+            clearTimeout(statusTimeoutRef.current);
+            statusTimeoutRef.current = null;
+          }
           // Invalidate credits cache to refresh balance
           queryClient.invalidateQueries({ queryKey: ['user-credits'] });
           toast.success('Payment confirmed! Credits added to your account.');
         } else if (status === 'failed') {
           setPaymentStatus('failed');
-          clearInterval(pollInterval);
+          // Clear polling since payment failed
+          if (statusPollRef.current) {
+            clearInterval(statusPollRef.current);
+            statusPollRef.current = null;
+          }
+          if (statusTimeoutRef.current) {
+            clearTimeout(statusTimeoutRef.current);
+            statusTimeoutRef.current = null;
+          }
           toast.error('Payment failed. Please try again.');
         }
       } catch (error) {
@@ -171,7 +242,13 @@ const CreditsPurchasePage: React.FC = () => {
     }, 10000); // Poll every 10 seconds
     
     // Stop polling after 1 hour
-    setTimeout(() => clearInterval(pollInterval), 3600000);
+    statusTimeoutRef.current = setTimeout(() => {
+      if (statusPollRef.current) {
+        clearInterval(statusPollRef.current);
+        statusPollRef.current = null;
+      }
+      statusTimeoutRef.current = null;
+    }, 3600000);
   };
   
   // Manual status check
