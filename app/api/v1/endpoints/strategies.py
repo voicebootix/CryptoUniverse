@@ -812,3 +812,283 @@ async def execute_strategy_trades(
                 user_id=user_id,
                 signal=signal
             )
+
+
+# Strategy Publisher Endpoints
+
+class StrategySubmissionRequest(BaseModel):
+    strategy_id: str
+    name: str
+    description: str
+    category: str
+    risk_level: str
+    expected_return_range: List[float]
+    required_capital: int
+    pricing_model: str
+    price_amount: Optional[float] = None
+    profit_share_percentage: Optional[int] = None
+    tags: List[str] = []
+    target_audience: List[str] = []
+    complexity_level: str = "intermediate"
+    support_level: str = "standard"
+
+
+@router.get("/publisher/submissions")
+async def get_user_strategy_submissions(
+    current_user: User = Depends(get_current_user)
+):
+    """Get user's strategy submissions for publishing."""
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:publisher:submissions",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # Return mock data for now - in a real system this would query a strategy_submissions table
+        submissions = [
+            {
+                "id": "sub_001",
+                "name": "AI Momentum Strategy",
+                "description": "Advanced momentum-based trading strategy using machine learning",
+                "category": "algorithmic",
+                "risk_level": "medium",
+                "expected_return_range": [15.0, 35.0],
+                "required_capital": 5000,
+                "pricing_model": "profit_share",
+                "profit_share_percentage": 25,
+                "status": "submitted",
+                "created_at": "2025-01-10T10:00:00Z",
+                "submitted_at": "2025-01-10T10:30:00Z",
+                "backtest_results": {
+                    "total_return": 28.5,
+                    "sharpe_ratio": 1.85,
+                    "max_drawdown": -12.3,
+                    "win_rate": 0.67,
+                    "total_trades": 156,
+                    "profit_factor": 2.1,
+                    "period_days": 365
+                },
+                "validation_results": {
+                    "is_valid": True,
+                    "security_score": 92,
+                    "performance_score": 85,
+                    "code_quality_score": 88,
+                    "overall_score": 88
+                },
+                "tags": ["momentum", "ai", "crypto"],
+                "target_audience": ["intermediate", "advanced"],
+                "complexity_level": "intermediate",
+                "documentation_quality": 85,
+                "support_level": "standard"
+            },
+            {
+                "id": "sub_002", 
+                "name": "Mean Reversion Pro",
+                "description": "Statistical mean reversion strategy with dynamic thresholds",
+                "category": "mean_reversion",
+                "risk_level": "low",
+                "expected_return_range": [8.0, 18.0],
+                "required_capital": 2000,
+                "pricing_model": "subscription",
+                "price_amount": 49.99,
+                "status": "approved",
+                "created_at": "2025-01-05T14:00:00Z",
+                "submitted_at": "2025-01-05T14:30:00Z",
+                "reviewed_at": "2025-01-08T09:15:00Z",
+                "reviewer_feedback": "Excellent strategy with solid backtesting results. Well documented.",
+                "backtest_results": {
+                    "total_return": 16.2,
+                    "sharpe_ratio": 2.1,
+                    "max_drawdown": -8.7,
+                    "win_rate": 0.72,
+                    "total_trades": 203,
+                    "profit_factor": 1.8,
+                    "period_days": 365
+                },
+                "validation_results": {
+                    "is_valid": True,
+                    "security_score": 95,
+                    "performance_score": 91,
+                    "code_quality_score": 93,
+                    "overall_score": 93
+                },
+                "tags": ["mean_reversion", "statistical", "low_risk"],
+                "target_audience": ["beginner", "intermediate"],
+                "complexity_level": "beginner",
+                "documentation_quality": 95,
+                "support_level": "premium"
+            }
+        ]
+        
+        return {
+            "success": True,
+            "submissions": submissions,
+            "total_count": len(submissions)
+        }
+        
+    except Exception as e:
+        logger.error("Failed to get strategy submissions", error=str(e), user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get submissions: {str(e)}"
+        )
+
+
+@router.get("/publisher/requirements")
+async def get_publishing_requirements(
+    current_user: User = Depends(get_current_user)
+):
+    """Get strategy publishing requirements."""
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:publisher:requirements",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        requirements = {
+            "min_backtest_period": 90,
+            "min_sharpe_ratio": 1.2,
+            "min_win_rate": 0.55,
+            "max_drawdown": 0.25,
+            "min_total_trades": 50,
+            "min_security_score": 80,
+            "min_code_quality_score": 75,
+            "min_overall_score": 80,
+            "required_documentation": [
+                "Strategy Description",
+                "Risk Management Rules", 
+                "Entry/Exit Conditions",
+                "Backtest Results",
+                "Performance Analysis",
+                "Code Documentation"
+            ]
+        }
+        
+        return requirements
+        
+    except Exception as e:
+        logger.error("Failed to get publishing requirements", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get requirements: {str(e)}"
+        )
+
+
+@router.post("/publisher/submit")
+async def submit_strategy_for_review(
+    request: StrategySubmissionRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Submit a strategy for review and potential publication."""
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:publisher:submit",
+        limit=10,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # In a real system, this would create a new submission record
+        submission_id = f"sub_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        
+        logger.info(
+            "Strategy submitted for review",
+            user_id=str(current_user.id),
+            strategy_name=request.name,
+            submission_id=submission_id,
+            category=request.category,
+            risk_level=request.risk_level
+        )
+        
+        return {
+            "success": True,
+            "submission_id": submission_id,
+            "message": f"Strategy '{request.name}' submitted for review successfully",
+            "estimated_review_time": "3-5 business days"
+        }
+        
+    except Exception as e:
+        logger.error("Strategy submission failed", error=str(e), user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Submission failed: {str(e)}"
+        )
+
+
+@router.post("/publisher/withdraw/{submission_id}")
+async def withdraw_strategy_submission(
+    submission_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Withdraw a strategy submission from review."""
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:publisher:withdraw",
+        limit=20,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # In a real system, this would update the submission status to 'withdrawn'
+        logger.info(
+            "Strategy submission withdrawn",
+            user_id=str(current_user.id),
+            submission_id=submission_id
+        )
+        
+        return {
+            "success": True,
+            "message": "Submission withdrawn successfully"
+        }
+        
+    except Exception as e:
+        logger.error("Failed to withdraw submission", error=str(e), user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to withdraw submission: {str(e)}"
+        )
+
+
+@router.put("/publisher/submissions/{submission_id}")
+async def update_strategy_submission(
+    submission_id: str,
+    updates: Dict[str, Any],
+    current_user: User = Depends(get_current_user)
+):
+    """Update a strategy submission."""
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:publisher:update",
+        limit=20,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # In a real system, this would update the submission record
+        logger.info(
+            "Strategy submission updated",
+            user_id=str(current_user.id),
+            submission_id=submission_id,
+            updates=list(updates.keys())
+        )
+        
+        return {
+            "success": True,
+            "message": "Submission updated successfully"
+        }
+        
+    except Exception as e:
+        logger.error("Failed to update submission", error=str(e), user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update submission: {str(e)}"
+        )
