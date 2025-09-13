@@ -524,20 +524,19 @@ async def _get_chat_id_for_user(self, user_id: str) -> Optional[str]:
         from app.core.database import AsyncSessionLocal
         
         async with AsyncSessionLocal() as db:
-        
-        # Query user's telegram chat ID from database
-        user_chat = await db.execute(
-            "SELECT telegram_chat_id FROM users WHERE id = %s AND telegram_chat_id IS NOT NULL",
-            (user_id,)
-        )
-        result = user_chat.fetchone()
-        
-        if result:
-            return result[0]
-        
-        # If no chat ID found, log warning and return None
-        self.logger.warning("No Telegram chat ID found for user", user_id=user_id)
-        return None
+            # Query user's telegram chat ID from database
+            user_chat = await db.execute(
+                "SELECT telegram_chat_id FROM users WHERE id = %s AND telegram_chat_id IS NOT NULL",
+                (user_id,)
+            )
+            result = user_chat.fetchone()
+
+            if result:
+                return result[0]
+
+            # If no chat ID found, log warning and return None
+            self.logger.warning("No Telegram chat ID found for user", user_id=user_id)
+            return None
         
     except Exception as e:
         self.logger.error("Failed to resolve user chat ID", user_id=user_id, error=str(e))

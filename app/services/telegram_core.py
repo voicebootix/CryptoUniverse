@@ -1097,7 +1097,17 @@ class TelegramCommanderService(LoggerMixin):
             
             # Resolve recipient to chat_id and send directly
             from app.services.telegram_commander import RecipientType
-            recipient_type = RecipientType(recipient)
+
+            try:
+                recipient_type = RecipientType(recipient)
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": f"Invalid recipient type: {recipient}",
+                    "function": "send_alert",
+                    "request_id": request_id
+                }
+
             chat_id = await self._get_chat_id_for_recipient(recipient_type)
 
             if not chat_id:
@@ -1164,7 +1174,17 @@ class TelegramCommanderService(LoggerMixin):
             
             # Resolve recipient to chat_id and send directly
             from app.services.telegram_commander import RecipientType
-            recipient_type = RecipientType(recipient)
+
+            try:
+                recipient_type = RecipientType(recipient)
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": f"Invalid recipient type: {recipient}",
+                    "function": "portfolio_update",
+                    "request_id": request_id
+                }
+
             chat_id = await self._get_chat_id_for_recipient(recipient_type)
 
             if not chat_id:
