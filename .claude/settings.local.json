@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(git show-branch:*)",
-      "Bash(python test_chat_endpoints.py)"
+      "Bash(python test_chat_endpoints.py)",
+      "Bash(curl:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

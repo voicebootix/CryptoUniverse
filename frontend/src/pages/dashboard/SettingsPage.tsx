@@ -14,7 +14,8 @@ import {
   Eye,
   EyeOff,
   Save,
-  AlertTriangle
+  AlertTriangle,
+  MessageSquare
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -30,6 +31,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { useAuthStore } from '@/store/authStore';
 import { usePaperModeStore } from '@/store/paperModeStore';
 import { apiClient } from '@/lib/api/client';
+import TelegramCenter from './TelegramCenter';
 
 interface UserSettings {
   profile: {
@@ -231,7 +233,7 @@ const SettingsPage: React.FC = () => {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="profile" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               Profile
@@ -251,6 +253,10 @@ const SettingsPage: React.FC = () => {
             <TabsTrigger value="appearance" className="flex items-center gap-2">
               <Palette className="h-4 w-4" />
               Appearance
+            </TabsTrigger>
+            <TabsTrigger value="telegram" className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4" />
+              Telegram
             </TabsTrigger>
           </TabsList>
 
@@ -640,6 +646,11 @@ const SettingsPage: React.FC = () => {
                 </Button>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Telegram Integration */}
+          <TabsContent value="telegram" className="space-y-6">
+            <TelegramCenter />
           </TabsContent>
 
           {/* Appearance */}

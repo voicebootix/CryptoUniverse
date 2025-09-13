@@ -416,7 +416,9 @@ class AIModelConnector(LoggerMixin):
                     reasoning = self._extract_reasoning(content)
                     
                     # Estimate tokens used (Gemini doesn't return usage info in all cases)
-                    estimated_tokens = len(user_content.split()) + len(content.split())
+                    # Handle case where content might be a list
+                    content_str = content if isinstance(content, str) else str(content)
+                    estimated_tokens = len(user_content.split()) + len(content_str.split())
                     cost = estimated_tokens * config["cost_per_token"]
                     
                     return AIModelResponse(

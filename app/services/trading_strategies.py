@@ -1022,6 +1022,34 @@ class TradingStrategiesService(LoggerMixin):
             "total_pnl": 0.0
         }
     
+    async def get_active_strategy(self, user_id: str) -> Dict[str, Any]:
+        """Get the active trading strategy for a user."""
+        try:
+            user_strategy = self.active_strategies.get(user_id)
+            if user_strategy:
+                return {
+                    "name": user_strategy.get("strategy_name", "adaptive"),
+                    "allocation": user_strategy.get("allocation", {}),
+                    "risk_level": user_strategy.get("risk_level", "medium"),
+                    "active": True
+                }
+            else:
+                # Return default strategy if no active strategy found
+                return {
+                    "name": "adaptive", 
+                    "allocation": {"stocks": 0.6, "bonds": 0.3, "crypto": 0.1},
+                    "risk_level": "medium",
+                    "active": False
+                }
+        except Exception as e:
+            self.logger.error("Failed to get active strategy", user_id=user_id, error=str(e))
+            return {
+                "name": "adaptive",
+                "allocation": {},
+                "risk_level": "medium", 
+                "active": False
+            }
+    
     async def execute_strategy(
         self,
         function: str,
@@ -1030,7 +1058,8 @@ class TradingStrategiesService(LoggerMixin):
         parameters: Dict[str, Any] = None,
         risk_mode: str = "balanced",
         exchange: str = "binance",
-        user_id: str = None
+        user_id: str = None,
+        simulation_mode: bool = True
     ) -> Dict[str, Any]:
         """Main strategy execution router - handles all 25+ functions."""
         
@@ -1066,7 +1095,12 @@ class TradingStrategiesService(LoggerMixin):
                     function, strategy_type, symbol, strategy_params, user_id
                 )
             
-            elif function in ["position_management", "risk_management", "portfolio_optimization"]:
+            elif function == "risk_management":
+                return await self.risk_management(
+                    symbols=symbol, user_id=user_id
+                )
+            
+            elif function in ["position_management", "portfolio_optimization"]:
                 return await self._execute_management_function(
                     function, symbol, strategy_params, user_id
                 )
@@ -1202,7 +1236,35 @@ class TradingStrategiesService(LoggerMixin):
         user_id: str
     ) -> Dict[str, Any]:
         """Execute position/risk management functions."""
-        # Placeholder for management functions
+        
+        if function == "portfolio_optimization":
+            # Call the actual position management method to get rebalancing data
+            pm_result = await self.position_management(symbols=symbol, user_id=user_id)
+            rebalancing_recommendations = []
+            
+            if pm_result.get("success") and "position_analysis" in pm_result:
+                # Extract rebalancing recommendations from position analysis
+                for pos_data in pm_result["position_analysis"].values():
+                    for rec in pos_data.get("recommendations", []):
+                        if rec.get("type") in ["REBALANCING", "SECTOR_REBALANCING", "DIVERSIFICATION"]:
+                            rebalancing_recommendations.append({
+                                "symbol": symbol,
+                                "action": rec.get("action", ""),
+                                "rationale": rec.get("rationale", ""),
+                                "improvement_potential": 0.15,  # Default 15% improvement
+                                "urgency": rec.get("urgency", "MEDIUM")
+                            })
+            
+            # Always return enhanced structure even if no recommendations found
+            return {
+                "success": True,
+                "function": function,
+                "symbol": symbol,
+                "rebalancing_recommendations": rebalancing_recommendations,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
+        # Default response for other management functions
         return {
             "success": True,
             "function": function,
@@ -3541,7 +3603,8 @@ class TradingStrategiesService(LoggerMixin):
             return {
                 "success": True,
                 "timestamp": datetime.utcnow().isoformat(),
-                "risk_management_analysis": risk_result
+                "risk_management_analysis": risk_result,
+                "hedge_recommendations": risk_result.get("hedging_recommendations", [])
             }
             
         except Exception as e:

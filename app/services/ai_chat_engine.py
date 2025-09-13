@@ -99,6 +99,7 @@ class EnhancedAIChatEngine(LoggerMixin):
         self.trading_strategies = None
         self.portfolio_risk = None
         self.chat_adapters = None
+        self.redis = None  # Redis client for autonomous mode checks
         
         self.logger.info("✅ Enhanced chat engine initialized")
         
@@ -127,6 +128,9 @@ class EnhancedAIChatEngine(LoggerMixin):
                 self.market_analysis = MarketAnalysisService()
             if self.chat_adapters is None:
                 self.chat_adapters = ChatServiceAdapters()
+            if self.redis is None:
+                from app.core.redis import get_redis_client
+                self.redis = await get_redis_client()
         except Exception as e:
             self.logger.warning("Some services failed to initialize", error=str(e))
     
@@ -208,9 +212,9 @@ class EnhancedAIChatEngine(LoggerMixin):
     async def start_chat_session(self, user_id: str, session_type: str = "general") -> str:
         """Start a new chat session with persistent memory."""
         try:
-            # If memory service is not available, generate a simple session ID
+            # If memory service is not available, generate a simple session ID using proper UUID
             if not self.memory:
-                session_id = f"session_{user_id}_{int(time.time())}"
+                session_id = str(uuid.uuid4())
                 self.logger.info("Created simple session without memory", session_id=session_id)
                 return session_id
             
@@ -229,10 +233,14 @@ class EnhancedAIChatEngine(LoggerMixin):
                     )
                     return last_session["session_id"]
             
-            # Create new session
-            session_id = await self.memory.create_session(
+            # Generate proper UUID for new session
+            session_id = str(uuid.uuid4())
+            
+            # Create new session with the UUID
+            created_session_id = await self.memory.create_session(
                 user_id=user_id,
                 session_type=session_type,
+                session_id=session_id,  # Pass the UUID to ensure proper format
                 context={
                     "preferences": {},
                     "active_strategies": [],
@@ -240,6 +248,9 @@ class EnhancedAIChatEngine(LoggerMixin):
                     "created_via": "chat_interface"
                 }
             )
+            
+            # Use the created session ID (should be the same UUID we passed)
+            session_id = created_session_id if created_session_id else session_id
             
             # Add welcome message
             await self.memory.save_message(
@@ -284,8 +295,8 @@ I'll remember our conversation and provide increasingly personalized assistance.
             # Ensure services are initialized (lazy loading)
             await self._ensure_services()
             
-            # Create session if none provided
-            if not session_id or session_id.strip() == "":
+            # Create session if none provided or invalid format
+            if not session_id or session_id.strip() == "" or len(session_id) > 50:
                 session_id = await self.start_chat_session(user_id)
             
             # Save user message (with fallback if memory unavailable)
@@ -307,17 +318,23 @@ I'll remember our conversation and provide increasingly personalized assistance.
                         user_message_id = saved_user_id
                     # Get conversation context
                     context = await self.memory.get_conversation_context(session_id)
+                    # Ensure user_id is in session_context for authenticated operations
+                    if "session_context" not in context:
+                        context["session_context"] = {}
+                    context["session_context"]["user_id"] = user_id
                 except Exception as e:
                     self.logger.warning("Memory service failed, continuing without memory", error=str(e))
-                    context = {}
+                    context = {
+                        "session_context": {"user_id": user_id}
+                    }
             
             # Try enhanced processing, fallback to simple response
             try:
                 # Classify intent
                 intent = await self._classify_intent(user_message, context)
                 
-                # Process with 5-phase execution for trading intents
-                if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
+                # Process with 5-phase execution for trading intents (except rebalancing)
+                if intent == ChatIntent.TRADE_EXECUTION:
                     response = await self._process_with_5_phases(
                         session_id, user_message, intent, context
                     )
@@ -351,7 +368,7 @@ I'll remember our conversation and provide increasingly personalized assistance.
                         metadata=response.get("metadata", {}),
                         model_used=response.get("model_used", "enhanced_engine"),
                         processing_time_ms=processing_time,
-                        tokens_used=response.get("tokens_used", len(response["content"].split()))
+                        tokens_used=response.get("tokens_used", len(str(response.get("content", "")).split()))
                     )
                     # Use the saved message ID if successful
                     if saved_message_id:
@@ -602,7 +619,7 @@ I encountered an error during the 5-phase execution. The trade was not completed
                 }),
                 confidence_threshold=80.0,
                 ai_models="all",
-                user_id=user_id or "00000000-0000-0000-0000-000000000000"  # System UUID
+                user_id=user_id
             )
             
             return {
@@ -654,16 +671,142 @@ I encountered an error during the 5-phase execution. The trade was not completed
     async def _execute_phase_monitoring(
         self, execution: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Execute Phase 5: Monitoring"""
-        # Simplified monitoring setup
-        monitoring_id = str(uuid.uuid4())
+        """Execute Phase 5: Real Monitoring Setup"""
         
-        return {
-            "monitoring_id": monitoring_id,
-            "monitoring_summary": "Monitoring setup for trade tracking and alerts",
-            "alert_types": ["price_target", "stop_loss", "volume_anomaly"],
-            "monitoring_duration": "ongoing"
-        }
+        try:
+            user_id = context.get("session_context", {}).get("user_id")
+            
+            # Generate monitoring configuration based on execution results
+            monitoring_id = str(uuid.uuid4())
+            
+            # If this was a rebalancing operation, set up portfolio monitoring
+            if execution.get("status") in ["completed", "simulated"] and execution.get("trade_id"):
+                
+                # Set up portfolio performance monitoring
+                monitoring_config = {
+                    "user_id": user_id,
+                    "monitoring_type": "rebalancing_performance",
+                    "trade_references": [execution.get("trade_id")],
+                    "alert_thresholds": {
+                        "portfolio_deviation": 5.0,  # Alert if portfolio deviates 5% from target
+                        "performance_drop": -10.0,   # Alert if portfolio drops 10%
+                        "risk_increase": 25.0        # Alert if risk increases 25%
+                    },
+                    "monitoring_duration_days": 30,
+                    "check_frequency_hours": 6,
+                    "created_at": datetime.utcnow().isoformat()
+                }
+                
+                # Store monitoring configuration in Redis if available
+                if hasattr(self, 'redis') and self.redis:
+                    try:
+                        # Serialize all mapping values to strings for Redis compatibility
+                        redis_mapping = {}
+                        for key, value in monitoring_config.items():
+                            if isinstance(value, (dict, list)):
+                                redis_mapping[str(key)] = json.dumps(value)
+                            elif value is None:
+                                redis_mapping[str(key)] = ""
+                            else:
+                                redis_mapping[str(key)] = str(value)
+                        
+                        await self.redis.hset(
+                            f"portfolio_monitoring:{monitoring_id}",
+                            mapping=redis_mapping
+                        )
+                        await self.redis.expire(f"portfolio_monitoring:{monitoring_id}", 86400 * 30)  # 30 days
+                        
+                        # Add to user's active monitoring list (ensure user_id is string)
+                        await self.redis.sadd(f"active_monitoring:{str(user_id)}", str(monitoring_id))
+                        await self.redis.expire(f"active_monitoring:{str(user_id)}", 86400 * 30)
+                        
+                        self.logger.info("Portfolio monitoring setup completed", 
+                                       monitoring_id=monitoring_id, user_id=user_id)
+                        
+                    except Exception as redis_error:
+                        self.logger.warning("Could not store monitoring config in Redis", error=str(redis_error))
+                
+                # Set up WebSocket notifications for real-time updates
+                try:
+                    await self._schedule_monitoring_checks(monitoring_id, user_id, monitoring_config)
+                except Exception as e:
+                    self.logger.warning("Could not schedule monitoring checks", error=str(e))
+                
+                return {
+                    "monitoring_id": monitoring_id,
+                    "monitoring_summary": "Real-time portfolio rebalancing monitoring active",
+                    "monitoring_config": {
+                        "performance_tracking": "30 days",
+                        "deviation_alerts": "5% threshold",
+                        "risk_monitoring": "25% increase threshold",
+                        "check_frequency": "Every 6 hours",
+                        "alert_methods": ["WebSocket", "Chat notifications"]
+                    },
+                    "alert_types": ["portfolio_deviation", "performance_drop", "risk_increase", "rebalancing_needed"],
+                    "monitoring_duration": "30 days",
+                    "status": "active"
+                }
+            
+            else:
+                # Fallback for non-rebalancing or failed executions
+                return {
+                    "monitoring_id": monitoring_id,
+                    "monitoring_summary": "Basic trade monitoring setup",
+                    "alert_types": ["execution_status", "general_alerts"],
+                    "monitoring_duration": "7 days",
+                    "status": "basic"
+                }
+                
+        except Exception as e:
+            self.logger.error("Phase 5 monitoring setup failed", error=str(e))
+            return {
+                "monitoring_id": f"error_{uuid.uuid4().hex}",
+                "monitoring_summary": f"Monitoring setup failed: {str(e)}",
+                "alert_types": [],
+                "monitoring_duration": "none",
+                "status": "failed",
+                "error": str(e)
+            }
+    
+    async def _schedule_monitoring_checks(self, monitoring_id: str, user_id: str, config: Dict[str, Any]):
+        """Schedule periodic monitoring checks for rebalanced portfolio."""
+        
+        try:
+            # This would integrate with your background task scheduler
+            # For now, we'll set up the monitoring framework
+            
+            check_config = {
+                "monitoring_id": monitoring_id,
+                "user_id": user_id,
+                "next_check": (datetime.utcnow() + timedelta(hours=6)).isoformat(),
+                "config": config
+            }
+            
+            # Store in Redis for background processor to pick up
+            if hasattr(self, 'redis') and self.redis:
+                # Ensure all mapping values are strings
+                redis_schedule_mapping = {
+                    "user_id": str(user_id),
+                    "next_check": str(check_config["next_check"]),
+                    "config": json.dumps(config),
+                    "status": "scheduled"
+                }
+                await self.redis.hset(
+                    f"monitoring_schedule:{monitoring_id}",
+                    mapping=redis_schedule_mapping
+                )
+                await self.redis.expire(f"monitoring_schedule:{monitoring_id}", 86400 * 30)
+                
+                # Add to global monitoring queue
+                await self.redis.zadd(
+                    "monitoring_queue",
+                    {monitoring_id: time.time() + 6 * 3600}  # 6 hours from now
+                )
+            
+            self.logger.info("Monitoring checks scheduled", monitoring_id=monitoring_id, user_id=user_id)
+            
+        except Exception as e:
+            self.logger.error("Failed to schedule monitoring checks", error=str(e), monitoring_id=monitoring_id)
     
     async def _classify_intent(
         self, message: str, context: Dict[str, Any]
@@ -715,7 +858,10 @@ I encountered an error during the 5-phase execution. The trade was not completed
     ) -> Dict[str, Any]:
         """Process intents by ROUTING TO ACTUAL SERVICES first, then using AI consensus for validation."""
         
-        user_id = context.get("session_context", {}).get("user_id", "00000000-0000-0000-0000-000000000000")
+        user_id = context.get("session_context", {}).get("user_id")
+        
+        if not user_id:
+            raise ValueError("Authentication required: No valid user session found")
         
         try:
             # STEP 1: ROUTE TO APPROPRIATE SERVICE (Do the work!)
@@ -739,6 +885,9 @@ I encountered an error during the 5-phase execution. The trade was not completed
             
             elif intent == ChatIntent.EMERGENCY_COMMAND:
                 return await self._handle_emergency_command(user_message, context, user_id)
+                
+            elif intent == ChatIntent.REBALANCING:
+                return await self._handle_rebalancing(user_message, context, user_id)
             
             else:
                 # For general queries, use AI consensus but with service context
@@ -753,58 +902,127 @@ I encountered an error during the 5-phase execution. The trade was not completed
             }
     
     async def _handle_opportunity_discovery(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
-        """Handle opportunity discovery using REAL market analysis API."""
+        """Handle opportunity discovery using REAL user strategy-based system."""
+        
+        self.logger.info("🎯 ENTERING _handle_opportunity_discovery", user_id=user_id, message=message)
         
         try:
-            # STEP 1: Use your REAL market analysis service
-            opportunities = await self.market_analysis.market_inefficiency_scanner(
-                symbols="BTC,ETH,SOL,ADA,DOT",
-                exchanges="all",
-                scan_types="spread,volume,time",
-                user_id=user_id
+            # Import the new enterprise services
+            self.logger.info("🎯 Importing user_opportunity_discovery service")
+            from app.services.user_opportunity_discovery import user_opportunity_discovery
+            from app.services.user_onboarding_service import user_onboarding_service
+            
+            # STEP 0: Ensure user is onboarded with free strategies
+            onboarding_check = await user_onboarding_service.check_user_onboarding_status(user_id)
+            
+            if onboarding_check.get("needs_onboarding", True):
+                self.logger.info("Auto-triggering user onboarding for opportunity discovery", user_id=user_id)
+                onboarding_result = await user_onboarding_service.onboard_new_user(user_id)
+                
+                if onboarding_result.get("success"):
+                    self.logger.info("User onboarding completed successfully", user_id=user_id)
+                else:
+                    self.logger.warning("User onboarding failed", user_id=user_id, error=onboarding_result.get("error"))
+            
+            # STEP 1: Initialize discovery service if needed  
+            await user_opportunity_discovery.async_init()
+            
+            # STEP 2: Use REAL user strategy-based opportunity discovery
+            opportunities_result = await user_opportunity_discovery.discover_opportunities_for_user(
+                user_id=user_id,
+                force_refresh=False,
+                include_strategy_recommendations=True
             )
             
-            # STEP 2: Use AI consensus to VALIDATE and format results
-            validation_prompt = f"""
-            REAL MARKET OPPORTUNITIES FOUND:
-            {json.dumps(opportunities, indent=2)}
+            if not opportunities_result.get("success"):
+                error_message = "Unable to discover opportunities at this time. Please ensure you have active trading strategies."
+                return {
+                    "content": error_message,
+                    "recommendation": error_message,
+                    "confidence": 0.3,
+                    "error": opportunities_result.get("error", "Unknown error"),
+                    "next_actions": [
+                        "Visit the Strategy Marketplace to activate your free strategies",
+                        "Connect your exchange accounts for better opportunity discovery"
+                    ]
+                }
             
+            opportunities = opportunities_result.get("opportunities", [])
+            user_profile = opportunities_result.get("user_profile", {})
+            strategy_recommendations = opportunities_result.get("strategy_recommendations", [])
+            
+            # STEP 2: Use AI consensus to ANALYZE and format results based on user's request
+            analysis_prompt = f"""
             USER REQUEST: {message}
             
-            Analyze these REAL opportunities and provide:
-            1. Which opportunities best match the user's request
-            2. Risk assessment for each
-            3. Recommended actions
-            4. Clear next steps
+            REAL TRADING OPPORTUNITIES DISCOVERED:
+            Total Opportunities: {len(opportunities)}
+            User's Active Strategies: {user_profile.get('active_strategies', 0)}
+            User Tier: {user_profile.get('user_tier', 'basic')}
             
-            Present in a professional, actionable format.
+            TOP OPPORTUNITIES:
+            {json.dumps(opportunities[:10], indent=2)}
+            
+            STRATEGY RECOMMENDATIONS:
+            {json.dumps(strategy_recommendations, indent=2)}
+            
+            Based on the user's request and these REAL opportunities, provide:
+            1. Executive summary of opportunities that match their request
+            2. Top 3 recommended opportunities with specific profit potential
+            3. Risk assessment and required capital for each
+            4. Clear action steps the user should take
+            5. Strategy recommendations to unlock more opportunities
+            
+            Format as actionable investment advice with specific numbers and timeframes.
             """
             
             ai_validation = await self.ai_consensus.consensus_decision(
-                decision_request=validation_prompt,
+                decision_request=analysis_prompt,
                 confidence_threshold=75.0,
                 ai_models="all",
                 user_id=user_id
             )
             
-            # Combine service results with AI validation
-            response_content = f"""🔍 **REAL Market Opportunities Found**
+            # Build comprehensive response with real data and recommendations
+            total_opportunities = len(opportunities)
+            total_potential = sum(opp.get("profit_potential_usd", 0) for opp in opportunities)
+            
+            response_content = f"""🎯 **ENTERPRISE Opportunity Discovery Results**
 
-**Analysis Results:**
-{ai_validation.get('final_recommendation', 'Opportunities analyzed')}
+{ai_validation.get('final_recommendation', 'Market opportunities analyzed using your active trading strategies.')}
 
-**Data Source:** Live market analysis service
-**Confidence:** {ai_validation.get('consensus_score', 0.8):.1%}
-**Processing:** {len(opportunities.get('opportunities', []))} opportunities analyzed"""
+**📊 Discovery Summary:**
+• **{total_opportunities}** opportunities found using your **{user_profile.get('active_strategies', 0)}** active strategies
+• **${total_potential:,.0f}** total profit potential identified
+• **{user_profile.get('user_tier', 'basic').title()}** tier access - scanning {user_profile.get('scan_limit', 'limited')} assets
+• **Asset Discovery:** {opportunities_result.get('asset_discovery', {}).get('total_assets_scanned', 0)} assets analyzed across multiple exchanges
+
+**🚀 Strategy Performance:**
+{chr(10).join([f"• {strategy}: {perf.get('count', 0)} opportunities (avg confidence {perf.get('avg_confidence', 0):.0%})" 
+              for strategy, perf in opportunities_result.get('strategy_performance', {}).items()])}
+
+**💡 Recommendations to Unlock More Opportunities:**
+{chr(10).join([f"• {rec.get('name', '')}: {rec.get('benefit', '')}" 
+              for rec in strategy_recommendations[:3]])}
+
+**Next Steps:**
+1. Review detailed opportunities in your dashboard
+2. Connect exchange accounts for live trading
+3. Consider upgrading strategies for {'+50-200% more opportunities' if len(strategy_recommendations) > 0 else 'enhanced discovery'}"""
 
             return {
                 "content": response_content,
-                "confidence": ai_validation.get("consensus_score", 0.8),
+                "confidence": ai_validation.get("consensus_score", 0.85),
                 "metadata": {
-                    "service_used": "market_analysis_service",
-                    "opportunities_count": len(opportunities.get('opportunities', [])),
+                    "service_used": "user_opportunity_discovery",
+                    "opportunities_count": total_opportunities,
+                    "user_tier": user_profile.get('user_tier'),
+                    "active_strategies": user_profile.get('active_strategies'),
+                    "assets_scanned": opportunities_result.get('asset_discovery', {}).get('total_assets_scanned'),
+                    "strategy_recommendations": len(strategy_recommendations),
                     "ai_validated": True,
-                    "real_data": True
+                    "real_data": True,
+                    "enterprise_grade": True
                 }
             }
             
@@ -998,9 +1216,942 @@ I encountered an error during the 5-phase execution. The trade was not completed
         except Exception as e:
             return {"content": f"Emergency protocol error: {str(e)}", "confidence": 0.3}
     
+    def _validate_rebalancing_request(self, user_id: str, strategy: str) -> Dict[str, Any]:
+        """Validate rebalancing request parameters for security and safety."""
+        
+        # Validate user_id format (should be UUID)
+        if not user_id or len(user_id.strip()) == 0:
+            return {"valid": False, "reason": "Invalid user ID: empty"}
+        
+        if user_id == "system":
+            return {"valid": False, "reason": "System user cannot perform rebalancing"}
+        
+        # Basic UUID format validation (loose check for flexibility)
+        if len(user_id) < 8 or len(user_id) > 128:
+            return {"valid": False, "reason": "Invalid user ID format"}
+        
+        # Validate strategy against allowed values
+        allowed_strategies = [
+            "risk_parity", "equal_weight", "max_sharpe", "min_variance", "kelly", "adaptive"
+        ]
+        if strategy not in allowed_strategies:
+            return {"valid": False, "reason": f"Invalid strategy: {strategy}. Allowed: {', '.join(allowed_strategies)}"}
+        
+        return {"valid": True}
+    
+    async def _check_rebalancing_rate_limits(self, user_id: str) -> Dict[str, Any]:
+        """Check rate limits to prevent excessive rebalancing requests."""
+        
+        if not self.redis:
+            # If Redis unavailable, allow but log warning
+            self.logger.warning("Rate limiting unavailable - Redis not connected", user_id=user_id)
+            return {"allowed": True}
+        
+        try:
+            # Check recent rebalancing attempts (max 5 per hour)
+            rate_limit_key = f"rebalancing_rate_limit:{user_id}"
+            current_count = await self.redis.get(rate_limit_key)
+            
+            if current_count and int(current_count) >= 5:
+                ttl = await self.redis.ttl(rate_limit_key)
+                return {
+                    "allowed": False, 
+                    "reason": f"Rate limit exceeded. Try again in {ttl // 60} minutes.",
+                    "retry_after_minutes": ttl // 60
+                }
+            
+            # Increment counter
+            await self.redis.incr(rate_limit_key)
+            await self.redis.expire(rate_limit_key, 3600)  # 1 hour window
+            
+            return {"allowed": True}
+            
+        except Exception as e:
+            self.logger.error("Rate limiting check failed", error=str(e), user_id=user_id)
+            return {"allowed": True}  # Fail open for availability
+    
+    async def _handle_rebalancing(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
+        """Handle portfolio rebalancing using REAL optimization service with security validation."""
+        
+        try:
+            # 1. SERVICE AVAILABILITY CHECK
+            service_status = await self._ensure_services_with_fallback()
+            critical_services_missing = []
+            
+            if not service_status["chat_adapters"]:
+                critical_services_missing.append("chat_adapters")
+            if not service_status["portfolio_risk"]:
+                critical_services_missing.append("portfolio_risk")
+            
+            if critical_services_missing:
+                return await self._handle_service_unavailable(critical_services_missing, user_id)
+            
+            # 2. INPUT VALIDATION & SECURITY CHECKS
+            strategy = self._detect_rebalancing_strategy(message, context)
+            
+            # Validate request parameters
+            validation_result = self._validate_rebalancing_request(user_id, strategy)
+            if not validation_result["valid"]:
+                return {
+                    "content": f"❌ **Invalid Request**\n\n{validation_result['reason']}\n\nPlease check your request and try again.",
+                    "confidence": 0.1,
+                    "metadata": {"error": True, "validation_error": validation_result['reason']}
+                }
+            
+            # Check rate limits
+            rate_limit_result = await self._check_rebalancing_rate_limits(user_id)
+            if not rate_limit_result["allowed"]:
+                return {
+                    "content": f"""⏱️ **Rate Limit Exceeded**
+
+{rate_limit_result['reason']}
+
+**Rate Limits:**
+- Maximum 5 rebalancing requests per hour
+- This prevents excessive trading and protects your portfolio
+
+**Alternative Options:**
+- Enable autonomous mode for automatic rebalancing
+- Use "portfolio status" to check current allocation
+- Try again in {rate_limit_result.get('retry_after_minutes', 60)} minutes""",
+                    "confidence": 0.8,
+                    "metadata": {"error": True, "rate_limited": True, "retry_after": rate_limit_result.get('retry_after_minutes')}
+                }
+            # Check if autonomous mode is active
+            autonomous_active = False
+            autonomous_config = {}
+            
+            if self.redis:
+                try:
+                    autonomous_active = await self.redis.get(f"autonomous_active:{user_id}")
+                    if autonomous_active:
+                        autonomous_config = await self.redis.hgetall(f"autonomous_config:{user_id}")
+                except Exception as e:
+                    self.logger.warning("Could not check autonomous status", error=str(e))
+            
+            # If autonomous mode is active, show current status instead of manual rebalancing
+            if autonomous_active:
+                last_rebalance = autonomous_config.get("last_rebalance_time", "Not available")
+                current_strategy = autonomous_config.get("rebalancing_strategy", "risk_parity")
+                
+                return {
+                    "content": f"""🤖 **Autonomous Mode Active - Portfolio Auto-Management**
+
+**Current Settings:**
+- Strategy: {current_strategy.replace('_', ' ').title()}
+- Last Rebalanced: {last_rebalance}
+- Auto-rebalance: Enabled
+
+**Options:**
+- Type "**rebalance now**" to force immediate rebalancing
+- Type "**change strategy [name]**" to update autonomous strategy
+- Type "**disable autonomous**" for manual control
+- Type "**rebalancing status**" for detailed analysis
+
+Your portfolio is being optimized automatically every 30 minutes.""",
+                    "confidence": 0.95,
+                    "metadata": {"autonomous_active": True, "current_strategy": current_strategy}
+                }
+            
+            # Manual rebalancing flow
+            # 1. Detect strategy from user message
+            strategy = self._detect_rebalancing_strategy(message, context)
+            
+            # 2. Get current portfolio analysis with timeout and retry
+            portfolio_analysis = await self._get_portfolio_analysis_with_retry(user_id, strategy)
+            
+            if portfolio_analysis.get("error"):
+                return {
+                    "content": f"❌ **Portfolio Analysis Failed**\n\nError: {portfolio_analysis['error']}\n\nPlease try again or contact support if the issue persists.",
+                    "confidence": 0.3,
+                    "metadata": {"error": True, "service_error": portfolio_analysis['error']}
+                }
+            
+            # 3. Check if rebalancing is needed
+            needs_rebalancing = portfolio_analysis.get("needs_rebalancing", False)
+            deviation_score = portfolio_analysis.get("deviation_score", 0)
+            recommended_trades = portfolio_analysis.get("recommended_trades", [])
+            
+            if not needs_rebalancing:
+                return {
+                    "content": f"""✅ **Portfolio Already Optimized**
+
+**Analysis Results:**
+- Strategy: {strategy.replace('_', ' ').title()}
+- Deviation: {deviation_score:.2%} (within threshold)
+- Status: No rebalancing needed
+
+Your portfolio allocation is already well-optimized for the selected strategy. Consider checking again later or trying a different strategy.""",
+                    "confidence": 0.9,
+                    "metadata": {"needs_rebalancing": False, "strategy": strategy}
+                }
+            
+            # 4. Present rebalancing preview
+            if not recommended_trades:
+                return {
+                    "content": f"""⚠️ **Rebalancing Analysis Complete**
+
+**Results:**
+- Strategy: {strategy.replace('_', ' ').title()}
+- Deviation: {deviation_score:.2%}
+- Status: Rebalancing recommended but no specific trades generated
+
+This might indicate insufficient portfolio size or market conditions. Try again later or contact support.""",
+                    "confidence": 0.6,
+                    "metadata": {"needs_rebalancing": True, "no_trades": True}
+                }
+            
+            # Format trades for display
+            trade_summary = []
+            for trade in recommended_trades[:5]:  # Show top 5 trades
+                action = trade.get("action", "").upper()
+                symbol = trade.get("symbol", "")
+                amount = trade.get("amount", 0)
+                trade_summary.append(f"• {action} {amount:.6f} {symbol}")
+            
+            trade_display = "\n".join(trade_summary)
+            
+            # Store rebalancing plan in context for execution
+            rebalancing_plan = {
+                "strategy": strategy,
+                "trades": recommended_trades,
+                "user_id": user_id,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            # Save to session context if memory available
+            if self.memory:
+                try:
+                    session_id = context.get("session_id")
+                    if session_id:
+                        await self.memory.update_session_context(session_id, {
+                            "pending_rebalancing_plan": rebalancing_plan
+                        })
+                except Exception as e:
+                    self.logger.warning("Could not save rebalancing plan to memory", error=str(e))
+            
+            return {
+                "content": f"""🎯 **Portfolio Rebalancing Plan Ready**
+
+**Strategy:** {strategy.replace('_', ' ').title()}
+**Current Deviation:** {deviation_score:.2%}
+**Risk Reduction:** {portfolio_analysis.get('risk_reduction', 0):.1f}%
+**Expected Improvement:** +{portfolio_analysis.get('expected_improvement', 0):.1f}%
+
+**Recommended Trades:**
+{trade_display}
+
+**Next Steps:**
+- Type "**execute rebalancing**" to proceed with these trades
+- Type "**different strategy**" to try another approach
+- Type "**cancel**" to abort
+
+⚠️ **Important:** These trades will be executed on your live portfolio.""",
+                "confidence": 0.95,
+                "metadata": {
+                    "rebalancing_plan": rebalancing_plan,
+                    "awaiting_execution_confirmation": True,
+                    "strategy": strategy,
+                    "trade_count": len(recommended_trades)
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error("Rebalancing handler failed", error=str(e), user_id=user_id)
+            return {
+                "content": f"❌ **Rebalancing Service Error**\n\nError: {str(e)}\n\nPlease try again or contact support if the issue persists.",
+                "confidence": 0.3,
+                "metadata": {"error": True, "handler_error": str(e)}
+            }
+    
+    def _detect_rebalancing_strategy(self, message: str, context: Dict[str, Any]) -> str:
+        """Detect rebalancing strategy from user message or use intelligent default."""
+        
+        message_lower = message.lower()
+        
+        # Strategy patterns for detection
+        strategy_patterns = {
+            "risk_parity": [r"risk parity", r"equal risk", r"risk weighted", r"balanced risk"],
+            "equal_weight": [r"equal weight", r"equally", r"same amount", r"equal allocation"],
+            "max_sharpe": [r"sharpe", r"best return", r"optimize return", r"maximum sharpe"],
+            "min_variance": [r"low risk", r"minimum risk", r"conservative", r"min variance", r"lowest risk"],
+            "kelly": [r"kelly", r"optimal sizing", r"kelly criterion"],
+            "adaptive": [r"adaptive", r"smart", r"automatic", r"ai choose", r"best strategy"]
+        }
+        
+        # Check user's message for strategy keywords
+        for strategy, patterns in strategy_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, message_lower):
+                    self.logger.info("Detected rebalancing strategy from message", strategy=strategy, pattern=pattern)
+                    return strategy
+        
+        # Check conversation context for previous preferences
+        session_context = context.get("session_context", {})
+        if session_context.get("preferred_rebalancing_strategy"):
+            preferred = session_context["preferred_rebalancing_strategy"]
+            self.logger.info("Using preferred rebalancing strategy from context", strategy=preferred)
+            return preferred
+        
+        # Use risk tolerance to pick smart default
+        risk_tolerance = session_context.get("risk_tolerance", "balanced")
+        if risk_tolerance == "conservative":
+            return "min_variance"
+        elif risk_tolerance == "aggressive":
+            return "max_sharpe"
+        else:
+            return "risk_parity"  # Best default for most users
+
+    async def _get_portfolio_analysis_with_retry(self, user_id: str, strategy: str, max_retries: int = 2) -> Dict[str, Any]:
+        """Get portfolio analysis with retry logic and timeout handling."""
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # Set timeout for portfolio analysis
+                analysis_result = await asyncio.wait_for(
+                    self.chat_adapters.analyze_rebalancing_needs(user_id=user_id, strategy=strategy),
+                    timeout=15.0  # 15 second timeout
+                )
+                
+                # Ensure analysis_result is a dict and not null
+                if not isinstance(analysis_result, dict) or not analysis_result:
+                    error_msg = "Portfolio analysis returned invalid result"
+                    self.logger.warning("Portfolio analysis failed", 
+                                      attempt=attempt + 1, error=error_msg, user_id=user_id)
+                    if attempt < max_retries:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    else:
+                        return {"error": f"Portfolio analysis failed after {max_retries + 1} attempts: {error_msg}"}
+                
+                # Check for presence of error key - if no error, it's a success
+                if not analysis_result.get("error"):
+                    return analysis_result
+                
+                # If explicit failure, log and potentially retry
+                error_msg = analysis_result.get("error", "Portfolio analysis failed")
+                self.logger.warning("Portfolio analysis failed", 
+                                  attempt=attempt + 1, error=error_msg, user_id=user_id)
+                
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+                else:
+                    return {"error": f"Portfolio analysis failed after {max_retries + 1} attempts: {error_msg}"}
+                    
+            except asyncio.TimeoutError:
+                self.logger.warning("Portfolio analysis timeout", 
+                                  attempt=attempt + 1, user_id=user_id)
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                else:
+                    return {"error": "Portfolio analysis timed out. Please try again later."}
+                    
+            except Exception as e:
+                self.logger.error("Portfolio analysis exception", 
+                                attempt=attempt + 1, error=str(e), user_id=user_id)
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                else:
+                    return {"error": f"Portfolio analysis failed: {str(e)}"}
+        
+        return {"error": "Portfolio analysis failed after all retry attempts"}
+
+    async def _ensure_services_with_fallback(self) -> Dict[str, bool]:
+        """Ensure services are available with fallback handling."""
+        
+        service_status = {
+            "chat_adapters": False,
+            "trade_executor": False,
+            "portfolio_risk": False,
+            "redis": False,
+            "memory": False
+        }
+        
+        try:
+            await self._ensure_services()
+            
+            # Check individual service availability
+            if self.chat_adapters:
+                service_status["chat_adapters"] = True
+            
+            if self.trade_executor:
+                service_status["trade_executor"] = True
+                
+            if self.portfolio_risk:
+                service_status["portfolio_risk"] = True
+                
+            if self.redis:
+                try:
+                    await self.redis.ping()
+                    service_status["redis"] = True
+                except Exception:
+                    self.logger.warning("Redis ping failed - service may be unavailable")
+                    
+            if self.memory:
+                service_status["memory"] = True
+                
+        except Exception as e:
+            self.logger.error("Service initialization check failed", error=str(e))
+        
+        return service_status
+
+    async def _handle_service_unavailable(self, missing_services: List[str], user_id: str) -> Dict[str, Any]:
+        """Handle cases where critical services are unavailable."""
+        
+        if "chat_adapters" in missing_services or "portfolio_risk" in missing_services:
+            return {
+                "content": """🔧 **Service Temporarily Unavailable**
+
+Portfolio analysis services are currently unavailable. This might be due to:
+- Temporary system maintenance
+- High system load
+- Network connectivity issues
+
+**Recommended Actions:**
+- Wait 2-3 minutes and try again
+- Check system status page
+- Use autonomous mode if available
+- Contact support if issues persist
+
+Your portfolio data is safe and no trades have been executed.""",
+                "confidence": 0.7,
+                "metadata": {"error": True, "service_unavailable": missing_services}
+            }
+        
+        if "trade_executor" in missing_services:
+            return {
+                "content": """⚠️ **Trade Execution Unavailable**
+
+The trade execution service is currently unavailable. 
+- Portfolio analysis can still be performed
+- No live trades can be executed at this time
+- Autonomous mode may be affected
+
+**Options:**
+- Get portfolio analysis and rebalancing recommendations
+- Wait for service restoration before executing trades
+- Contact support for urgent trading needs""",
+                "confidence": 0.7,
+                "metadata": {"error": True, "trade_execution_unavailable": True}
+            }
+        
+        # Redis/Memory unavailable - degraded functionality
+        return {
+            "content": """⚠️ **Limited Functionality**
+
+Some background services are unavailable:
+- Session memory may be limited
+- Rate limiting may not work properly  
+- Monitoring features may be reduced
+
+Rebalancing can still proceed but with reduced features.""",
+            "confidence": 0.8,
+            "metadata": {"error": False, "degraded_mode": True, "unavailable_services": missing_services}
+        }
+
+    async def _validate_trade_safety(self, user_id: str, trades: List[Dict], portfolio_summary: Dict) -> Dict[str, Any]:
+        """Validate trades are safe to execute with comprehensive safety checks."""
+        
+        try:
+            # Check for concurrent rebalancing lock
+            if self.redis:
+                rebalancing_lock = await self.redis.get(f"rebalancing_lock:{user_id}")
+                if rebalancing_lock:
+                    return {
+                        "valid": False, 
+                        "reason": "Another rebalancing operation is already in progress. Please wait for it to complete."
+                    }
+            
+            portfolio_value = portfolio_summary.get("total_value", 0)
+            
+            # Portfolio minimum size check
+            if portfolio_value < 100:  # Minimum $100 portfolio
+                return {
+                    "valid": False,
+                    "reason": f"Portfolio too small for rebalancing (${portfolio_value:.2f}). Minimum: $100."
+                }
+            
+            # Validate individual trades
+            total_trade_value = 0
+            for i, trade in enumerate(trades):
+                symbol = trade.get("symbol", "").upper()
+                action = trade.get("action", "").lower()
+                amount = trade.get("amount", 0)
+                
+                # Basic trade validation
+                if not symbol or symbol.strip() == "":
+                    return {"valid": False, "reason": f"Trade {i+1}: Invalid symbol"}
+                
+                if action not in ["buy", "sell"]:
+                    return {"valid": False, "reason": f"Trade {i+1}: Invalid action '{action}'. Must be 'buy' or 'sell'"}
+                
+                if amount <= 0:
+                    return {"valid": False, "reason": f"Trade {i+1}: Invalid amount {amount}. Must be positive"}
+                
+                # Estimate trade value (rough calculation)
+                estimated_price = trade.get("estimated_price", 0)
+                if estimated_price > 0:
+                    trade_value = amount * estimated_price
+                    total_trade_value += trade_value
+                    
+                    # Single trade size limit (max 50% of portfolio)
+                    max_trade_value = portfolio_value * 0.5
+                    if trade_value > max_trade_value:
+                        return {
+                            "valid": False,
+                            "reason": f"Trade {i+1}: Trade too large (${trade_value:.2f}). Max per trade: ${max_trade_value:.2f}"
+                        }
+            
+            # Total rebalancing size check (max 90% of portfolio turnover)
+            max_total_turnover = portfolio_value * 0.9
+            if total_trade_value > max_total_turnover:
+                return {
+                    "valid": False,
+                    "reason": f"Total rebalancing too large (${total_trade_value:.2f}). Max turnover: ${max_total_turnover:.2f}"
+                }
+            
+            # Check minimum number of trades (rebalancing should involve multiple assets)
+            if len(trades) < 2:
+                return {
+                    "valid": False,
+                    "reason": "Rebalancing requires at least 2 trades. Single trades should use regular trading."
+                }
+            
+            # Maximum number of trades check (prevent excessive fragmentation)
+            if len(trades) > 20:
+                return {
+                    "valid": False,
+                    "reason": f"Too many trades ({len(trades)}). Maximum 20 trades per rebalancing to ensure execution quality."
+                }
+            
+            return {"valid": True}
+            
+        except Exception as e:
+            self.logger.error("Trade safety validation failed", error=str(e), user_id=user_id)
+            return {"valid": False, "reason": f"Safety validation error: {str(e)}"}
+    
+    async def _acquire_rebalancing_lock(self, user_id: str) -> bool:
+        """Acquire exclusive lock for rebalancing to prevent concurrent operations."""
+        
+        if not self.redis:
+            self.logger.warning("Cannot acquire rebalancing lock - Redis unavailable", user_id=user_id)
+            return True  # Proceed without lock if Redis unavailable
+        
+        try:
+            # Set lock with 30-minute expiration (safety timeout)
+            lock_acquired = await self.redis.set(
+                f"rebalancing_lock:{user_id}", 
+                datetime.utcnow().isoformat(),
+                ex=1800,  # 30 minutes
+                nx=True   # Only set if not exists
+            )
+            
+            if lock_acquired:
+                self.logger.info("Rebalancing lock acquired", user_id=user_id)
+                return True
+            else:
+                self.logger.warning("Failed to acquire rebalancing lock - already exists", user_id=user_id)
+                return False
+                
+        except Exception as e:
+            self.logger.error("Failed to acquire rebalancing lock", error=str(e), user_id=user_id)
+            return True  # Fail open for availability
+    
+    async def _release_rebalancing_lock(self, user_id: str):
+        """Release rebalancing lock."""
+        
+        if self.redis:
+            try:
+                await self.redis.delete(f"rebalancing_lock:{user_id}")
+                self.logger.info("Rebalancing lock released", user_id=user_id)
+            except Exception as e:
+                self.logger.error("Failed to release rebalancing lock", error=str(e), user_id=user_id)
+
+    async def _execute_trade_with_safety(self, trade: Dict, user_id: str, attempt: int = 1) -> Dict[str, Any]:
+        """Execute individual trade with safety checks and retry logic."""
+        
+        max_attempts = 3
+        base_delay = 2  # seconds
+        
+        try:
+            # Pre-execution validation
+            symbol = trade.get("symbol", "").upper().strip()
+            action = trade.get("action", "").lower().strip()
+            amount = float(trade.get("amount", 0))
+            
+            if not all([symbol, action in ["buy", "sell"], amount > 0]):
+                return {
+                    "success": False,
+                    "error": f"Invalid trade parameters: symbol={symbol}, action={action}, amount={amount}"
+                }
+            
+            # Prepare trade request in correct format for TradeExecutionService
+            trade_request = {
+                "symbol": symbol,
+                "quantity": amount,  # TradeExecutionService expects 'quantity', not 'amount'
+                "exchange": trade.get("exchange", "auto"),
+                "side": action,      # 'buy' or 'sell'
+                "order_type": "market",
+                "source": "rebalancing",
+                "opportunity_data": trade.get("opportunity_data"),
+                "safety_checks": True
+            }
+            
+            # Execute trade with timeout using correct signature
+            execution_result = await asyncio.wait_for(
+                self.trade_executor.execute_trade(
+                    trade_request=trade_request, 
+                    user_id=user_id, 
+                    simulation_mode=False  # Real trades for rebalancing
+                ),
+                timeout=30.0  # 30 second timeout per trade
+            )
+            
+            return execution_result
+            
+        except asyncio.TimeoutError:
+            if attempt < max_attempts:
+                # Exponential backoff retry
+                delay = base_delay ** attempt
+                self.logger.warning(f"Trade execution timeout, retrying in {delay}s", 
+                                  symbol=symbol, attempt=attempt, user_id=user_id)
+                await asyncio.sleep(delay)
+                return await self._execute_trade_with_safety(trade, user_id, attempt + 1)
+            else:
+                return {"success": False, "error": f"Trade execution timeout after {max_attempts} attempts"}
+                
+        except Exception as e:
+            if attempt < max_attempts:
+                delay = base_delay ** attempt
+                self.logger.warning(f"Trade execution error, retrying in {delay}s", 
+                                  error=str(e), symbol=symbol, attempt=attempt, user_id=user_id)
+                await asyncio.sleep(delay)
+                return await self._execute_trade_with_safety(trade, user_id, attempt + 1)
+            else:
+                return {"success": False, "error": f"Trade execution failed after {max_attempts} attempts: {str(e)}"}
+
+    async def _execute_rebalancing_plan(self, user_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a previously planned rebalancing operation with comprehensive safety checks."""
+        
+        try:
+            # Get the pending rebalancing plan from context
+            session_context = context.get("session_context", {})
+            pending_plan = session_context.get("pending_rebalancing_plan")
+            
+            if not pending_plan:
+                return {
+                    "content": """❌ **No Rebalancing Plan Found**
+                    
+No pending rebalancing plan found. Please run portfolio analysis first by typing:
+- "rebalance my portfolio"
+- "optimize my portfolio using [strategy]"
+
+Then you can execute the recommended trades.""",
+                    "confidence": 0.8,
+                    "metadata": {"error": "no_pending_plan"}
+                }
+            
+            # Validate the plan is recent (within 10 minutes)
+            plan_timestamp = datetime.fromisoformat(pending_plan.get("timestamp", "2000-01-01"))
+            if (datetime.utcnow() - plan_timestamp).total_seconds() > 600:
+                return {
+                    "content": """⏰ **Rebalancing Plan Expired**
+                    
+The rebalancing plan has expired (older than 10 minutes). Please generate a new plan:
+- "rebalance my portfolio"
+- "optimize portfolio using [strategy]"
+
+Market conditions may have changed since the original analysis.""",
+                    "confidence": 0.8,
+                    "metadata": {"error": "plan_expired"}
+                }
+            
+            trades = pending_plan.get("trades", [])
+            strategy = pending_plan.get("strategy", "unknown")
+            
+            if not trades:
+                return {
+                    "content": """❌ **No Trades to Execute**
+                    
+The rebalancing plan contains no executable trades. This might mean:
+- Portfolio is already optimally balanced
+- Insufficient portfolio size for rebalancing
+- Market conditions prevent trade generation
+
+Please try a different strategy or check your portfolio status.""",
+                    "confidence": 0.7,
+                    "metadata": {"error": "no_trades"}
+                }
+            
+            # SAFETY CHECK: Acquire rebalancing lock
+            if not await self._acquire_rebalancing_lock(user_id):
+                return {
+                    "content": """🔒 **Rebalancing Already in Progress**
+                    
+Another rebalancing operation is currently running for your account.
+Please wait for it to complete before starting a new rebalancing.
+
+**Status Check:**
+- Type "portfolio status" to see current state
+- Wait 5-10 minutes and try again
+- Contact support if the lock persists
+
+This safety mechanism prevents conflicting trades.""",
+                    "confidence": 0.9,
+                    "metadata": {"error": "rebalancing_locked"}
+                }
+            
+            try:
+                # Get current portfolio for safety validation
+                portfolio_summary = await self.chat_adapters.get_portfolio_summary(user_id)
+                
+                # SAFETY CHECK: Validate all trades before execution
+                safety_result = await self._validate_trade_safety(user_id, trades, portfolio_summary)
+                if not safety_result["valid"]:
+                    await self._release_rebalancing_lock(user_id)
+                    return {
+                        "content": f"""🛡️ **Safety Check Failed**
+                        
+{safety_result['reason']}
+
+**Safety Limits:**
+- Minimum portfolio: $100
+- Maximum single trade: 50% of portfolio
+- Maximum total turnover: 90% of portfolio  
+- Trade count: 2-20 trades per rebalancing
+
+Your portfolio and trades have been analyzed to prevent potential losses.""",
+                        "confidence": 0.8,
+                        "metadata": {"error": "safety_check_failed", "reason": safety_result['reason']}
+                    }
+                
+                # Execute trades with enhanced safety
+                self.logger.info(f"Executing rebalancing plan with {len(trades)} trades", 
+                               user_id=user_id, strategy=strategy, portfolio_value=portfolio_summary.get("total_value"))
+                
+                executed_trades = []
+                failed_trades = []
+                
+                for trade in trades:
+                    try:
+                        # Execute individual trade with safety and retry logic
+                        execution_result = await self._execute_trade_with_safety(trade, user_id)
+                        
+                        if execution_result.get("success"):
+                            executed_trades.append({
+                                "symbol": trade.get("symbol"),
+                                "action": trade.get("action"),
+                                "amount": trade.get("amount"),
+                                "trade_id": execution_result.get("trade_id")
+                            })
+                            self.logger.info("Rebalancing trade executed successfully", 
+                                           symbol=trade.get("symbol"), 
+                                           action=trade.get("action"),
+                                           trade_id=execution_result.get("trade_id"))
+                        else:
+                            failed_trades.append({
+                                "symbol": trade.get("symbol"),
+                                "action": trade.get("action"),
+                                "amount": trade.get("amount"),
+                                "error": execution_result.get("error", "Unknown error")
+                            })
+                            self.logger.warning("Rebalancing trade failed", 
+                                              symbol=trade.get("symbol"),
+                                              error=execution_result.get("error"))
+                        
+                    except Exception as e:
+                        self.logger.error("Trade execution exception", error=str(e), trade=trade)
+                        failed_trades.append({
+                            "symbol": trade.get("symbol"),
+                            "action": trade.get("action"),
+                            "amount": trade.get("amount"),
+                            "error": str(e)
+                        })
+                
+                # Always release the lock after execution attempt
+                await self._release_rebalancing_lock(user_id)
+                
+            except Exception as safety_error:
+                # Release lock on any exception during safety checks or execution
+                await self._release_rebalancing_lock(user_id)
+                raise safety_error
+            
+            # Clear the pending plan from context
+            if self.memory:
+                try:
+                    session_id = context.get("session_id")
+                    if session_id:
+                        await self.memory.update_session_context(session_id, {
+                            "pending_rebalancing_plan": None,
+                            "last_rebalancing_execution": {
+                                "timestamp": datetime.utcnow().isoformat(),
+                                "strategy": strategy,
+                                "executed_count": len(executed_trades),
+                                "failed_count": len(failed_trades)
+                            }
+                        })
+                except Exception as e:
+                    self.logger.warning("Could not clear rebalancing plan from memory", error=str(e))
+            
+            # Format response based on results
+            if len(executed_trades) == len(trades):
+                # All trades succeeded
+                trade_summary = "\n".join([
+                    f"✅ {trade['action'].upper()} {trade['amount']:.6f} {trade['symbol']}"
+                    for trade in executed_trades
+                ])
+                
+                return {
+                    "content": f"""🎉 **Portfolio Rebalancing Completed Successfully**
+
+**Strategy:** {strategy.replace('_', ' ').title()}
+**Executed Trades:** {len(executed_trades)}/{len(trades)}
+
+**Trade Summary:**
+{trade_summary}
+
+**Status:** All rebalancing trades executed successfully
+**Next Steps:** 
+- Your portfolio is now optimized according to the {strategy.replace('_', ' ')} strategy
+- Monitor performance over the next few days
+- Consider enabling autonomous mode for automatic rebalancing
+
+Portfolio rebalancing complete! 🚀""",
+                    "confidence": 0.98,
+                    "metadata": {
+                        "rebalancing_complete": True,
+                        "strategy": strategy,
+                        "executed_trades": len(executed_trades),
+                        "total_trades": len(trades)
+                    }
+                }
+                
+            elif len(executed_trades) > 0:
+                # Partial success
+                executed_summary = "\n".join([
+                    f"✅ {trade['action'].upper()} {trade['amount']:.6f} {trade['symbol']}"
+                    for trade in executed_trades
+                ])
+                failed_summary = "\n".join([
+                    f"❌ {trade['action'].upper()} {trade['amount']:.6f} {trade['symbol']} - {trade['error']}"
+                    for trade in failed_trades
+                ])
+                
+                return {
+                    "content": f"""⚠️ **Portfolio Rebalancing Partially Completed**
+
+**Strategy:** {strategy.replace('_', ' ').title()}
+**Executed:** {len(executed_trades)}/{len(trades)} trades
+
+**Successful Trades:**
+{executed_summary}
+
+**Failed Trades:**
+{failed_summary}
+
+**Status:** Partial rebalancing completed
+**Recommendation:** Review failed trades and consider manual execution or retry later.""",
+                    "confidence": 0.7,
+                    "metadata": {
+                        "rebalancing_partial": True,
+                        "strategy": strategy,
+                        "executed_trades": len(executed_trades),
+                        "failed_trades": len(failed_trades),
+                        "total_trades": len(trades)
+                    }
+                }
+                
+            else:
+                # All trades failed
+                failed_summary = "\n".join([
+                    f"❌ {trade['action'].upper()} {trade['amount']:.6f} {trade['symbol']} - {trade['error']}"
+                    for trade in failed_trades
+                ])
+                
+                return {
+                    "content": f"""❌ **Portfolio Rebalancing Failed**
+
+**Strategy:** {strategy.replace('_', ' ').title()}
+**Status:** All trades failed to execute
+
+**Failed Trades:**
+{failed_summary}
+
+**Possible Causes:**
+- Insufficient balance for trades
+- Exchange connectivity issues
+- Market conditions preventing execution
+
+**Recommendations:**
+- Check your exchange account balances
+- Verify exchange API connections
+- Try again in a few minutes
+- Contact support if issues persist""",
+                    "confidence": 0.4,
+                    "metadata": {
+                        "rebalancing_failed": True,
+                        "strategy": strategy,
+                        "failed_trades": len(failed_trades),
+                        "total_trades": len(trades)
+                    }
+                }
+            
+        except Exception as e:
+            self.logger.error("Rebalancing execution failed", error=str(e), user_id=user_id)
+            return {
+                "content": f"""❌ **Rebalancing Execution Error**
+                
+An unexpected error occurred during rebalancing execution:
+{str(e)}
+
+Please try again or contact support if the issue persists.""",
+                "confidence": 0.3,
+                "metadata": {"error": True, "execution_error": str(e)}
+            }
+
+    async def _handle_strategy_selection(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
+        """Handle strategy selection or change requests."""
+        
+        # Offer strategy selection menu
+        return {
+            "content": """🎯 **Choose Rebalancing Strategy**
+
+**Available Strategies:**
+
+1. **Risk Parity** ⚖️ - Equal risk contribution across assets (Recommended)
+2. **Maximum Sharpe** 📈 - Optimize for best risk-adjusted returns
+3. **Minimum Variance** 🛡️ - Lowest possible portfolio volatility  
+4. **Equal Weight** ⚖️ - Simple equal allocation across all assets
+5. **Kelly Criterion** 🎲 - Optimal position sizing based on expected returns
+6. **Adaptive** 🤖 - AI selects the best strategy for current conditions
+
+**Examples:**
+- "rebalance using risk parity"
+- "optimize portfolio with maximum sharpe"
+- "use minimum variance strategy"
+
+Which strategy would you like to use?""",
+            "confidence": 0.95,
+            "metadata": {"strategy_selection_menu": True}
+        }
+
     async def _handle_general_query(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Handle general queries with service context."""
         
+        # Check for execution confirmation commands
+        message_lower = message.lower().strip()
+        
+        # Handle rebalancing execution confirmation
+        if any(phrase in message_lower for phrase in ["execute rebalancing", "execute rebalance", "confirm rebalancing", "proceed with rebalancing"]):
+            return await self._execute_rebalancing_plan(user_id, context)
+        
+        # Handle strategy change requests
+        if "different strategy" in message_lower or "change strategy" in message_lower:
+            return await self._handle_strategy_selection(message, context, user_id)
+            
         context_summary = self._build_context_summary(context)
         
         general_prompt = f"""

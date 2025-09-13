@@ -162,7 +162,7 @@ class EnterpriseAssetFilter(LoggerMixin):
     async def async_init(self):
         """Initialize async components."""
         try:
-            self.redis = get_redis_client()
+            self.redis = await get_redis_client()
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=15),
                 headers={

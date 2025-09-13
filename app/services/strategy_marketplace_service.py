@@ -27,7 +27,7 @@ from app.core.database import get_database
 from app.core.logging import LoggerMixin
 from app.models.trading import TradingStrategy, Trade
 from app.models.user import User
-from app.models.credit import CreditAccount, CreditTransaction
+from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.models.copy_trading import StrategyPublisher, StrategyPerformance
 from app.services.trading_strategies import trading_strategies_service
 
@@ -107,8 +107,13 @@ class StrategyMarketplaceService(LoggerMixin):
             if strategy_pricing_data:
                 strategy_pricing = {}
                 for key, value in strategy_pricing_data.items():
-                    strategy_name = key.decode() if isinstance(key, bytes) else key
-                    credit_cost = int(value.decode()) if isinstance(value, bytes) else int(value)
+                    # Handle both bytes and string responses from Redis
+                    strategy_name = key.decode() if isinstance(key, bytes) else str(key)
+                    try:
+                        credit_cost = int(value.decode()) if isinstance(value, bytes) else int(value)
+                    except (ValueError, AttributeError):
+                        # Fallback to default if conversion fails
+                        credit_cost = 25
                     strategy_pricing[strategy_name] = credit_cost
                 
                 self.strategy_pricing = strategy_pricing
@@ -191,12 +196,12 @@ class StrategyMarketplaceService(LoggerMixin):
             "spot_momentum_strategy": {
                 "name": "AI Momentum Trading",
                 "category": "spot",
-                "credit_cost_monthly": 25,
-                "credit_cost_per_execution": 2,
+                "credit_cost_monthly": 0,  # FREE basic strategy
+                "credit_cost_per_execution": 0,  # FREE basic strategy
                 "risk_level": "medium",
                 "min_capital": 1000,
                 "estimated_monthly_return": "25-45%",
-                "tier": "basic"
+                "tier": "free"
             },
             "spot_mean_reversion": {
                 "name": "AI Mean Reversion",
@@ -261,22 +266,22 @@ class StrategyMarketplaceService(LoggerMixin):
                 "tier": "pro"
             },
             
-            # Portfolio Management (Essential, lower pricing)
+            # Portfolio Management (Essential, FREE basic strategies)
             "portfolio_optimization": {
                 "name": "AI Portfolio Optimizer",
                 "category": "portfolio",
-                "credit_cost_monthly": 20,
-                "credit_cost_per_execution": 1,
+                "credit_cost_monthly": 0,  # FREE basic strategy
+                "credit_cost_per_execution": 0,  # FREE basic strategy
                 "risk_level": "low",
                 "min_capital": 1000,
                 "estimated_monthly_return": "15-25%",
-                "tier": "basic"
+                "tier": "free"
             },
             "risk_management": {
                 "name": "AI Risk Manager",
                 "category": "portfolio",
-                "credit_cost_monthly": 15,
-                "credit_cost_per_execution": 1,
+                "credit_cost_monthly": 0,  # FREE basic strategy
+                "credit_cost_per_execution": 0,  # FREE basic strategy
                 "risk_level": "low",
                 "min_capital": 500,
                 "estimated_monthly_return": "10-20%",
@@ -566,7 +571,11 @@ class StrategyMarketplaceService(LoggerMixin):
                         return {"success": False, "error": "Strategy not found"}
                     
                     config = self.ai_strategy_catalog[strategy_func]
-                    cost = config["credit_cost_monthly"] if subscription_type == "monthly" else config["credit_cost_per_execution"]
+                    # Handle different subscription types
+                    if subscription_type in ["monthly", "permanent"]:
+                        cost = config["credit_cost_monthly"]
+                    else:
+                        cost = config["credit_cost_per_execution"]
                 else:
                     # Community strategy
                     strategy_stmt = select(TradingStrategy).where(TradingStrategy.id == strategy_id)
@@ -578,32 +587,42 @@ class StrategyMarketplaceService(LoggerMixin):
                     
                     cost = self._calculate_strategy_pricing(strategy)
                 
-                # Check if user has enough credits
-                if credit_account.available_credits < cost:
+                # Check if user has enough credits (skip check for free strategies)
+                if cost > 0 and credit_account.available_credits < cost:
                     return {
                         "success": False, 
                         "error": f"Insufficient credits. Required: {cost}, Available: {credit_account.available_credits}"
                     }
                 
-                # Deduct credits
-                credit_account.available_credits -= cost
-                credit_account.total_used_credits += cost
-                
-                # Record transaction
-                transaction = CreditTransaction(
-                    user_id=user_id,
-                    amount=-cost,
-                    transaction_type="strategy_purchase",
-                    description=f"Strategy access: {strategy_id}",
-                    reference_id=strategy_id,
-                    status="completed"
-                )
-                db.add(transaction)
+                # Deduct credits (only for paid strategies)
+                if cost > 0:
+                    balance_before = credit_account.available_credits
+                    credit_account.available_credits -= cost
+                    credit_account.used_credits += cost
+                    balance_after = credit_account.available_credits
+                    
+                    # Record transaction (only for paid strategies)
+                    transaction = CreditTransaction(
+                        account_id=credit_account.id,
+                        transaction_type=CreditTransactionType.USAGE,
+                        amount=-cost,
+                        description=f"Strategy access: {strategy_id} ({subscription_type})",
+                        balance_before=balance_before,
+                        balance_after=balance_after,
+                        source="system"
+                    )
+                    db.add(transaction)
                 
                 # Add to user's active strategies
                 await self._add_to_user_strategy_portfolio(user_id, strategy_id, db)
                 
                 await db.commit()
+                
+                self.logger.info("Strategy purchase successful", 
+                               user_id=user_id, 
+                               strategy_id=strategy_id, 
+                               cost=cost,
+                               subscription_type=subscription_type)
                 
                 return {
                     "success": True,
@@ -619,16 +638,24 @@ class StrategyMarketplaceService(LoggerMixin):
     
     async def _add_to_user_strategy_portfolio(self, user_id: str, strategy_id: str, db: AsyncSession):
         """Add strategy to user's active strategy portfolio."""
-        # This would create a user_strategy_subscriptions record
-        # For now, store in Redis for quick access
-        from app.core.redis import get_redis_client
-        redis = await get_redis_client()
-        
-        # Add to user's active strategies set
-        await redis.sadd(f"user_strategies:{user_id}", strategy_id)
-        
-        # Set expiry for monthly subscriptions
-        await redis.expire(f"user_strategies:{user_id}", 30 * 24 * 3600)  # 30 days
+        try:
+            # This would create a user_strategy_subscriptions record
+            # For now, store in Redis for quick access
+            from app.core.redis import get_redis_client
+            redis = await get_redis_client()
+            
+            if redis:
+                # Add to user's active strategies set
+                await redis.sadd(f"user_strategies:{user_id}", strategy_id)
+                
+                # Set expiry for monthly subscriptions
+                await redis.expire(f"user_strategies:{user_id}", 30 * 24 * 3600)  # 30 days
+                self.logger.info("Strategy added to user portfolio", user_id=user_id, strategy_id=strategy_id)
+            else:
+                self.logger.warning("Redis unavailable, strategy not cached", user_id=user_id, strategy_id=strategy_id)
+                
+        except Exception as e:
+            self.logger.error("Failed to add strategy to portfolio", user_id=user_id, strategy_id=strategy_id, error=str(e))
     
     async def get_user_strategy_portfolio(self, user_id: str) -> Dict[str, Any]:
         """Get user's purchased/active strategies."""
@@ -636,9 +663,14 @@ class StrategyMarketplaceService(LoggerMixin):
             from app.core.redis import get_redis_client
             redis = await get_redis_client()
             
+            if not redis:
+                self.logger.warning("Redis unavailable for strategy portfolio retrieval")
+                return {"success": False, "error": "Redis unavailable"}
+            
             # Get user's active strategies
             active_strategies = await redis.smembers(f"user_strategies:{user_id}")
-            active_strategies = [s.decode() for s in active_strategies]
+            # Handle both bytes and string responses from Redis
+            active_strategies = [s.decode() if isinstance(s, bytes) else s for s in active_strategies]
             
             strategy_portfolio = []
             total_monthly_cost = 0
