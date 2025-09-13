@@ -2831,7 +2831,7 @@ class TradingStrategiesService(LoggerMixin):
                 return {
                     "success": False,
                     "error": f"Unable to get price for {symbol}",
-                    "function": "scalp_strategy"
+                    "function": "scalping_strategy"
                 }
             current_price = float(price_data.get("price", 0))
             
@@ -3012,7 +3012,7 @@ class TradingStrategiesService(LoggerMixin):
                 return {
                     "success": False,
                     "error": f"Unable to get price for {symbol}",
-                    "function": "swing_strategy"
+                    "function": "swing_trading"
                 }
             current_price = float(price_data.get("price", 0))
             
