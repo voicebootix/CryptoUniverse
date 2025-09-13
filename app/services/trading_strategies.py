@@ -4494,11 +4494,17 @@ class TradingStrategiesService(LoggerMixin):
             
             base_symbol = symbol.split('/')[0] if '/' in symbol else symbol.replace('USDT', '')
             base_leverage = safe_leverage_map.get(base_symbol, 1.5)
-            
+
+            # Normalize liquidation_distance to fraction (convert percentage if needed)
+            normalized_distance = liquidation_distance / 100 if liquidation_distance > 1 else liquidation_distance
+
+            # Clamp to sensible range to avoid extreme values
+            normalized_distance = max(0.01, min(normalized_distance, 1.0))
+
             # Adjust based on liquidation distance preference
-            distance_adjustment = liquidation_distance / 0.2
+            distance_adjustment = normalized_distance / 0.2
             adjusted_leverage = base_leverage * distance_adjustment
-            
+
             return max(1.0, min(adjusted_leverage, 10.0))
             
         except Exception as e:
