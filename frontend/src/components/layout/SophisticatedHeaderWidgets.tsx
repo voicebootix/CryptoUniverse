@@ -69,6 +69,13 @@ const SophisticatedHeaderWidgets: React.FC = () => {
   const portfolioValue = isPaperMode ? paperBalance : totalValue;
   const portfolioPnL = isPaperMode ? (paperStats?.totalProfit || 0) : totalPnL;
   const dailyPnLValue = isPaperMode ? ((paperStats?.totalProfit || 0) * 0.1) : dailyPnL;
+  
+  // Helper function to safely clamp percentage values to [0,100] range
+  const safePercentage = (value: any): number => {
+    const num = Number(value);
+    if (!isFinite(num) || isNaN(num)) return 0;
+    return Math.max(0, Math.min(100, num));
+  };
 
   return (
     <div className="flex items-center gap-4">
@@ -332,13 +339,13 @@ const SophisticatedHeaderWidgets: React.FC = () => {
               <div className="space-y-2">
                 <div className="flex justify-between text-xs text-muted-foreground">
                   <span>Usage</span>
-                  <span>{Math.round(credits?.usage_percentage || 0)}%</span>
+                  <span>{Math.round(safePercentage(credits?.usage_percentage))}%</span>
                 </div>
                 <div className="w-full bg-secondary rounded-full h-2">
                   <div
                     className="bg-primary h-2 rounded-full"
                     style={{
-                      width: `${credits?.usage_percentage || 0}%`
+                      width: `${safePercentage(credits?.usage_percentage)}%`
                     }}
                   />
                 </div>
