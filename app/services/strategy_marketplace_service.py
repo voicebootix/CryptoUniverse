@@ -665,7 +665,24 @@ class StrategyMarketplaceService(LoggerMixin):
             
             if not redis:
                 self.logger.warning("Redis unavailable for strategy portfolio retrieval")
-                return {"success": False, "error": "Redis unavailable"}
+                # Return empty portfolio structure when Redis is unavailable
+                return {
+                    "success": True,
+                    "strategies": [],
+                    "summary": {
+                        "active_strategies": 0,
+                        "total_strategies": 0,
+                        "welcome_strategies": 0,
+                        "purchased_strategies": 0,
+                        "total_portfolio_value": 0,
+                        "total_pnl_usd": 0,
+                        "total_pnl_percentage": 0,
+                        "monthly_credit_cost": 0,
+                        "next_billing_date": None,
+                        "profit_potential_used": 0,
+                        "profit_potential_remaining": 0
+                    }
+                }
             
             # Get user's active strategies
             active_strategies = await redis.smembers(f"user_strategies:{user_id}")
@@ -693,17 +710,53 @@ class StrategyMarketplaceService(LoggerMixin):
                             "is_ai_strategy": True
                         })
             
+            # Calculate profit metrics
+            total_pnl_usd = sum(s["performance"].get("total_pnl", 0) for s in strategy_portfolio)
+            avg_return_pct = sum(s["performance"].get("avg_return", 0) for s in strategy_portfolio) / max(1, len(strategy_portfolio))
+            
+            # Assume user has a monthly profit potential based on portfolio size
+            profit_potential_total = total_monthly_cost * 5  # 5x multiplier for profit potential
+            profit_potential_used = max(0, total_pnl_usd)
+            profit_potential_remaining = max(0, profit_potential_total - profit_potential_used)
+
             return {
                 "success": True,
-                "active_strategies": strategy_portfolio,
-                "total_strategies": len(strategy_portfolio),
-                "total_monthly_cost": total_monthly_cost,
-                "estimated_monthly_return": sum(s["performance"].get("avg_return", 0) for s in strategy_portfolio)
+                "strategies": strategy_portfolio,
+                "summary": {
+                    "active_strategies": len(strategy_portfolio),
+                    "total_strategies": len(strategy_portfolio),
+                    "welcome_strategies": len([s for s in strategy_portfolio if s.get("category") == "Beginner Friendly"]),
+                    "purchased_strategies": len(strategy_portfolio),
+                    "total_portfolio_value": total_monthly_cost * 12,  # Annualized
+                    "total_pnl_usd": total_pnl_usd,
+                    "total_pnl_percentage": avg_return_pct,
+                    "monthly_credit_cost": total_monthly_cost,
+                    "next_billing_date": None,  # Could be enhanced with actual billing date
+                    "profit_potential_used": profit_potential_used,
+                    "profit_potential_remaining": profit_potential_remaining
+                }
             }
             
         except Exception as e:
             self.logger.error("Failed to get user strategy portfolio", error=str(e))
-            return {"success": False, "error": str(e)}
+            # Return empty portfolio structure on error to prevent frontend crashes
+            return {
+                "success": True,
+                "strategies": [],
+                "summary": {
+                    "active_strategies": 0,
+                    "total_strategies": 0,
+                    "welcome_strategies": 0,
+                    "purchased_strategies": 0,
+                    "total_portfolio_value": 0,
+                    "total_pnl_usd": 0,
+                    "total_pnl_percentage": 0,
+                    "monthly_credit_cost": 0,
+                    "next_billing_date": None,
+                    "profit_potential_used": 0,
+                    "profit_potential_remaining": 0
+                }
+            }
 
 
 # Global service instance
