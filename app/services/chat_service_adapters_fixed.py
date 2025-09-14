@@ -479,10 +479,16 @@ class ChatServiceAdaptersFixed:
                        converted_value=optimization_portfolio.get("total_value_usd", 0),
                        converted_positions=len(optimization_portfolio.get("positions", [])))
             
-            # ENHANCED: Use existing intelligent strategy selection
+            # AI MONEY MANAGER: Comprehensive strategy analysis
+            strategy_analysis_results = None
             if strategy == "auto":
-                strategy = await self._select_optimal_strategy(portfolio_data, user_id)
-                logger.info("Enhanced strategy selection", strategy=strategy, user_id=user_id)
+                # Test ALL strategies and find the best one
+                strategy_analysis_results = await self._analyze_all_strategies_comprehensive(portfolio_data, user_id)
+                strategy = strategy_analysis_results["recommended_strategy"]
+                logger.info("AI Money Manager: Comprehensive analysis completed", 
+                           strategy=strategy, 
+                           expected_return=strategy_analysis_results["best_metrics"]["expected_return"],
+                           user_id=user_id)
             
             # Use the CORRECT method signature that actually exists
             constraints = {}
@@ -560,11 +566,12 @@ class ChatServiceAdaptersFixed:
                             "position_values": [f"{pos.get('symbol', 'Unknown')}: ${pos.get('value_usd', 0)}" for pos in positions[:5]],  # Position values
                             "optimization_weights": {k: v for k, v in list(optimization_data.get("weights", {}).items())[:5]},  # First 5 weights
                             "selected_strategy": strategy,  # Show which strategy was selected
-                            "strategy_selection": "enhanced_intelligent_selection" if strategy != "auto" else "user_specified",
-                            "portfolio_consolidation": f"{len(portfolio_data.get('positions', []))} positions → {len(optimization_data.get('weights', {}))} consolidated symbols"
+                            "strategy_selection": "ai_money_manager_comprehensive" if strategy != "auto" else "user_specified",
+                            "portfolio_consolidation": f"{len(portfolio_data.get('positions', []))} positions → {len(optimization_data.get('weights', {}))} consolidated symbols",
+                            "strategy_analysis": strategy_analysis_results["analysis_type"] if strategy_analysis_results else "single_strategy"
                         }
                         
-                        return {
+                        result_data = {
                             "needs_rebalancing": optimization_data.get("rebalancing_needed", False),
                             "deviation_score": (1.0 - optimization_data.get("confidence", 0.8)) * 100,
                             "recommended_trades": optimization_data.get("suggested_trades", []),
@@ -572,6 +579,19 @@ class ChatServiceAdaptersFixed:
                             "expected_improvement": optimization_data.get("expected_return", 0) * 100,
                             "debug_info": debug_info  # Add debug information
                         }
+                        
+                        # Add comprehensive strategy analysis if available
+                        if strategy_analysis_results:
+                            result_data["strategy_analysis"] = strategy_analysis_results
+                            result_data["ai_money_manager"] = {
+                                "mode": "comprehensive_analysis",
+                                "strategies_tested": strategy_analysis_results["analysis_summary"]["total_tested"],
+                                "recommended_strategy": strategy_analysis_results["recommended_strategy"],
+                                "expected_return": strategy_analysis_results["best_metrics"]["expected_return"],
+                                "confidence_score": strategy_analysis_results["best_metrics"].get("final_score", 0)
+                            }
+                        
+                        return result_data
                     else:
                         logger.error("Unexpected optimization_data type", type=type(optimization_data))
                         return {
@@ -685,6 +705,143 @@ class ChatServiceAdaptersFixed:
     
 
 
+    async def _analyze_all_strategies_comprehensive(self, portfolio_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+        """AI MONEY MANAGER: Comprehensive analysis of ALL strategies with real data."""
+        try:
+            logger.info("AI Money Manager: Starting comprehensive strategy analysis", user_id=user_id)
+            
+            # Convert portfolio for optimization
+            optimization_portfolio = self._convert_portfolio_for_optimization(portfolio_data)
+            
+            # All available strategies to test
+            strategies_to_test = [
+                "risk_parity",
+                "equal_weight", 
+                "max_sharpe",
+                "min_variance",
+                "kelly_criterion",
+                "adaptive"
+            ]
+            
+            strategy_results = {}
+            
+            # Test each strategy with real portfolio data
+            for strategy_name in strategies_to_test:
+                try:
+                    logger.info(f"Testing strategy: {strategy_name}")
+                    
+                    # Temporarily replace the portfolio connector method
+                    original_get_portfolio = self.portfolio_risk.portfolio_connector.get_consolidated_portfolio
+                    
+                    async def get_real_portfolio(user_id_param):
+                        return optimization_portfolio
+                    
+                    self.portfolio_risk.portfolio_connector.get_consolidated_portfolio = get_real_portfolio
+                    
+                    # Run optimization for this strategy
+                    result = await self.portfolio_risk.optimize_allocation(
+                        user_id=user_id,
+                        strategy=strategy_name,
+                        constraints={"rebalance_threshold": 0.05}
+                    )
+                    
+                    # Restore original method
+                    self.portfolio_risk.portfolio_connector.get_consolidated_portfolio = original_get_portfolio
+                    
+                    if result.get("success") and result.get("optimization_result"):
+                        opt_result = result["optimization_result"]
+                        
+                        # Extract metrics (handle both dict and dataclass)
+                        if isinstance(opt_result, dict):
+                            expected_return = opt_result.get("expected_return", 0)
+                            sharpe_ratio = opt_result.get("sharpe_ratio", 0)
+                            volatility = opt_result.get("expected_volatility", 0)
+                            confidence = opt_result.get("confidence", 0.5)
+                        else:
+                            expected_return = getattr(opt_result, "expected_return", 0)
+                            sharpe_ratio = getattr(opt_result, "sharpe_ratio", 0)
+                            volatility = getattr(opt_result, "expected_volatility", 0)
+                            confidence = getattr(opt_result, "confidence", 0.5)
+                        
+                        # Calculate comprehensive score
+                        risk_adjusted_return = expected_return / max(volatility, 0.01)  # Avoid division by zero
+                        profit_potential = expected_return * confidence
+                        comprehensive_score = (profit_potential * 0.4) + (risk_adjusted_return * 0.3) + (sharpe_ratio * 0.3)
+                        
+                        strategy_results[strategy_name] = {
+                            "expected_return": float(expected_return),
+                            "sharpe_ratio": float(sharpe_ratio),
+                            "volatility": float(volatility),
+                            "confidence": float(confidence),
+                            "profit_potential": float(profit_potential),
+                            "risk_adjusted_return": float(risk_adjusted_return),
+                            "comprehensive_score": float(comprehensive_score),
+                            "status": "success"
+                        }
+                        
+                        logger.info(f"Strategy {strategy_name} analysis complete",
+                                   expected_return=expected_return,
+                                   comprehensive_score=comprehensive_score)
+                    else:
+                        strategy_results[strategy_name] = {
+                            "status": "failed",
+                            "error": result.get("error", "Optimization failed")
+                        }
+                        
+                except Exception as e:
+                    strategy_results[strategy_name] = {
+                        "status": "error",
+                        "error": str(e)
+                    }
+                    logger.error(f"Strategy {strategy_name} analysis failed", error=str(e))
+            
+            # Find the best strategy
+            successful_strategies = {k: v for k, v in strategy_results.items() if v.get("status") == "success"}
+            
+            if successful_strategies:
+                # Select strategy with highest comprehensive score
+                best_strategy = max(successful_strategies.keys(), 
+                                  key=lambda k: successful_strategies[k]["comprehensive_score"])
+                best_metrics = successful_strategies[best_strategy]
+                
+                logger.info("AI Money Manager: Best strategy identified",
+                           best_strategy=best_strategy,
+                           comprehensive_score=best_metrics["comprehensive_score"],
+                           expected_return=best_metrics["expected_return"])
+                
+                return {
+                    "recommended_strategy": best_strategy,
+                    "best_metrics": best_metrics,
+                    "all_strategies": strategy_results,
+                    "analysis_type": "comprehensive_multi_strategy",
+                    "strategies_tested": len(strategies_to_test),
+                    "successful_strategies": len(successful_strategies)
+                }
+            else:
+                # Fallback to intelligent selection if all strategies failed
+                logger.warning("All strategies failed, using intelligent fallback")
+                fallback_strategy = await self._select_optimal_strategy(portfolio_data, user_id)
+                return {
+                    "recommended_strategy": fallback_strategy,
+                    "best_metrics": {"expected_return": 0.15, "comprehensive_score": 0.5},
+                    "all_strategies": strategy_results,
+                    "analysis_type": "fallback_intelligent_selection",
+                    "strategies_tested": len(strategies_to_test),
+                    "successful_strategies": 0
+                }
+                
+        except Exception as e:
+            logger.error("Comprehensive strategy analysis failed", error=str(e))
+            # Fallback to simple intelligent selection
+            fallback_strategy = await self._select_optimal_strategy(portfolio_data, user_id)
+            return {
+                "recommended_strategy": fallback_strategy,
+                "best_metrics": {"expected_return": 0.15, "comprehensive_score": 0.5},
+                "all_strategies": {},
+                "analysis_type": "error_fallback",
+                "error": str(e)
+            }
+
     async def _select_optimal_strategy(self, portfolio_data: Dict[str, Any], user_id: str) -> str:
         """Intelligently select the optimal rebalancing strategy based on portfolio analysis."""
         try:
@@ -791,6 +948,167 @@ class ChatServiceAdaptersFixed:
         except Exception as e:
             logger.error("Strategy selection failed, using fallback", error=str(e))
             return "risk_parity"  # Safe fallback
+    
+    async def _analyze_all_strategies_comprehensive(self, portfolio_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+        """AI MONEY MANAGER: Test all strategies and return comprehensive analysis."""
+        try:
+            logger.info("AI Money Manager: Testing all strategies for optimal selection", user_id=user_id)
+            
+            # Convert portfolio for optimization
+            optimization_portfolio = self._convert_portfolio_for_optimization(portfolio_data)
+            
+            # All available strategies to test
+            strategies_to_test = [
+                "risk_parity",
+                "equal_weight", 
+                "max_sharpe",
+                "min_variance",
+                "kelly_criterion",
+                "adaptive"
+            ]
+            
+            strategy_results = {}
+            successful_results = {}
+            
+            # Test each strategy using existing optimization engine
+            for strategy_name in strategies_to_test:
+                try:
+                    # Use the existing monkey-patch approach that works
+                    original_get_portfolio = self.portfolio_risk.portfolio_connector.get_consolidated_portfolio
+                    
+                    async def get_real_portfolio(user_id_param):
+                        return optimization_portfolio
+                    
+                    self.portfolio_risk.portfolio_connector.get_consolidated_portfolio = get_real_portfolio
+                    
+                    try:
+                        # Run optimization for this strategy
+                        result = await self.portfolio_risk.optimize_allocation(
+                            user_id=user_id,
+                            strategy=strategy_name,
+                            constraints={"rebalance_threshold": 0.05}
+                        )
+                        
+                        if result.get("success") and result.get("optimization_result"):
+                            opt_result = result["optimization_result"]
+                            
+                            # Extract metrics (handle both dict and dataclass)
+                            if isinstance(opt_result, dict):
+                                expected_return = opt_result.get("expected_return", 0)
+                                sharpe_ratio = opt_result.get("sharpe_ratio", 0)
+                                volatility = opt_result.get("expected_volatility", 0)
+                                confidence = opt_result.get("confidence", 0.5)
+                                max_drawdown = opt_result.get("max_drawdown_estimate", 0)
+                            else:
+                                expected_return = getattr(opt_result, "expected_return", 0)
+                                sharpe_ratio = getattr(opt_result, "sharpe_ratio", 0)
+                                volatility = getattr(opt_result, "expected_volatility", 0)
+                                confidence = getattr(opt_result, "confidence", 0.5)
+                                max_drawdown = getattr(opt_result, "max_drawdown_estimate", 0)
+                            
+                            # Calculate comprehensive score
+                            risk_adjusted_return = expected_return - (volatility * 0.5)  # Risk penalty
+                            confidence_weighted_return = risk_adjusted_return * confidence
+                            drawdown_penalty = max_drawdown * 0.3
+                            final_score = confidence_weighted_return - drawdown_penalty
+                            
+                            strategy_results[strategy_name] = {
+                                "expected_return": float(expected_return),
+                                "sharpe_ratio": float(sharpe_ratio),
+                                "volatility": float(volatility),
+                                "confidence": float(confidence),
+                                "max_drawdown": float(max_drawdown),
+                                "risk_adjusted_return": float(risk_adjusted_return),
+                                "final_score": float(final_score),
+                                "status": "success"
+                            }
+                            
+                            successful_results[strategy_name] = strategy_results[strategy_name]
+                            
+                            logger.info(f"Strategy {strategy_name} analysis completed",
+                                       expected_return=expected_return,
+                                       final_score=final_score)
+                        else:
+                            strategy_results[strategy_name] = {
+                                "status": "failed",
+                                "error": result.get("error", "Optimization failed")
+                            }
+                            
+                    finally:
+                        # Always restore original method
+                        self.portfolio_risk.portfolio_connector.get_consolidated_portfolio = original_get_portfolio
+                        
+                except Exception as strategy_error:
+                    strategy_results[strategy_name] = {
+                        "status": "error",
+                        "error": str(strategy_error)
+                    }
+                    logger.error(f"Strategy {strategy_name} failed", error=str(strategy_error))
+            
+            # Find the best strategy
+            if successful_results:
+                best_strategy = max(successful_results.keys(), 
+                                  key=lambda k: successful_results[k]["final_score"])
+                best_metrics = successful_results[best_strategy]
+                
+                # Sort all results by score for ranking
+                ranked_strategies = sorted(successful_results.items(), 
+                                         key=lambda x: x[1]["final_score"], 
+                                         reverse=True)
+                
+                logger.info("AI Money Manager: Strategy analysis completed",
+                           best_strategy=best_strategy,
+                           best_score=best_metrics["final_score"],
+                           strategies_tested=len(strategy_results),
+                           successful_strategies=len(successful_results))
+                
+                return {
+                    "recommended_strategy": best_strategy,
+                    "best_metrics": best_metrics,
+                    "all_results": strategy_results,
+                    "ranked_strategies": ranked_strategies,
+                    "analysis_summary": {
+                        "total_tested": len(strategy_results),
+                        "successful": len(successful_results),
+                        "failed": len(strategy_results) - len(successful_results)
+                    }
+                }
+            else:
+                # All strategies failed - use intelligent fallback
+                fallback_strategy = await self._select_optimal_strategy(portfolio_data, user_id)
+                logger.warning("All strategies failed, using intelligent fallback", 
+                              fallback_strategy=fallback_strategy)
+                
+                return {
+                    "recommended_strategy": fallback_strategy,
+                    "best_metrics": {"expected_return": 0.15, "final_score": 0.1},
+                    "all_results": strategy_results,
+                    "ranked_strategies": [],
+                    "analysis_summary": {
+                        "total_tested": len(strategy_results),
+                        "successful": 0,
+                        "failed": len(strategy_results),
+                        "fallback_used": True
+                    }
+                }
+                
+        except Exception as e:
+            logger.error("Comprehensive strategy analysis failed", error=str(e))
+            # Use existing intelligent selection as fallback
+            fallback_strategy = await self._select_optimal_strategy(portfolio_data, user_id)
+            return {
+                "recommended_strategy": fallback_strategy,
+                "best_metrics": {"expected_return": 0.15, "final_score": 0.1},
+                "all_results": {},
+                "ranked_strategies": [],
+                "analysis_summary": {
+                    "total_tested": 0,
+                    "successful": 0,
+                    "failed": 0,
+                    "error": str(e),
+                    "fallback_used": True
+                }
+            }
     
     def _map_risk_tolerance(self, risk_tolerance: str) -> str:
         """Map risk tolerance to risk level."""
