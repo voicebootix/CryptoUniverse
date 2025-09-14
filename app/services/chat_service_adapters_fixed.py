@@ -453,17 +453,30 @@ class ChatServiceAdaptersFixed:
             logger.info("Getting real portfolio data for rebalancing analysis")
             portfolio_data = await self.get_portfolio_summary(user_id)
             
+            # DEBUG: Log portfolio data details
+            logger.info("Portfolio data retrieved for rebalancing", 
+                       total_value=portfolio_data.get("total_value", 0),
+                       positions_count=len(portfolio_data.get("positions", [])),
+                       has_error=bool(portfolio_data.get("error")))
+            
             if not portfolio_data or portfolio_data.get("total_value", 0) <= 0:
-                logger.warning("No portfolio data available for rebalancing")
+                logger.warning("No portfolio data available for rebalancing", 
+                              portfolio_data=portfolio_data)
                 return {
                     "needs_rebalancing": False,
                     "deviation_score": 0,
                     "recommended_trades": [],
-                    "error": "No portfolio data available"
+                    "error": f"No portfolio data available: {portfolio_data.get('error', 'Unknown error')}"
                 }
             
             # Convert chat portfolio format to optimization engine format
             optimization_portfolio = self._convert_portfolio_for_optimization(portfolio_data)
+            
+            # DEBUG: Log converted portfolio
+            logger.info("Portfolio converted for optimization",
+                       original_value=portfolio_data.get("total_value", 0),
+                       converted_value=optimization_portfolio.get("total_value_usd", 0),
+                       converted_positions=len(optimization_portfolio.get("positions", [])))
             
             # Use the CORRECT method signature that actually exists
             constraints = {}
@@ -471,13 +484,34 @@ class ChatServiceAdaptersFixed:
                 constraints["target_allocation"] = target_allocation
             constraints["rebalance_threshold"] = 0.05
             
-            # FIXED: Pass the real portfolio data instead of letting it fetch fake data
-            optimization_result = await self.portfolio_risk.optimize_allocation_with_portfolio_data(
-                user_id=user_id,
-                portfolio_data=optimization_portfolio,  # ← USE REAL DATA
-                strategy=strategy,
-                constraints=constraints
-            )
+            # DIRECT FIX: Monkey-patch the portfolio connector to use real data
+            logger.info("Applying direct fix - using real portfolio data for optimization")
+            
+            # Temporarily replace the portfolio connector's method with real data
+            original_get_portfolio = self.portfolio_risk.portfolio_connector.get_consolidated_portfolio
+            
+            async def get_real_portfolio(user_id_param):
+                logger.info("Using real portfolio data instead of simulated data")
+                return optimization_portfolio
+            
+            # Apply the monkey patch
+            self.portfolio_risk.portfolio_connector.get_consolidated_portfolio = get_real_portfolio
+            
+            try:
+                # Now call the existing method - it will use our real data
+                optimization_result = await self.portfolio_risk.optimize_allocation(
+                    user_id=user_id,
+                    strategy=strategy,
+                    constraints=constraints
+                )
+                
+                logger.info("Optimization completed with real portfolio data",
+                           portfolio_value=portfolio_data.get("total_value", 0),
+                           assets=[pos.get("symbol") for pos in portfolio_data.get("positions", [])])
+                
+            finally:
+                # Restore the original method
+                self.portfolio_risk.portfolio_connector.get_consolidated_portfolio = original_get_portfolio
             
             # FIXED: Handle the actual return structure from optimize_allocation
             if isinstance(optimization_result, dict):
