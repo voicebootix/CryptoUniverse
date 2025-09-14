@@ -261,10 +261,11 @@ const MyStrategies: React.FC = () => {
       }
       // Other axios errors
       else {
-        errorMessage = portfolioError.response?.data?.detail || portfolioError.message;
+        const responseData = portfolioError.response?.data as any;
+        errorMessage = responseData?.detail || portfolioError.message;
       }
-    } else if (portfolioError instanceof Error) {
-      errorMessage = portfolioError.message;
+    } else if (portfolioError && typeof portfolioError === 'object' && 'message' in portfolioError) {
+      errorMessage = (portfolioError as Error).message;
     }
 
     return (
