@@ -692,27 +692,93 @@ class StrategyMarketplaceService(LoggerMixin):
             strategy_portfolio = []
             total_monthly_cost = 0
             
+            # Helper function to get numeric monthly cost
+            def _get_numeric_monthly_cost(config: Dict[str, Any], strategy_id: str) -> float:
+                """Extract numeric monthly cost, handling DYNAMIC pricing."""
+                cost = config.get("credit_cost_monthly", 0)
+                
+                # Handle DYNAMIC pricing by looking up in strategy pricing
+                if cost == "DYNAMIC" or isinstance(cost, str):
+                    if hasattr(self, 'strategy_pricing') and strategy_id in self.strategy_pricing:
+                        return float(self.strategy_pricing[strategy_id].get("monthly_cost", 0))
+                    # Fallback for DYNAMIC pricing
+                    return 50.0  # Default dynamic cost
+                
+                try:
+                    return float(cost)
+                except (TypeError, ValueError):
+                    return 0.0
+            
             for strategy_id in active_strategies:
                 if strategy_id.startswith("ai_"):
+                    # Handle AI strategies
                     strategy_func = strategy_id.replace("ai_", "")
                     if strategy_func in self.ai_strategy_catalog:
                         config = self.ai_strategy_catalog[strategy_func]
-                        total_monthly_cost += config["credit_cost_monthly"]
+                        monthly_cost = _get_numeric_monthly_cost(config, strategy_id)
+                        total_monthly_cost += monthly_cost
                         
                         performance = await self._get_ai_strategy_performance(strategy_func, user_id)
+                        
+                        # Determine tier for welcome strategy calculation
+                        tier = "free" if monthly_cost == 0 else config.get("tier", "paid")
                         
                         strategy_portfolio.append({
                             "strategy_id": strategy_id,
                             "name": config["name"],
                             "category": config["category"],
-                            "monthly_cost": config["credit_cost_monthly"],
+                            "monthly_cost": monthly_cost,
                             "performance": performance,
-                            "is_ai_strategy": True
+                            "is_ai_strategy": True,
+                            "tier": tier
                         })
+                        
+                elif strategy_id.startswith("community_"):
+                    # Handle community strategies
+                    try:
+                        # Mock community strategy data (would be loaded from database)
+                        monthly_cost = 25.0  # Default community strategy cost
+                        total_monthly_cost += monthly_cost
+                        
+                        # Mock performance data for community strategies
+                        performance = {
+                            "total_pnl": 0,
+                            "avg_return": 0,
+                            "total_trades": 0,
+                            "win_rate": 0
+                        }
+                        
+                        strategy_portfolio.append({
+                            "strategy_id": strategy_id,
+                            "name": f"Community Strategy {strategy_id}",
+                            "category": "Community",
+                            "monthly_cost": monthly_cost,
+                            "performance": performance,
+                            "is_ai_strategy": False,
+                            "tier": "community"
+                        })
+                    except Exception as e:
+                        self.logger.warning(f"Failed to load community strategy {strategy_id}", error=str(e))
+                        continue
             
-            # Calculate profit metrics
-            total_pnl_usd = sum(s["performance"].get("total_pnl", 0) for s in strategy_portfolio)
-            avg_return_pct = sum(s["performance"].get("avg_return", 0) for s in strategy_portfolio) / max(1, len(strategy_portfolio))
+            # Calculate profit metrics (robust to schema variance)
+            def _to_float(v):
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return 0.0
+                    
+            def _pnl(perf: Dict[str, Any]) -> float:
+                return _to_float(
+                    perf.get("total_pnl_usd")
+                    or perf.get("total_pnl")
+                    or perf.get("total_return")
+                    or perf.get("net_profit_usd")
+                    or 0
+                )
+                
+            total_pnl_usd = sum(_pnl(s["performance"]) for s in strategy_portfolio)
+            avg_return_pct = sum(_to_float(s["performance"].get("avg_return")) for s in strategy_portfolio) / max(1, len(strategy_portfolio))
             
             # Assume user has a monthly profit potential based on portfolio size
             profit_potential_total = total_monthly_cost * 5  # 5x multiplier for profit potential
@@ -725,8 +791,8 @@ class StrategyMarketplaceService(LoggerMixin):
                 "summary": {
                     "active_strategies": len(strategy_portfolio),
                     "total_strategies": len(strategy_portfolio),
-                    "welcome_strategies": len([s for s in strategy_portfolio if s.get("category") == "Beginner Friendly"]),
-                    "purchased_strategies": len(strategy_portfolio),
+                    "welcome_strategies": len([s for s in strategy_portfolio if s.get("tier") == "free"]),
+                    "purchased_strategies": len([s for s in strategy_portfolio if s.get("tier") != "free"]),
                     "total_portfolio_value": total_monthly_cost * 12,  # Annualized
                     "total_pnl_usd": total_pnl_usd,
                     "total_pnl_percentage": avg_return_pct,
