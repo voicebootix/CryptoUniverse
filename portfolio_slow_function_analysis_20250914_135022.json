@@ -1,0 +1,131 @@
+{
+  "investigation_time": "2025-09-14T13:50:22.763629",
+  "base_url": "https://cryptouniverse.onrender.com",
+  "timings": {
+    "trading_portfolio_endpoint": {
+      "duration": 8.266646385192871,
+      "success": true,
+      "result_size": 8211,
+      "timestamp": "2025-09-14T13:47:49.745251"
+    },
+    "exchanges_list": {
+      "duration": 3.4475343227386475,
+      "success": true,
+      "result_size": 1414,
+      "timestamp": "2025-09-14T13:47:53.194805"
+    },
+    "exchange_binance_balances": {
+      "duration": 7.749307155609131,
+      "success": true,
+      "result_size": 2441,
+      "timestamp": "2025-09-14T13:48:00.944112"
+    },
+    "exchange_kraken_balances": {
+      "duration": 3.3991429805755615,
+      "success": true,
+      "result_size": 108,
+      "timestamp": "2025-09-14T13:48:04.343255"
+    },
+    "exchange_kucoin_balances": {
+      "duration": 5.651524066925049,
+      "success": true,
+      "result_size": 1079,
+      "timestamp": "2025-09-14T13:48:09.994779"
+    },
+    "exchange_coinbase_balances": {
+      "duration": 2.0479953289031982,
+      "success": true,
+      "result_size": 46,
+      "timestamp": "2025-09-14T13:48:12.042774"
+    },
+    "health_check": {
+      "duration": 1.6336688995361328,
+      "success": true,
+      "result_size": 408,
+      "timestamp": "2025-09-14T13:48:13.677069"
+    },
+    "auth_me": {
+      "duration": 2.048790216445923,
+      "success": false,
+      "error": "500, message='Internal Server Error', url='https://cryptouniverse.onrender.com/api/v1/auth/me'",
+      "timestamp": "2025-09-14T13:48:15.725859"
+    },
+    "simple_chat": {
+      "duration": 17.86638903617859,
+      "success": true,
+      "result_size": 374,
+      "timestamp": "2025-09-14T13:48:33.593054"
+    },
+    "chat_portfolio_query_1": {
+      "duration": 12.590954303741455,
+      "success": true,
+      "result_size": 2466,
+      "timestamp": "2025-09-14T13:48:46.192980"
+    },
+    "chat_portfolio_query_2": {
+      "duration": 11.698387384414673,
+      "success": true,
+      "result_size": 2586,
+      "timestamp": "2025-09-14T13:48:57.891367"
+    },
+    "chat_portfolio_query_3": {
+      "duration": 9.599637508392334,
+      "success": true,
+      "result_size": 2586,
+      "timestamp": "2025-09-14T13:49:07.491005"
+    },
+    "chat_portfolio_query_4": {
+      "duration": 18.359136819839478,
+      "success": true,
+      "result_size": 374,
+      "timestamp": "2025-09-14T13:49:25.850141"
+    },
+    "chat_portfolio_query_5": {
+      "duration": 12.623091697692871,
+      "success": true,
+      "result_size": 2465,
+      "timestamp": "2025-09-14T13:49:38.473233"
+    },
+    "rebalancing_query_1": {
+      "duration": 12.17742109298706,
+      "success": true,
+      "result_size": 2454,
+      "timestamp": "2025-09-14T13:49:50.651882"
+    },
+    "rebalancing_query_2": {
+      "duration": 10.98268437385559,
+      "success": true,
+      "result_size": 2597,
+      "timestamp": "2025-09-14T13:50:01.634567"
+    },
+    "rebalancing_query_3": {
+      "duration": 11.37318468093872,
+      "success": true,
+      "result_size": 2583,
+      "timestamp": "2025-09-14T13:50:13.007752"
+    },
+    "rebalancing_query_4": {
+      "duration": 9.74772572517395,
+      "success": true,
+      "result_size": 2595,
+      "timestamp": "2025-09-14T13:50:22.755478"
+    }
+  },
+  "analysis": {
+    "total_operations": 18,
+    "successful_operations": 17,
+    "failed_operations": 1,
+    "slowest_operation": [
+      "chat_portfolio_query_4",
+      {
+        "duration": 18.359136819839478,
+        "success": true,
+        "result_size": 374,
+        "timestamp": "2025-09-14T13:49:25.850141"
+      }
+    ],
+    "critical_operations": [],
+    "average_portfolio_time": 12.189642349878946,
+    "average_non_portfolio_time": 7.825143423947421
+  }
+}

@@ -1376,35 +1376,78 @@ class PortfolioRiskService(LoggerMixin):
         current_portfolio: Dict[str, Any], 
         optimal_weights: Dict[str, float]
     ) -> List[Dict[str, Any]]:
-        """Generate trades needed for rebalancing to optimal weights."""
+        """Generate trades needed for rebalancing to optimal weights - FIXED VERSION."""
         trades = []
         # Use consolidated field with fallback to legacy field
         total_value = current_portfolio.get("total_value_usd", 0) or current_portfolio.get("total_value", 0)
         
+        # DEBUG: Log the input data
+        self.logger.info("Generating rebalancing trades", 
+                        total_value=total_value,
+                        optimal_weights_count=len(optimal_weights),
+                        positions_count=len(current_portfolio.get("positions", [])))
+        
+        # DEBUG: Log portfolio positions
+        portfolio_symbols = [pos.get("symbol") for pos in current_portfolio.get("positions", [])]
+        self.logger.info("Portfolio symbols", symbols=portfolio_symbols[:10])  # First 10
+        self.logger.info("Optimal weight symbols", symbols=list(optimal_weights.keys())[:10])  # First 10
+        
         for symbol, optimal_weight in optimal_weights.items():
             current_weight = 0
             current_value = 0
+            position_found = False
             
-            # Find current position
+            # Find current position - ENHANCED MATCHING
             for position in current_portfolio.get("positions", []):
-                if position.get("symbol") == symbol:
+                position_symbol = position.get("symbol")
+                if position_symbol == symbol:
                     # Use consolidated field with fallback to legacy field
                     current_value = position.get("value_usd", 0) or position.get("market_value", 0)
                     current_weight = current_value / total_value if total_value > 0 else 0
+                    position_found = True
+                    
+                    # DEBUG: Log successful match
+                    self.logger.info("Position matched", 
+                                   symbol=symbol,
+                                   current_value=current_value,
+                                   current_weight=current_weight)
                     break
+            
+            # DEBUG: Log if position not found
+            if not position_found:
+                self.logger.warning("Position not found for optimization symbol", 
+                                  symbol=symbol,
+                                  optimal_weight=optimal_weight)
             
             target_value = total_value * optimal_weight
             value_difference = target_value - current_value
             
-            if abs(value_difference) > total_value * 0.01:  # 1% threshold
-                trades.append({
+            # FIXED: Lower threshold and always include trades with meaningful differences
+            threshold = max(total_value * 0.005, 1.0)  # 0.5% of portfolio or $1 minimum
+            
+            if abs(value_difference) > threshold:
+                trade = {
                     "symbol": symbol,
                     "action": "BUY" if value_difference > 0 else "SELL",
-                    "target_value": target_value,
-                    "current_value": current_value,
-                    "value_change": value_difference,
-                    "weight_change": optimal_weight - current_weight
-                })
+                    "target_value": round(target_value, 2),
+                    "current_value": round(current_value, 2),
+                    "value_change": round(value_difference, 2),
+                    "weight_change": round(optimal_weight - current_weight, 4),
+                    "current_weight": round(current_weight, 4),
+                    "target_weight": round(optimal_weight, 4)
+                }
+                trades.append(trade)
+                
+                # DEBUG: Log trade generation
+                self.logger.info("Trade generated", 
+                               symbol=symbol,
+                               action=trade["action"],
+                               amount=abs(trade["value_change"]))
+        
+        # DEBUG: Log final results
+        self.logger.info("Rebalancing trades generated", 
+                        trades_count=len(trades),
+                        total_volume=sum(abs(t["value_change"]) for t in trades))
         
         return trades
     

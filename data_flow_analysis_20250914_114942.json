@@ -1,0 +1,16 @@
+[
+  {
+    "issue": "Portfolio Data Source Mismatch",
+    "severity": "HIGH",
+    "description": "Chat and rebalancing systems use different portfolio data",
+    "chat_assets": [
+      "ADA",
+      "DOGE",
+      "REEF",
+      "USDC",
+      "XRP"
+    ],
+    "rebalance_assets": [],
+    "root_cause": "Different services calling different portfolio methods"
+  }
+]

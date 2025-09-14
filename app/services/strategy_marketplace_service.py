@@ -648,8 +648,9 @@ class StrategyMarketplaceService(LoggerMixin):
                 # Add to user's active strategies set
                 await redis.sadd(f"user_strategies:{user_id}", strategy_id)
                 
-                # Set expiry for monthly subscriptions
-                await redis.expire(f"user_strategies:{user_id}", 30 * 24 * 3600)  # 30 days
+                # Set expiry for monthly subscriptions (but not for permanent free strategies)
+                if not strategy_id.startswith("ai_") or strategy_id not in ["ai_risk_management", "ai_portfolio_optimization", "ai_spot_momentum_strategy"]:
+                    await redis.expire(f"user_strategies:{user_id}", 30 * 24 * 3600)  # 30 days for paid strategies only
                 self.logger.info("Strategy added to user portfolio", user_id=user_id, strategy_id=strategy_id)
             else:
                 self.logger.warning("Redis unavailable, strategy not cached", user_id=user_id, strategy_id=strategy_id)
@@ -671,6 +672,35 @@ class StrategyMarketplaceService(LoggerMixin):
             active_strategies = await redis.smembers(f"user_strategies:{user_id}")
             # Handle both bytes and string responses from Redis
             active_strategies = [s.decode() if isinstance(s, bytes) else s for s in active_strategies]
+            
+            # FALLBACK: If no strategies found, check if user should have free strategies
+            if not active_strategies:
+                self.logger.info("No strategies found in Redis, checking if user needs free strategy re-provisioning", user_id=user_id)
+                
+                # Check if user has a credit account (sign they've been onboarded before)
+                try:
+                    async for db in get_database():
+                        from app.models.credit import CreditAccount
+                        from sqlalchemy import select
+                        credit_stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
+                        credit_result = await db.execute(credit_stmt)
+                        credit_account = credit_result.scalar_one_or_none()
+                        
+                        if credit_account:
+                            # User has been onboarded before but lost strategies, re-provision free ones
+                            self.logger.info("Re-provisioning free strategies for existing user", user_id=user_id)
+                            free_strategies = ["ai_risk_management", "ai_portfolio_optimization", "ai_spot_momentum_strategy"]
+                            
+                            for strategy_id in free_strategies:
+                                await redis.sadd(f"user_strategies:{user_id}", strategy_id)
+                                self.logger.info("Re-provisioned free strategy", user_id=user_id, strategy_id=strategy_id)
+                            
+                            # Re-fetch the strategies
+                            active_strategies = await redis.smembers(f"user_strategies:{user_id}")
+                            active_strategies = [s.decode() if isinstance(s, bytes) else s for s in active_strategies]
+                            
+                except Exception as e:
+                    self.logger.warning("Failed to re-provision free strategies", user_id=user_id, error=str(e))
             
             strategy_portfolio = []
             total_monthly_cost = 0
