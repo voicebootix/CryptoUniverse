@@ -689,21 +689,38 @@ class StrategyMarketplaceService(LoggerMixin):
             # Handle both bytes and string responses from Redis
             active_strategies = [s.decode() if isinstance(s, bytes) else s for s in active_strategies]
             
+            # Ensure pricing is loaded before lookups
+            await self.ensure_pricing_loaded()
+            
             strategy_portfolio = []
             total_monthly_cost = 0
             
             # Helper function to get numeric monthly cost
-            def _get_numeric_monthly_cost(config: Dict[str, Any], strategy_id: str) -> float:
+            def _get_numeric_monthly_cost(config: Dict[str, Any], strategy_name: str) -> float:
                 """Extract numeric monthly cost, handling DYNAMIC pricing."""
                 cost = config.get("credit_cost_monthly", 0)
                 
-                # Handle DYNAMIC pricing by looking up in strategy pricing
-                if cost == "DYNAMIC" or isinstance(cost, str):
-                    if hasattr(self, 'strategy_pricing') and strategy_id in self.strategy_pricing:
-                        return float(self.strategy_pricing[strategy_id].get("monthly_cost", 0))
-                    # Fallback for DYNAMIC pricing
-                    return 50.0  # Default dynamic cost
+                # Handle DYNAMIC pricing specifically (only literal "DYNAMIC")
+                if cost == "DYNAMIC":
+                    # Safe membership check for strategy_pricing
+                    if (self.strategy_pricing is not None and 
+                        isinstance(self.strategy_pricing, dict) and 
+                        strategy_name in self.strategy_pricing):
+                        try:
+                            return float(self.strategy_pricing[strategy_name])
+                        except (TypeError, ValueError):
+                            pass
+                    # Default dynamic cost when pricing not found
+                    return 50.0
                 
+                # Handle string that represents a number
+                if isinstance(cost, str):
+                    try:
+                        return float(cost)
+                    except (TypeError, ValueError):
+                        return 0.0
+                
+                # Handle numeric values
                 try:
                     return float(cost)
                 except (TypeError, ValueError):
@@ -715,7 +732,7 @@ class StrategyMarketplaceService(LoggerMixin):
                     strategy_func = strategy_id.replace("ai_", "")
                     if strategy_func in self.ai_strategy_catalog:
                         config = self.ai_strategy_catalog[strategy_func]
-                        monthly_cost = _get_numeric_monthly_cost(config, strategy_id)
+                        monthly_cost = _get_numeric_monthly_cost(config, strategy_func)
                         total_monthly_cost += monthly_cost
                         
                         performance = await self._get_ai_strategy_performance(strategy_func, user_id)
@@ -733,32 +750,69 @@ class StrategyMarketplaceService(LoggerMixin):
                             "tier": tier
                         })
                         
-                elif strategy_id.startswith("community_"):
-                    # Handle community strategies
+                else:
+                    # Handle database strategies (raw DB id lookup)
                     try:
-                        # Mock community strategy data (would be loaded from database)
-                        monthly_cost = 25.0  # Default community strategy cost
-                        total_monthly_cost += monthly_cost
+                        # Attempt async DB lookup for TradingStrategy by primary key
+                        from sqlalchemy import select
                         
-                        # Mock performance data for community strategies
-                        performance = {
-                            "total_pnl": 0,
-                            "avg_return": 0,
-                            "total_trades": 0,
-                            "win_rate": 0
-                        }
+                        strategy = None
+                        async for db in get_database():
+                            try:
+                                stmt = select(TradingStrategy).where(TradingStrategy.id == strategy_id)
+                                result = await db.execute(stmt)
+                                strategy = result.scalar_one_or_none()
+                                break
+                            except Exception as db_error:
+                                self.logger.warning(f"Database lookup failed for strategy {strategy_id}", error=str(db_error))
+                                break
                         
-                        strategy_portfolio.append({
-                            "strategy_id": strategy_id,
-                            "name": f"Community Strategy {strategy_id}",
-                            "category": "Community",
-                            "monthly_cost": monthly_cost,
-                            "performance": performance,
-                            "is_ai_strategy": False,
-                            "tier": "community"
-                        })
+                        if strategy:
+                            # Compute monthly cost using existing helper
+                            monthly_cost = float(self._calculate_strategy_pricing(strategy))
+                            total_monthly_cost += monthly_cost
+                            
+                            # Retrieve live performance via helper
+                            performance = await self._get_live_performance(strategy_id)
+                            
+                            # Determine tier based on cost
+                            tier = "free" if monthly_cost == 0 else "community"
+                            
+                            # Append enriched strategy dict
+                            strategy_portfolio.append({
+                                "strategy_id": strategy_id,
+                                "name": strategy.name or f"Strategy {strategy_id}",
+                                "category": strategy.category or "Custom",
+                                "monthly_cost": monthly_cost,
+                                "performance": performance,
+                                "is_ai_strategy": False,
+                                "tier": tier
+                            })
+                        else:
+                            # Fall back to mock behavior when strategy not found
+                            monthly_cost = 25.0  # Default fallback cost
+                            total_monthly_cost += monthly_cost
+                            
+                            # Mock performance data for unknown strategies
+                            performance = {
+                                "total_pnl": 0,
+                                "avg_return": 0,
+                                "total_trades": 0,
+                                "win_rate": 0
+                            }
+                            
+                            strategy_portfolio.append({
+                                "strategy_id": strategy_id,
+                                "name": f"Unknown Strategy {strategy_id}",
+                                "category": "Unknown",
+                                "monthly_cost": monthly_cost,
+                                "performance": performance,
+                                "is_ai_strategy": False,
+                                "tier": "community"
+                            })
+                            
                     except Exception as e:
-                        self.logger.warning(f"Failed to load community strategy {strategy_id}", error=str(e))
+                        self.logger.warning(f"Failed to load strategy {strategy_id}", error=str(e))
                         continue
             
             # Calculate profit metrics (robust to schema variance)
