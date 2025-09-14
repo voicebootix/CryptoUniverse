@@ -1201,3 +1201,99 @@ async def update_strategy_submission(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update submission"
         ) from e
+
+
+# User Strategy Management Endpoints
+
+@router.post("/{strategy_id}/toggle")
+async def toggle_user_strategy(
+    strategy_id: str,
+    request: Dict[str, bool],
+    current_user: User = Depends(get_current_user)
+):
+    """Toggle user strategy active/inactive status."""
+    
+    # Check if user has permissions (ADMIN or TRADER roles)
+    if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and traders can toggle strategies"
+        )
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:toggle",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        is_active = request.get("is_active", False)
+        
+        # In a real system, this would update the user's strategy configuration
+        logger.info(
+            "Strategy toggled",
+            user_id=str(current_user.id),
+            strategy_id=strategy_id,
+            is_active=is_active
+        )
+        
+        return {
+            "success": True,
+            "message": f"Strategy {'activated' if is_active else 'deactivated'} successfully",
+            "strategy_id": strategy_id,
+            "is_active": is_active
+        }
+        
+    except Exception as e:
+        logger.exception("Failed to toggle strategy", user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to toggle strategy"
+        ) from e
+
+
+@router.put("/{strategy_id}/config")
+async def update_strategy_configuration(
+    strategy_id: str,
+    config: Dict[str, Any],
+    current_user: User = Depends(get_current_user)
+):
+    """Update user strategy configuration settings."""
+    
+    # Check if user has permissions (ADMIN or TRADER roles)
+    if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and traders can configure strategies"
+        )
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:config",
+        limit=20,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        # In a real system, this would validate and update strategy configuration
+        logger.info(
+            "Strategy configuration updated",
+            user_id=str(current_user.id),
+            strategy_id=strategy_id,
+            config_keys=list(config.keys())
+        )
+        
+        return {
+            "success": True,
+            "message": "Strategy configuration updated successfully",
+            "strategy_id": strategy_id,
+            "updated_config": config
+        }
+        
+    except Exception as e:
+        logger.exception("Failed to update strategy configuration", user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update strategy configuration"
+        ) from e

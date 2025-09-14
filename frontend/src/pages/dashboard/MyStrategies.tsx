@@ -119,7 +119,7 @@ const MyStrategies: React.FC = () => {
   const { data: portfolio, isLoading: portfolioLoading, error: portfolioError } = useQuery({
     queryKey: ['user-strategy-portfolio'],
     queryFn: async () => {
-      const response = await apiClient.get('/strategies/user/portfolio');
+      const response = await apiClient.get('/strategies/my-portfolio');
       return response.data as { summary: PortfolioSummary; strategies: UserStrategy[] };
     },
     refetchInterval: 30000,
