@@ -147,7 +147,9 @@ const MyStrategies: React.FC = () => {
   // Strategy configuration update mutation
   const updateStrategyConfigMutation = useMutation({
     mutationFn: async ({ strategyId, config }: { strategyId: string; config: any }) => {
-      const response = await apiClient.put(`/strategies/${strategyId}/config`, config);
+      const response = await apiClient.put(`/strategies/${strategyId}/config`, {
+        parameters: config
+      });
       return response.data;
     },
     onSuccess: () => {
