@@ -389,6 +389,8 @@ Reply with:
 • Optimization Weights: {debug_info.get('optimization_weights_count', 0)}
 • Portfolio Symbols: {debug_info.get('portfolio_symbols', [])}
 • Optimization Symbols: {debug_info.get('optimization_symbols', [])}
+• Position Values: {debug_info.get('position_values', [])}
+• Optimization Weights: {debug_info.get('optimization_weights', {})}
 • Total Value: ${debug_info.get('portfolio_total_value', 0):,.2f}"""
 
                 response_content += f"""

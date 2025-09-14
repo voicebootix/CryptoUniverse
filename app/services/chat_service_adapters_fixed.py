@@ -543,13 +543,16 @@ class ChatServiceAdaptersFixed:
                         logger.info("Processing optimization result as dictionary")
                         
                         # DEBUG: Add debug information to the response
+                        positions = portfolio_data.get("positions", [])
                         debug_info = {
                             "portfolio_total_value": portfolio_data.get("total_value", 0),
-                            "portfolio_positions_count": len(portfolio_data.get("positions", [])),
+                            "portfolio_positions_count": len(positions),
                             "optimization_weights_count": len(optimization_data.get("weights", {})),
                             "suggested_trades_count": len(optimization_data.get("suggested_trades", [])),
-                            "portfolio_symbols": [pos.get("symbol") for pos in portfolio_data.get("positions", [])[:5]],  # First 5
-                            "optimization_symbols": list(optimization_data.get("weights", {}).keys())[:5]  # First 5
+                            "portfolio_symbols": [pos.get("symbol") for pos in positions[:5]],  # First 5
+                            "optimization_symbols": list(optimization_data.get("weights", {}).keys())[:5],  # First 5
+                            "position_values": [f"{pos.get('symbol', 'Unknown')}: ${pos.get('value_usd', 0)}" for pos in positions[:5]],  # Position values
+                            "optimization_weights": {k: v for k, v in list(optimization_data.get("weights", {}).items())[:5]}  # First 5 weights
                         }
                         
                         return {
