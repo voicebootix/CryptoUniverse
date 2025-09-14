@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import axios, { AxiosError } from 'axios';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -54,17 +55,17 @@ interface UserStrategy {
   category: string;
   is_ai_strategy: boolean;
   publisher_name?: string;
-  
+
   // Status & Subscription
   is_active: boolean;
   subscription_type: 'welcome' | 'purchased' | 'trial';
   activated_at: string;
   expires_at?: string;
-  
+
   // Pricing
   credit_cost_monthly: number;
   credit_cost_per_execution: number;
-  
+
   // Performance Metrics
   total_trades: number;
   winning_trades: number;
@@ -75,13 +76,13 @@ interface UserStrategy {
   current_drawdown: number;
   max_drawdown: number;
   sharpe_ratio?: number;
-  
+
   // Risk & Configuration
   risk_level: string;
   allocation_percentage: number;
   max_position_size: number;
   stop_loss_percentage: number;
-  
+
   // Recent Performance
   last_7_days_pnl: number;
   last_30_days_pnl: number;
@@ -108,6 +109,11 @@ interface PortfolioSummary {
   profit_potential_remaining: number;
 }
 
+interface UserStrategyPortfolio {
+  summary: PortfolioSummary;
+  strategies: UserStrategy[];
+}
+
 const MyStrategies: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -116,16 +122,16 @@ const MyStrategies: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'paused'>('all');
 
   // Fetch user's strategy portfolio
-  const { data: portfolio, isLoading: portfolioLoading, error: portfolioError } = useQuery({
+  const { data: portfolio, isLoading: portfolioLoading, error: portfolioError } = useQuery<UserStrategyPortfolio, AxiosError>({
     queryKey: ['user-strategy-portfolio'],
     queryFn: async () => {
       try {
-        const response = await apiClient.get('/strategies/my-portfolio');
-        return response.data as { summary: PortfolioSummary; strategies: UserStrategy[] };
-      } catch (error: any) {
+        const response = await apiClient.get<UserStrategyPortfolio>('/strategies/my-portfolio');
+        return response.data;
+      } catch (error: unknown) {
         console.error('Failed to fetch portfolio:', error);
         // Return empty portfolio if endpoint not found
-        if (error?.response?.status === 404) {
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
           return {
             summary: {
               total_strategies: 0,
@@ -162,8 +168,11 @@ const MyStrategies: React.FC = () => {
       toast.success(`Strategy ${variables.active ? 'activated' : 'paused'} successfully`);
       queryClient.invalidateQueries({ queryKey: ['user-strategy-portfolio'] });
     },
-    onError: (error: any) => {
-      toast.error(`Failed to update strategy: ${error.response?.data?.detail || error.message}`);
+    onError: (error: unknown) => {
+      const message = axios.isAxiosError(error)
+        ? error.response?.data?.detail || error.message
+        : 'Failed to update strategy';
+      toast.error(`Failed to update strategy: ${message}`);
     }
   });
 
@@ -179,8 +188,11 @@ const MyStrategies: React.FC = () => {
       toast.success('Strategy configuration updated successfully');
       queryClient.invalidateQueries({ queryKey: ['user-strategy-portfolio'] });
     },
-    onError: (error: any) => {
-      toast.error(`Failed to update configuration: ${error.response?.data?.detail || error.message}`);
+    onError: (error: unknown) => {
+      const message = axios.isAxiosError(error)
+        ? error.response?.data?.detail || error.message
+        : 'Failed to update configuration';
+      toast.error(`Failed to update configuration: ${message}`);
     }
   });
 
@@ -226,25 +238,49 @@ const MyStrategies: React.FC = () => {
   const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
   if (portfolioError) {
-    const errorMessage = portfolioError instanceof Error
-      ? portfolioError.message
-      : 'Unable to load your strategies. Please try again later.';
+    let errorMessage = 'Unable to load your strategies. Please try again later.';
+    let isNetworkError = false;
+    let isServerError = false;
+    let isTimeoutError = false;
 
-    const isNetworkError = errorMessage.includes('Network') || errorMessage.includes('fetch');
-    const isServerError = errorMessage.includes('500') || errorMessage.includes('Server');
+    if (axios.isAxiosError(portfolioError)) {
+      // Check for network errors (request made but no response)
+      if (portfolioError.request && !portfolioError.response) {
+        isNetworkError = true;
+        errorMessage = 'Network connection error. Please check your internet connection.';
+      }
+      // Check for timeout errors
+      else if (portfolioError.code === 'ECONNABORTED') {
+        isTimeoutError = true;
+        errorMessage = 'Request timed out. The server may be starting up. Please try again.';
+      }
+      // Check for server errors (5xx)
+      else if (portfolioError.response?.status && portfolioError.response.status >= 500) {
+        isServerError = true;
+        errorMessage = 'Server error. Our servers are experiencing issues.';
+      }
+      // Other axios errors
+      else {
+        errorMessage = portfolioError.response?.data?.detail || portfolioError.message;
+      }
+    } else if (portfolioError instanceof Error) {
+      errorMessage = portfolioError.message;
+    }
 
     return (
       <div className="container mx-auto p-6">
         <div className="text-center py-12">
           <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
           <h3 className="text-lg font-semibold mb-2">
-            {isNetworkError ? 'Connection Problem' : 'Failed to Load Strategies'}
+            {isNetworkError ? 'Connection Problem' : isTimeoutError ? 'Request Timeout' : 'Failed to Load Strategies'}
           </h3>
           <p className="text-muted-foreground mb-4">
             {isNetworkError
               ? 'Please check your internet connection and try again.'
               : isServerError
               ? 'Our servers are experiencing issues. Please try again in a few moments.'
+              : isTimeoutError
+              ? 'The server is taking longer than expected. Please wait and try again.'
               : errorMessage}
           </p>
           <div className="flex gap-2 justify-center">
