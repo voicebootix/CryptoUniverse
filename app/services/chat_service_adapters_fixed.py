@@ -445,9 +445,25 @@ class ChatServiceAdaptersFixed:
             }
     
     async def analyze_rebalancing_needs(self, user_id: str, strategy: str = "adaptive", target_allocation: Optional[Dict] = None) -> Dict[str, Any]:
-        """Analyze rebalancing needs using CORRECT method call with fixed parameters."""
+        """Analyze rebalancing needs using REAL portfolio data (no duplicate API calls)."""
         try:
             logger.info("Analyzing rebalancing needs", user_id=user_id, strategy=strategy)
+            
+            # EFFICIENCY FIX: Get real portfolio data ONCE and reuse it
+            logger.info("Getting real portfolio data for rebalancing analysis")
+            portfolio_data = await self.get_portfolio_summary(user_id)
+            
+            if not portfolio_data or portfolio_data.get("total_value", 0) <= 0:
+                logger.warning("No portfolio data available for rebalancing")
+                return {
+                    "needs_rebalancing": False,
+                    "deviation_score": 0,
+                    "recommended_trades": [],
+                    "error": "No portfolio data available"
+                }
+            
+            # Convert chat portfolio format to optimization engine format
+            optimization_portfolio = self._convert_portfolio_for_optimization(portfolio_data)
             
             # Use the CORRECT method signature that actually exists
             constraints = {}
@@ -455,10 +471,12 @@ class ChatServiceAdaptersFixed:
                 constraints["target_allocation"] = target_allocation
             constraints["rebalance_threshold"] = 0.05
             
-            optimization_result = await self.portfolio_risk.optimize_allocation(
+            # FIXED: Pass the real portfolio data instead of letting it fetch fake data
+            optimization_result = await self.portfolio_risk.optimize_allocation_with_portfolio_data(
                 user_id=user_id,
-                strategy=strategy,  # Use the passed strategy
-                constraints=constraints  # Correct parameter name
+                portfolio_data=optimization_portfolio,  # ← USE REAL DATA
+                strategy=strategy,
+                constraints=constraints
             )
             
             # FIXED: Handle the actual return structure from optimize_allocation
@@ -537,6 +555,49 @@ class ChatServiceAdaptersFixed:
             return {
                 "needs_rebalancing": False,
                 "error": str(e)
+            }
+    
+    def _convert_portfolio_for_optimization(self, portfolio_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert chat portfolio format to optimization engine format."""
+        try:
+            positions = portfolio_data.get("positions", [])
+            total_value = portfolio_data.get("total_value", 0)
+            
+            # Convert to optimization engine format
+            optimization_positions = []
+            for pos in positions:
+                optimization_positions.append({
+                    "symbol": pos.get("symbol"),
+                    "exchange": pos.get("exchange", "binance"),
+                    "quantity": pos.get("amount", 0),
+                    "value_usd": pos.get("value_usd", 0),
+                    "percentage": pos.get("percentage", 0),
+                    "avg_entry_price": pos.get("value_usd", 0) / max(pos.get("amount", 1), 1),  # Estimate
+                    "current_price": pos.get("value_usd", 0) / max(pos.get("amount", 1), 1),   # Estimate
+                    "unrealized_pnl": 0,  # Not available in chat format
+                    "unrealized_pnl_pct": 0
+                })
+            
+            return {
+                "user_id": portfolio_data.get("user_id", "unknown"),
+                "total_value_usd": total_value,
+                "positions": optimization_positions,
+                "balances": {},  # Not needed for optimization
+                "exchange_breakdown": {},
+                "last_updated": portfolio_data.get("last_updated", datetime.utcnow().isoformat()),
+                "data_source": "real_exchange_data"
+            }
+            
+        except Exception as e:
+            logger.error("Portfolio conversion failed", error=str(e))
+            return {
+                "user_id": "unknown",
+                "total_value_usd": 0,
+                "positions": [],
+                "balances": {},
+                "exchange_breakdown": {},
+                "last_updated": datetime.utcnow().isoformat(),
+                "data_source": "conversion_failed"
             }
     
     def _map_risk_tolerance(self, risk_tolerance: str) -> str:

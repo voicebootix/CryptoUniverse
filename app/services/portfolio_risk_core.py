@@ -1135,6 +1135,74 @@ class PortfolioRiskService(LoggerMixin):
         
         return alerts
     
+    async def optimize_allocation_with_portfolio_data(
+        self, 
+        user_id: str,
+        portfolio_data: Dict[str, Any],
+        strategy: str = "adaptive", 
+        constraints: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Portfolio allocation optimization using PROVIDED portfolio data (no duplicate API calls)."""
+        
+        request_id = self._generate_request_id()
+        self.logger.info("Optimizing portfolio allocation with provided data", 
+                        user_id=user_id, 
+                        strategy=strategy, 
+                        request_id=request_id,
+                        portfolio_value=portfolio_data.get("total_value_usd", 0),
+                        positions_count=len(portfolio_data.get("positions", [])))
+        
+        try:
+            if not portfolio_data.get("positions"):
+                return {
+                    "success": False,
+                    "error": "No positions found in provided portfolio data",
+                    "function": "optimize_allocation_with_portfolio_data",
+                    "request_id": request_id
+                }
+            
+            # Use the provided portfolio data directly (no additional API calls)
+            portfolio = portfolio_data
+            
+            # Perform optimization using the optimization engine
+            optimization_result = await self.optimization_engine.optimize_portfolio(
+                portfolio, 
+                strategy=OptimizationStrategy(strategy),
+                constraints=constraints or {}
+            )
+            
+            # Generate rebalancing trades if needed
+            if optimization_result.rebalancing_needed:
+                rebalancing_trades = await self._generate_rebalancing_trades(
+                    portfolio, optimization_result.weights
+                )
+                optimization_result.suggested_trades = rebalancing_trades
+            
+            # Update service metrics
+            self.service_metrics["successful_optimizations"] += 1
+            
+            return {
+                "success": True,
+                "function": "optimize_allocation_with_portfolio_data",
+                "request_id": request_id,
+                "optimization_result": optimization_result,
+                "portfolio_data_source": portfolio_data.get("data_source", "provided"),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error("Portfolio optimization with provided data failed", 
+                            error=str(e), 
+                            request_id=request_id,
+                            user_id=user_id)
+            return {
+                "success": False,
+                "error": str(e),
+                "function": "optimize_allocation_with_portfolio_data",
+                "request_id": request_id,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
     async def optimize_allocation(
         self, 
         user_id: str, 
