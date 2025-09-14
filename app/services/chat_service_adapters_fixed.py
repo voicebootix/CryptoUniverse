@@ -541,12 +541,24 @@ class ChatServiceAdaptersFixed:
                     elif isinstance(optimization_data, dict):
                         # It's a dictionary representation of the optimization result
                         logger.info("Processing optimization result as dictionary")
+                        
+                        # DEBUG: Add debug information to the response
+                        debug_info = {
+                            "portfolio_total_value": portfolio_data.get("total_value", 0),
+                            "portfolio_positions_count": len(portfolio_data.get("positions", [])),
+                            "optimization_weights_count": len(optimization_data.get("weights", {})),
+                            "suggested_trades_count": len(optimization_data.get("suggested_trades", [])),
+                            "portfolio_symbols": [pos.get("symbol") for pos in portfolio_data.get("positions", [])[:5]],  # First 5
+                            "optimization_symbols": list(optimization_data.get("weights", {}).keys())[:5]  # First 5
+                        }
+                        
                         return {
                             "needs_rebalancing": optimization_data.get("rebalancing_needed", False),
                             "deviation_score": (1.0 - optimization_data.get("confidence", 0.8)) * 100,
                             "recommended_trades": optimization_data.get("suggested_trades", []),
                             "risk_reduction": (optimization_data.get("max_drawdown_estimate", 0) * -100),
-                            "expected_improvement": optimization_data.get("expected_return", 0) * 100
+                            "expected_improvement": optimization_data.get("expected_return", 0) * 100,
+                            "debug_info": debug_info  # Add debug information
                         }
                     else:
                         logger.error("Unexpected optimization_data type", type=type(optimization_data))
