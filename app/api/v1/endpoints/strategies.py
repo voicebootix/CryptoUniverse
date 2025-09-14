@@ -896,8 +896,8 @@ class ToggleRequest(BaseModel):
     is_active: bool
 
 
-class StrategyConfigRequest(BaseModel):
-    """Request model for updating strategy configuration."""
+class StrategyParametersUpdateRequest(BaseModel):
+    """Request model for updating strategy configuration parameters."""
     parameters: Dict[str, Any]
     
     @field_validator('parameters')
@@ -1353,7 +1353,7 @@ async def toggle_user_strategy(
 @router.put("/{strategy_id}/config")
 async def update_strategy_configuration(
     strategy_id: str,
-    request: StrategyConfigRequest,
+    request: StrategyParametersUpdateRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_database)
 ):
