@@ -114,6 +114,16 @@ interface UserStrategyPortfolio {
   strategies: UserStrategy[];
 }
 
+// Type guard for error response
+const isErrorResponse = (obj: unknown): obj is { detail: string } => {
+  return (
+    obj !== null &&
+    typeof obj === 'object' &&
+    'detail' in obj &&
+    typeof (obj as any).detail === 'string'
+  );
+};
+
 const MyStrategies: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -261,8 +271,14 @@ const MyStrategies: React.FC = () => {
       }
       // Other axios errors
       else {
-        const responseData = portfolioError.response?.data as any;
-        errorMessage = responseData?.detail || portfolioError.message;
+        const responseData = portfolioError.response?.data;
+        if (typeof responseData === 'string') {
+          errorMessage = responseData;
+        } else if (isErrorResponse(responseData)) {
+          errorMessage = responseData.detail;
+        } else {
+          errorMessage = portfolioError.message;
+        }
       }
     } else if (portfolioError && typeof portfolioError === 'object' && 'message' in portfolioError) {
       errorMessage = (portfolioError as Error).message;
