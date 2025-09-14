@@ -1429,12 +1429,15 @@ class PortfolioRiskService(LoggerMixin):
                 trade = {
                     "symbol": symbol,
                     "action": "BUY" if value_difference > 0 else "SELL",
+                    "amount": abs(round(value_difference, 2)),  # FIX: Add amount field that chat system expects
                     "target_value": round(target_value, 2),
                     "current_value": round(current_value, 2),
                     "value_change": round(value_difference, 2),
                     "weight_change": round(optimal_weight - current_weight, 4),
                     "current_weight": round(current_weight, 4),
-                    "target_weight": round(optimal_weight, 4)
+                    "target_weight": round(optimal_weight, 4),
+                    "current_percentage": round(current_weight * 100, 1),  # FIX: Add percentage fields
+                    "target_percentage": round(optimal_weight * 100, 1)
                 }
                 trades.append(trade)
                 
