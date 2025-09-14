@@ -714,17 +714,17 @@ class PortfolioOptimizationEngine(LoggerMixin):
                 expected_returns[symbol] = 0.15  # 15% annual expected return
             elif symbol == "ETH":
                 expected_returns[symbol] = 0.20  # 20% for ETH
-            # Real portfolio assets (based on actual holdings)
+            # Real portfolio assets (based on market research 2024)
             elif symbol == "XRP":
-                expected_returns[symbol] = 0.22  # 22% for XRP (high growth potential)
+                expected_returns[symbol] = 0.12  # 12% for XRP (realistic with regulatory uncertainty)
             elif symbol == "ADA":
-                expected_returns[symbol] = 0.25  # 25% for ADA (smart contract platform)
+                expected_returns[symbol] = 0.15  # 15% for ADA (smart contract platform, slower growth)
             elif symbol == "DOGE":
-                expected_returns[symbol] = 0.18  # 18% for DOGE (meme coin volatility)
+                expected_returns[symbol] = 0.10  # 10% for DOGE (meme coin, highly speculative)
             elif symbol == "USDC":
-                expected_returns[symbol] = 0.05  # 5% for stablecoin (low risk)
+                expected_returns[symbol] = 0.04  # 4% for stablecoin (current yield rates)
             elif symbol == "REEF":
-                expected_returns[symbol] = 0.30  # 30% for REEF (small cap, high risk/reward)
+                expected_returns[symbol] = -0.05  # -5% for REEF (small cap, high risk of loss)
             # Other altcoins
             elif symbol in ["SOL", "AVAX", "DOT"]:
                 expected_returns[symbol] = 0.25  # 25% for major altcoins
@@ -869,13 +869,29 @@ class PortfolioOptimizationEngine(LoggerMixin):
         inv_cov = np.linalg.pinv(covariance_matrix)
         ones = np.ones(len(symbols))
         
-        # Calculate optimal weights
+        # Calculate optimal weights with asset-specific constraints
         numerator = np.dot(inv_cov, returns_array - 0.02)  # Excess returns
         denominator = np.dot(ones.T, numerator)
         
         if abs(denominator) > 1e-8:
             weights_array = numerator / denominator
             weights_array = np.abs(weights_array)  # Ensure positive
+            
+            # Apply asset-specific constraints based on market research
+            for i, symbol in enumerate(symbols):
+                if symbol == "XRP":
+                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.25)  # Max 25%
+                elif symbol == "ADA":
+                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.20)  # Max 20%
+                elif symbol == "DOGE":
+                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.10)  # Max 10%
+                elif symbol == "USDC":
+                    weights_array[i] = np.clip(weights_array[i], 0.05, 0.30)  # 5-30%
+                elif symbol == "REEF":
+                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.05)  # Max 5%
+                else:
+                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.25)  # Default constraints
+            
             weights_array = weights_array / np.sum(weights_array)  # Normalize
         else:
             # Fallback to equal weights
@@ -1021,14 +1037,33 @@ class PortfolioOptimizationEngine(LoggerMixin):
         risk_parity_result = await self._optimize_risk_parity(positions, covariance_matrix)
         max_sharpe_result = await self._optimize_max_sharpe(positions, expected_returns, covariance_matrix)
         
-        # Blend weights (60% risk parity, 40% max Sharpe)
+        # Blend weights (80% risk parity, 20% max Sharpe) - More conservative
         symbols = list(set(pos["symbol"] for pos in positions))
         blended_weights = {}
         
         for symbol in symbols:
             rp_weight = risk_parity_result.weights.get(symbol, 0)
             ms_weight = max_sharpe_result.weights.get(symbol, 0)
-            blended_weights[symbol] = 0.6 * rp_weight + 0.4 * ms_weight
+            blended_weights[symbol] = 0.8 * rp_weight + 0.2 * ms_weight
+            
+        # Apply asset-specific constraints based on market research
+        for symbol in blended_weights:
+            if symbol == "XRP":
+                blended_weights[symbol] = min(blended_weights[symbol], 0.25)  # Max 25%
+            elif symbol == "ADA":
+                blended_weights[symbol] = min(blended_weights[symbol], 0.20)  # Max 20%
+            elif symbol == "DOGE":
+                blended_weights[symbol] = min(blended_weights[symbol], 0.10)  # Max 10%
+            elif symbol == "USDC":
+                blended_weights[symbol] = max(min(blended_weights[symbol], 0.30), 0.05)  # 5-30%
+            elif symbol == "REEF":
+                blended_weights[symbol] = min(blended_weights[symbol], 0.05)  # Max 5%
+            else:
+                blended_weights[symbol] = min(blended_weights[symbol], 0.25)  # Default max 25%
+            
+            # Ensure minimum allocation
+            if blended_weights[symbol] < 0.02:
+                blended_weights[symbol] = 0.02
         
         # ENTERPRISE FIX: Robust weight normalization
         total_weight = sum(blended_weights.values())

@@ -89,8 +89,9 @@ class ChatServiceAdaptersFixed:
             formatted_positions = []
             connected_exchanges = set()
             
-            for balance in balances[:10]:  # Top 10 positions
-                if balance.get("value_usd", 0) > 0:
+            # CRITICAL FIX: Include ALL positions with meaningful value
+            for balance in balances:  # Process ALL positions from ALL exchanges
+                if balance.get("value_usd", 0) > 5.0:  # Include positions > $5 (captures all significant holdings)
                     exchange_name = balance.get("exchange", "Unknown")
                     connected_exchanges.add(exchange_name)
                     
@@ -444,7 +445,7 @@ class ChatServiceAdaptersFixed:
                 "error": str(e)
             }
     
-    async def analyze_rebalancing_needs(self, user_id: str, strategy: str = "adaptive", target_allocation: Optional[Dict] = None) -> Dict[str, Any]:
+    async def analyze_rebalancing_needs(self, user_id: str, strategy: str = "auto", target_allocation: Optional[Dict] = None) -> Dict[str, Any]:
         """Analyze rebalancing needs using REAL portfolio data (no duplicate API calls)."""
         try:
             logger.info("Analyzing rebalancing needs", user_id=user_id, strategy=strategy)
@@ -477,6 +478,16 @@ class ChatServiceAdaptersFixed:
                        original_value=portfolio_data.get("total_value", 0),
                        converted_value=optimization_portfolio.get("total_value_usd", 0),
                        converted_positions=len(optimization_portfolio.get("positions", [])))
+            
+            # AI MONEY MANAGER: COMPREHENSIVE STRATEGY ANALYSIS
+            if strategy == "auto":
+                # Run ALL strategies and find the most profitable
+                strategy_analysis = await self._analyze_all_strategies(portfolio_data, user_id)
+                strategy = strategy_analysis["best_strategy"]
+                logger.info("AI Money Manager selected optimal strategy", 
+                           strategy=strategy, 
+                           expected_return=strategy_analysis["best_return"],
+                           user_id=user_id)
             
             # Use the CORRECT method signature that actually exists
             constraints = {}
@@ -552,7 +563,9 @@ class ChatServiceAdaptersFixed:
                             "portfolio_symbols": [pos.get("symbol") for pos in positions[:5]],  # First 5
                             "optimization_symbols": list(optimization_data.get("weights", {}).keys())[:5],  # First 5
                             "position_values": [f"{pos.get('symbol', 'Unknown')}: ${pos.get('value_usd', 0)}" for pos in positions[:5]],  # Position values
-                            "optimization_weights": {k: v for k, v in list(optimization_data.get("weights", {}).items())[:5]}  # First 5 weights
+                            "optimization_weights": {k: v for k, v in list(optimization_data.get("weights", {}).items())[:5]},  # First 5 weights
+                            "selected_strategy": strategy,  # Show which strategy was selected
+                            "strategy_selection": "ai_money_manager_auto" if strategy != "auto" else "user_specified"
                         }
                         
                         return {
@@ -648,6 +661,211 @@ class ChatServiceAdaptersFixed:
                 "last_updated": datetime.utcnow().isoformat(),
                 "data_source": "conversion_failed"
             }
+    
+    async def _analyze_all_strategies(self, portfolio_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+        """AI MONEY MANAGER: Analyze ALL strategies and find the most profitable."""
+        try:
+            logger.info("AI Money Manager: Analyzing all strategies for maximum profit", user_id=user_id)
+            
+            # Convert portfolio for optimization
+            optimization_portfolio = self._convert_portfolio_for_optimization(portfolio_data)
+            
+            # All available strategies
+            strategies = [
+                "risk_parity",
+                "equal_weight", 
+                "max_sharpe",
+                "min_variance",
+                "kelly_criterion",
+                "adaptive"
+            ]
+            
+            strategy_results = {}
+            
+            # Test each strategy
+            for strategy_name in strategies:
+                try:
+                    # Temporarily replace the portfolio connector method
+                    original_get_portfolio = self.portfolio_risk.portfolio_connector.get_consolidated_portfolio
+                    
+                    async def get_real_portfolio(user_id_param):
+                        return optimization_portfolio
+                    
+                    self.portfolio_risk.portfolio_connector.get_consolidated_portfolio = get_real_portfolio
+                    
+                    # Run optimization for this strategy
+                    result = await self.portfolio_risk.optimize_allocation(
+                        user_id=user_id,
+                        strategy=strategy_name,
+                        constraints={}
+                    )
+                    
+                    # Restore original method
+                    self.portfolio_risk.portfolio_connector.get_consolidated_portfolio = original_get_portfolio
+                    
+                    if result.get("success") and result.get("optimization_result"):
+                        opt_result = result["optimization_result"]
+                        
+                        # Extract key metrics
+                        expected_return = opt_result.get("expected_return", 0) if isinstance(opt_result, dict) else getattr(opt_result, "expected_return", 0)
+                        sharpe_ratio = opt_result.get("sharpe_ratio", 0) if isinstance(opt_result, dict) else getattr(opt_result, "sharpe_ratio", 0)
+                        volatility = opt_result.get("expected_volatility", 0) if isinstance(opt_result, dict) else getattr(opt_result, "expected_volatility", 0)
+                        confidence = opt_result.get("confidence", 0) if isinstance(opt_result, dict) else getattr(opt_result, "confidence", 0)
+                        
+                        # Calculate profit score (return * confidence - risk penalty)
+                        risk_penalty = volatility * 0.5  # Penalize high volatility
+                        profit_score = (expected_return * confidence) - risk_penalty
+                        
+                        strategy_results[strategy_name] = {
+                            "expected_return": expected_return,
+                            "sharpe_ratio": sharpe_ratio,
+                            "volatility": volatility,
+                            "confidence": confidence,
+                            "profit_score": profit_score,
+                            "status": "success"
+                        }
+                        
+                        logger.info(f"Strategy {strategy_name} analysis complete",
+                                   expected_return=expected_return,
+                                   profit_score=profit_score)
+                    else:
+                        strategy_results[strategy_name] = {
+                            "status": "failed",
+                            "error": result.get("error", "Unknown error")
+                        }
+                        
+                except Exception as e:
+                    strategy_results[strategy_name] = {
+                        "status": "error",
+                        "error": str(e)
+                    }
+                    logger.error(f"Strategy {strategy_name} analysis failed", error=str(e))
+            
+            # Find the best strategy (highest profit score)
+            successful_strategies = {k: v for k, v in strategy_results.items() if v.get("status") == "success"}
+            
+            if successful_strategies:
+                best_strategy = max(successful_strategies.keys(), 
+                                  key=lambda k: successful_strategies[k]["profit_score"])
+                best_return = successful_strategies[best_strategy]["expected_return"]
+                
+                logger.info("AI Money Manager: Best strategy identified",
+                           best_strategy=best_strategy,
+                           best_return=best_return,
+                           all_results=successful_strategies)
+                
+                return {
+                    "best_strategy": best_strategy,
+                    "best_return": best_return,
+                    "all_strategies": strategy_results,
+                    "analysis_type": "comprehensive_profit_optimization"
+                }
+            else:
+                # Fallback if all strategies failed
+                logger.warning("All strategies failed, using risk_parity fallback")
+                return {
+                    "best_strategy": "risk_parity",
+                    "best_return": 0.15,
+                    "all_strategies": strategy_results,
+                    "analysis_type": "fallback"
+                }
+                
+        except Exception as e:
+            logger.error("Comprehensive strategy analysis failed", error=str(e))
+            return {
+                "best_strategy": "risk_parity",
+                "best_return": 0.15,
+                "all_strategies": {},
+                "analysis_type": "error_fallback"
+            }
+
+    async def _select_optimal_strategy(self, portfolio_data: Dict[str, Any], user_id: str) -> str:
+        """Intelligently select the optimal rebalancing strategy based on portfolio analysis."""
+        try:
+            total_value = portfolio_data.get("total_value", 0)
+            positions = portfolio_data.get("positions", [])
+            
+            if not positions or total_value <= 0:
+                return "equal_weight"  # Simple fallback
+            
+            # ANALYSIS 1: Portfolio Size
+            if total_value < 1000:
+                # Small portfolio: Keep it simple
+                return "equal_weight"
+            elif total_value > 50000:
+                # Large portfolio: Use sophisticated optimization
+                portfolio_size_score = 2
+            else:
+                # Medium portfolio: Moderate sophistication
+                portfolio_size_score = 1
+            
+            # ANALYSIS 2: Portfolio Concentration
+            position_values = [pos.get("value_usd", 0) for pos in positions]
+            max_position_pct = max(position_values) / total_value if total_value > 0 else 0
+            
+            if max_position_pct > 0.6:
+                # Highly concentrated: Need risk management
+                concentration_risk = "high"
+            elif max_position_pct > 0.4:
+                concentration_risk = "medium"
+            else:
+                concentration_risk = "low"
+            
+            # ANALYSIS 3: Asset Diversity
+            num_positions = len([pos for pos in positions if pos.get("value_usd", 0) > total_value * 0.01])  # Positions > 1%
+            
+            if num_positions <= 2:
+                diversity_score = "low"
+            elif num_positions <= 5:
+                diversity_score = "medium"
+            else:
+                diversity_score = "high"
+            
+            # ANALYSIS 4: Volatility Assessment (based on asset types)
+            stablecoins = ["USDT", "USDC", "BUSD", "DAI", "FDUSD"]
+            major_coins = ["BTC", "ETH"]
+            
+            stable_pct = sum(pos.get("value_usd", 0) for pos in positions if pos.get("symbol") in stablecoins) / total_value
+            major_pct = sum(pos.get("value_usd", 0) for pos in positions if pos.get("symbol") in major_coins) / total_value
+            alt_pct = 1 - stable_pct - major_pct
+            
+            # INTELLIGENT STRATEGY SELECTION
+            logger.info("Portfolio analysis for strategy selection",
+                       total_value=total_value,
+                       max_position_pct=max_position_pct,
+                       num_positions=num_positions,
+                       stable_pct=stable_pct,
+                       major_pct=major_pct,
+                       alt_pct=alt_pct)
+            
+            # DECISION TREE
+            if concentration_risk == "high":
+                # High concentration: Use risk parity to diversify
+                return "risk_parity"
+            
+            elif stable_pct > 0.5:
+                # Conservative portfolio: Minimize variance
+                return "min_variance"
+            
+            elif alt_pct > 0.7 and total_value > 10000:
+                # High altcoin exposure + large portfolio: Use Kelly criterion for optimal sizing
+                return "kelly_criterion"
+            
+            elif diversity_score == "high" and portfolio_size_score >= 1:
+                # Well-diversified portfolio: Maximize Sharpe ratio
+                return "max_sharpe"
+            
+            elif num_positions <= 3:
+                # Simple portfolio: Equal weight
+                return "equal_weight"
+            
+            else:
+                # Balanced approach: Adaptive strategy
+                return "adaptive"
+                
+        except Exception as e:
+            logger.error("Strategy selection failed, using fallback", error=str(e))
+            return "risk_parity"  # Safe fallback
     
     def _map_risk_tolerance(self, risk_tolerance: str) -> str:
         """Map risk tolerance to risk level."""
