@@ -891,6 +891,112 @@ class StrategySubmissionUpdate(BaseModel):
         return self
 
 
+class ToggleRequest(BaseModel):
+    """Request model for toggling strategy active state."""
+    is_active: bool
+
+
+class StrategyParametersUpdateRequest(BaseModel):
+    """Request model for updating strategy configuration parameters."""
+    parameters: Dict[str, Any]
+    
+    @field_validator('parameters')
+    @classmethod
+    def validate_parameters(cls, v):
+        """Validate configuration parameters with comprehensive type and bounds checking."""
+        allowed_keys = {
+            'risk_level', 'position_size', 'stop_loss', 'take_profit',
+            'max_positions', 'rebalance_frequency', 'allocation_percentage',
+            'volatility_threshold', 'correlation_limit', 'drawdown_limit',
+            'profit_target', 'timeframe', 'indicators', 'entry_conditions',
+            'exit_conditions', 'custom_settings'
+        }
+        
+        invalid_keys = set(v.keys()) - allowed_keys
+        if invalid_keys:
+            raise ValueError(f"Invalid configuration keys: {', '.join(invalid_keys)}")
+        
+        # Keep existing allowed_keys and risk_level check
+        if 'risk_level' in v and v['risk_level'] not in ['low', 'medium', 'high']:
+            raise ValueError("risk_level must be one of: low, medium, high")
+        
+        # Ensure position_size is positive number
+        if 'position_size' in v and (not isinstance(v['position_size'], (int, float)) or v['position_size'] <= 0):
+            raise ValueError("position_size must be a positive number")
+            
+        # Tighten allocation_percentage to allow 0 < value <= 100
+        if 'allocation_percentage' in v and (not isinstance(v['allocation_percentage'], (int, float)) or not 0 < v['allocation_percentage'] <= 100):
+            raise ValueError("allocation_percentage must be between 0 and 100")
+        
+        # Stop loss validation - numbers between 0 and 100
+        if 'stop_loss' in v:
+            if not isinstance(v['stop_loss'], (int, float)) or not 0 <= v['stop_loss'] <= 100:
+                raise ValueError("stop_loss must be a number between 0 and 100")
+        
+        # Take profit validation - numbers between 0 and 100
+        if 'take_profit' in v:
+            if not isinstance(v['take_profit'], (int, float)) or not 0 <= v['take_profit'] <= 100:
+                raise ValueError("take_profit must be a number between 0 and 100")
+        
+        # Max positions - positive integer
+        if 'max_positions' in v:
+            if not isinstance(v['max_positions'], int) or v['max_positions'] <= 0:
+                raise ValueError("max_positions must be a positive integer")
+        
+        # Rebalance frequency - positive integer
+        if 'rebalance_frequency' in v:
+            if not isinstance(v['rebalance_frequency'], int) or v['rebalance_frequency'] <= 0:
+                raise ValueError("rebalance_frequency must be a positive integer")
+        
+        # Volatility threshold - numeric bounds
+        if 'volatility_threshold' in v:
+            if not isinstance(v['volatility_threshold'], (int, float)) or not 0 <= v['volatility_threshold'] <= 1:
+                raise ValueError("volatility_threshold must be a number between 0 and 1")
+        
+        # Correlation limit - numeric bounds
+        if 'correlation_limit' in v:
+            if not isinstance(v['correlation_limit'], (int, float)) or not -1 <= v['correlation_limit'] <= 1:
+                raise ValueError("correlation_limit must be a number between -1 and 1")
+        
+        # Drawdown limit - numeric bounds
+        if 'drawdown_limit' in v:
+            if not isinstance(v['drawdown_limit'], (int, float)) or not 0 <= v['drawdown_limit'] <= 1:
+                raise ValueError("drawdown_limit must be a number between 0 and 1")
+        
+        # Profit target - numeric bounds
+        if 'profit_target' in v:
+            if not isinstance(v['profit_target'], (int, float)) or v['profit_target'] <= 0:
+                raise ValueError("profit_target must be a positive number")
+        
+        # Timeframe - restrict to allowed strings
+        if 'timeframe' in v:
+            allowed_timeframes = {'1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w'}
+            if not isinstance(v['timeframe'], str) or v['timeframe'] not in allowed_timeframes:
+                raise ValueError(f"timeframe must be one of: {', '.join(sorted(allowed_timeframes))}")
+        
+        # Indicators - must be a list of strings
+        if 'indicators' in v:
+            if not isinstance(v['indicators'], list) or not all(isinstance(item, str) for item in v['indicators']):
+                raise ValueError("indicators must be a list of strings")
+        
+        # Entry conditions - must be lists or dicts with expected structure
+        if 'entry_conditions' in v:
+            if not isinstance(v['entry_conditions'], (list, dict)):
+                raise ValueError("entry_conditions must be a list or dictionary")
+        
+        # Exit conditions - must be lists or dicts with expected structure
+        if 'exit_conditions' in v:
+            if not isinstance(v['exit_conditions'], (list, dict)):
+                raise ValueError("exit_conditions must be a list or dictionary")
+        
+        # Custom settings - must be a dict
+        if 'custom_settings' in v:
+            if not isinstance(v['custom_settings'], dict):
+                raise ValueError("custom_settings must be a dictionary")
+        
+        return v
+
+
 @router.get("/publisher/submissions")
 async def get_user_strategy_submissions(
     current_user: User = Depends(get_current_user)
@@ -1200,4 +1306,345 @@ async def update_strategy_submission(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update submission"
+        ) from e
+
+
+# User Strategy Management Endpoints
+
+@router.post("/{strategy_id}/toggle")
+async def toggle_user_strategy(
+    strategy_id: str,
+    request: ToggleRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
+):
+    """Toggle user strategy active/inactive status with live trading guardrails and idempotency."""
+    
+    # Check if user has permissions (ADMIN or TRADER roles)
+    if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and traders can toggle strategies"
+        )
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:toggle",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        async with db.begin():
+            from app.models.trading import TradingStrategy, UserStrategySettings
+            from app.models.exchange import ExchangeAccount
+            
+            # Try to find user's strategy configuration first
+            user_strategy_stmt = select(UserStrategySettings).where(
+                and_(
+                    UserStrategySettings.strategy_id == strategy_id,
+                    UserStrategySettings.user_id == current_user.id
+                )
+            )
+            result = await db.execute(user_strategy_stmt)
+            user_strategy = result.scalar_one_or_none()
+            
+            if user_strategy:
+                # Idempotency check - if already in desired state, return success
+                if user_strategy.is_active == request.is_active:
+                    return {
+                        "success": True,
+                        "message": f"Strategy already {'activated' if request.is_active else 'deactivated'}",
+                        "strategy_id": strategy_id,
+                        "is_active": user_strategy.is_active,
+                        "idempotent": True
+                    }
+                
+                # Live trading guardrails - check for exchange accounts if activating for live trading
+                if request.is_active:
+                    # Get the base strategy to check if it's for live trading
+                    base_strategy_stmt = select(TradingStrategy).where(TradingStrategy.id == strategy_id)
+                    base_result = await db.execute(base_strategy_stmt)
+                    base_strategy = base_result.scalar_one_or_none()
+                    
+                    if base_strategy and not base_strategy.is_simulation:
+                        # Check if user has active exchange accounts for live trading
+                        exchange_stmt = select(ExchangeAccount).where(
+                            and_(
+                                ExchangeAccount.user_id == current_user.id,
+                                ExchangeAccount.is_active == True
+                            )
+                        )
+                        exchange_result = await db.execute(exchange_stmt)
+                        active_exchanges = exchange_result.scalars().all()
+                        
+                        if not active_exchanges:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="Cannot activate live trading strategy without connected exchange accounts. Please connect an exchange account first."
+                            )
+                
+                # Update user-specific strategy settings with updated_at timestamp
+                user_strategy.is_active = request.is_active
+                user_strategy.updated_at = datetime.utcnow()
+                await db.flush()
+                await db.refresh(user_strategy)
+                
+                logger.info(
+                    "User strategy toggled",
+                    user_id=str(current_user.id),
+                    strategy_id=strategy_id,
+                    is_active=request.is_active
+                )
+                
+                return {
+                    "success": True,
+                    "message": f"Strategy {'activated' if request.is_active else 'deactivated'} successfully",
+                    "strategy_id": strategy_id,
+                    "is_active": user_strategy.is_active,
+                    "updated_at": user_strategy.updated_at.isoformat()
+                }
+            
+            else:
+                # Try to find the base TradingStrategy if no user-specific settings
+                strategy_stmt = select(TradingStrategy).where(
+                    and_(
+                        TradingStrategy.id == strategy_id,
+                        TradingStrategy.user_id == current_user.id
+                    )
+                )
+                result = await db.execute(strategy_stmt)
+                strategy = result.scalar_one_or_none()
+                
+                if not strategy:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Strategy not found or access denied"
+                    )
+                
+                # Idempotency check - if already in desired state, return success
+                if strategy.is_active == request.is_active:
+                    return {
+                        "success": True,
+                        "message": f"Strategy already {'activated' if request.is_active else 'deactivated'}",
+                        "strategy_id": strategy_id,
+                        "is_active": strategy.is_active,
+                        "idempotent": True
+                    }
+                
+                # Live trading guardrails - check for exchange accounts if activating for live trading
+                if request.is_active and not strategy.is_simulation:
+                    # Check if user has active exchange accounts for live trading
+                    exchange_stmt = select(ExchangeAccount).where(
+                        and_(
+                            ExchangeAccount.user_id == current_user.id,
+                            ExchangeAccount.is_active == True
+                        )
+                    )
+                    exchange_result = await db.execute(exchange_stmt)
+                    active_exchanges = exchange_result.scalars().all()
+                    
+                    if not active_exchanges:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Cannot activate live trading strategy without connected exchange accounts. Please connect an exchange account first."
+                        )
+                
+                # Update the strategy directly with updated_at timestamp
+                strategy.is_active = request.is_active
+                strategy.updated_at = datetime.utcnow()
+                await db.flush()
+                await db.refresh(strategy)
+                
+                logger.info(
+                    "Strategy toggled",
+                    user_id=str(current_user.id),
+                    strategy_id=strategy_id,
+                    is_active=request.is_active
+                )
+                
+                return {
+                    "success": True,
+                    "message": f"Strategy {'activated' if request.is_active else 'deactivated'} successfully",
+                    "strategy_id": strategy_id,
+                    "is_active": strategy.is_active,
+                    "updated_at": strategy.updated_at.isoformat()
+                }
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to toggle strategy", 
+                        user_id=str(current_user.id), 
+                        strategy_id=strategy_id,
+                        error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to toggle strategy"
+        ) from e
+
+
+def deep_merge_dict(base_dict: dict, update_dict: dict) -> dict:
+    """
+    Perform deep merge of nested dictionaries.
+    
+    Args:
+        base_dict: The base dictionary to merge into
+        update_dict: The dictionary with updates to apply
+        
+    Returns:
+        Merged dictionary with deep merge applied to nested objects
+    """
+    result = base_dict.copy()
+    
+    for key, value in update_dict.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            # Recursively merge nested dictionaries
+            result[key] = deep_merge_dict(result[key], value)
+        else:
+            # Direct assignment for non-dict values or new keys
+            result[key] = value
+    
+    return result
+
+
+@router.put("/{strategy_id}/config")
+async def update_strategy_configuration(
+    strategy_id: str,
+    request: StrategyParametersUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
+):
+    """Update user strategy configuration with deep merge, empty payload rejection, and updated_at tracking."""
+    
+    # Empty payload rejection - return HTTP 422 for empty configuration
+    if not request.parameters:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Configuration parameters cannot be empty"
+        )
+    
+    # Check if user has permissions (ADMIN or TRADER roles)
+    if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and traders can configure strategies"
+        )
+    
+    await rate_limiter.check_rate_limit(
+        key="strategies:config",
+        limit=20,
+        window=60,
+        user_id=str(current_user.id)
+    )
+    
+    try:
+        async with db.begin():
+            from app.models.trading import TradingStrategy, UserStrategySettings
+            import json
+            
+            # Try to find user-specific strategy settings first
+            user_strategy_stmt = select(UserStrategySettings).where(
+                and_(
+                    UserStrategySettings.strategy_id == strategy_id,
+                    UserStrategySettings.user_id == current_user.id
+                )
+            )
+            result = await db.execute(user_strategy_stmt)
+            user_strategy = result.scalar_one_or_none()
+            
+            if user_strategy:
+                # Update user-specific strategy configuration with deep merge
+                existing_params = user_strategy.parameters or {}
+                if isinstance(existing_params, str):
+                    existing_params = json.loads(existing_params)
+                
+                # Perform deep merge of nested configuration objects
+                merged_params = deep_merge_dict(existing_params, request.parameters)
+                user_strategy.parameters = merged_params
+                user_strategy.updated_at = datetime.utcnow()
+                
+                await db.flush()
+                await db.refresh(user_strategy)
+                
+                logger.info(
+                    "User strategy configuration updated",
+                    user_id=str(current_user.id),
+                    strategy_id=strategy_id,
+                    config_keys=list(request.parameters.keys())
+                )
+                
+                return {
+                    "success": True,
+                    "message": "Strategy configuration updated successfully",
+                    "strategy_id": strategy_id,
+                    "updated_config": user_strategy.parameters,
+                    "updated_at": user_strategy.updated_at.isoformat()
+                }
+            
+            else:
+                # Try to find the base TradingStrategy
+                strategy_stmt = select(TradingStrategy).where(
+                    and_(
+                        TradingStrategy.id == strategy_id,
+                        TradingStrategy.user_id == current_user.id
+                    )
+                )
+                result = await db.execute(strategy_stmt)
+                strategy = result.scalar_one_or_none()
+                
+                if not strategy:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Strategy not found or access denied"
+                    )
+                
+                # Update the strategy parameters with deep merge
+                existing_params = strategy.parameters or {}
+                if isinstance(existing_params, str):
+                    existing_params = json.loads(existing_params)
+                
+                # Perform deep merge of nested configuration objects
+                merged_params = deep_merge_dict(existing_params, request.parameters)
+                strategy.parameters = merged_params
+                strategy.updated_at = datetime.utcnow()
+                
+                await db.flush()
+                await db.refresh(strategy)
+                
+                logger.info(
+                    "Strategy configuration updated",
+                    user_id=str(current_user.id),
+                    strategy_id=strategy_id,
+                    config_keys=list(request.parameters.keys())
+                )
+                
+                return {
+                    "success": True,
+                    "message": "Strategy configuration updated successfully",
+                    "strategy_id": strategy_id,
+                    "updated_config": strategy.parameters,
+                    "updated_at": strategy.updated_at.isoformat()
+                }
+                
+    except HTTPException:
+        raise
+    except ValueError as e:
+        # Handle validation errors from Pydantic
+        logger.warning("Strategy configuration validation failed",
+                      user_id=str(current_user.id),
+                      strategy_id=strategy_id,
+                      error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Configuration validation failed: {str(e)}"
+        ) from e
+    except Exception as e:
+        logger.exception("Failed to update strategy configuration", 
+                        user_id=str(current_user.id),
+                        strategy_id=strategy_id,
+                        error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update strategy configuration"
         ) from e
