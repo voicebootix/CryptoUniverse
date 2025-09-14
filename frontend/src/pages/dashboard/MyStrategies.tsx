@@ -119,8 +119,31 @@ const MyStrategies: React.FC = () => {
   const { data: portfolio, isLoading: portfolioLoading, error: portfolioError } = useQuery({
     queryKey: ['user-strategy-portfolio'],
     queryFn: async () => {
-      const response = await apiClient.get('/strategies/my-portfolio');
-      return response.data as { summary: PortfolioSummary; strategies: UserStrategy[] };
+      try {
+        const response = await apiClient.get('/strategies/my-portfolio');
+        return response.data as { summary: PortfolioSummary; strategies: UserStrategy[] };
+      } catch (error: any) {
+        console.error('Failed to fetch portfolio:', error);
+        // Return empty portfolio if endpoint not found
+        if (error?.response?.status === 404) {
+          return {
+            summary: {
+              total_strategies: 0,
+              active_strategies: 0,
+              welcome_strategies: 0,
+              purchased_strategies: 0,
+              total_portfolio_value: 0,
+              total_pnl_usd: 0,
+              total_pnl_percentage: 0,
+              monthly_credit_cost: 0,
+              profit_potential_used: 0,
+              profit_potential_remaining: 100
+            },
+            strategies: []
+          };
+        }
+        throw error;
+      }
     },
     refetchInterval: 30000,
     retry: 2,
@@ -203,18 +226,36 @@ const MyStrategies: React.FC = () => {
   const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
   if (portfolioError) {
+    const errorMessage = portfolioError instanceof Error
+      ? portfolioError.message
+      : 'Unable to load your strategies. Please try again later.';
+
+    const isNetworkError = errorMessage.includes('Network') || errorMessage.includes('fetch');
+    const isServerError = errorMessage.includes('500') || errorMessage.includes('Server');
+
     return (
       <div className="container mx-auto p-6">
         <div className="text-center py-12">
           <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Failed to Load Strategies</h3>
+          <h3 className="text-lg font-semibold mb-2">
+            {isNetworkError ? 'Connection Problem' : 'Failed to Load Strategies'}
+          </h3>
           <p className="text-muted-foreground mb-4">
-            {portfolioError instanceof Error ? portfolioError.message : 'Unknown error occurred'}
+            {isNetworkError
+              ? 'Please check your internet connection and try again.'
+              : isServerError
+              ? 'Our servers are experiencing issues. Please try again in a few moments.'
+              : errorMessage}
           </p>
-          <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['user-strategy-portfolio'] })}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Retry
-          </Button>
+          <div className="flex gap-2 justify-center">
+            <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['user-strategy-portfolio'] })}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry
+            </Button>
+            <Button variant="outline" onClick={() => navigate('/dashboard/strategies')}>
+              Browse Strategies
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -239,7 +280,7 @@ const MyStrategies: React.FC = () => {
         </div>
         <div className="ml-auto">
           <Button 
-            onClick={() => navigate('/dashboard/strategy-marketplace')}
+            onClick={() => navigate('/dashboard/strategies')}
             className="bg-gradient-to-r from-blue-500 to-purple-600"
           >
             <Gem className="h-4 w-4 mr-2" />
