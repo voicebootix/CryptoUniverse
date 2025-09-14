@@ -543,9 +543,13 @@ const StrategyMarketplace: React.FC = () => {
                       size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handlePurchaseStrategy(strategy);
+                        if (!strategy.user_can_afford) {
+                          navigate('/dashboard/credits/purchase');
+                        } else {
+                          handlePurchaseStrategy(strategy);
+                        }
                       }}
-                      disabled={strategy.user_has_purchased || !strategy.user_can_afford || purchaseStrategyMutation.isPending}
+                      disabled={strategy.user_has_purchased || purchaseStrategyMutation.isPending}
                       className={strategy.user_has_purchased ? 'bg-green-500' : ''}
                     >
                       {strategy.user_has_purchased ? (
@@ -556,7 +560,10 @@ const StrategyMarketplace: React.FC = () => {
                       ) : purchaseStrategyMutation.isPending ? (
                         'Purchasing...'
                       ) : !strategy.user_can_afford ? (
-                        'Need Credits'
+                        <>
+                          <DollarSign className="h-4 w-4 mr-2" />
+                          Need Credits
+                        </>
                       ) : (
                         <>
                           <ShoppingCart className="h-4 w-4 mr-2" />
