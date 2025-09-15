@@ -11,6 +11,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from sqlalchemy.ext.mutable import MutableDict
 import enum
 from uuid import uuid4
 
@@ -93,35 +94,43 @@ class StrategySubmission(Base):
     rejection_reason = Column(Text, nullable=True)
 
     # Backtest Results (stored as JSON)
-    backtest_results = Column(JSON, nullable=True, default={
-        "total_return": 0.0,
-        "sharpe_ratio": 0.0,
-        "max_drawdown": 0.0,
-        "win_rate": 0.0,
-        "total_trades": 0,
-        "profit_factor": 0.0,
-        "period_days": 0
-    })
+    backtest_results = Column(
+        MutableDict.as_mutable(JSON),
+        nullable=True,
+        default=lambda: {
+            "total_return": 0.0,
+            "sharpe_ratio": 0.0,
+            "max_drawdown": 0.0,
+            "win_rate": 0.0,
+            "total_trades": 0,
+            "profit_factor": 0.0,
+            "period_days": 0
+        }
+    )
 
     # Validation Results (stored as JSON)
-    validation_results = Column(JSON, nullable=True, default={
-        "is_valid": False,
-        "security_score": 0,
-        "performance_score": 0,
-        "code_quality_score": 0,
-        "overall_score": 0
-    })
+    validation_results = Column(
+        MutableDict.as_mutable(JSON),
+        nullable=True,
+        default=lambda: {
+            "is_valid": False,
+            "security_score": 0,
+            "performance_score": 0,
+            "code_quality_score": 0,
+            "overall_score": 0
+        }
+    )
 
     # Publishing Details
-    tags = Column(JSON, nullable=True, default=list)
-    target_audience = Column(JSON, nullable=True, default=list)
+    tags = Column(MutableDict.as_mutable(JSON), nullable=True, default=list)
+    target_audience = Column(MutableDict.as_mutable(JSON), nullable=True, default=list)
     complexity_level = Column(SQLEnum(ComplexityLevel), default=ComplexityLevel.INTERMEDIATE)
     documentation_quality = Column(Integer, default=0)
     support_level = Column(SQLEnum(SupportLevel), default=SupportLevel.STANDARD)
 
     # Strategy Code/Configuration (stored securely)
     strategy_code = Column(Text, nullable=True)  # Encrypted in production
-    strategy_config = Column(JSON, nullable=True)
+    strategy_config = Column(MutableDict.as_mutable(JSON), nullable=True, default=dict)
 
     # Statistics
     total_subscribers = Column(Integer, default=0)
