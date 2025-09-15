@@ -4,16 +4,59 @@ Admin Testing Solution
 
 Simple approach: Test strategies directly via execute endpoint
 without needing to purchase them first.
+
+Environment Variables Required:
+- BASE_URL: API base URL (e.g., https://cryptouniverse.onrender.com/api/v1)
+- ADMIN_EMAIL: Admin user email for authentication
+- ADMIN_PASSWORD: Admin user password for authentication
+
+Set these in your local .env file or CI secrets. Do not hardcode in source.
 """
 
 import requests
 import json
 import time
+import os
+import sys
+from typing import Optional
 
-# Configuration
-BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
-ADMIN_EMAIL = "admin@cryptouniverse.com"
-ADMIN_PASSWORD = "AdminPass123!"
+def _get_required_env_var(var_name: str, description: str) -> str:
+    """
+    Securely load required environment variable with validation.
+    
+    Args:
+        var_name: Environment variable name
+        description: Human-readable description for error messages
+        
+    Returns:
+        Environment variable value
+        
+    Raises:
+        SystemExit: If environment variable is missing or empty
+    """
+    value = os.getenv(var_name)
+    
+    if not value or not value.strip():
+        print(f"❌ ERROR: Required environment variable '{var_name}' is missing or empty")
+        print(f"   Description: {description}")
+        print(f"   Please set {var_name} in your .env file or environment")
+        print(f"   Example: export {var_name}='your_value_here'")
+        sys.exit(1)
+    
+    # Do not log the actual value for security
+    print(f"✅ Loaded {var_name} from environment")
+    return value.strip()
+
+# Load configuration from environment variables (validated at import)
+BASE_URL = _get_required_env_var("BASE_URL", "API base URL for testing")
+ADMIN_EMAIL = _get_required_env_var("ADMIN_EMAIL", "Admin user email for authentication") 
+ADMIN_PASSWORD = _get_required_env_var("ADMIN_PASSWORD", "Admin user password for authentication")
+
+# Validate BASE_URL format
+if not BASE_URL.startswith(("http://", "https://")):
+    print(f"❌ ERROR: BASE_URL must start with http:// or https://")
+    print(f"   Current value starts with: {BASE_URL[:10]}...")
+    sys.exit(1)
 
 def test_all_strategies_directly():
     """Test all 25 strategies directly via execute endpoint."""
@@ -21,14 +64,88 @@ def test_all_strategies_directly():
     print("🔧 ADMIN STRATEGY TESTING - DIRECT EXECUTION")
     print("=" * 70)
     
-    # Login
+    # Robust authentication with retries and validation
     session = requests.Session()
-    login_data = {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
     
-    response = session.post(f"{BASE_URL}/auth/login", json=login_data)
-    token = response.json().get("access_token")
+    def authenticate_with_retry() -> str:
+        """Authenticate with retry logic and robust validation."""
+        login_data = {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
+        max_attempts = 3
+        base_delay = 1.0
+        
+        for attempt in range(max_attempts):
+            try:
+                print(f"🔐 Authentication attempt {attempt + 1}/{max_attempts}")
+                
+                response = session.post(
+                    f"{BASE_URL}/auth/login", 
+                    json=login_data,
+                    timeout=10.0  # 10 second timeout
+                )
+                
+                # Check HTTP status
+                if not response.ok:
+                    error_msg = f"HTTP {response.status_code}"
+                    try:
+                        error_data = response.json()
+                        error_msg += f": {error_data.get('detail', response.text[:100])}"
+                    except:
+                        error_msg += f": {response.text[:100]}"
+                    
+                    if attempt < max_attempts - 1 and response.status_code >= 500:
+                        print(f"   ⚠️ Server error ({error_msg}), retrying in {base_delay * (attempt + 1)}s...")
+                        time.sleep(base_delay * (attempt + 1))
+                        continue
+                    else:
+                        print(f"❌ Authentication failed: {error_msg}")
+                        sys.exit(1)
+                
+                # Parse and validate response
+                try:
+                    auth_data = response.json()
+                except json.JSONDecodeError as e:
+                    print(f"❌ Invalid JSON response: {e}")
+                    sys.exit(1)
+                
+                # Validate access token
+                access_token = auth_data.get("access_token")
+                if not access_token or not access_token.strip():
+                    print(f"❌ No access token in response")
+                    print(f"   Response keys: {list(auth_data.keys())}")
+                    sys.exit(1)
+                
+                # Validate token format (basic check)
+                if len(access_token.strip()) < 10:
+                    print(f"❌ Access token appears invalid (too short)")
+                    sys.exit(1)
+                
+                print(f"✅ Authentication successful")
+                return access_token.strip()
+                
+            except requests.exceptions.Timeout:
+                if attempt < max_attempts - 1:
+                    print(f"   ⚠️ Request timeout, retrying in {base_delay * (attempt + 1)}s...")
+                    time.sleep(base_delay * (attempt + 1))
+                    continue
+                else:
+                    print(f"❌ Authentication failed: Request timeout after {max_attempts} attempts")
+                    sys.exit(1)
+                    
+            except requests.exceptions.RequestException as e:
+                if attempt < max_attempts - 1:
+                    print(f"   ⚠️ Network error ({e}), retrying in {base_delay * (attempt + 1)}s...")
+                    time.sleep(base_delay * (attempt + 1))
+                    continue
+                else:
+                    print(f"❌ Authentication failed: Network error after {max_attempts} attempts: {e}")
+                    sys.exit(1)
+        
+        print(f"❌ Authentication failed after {max_attempts} attempts")
+        sys.exit(1)
+    
+    # Authenticate and set headers
+    token = authenticate_with_retry()
     session.headers.update({"Authorization": f"Bearer {token}"})
-    print("✅ Authenticated successfully")
     
     # All 25 strategy functions to test
     all_strategy_functions = [
@@ -80,7 +197,9 @@ def test_all_strategies_directly():
             "function": function,
             "symbol": "BTC/USDT",
             "parameters": params,
-            "simulation_mode": True
+            "simulation_mode": True,  # CRITICAL: Force simulation mode
+            "dry_run": True,         # Additional safety flag
+            "testing_mode": True     # Explicit testing indicator
         }
         
         try:

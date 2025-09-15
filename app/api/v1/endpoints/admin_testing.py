@@ -4,8 +4,9 @@ Admin Testing Endpoints
 Dedicated endpoints for admin to test all strategies without purchase requirements.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from typing import Dict, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, Body
+from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional, List
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
 from app.services.trading_strategies import trading_strategies_service
@@ -15,11 +16,23 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/admin/testing", tags=["Admin Testing"])
 
 
+class AdminStrategyTestRequest(BaseModel):
+    """Request model for admin strategy testing."""
+    function: str = Field(..., description="Strategy function name to test")
+    symbol: str = Field(default="BTC/USDT", description="Trading symbol")
+    parameters: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Strategy parameters")
+
+
+class AdminBulkTestRequest(BaseModel):
+    """Request model for admin bulk strategy testing."""
+    functions: List[str] = Field(..., description="List of strategy functions to test")
+    symbol: str = Field(default="BTC/USDT", description="Trading symbol")
+    parameters: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Common parameters")
+
+
 @router.post("/strategy/execute")
 async def admin_test_strategy(
-    function: str,
-    symbol: str = "BTC/USDT",
-    parameters: Optional[Dict[str, Any]] = None,
+    request: AdminStrategyTestRequest,
     current_user: User = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
@@ -28,21 +41,21 @@ async def admin_test_strategy(
     This bypasses all purchase and credit checks for testing purposes.
     """
     
-    # Verify admin access
-    if not current_user.is_admin:
+    # Verify admin access (call the method, not just reference it)
+    if not current_user.is_admin():
         raise HTTPException(status_code=403, detail="Admin access required")
     
     try:
         logger.info("Admin testing strategy", 
-                   function=function, 
-                   symbol=symbol,
+                   function=request.function, 
+                   symbol=request.symbol,
                    admin_user=current_user.email)
         
         # Execute strategy directly without purchase checks
         result = await trading_strategies_service.execute_strategy(
-            function=function,
-            symbol=symbol,
-            parameters=parameters or {},
+            function=request.function,
+            symbol=request.symbol,
+            parameters=request.parameters,
             user_id=str(current_user.id),
             simulation_mode=True
         )
@@ -50,7 +63,7 @@ async def admin_test_strategy(
         return {
             "success": True,
             "admin_testing": True,
-            "function": function,
+            "function": request.function,
             "execution_result": result,
             "bypass_purchase_check": True,
             "timestamp": "admin_testing_mode"
@@ -69,7 +82,7 @@ async def admin_list_all_strategies(
     Admin-only endpoint to list all available strategy functions.
     """
     
-    if not current_user.is_admin:
+    if not current_user.is_admin():
         raise HTTPException(status_code=403, detail="Admin access required")
     
     # Get all strategy functions via introspection
@@ -100,25 +113,24 @@ async def admin_list_all_strategies(
 
 @router.post("/strategy/bulk-test")
 async def admin_bulk_test_strategies(
-    functions: list[str],
-    symbol: str = "BTC/USDT",
+    request: AdminBulkTestRequest,
     current_user: User = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
     Admin-only endpoint to test multiple strategies in bulk.
     """
     
-    if not current_user.is_admin:
+    if not current_user.is_admin():
         raise HTTPException(status_code=403, detail="Admin access required")
     
     results = []
     
-    for function in functions:
+    for function in request.functions:
         try:
             result = await trading_strategies_service.execute_strategy(
                 function=function,
-                symbol=symbol,
-                parameters={},
+                symbol=request.symbol,
+                parameters=request.parameters,
                 user_id=str(current_user.id),
                 simulation_mode=True
             )
@@ -140,9 +152,9 @@ async def admin_bulk_test_strategies(
     
     return {
         "success": True,
-        "total_tested": len(functions),
+        "total_tested": len(request.functions),
         "successful": successful,
-        "success_rate": f"{successful/len(functions)*100:.1f}%",
+        "success_rate": f"{successful/len(request.functions)*100:.1f}%",
         "results": results,
         "admin_testing": True
     }

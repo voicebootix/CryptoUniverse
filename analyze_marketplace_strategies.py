@@ -41,7 +41,7 @@ def analyze_marketplace():
     
     if response.status_code != 200:
         print(f"❌ Marketplace fetch failed: {response.status_code}")
-        return
+        return [], {}  # Return empty strategies and analysis to match expected tuple
     
     data = response.json()
     strategies = data.get("strategies", [])
