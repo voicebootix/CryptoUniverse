@@ -205,14 +205,19 @@ const PublisherDashboard: React.FC = () => {
     refetchInterval: 60000
   });
 
+  // Map payouts using only real backend fields, show "—" for missing data
   const payouts = payoutsData?.payouts?.map((payout: any, index: number) => ({
-    id: `payout-${index}`,
+    // Use backend id if available, otherwise show placeholder
+    id: payout.id || "—",
     amount: payout.amount,
     status: payout.status,
-    requested_at: payout.date,
-    processed_at: payout.status === 'completed' ? payout.date : undefined,
-    payment_method: payout.method || 'bank_transfer',
-    transaction_id: `tx-${index}`
+    // Map date fields from backend
+    requested_at: payout.date || payout.requested_at || "—",
+    processed_at: payout.processed_at || (payout.status === 'completed' ? payout.date : "—"),
+    // Use backend payment method or show placeholder
+    payment_method: payout.method || payout.payment_method || "—",
+    // Use backend transaction ID or show placeholder
+    transaction_id: payout.transaction_id || "—"
   })) || [];
 
   const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
@@ -814,7 +819,7 @@ const PublisherDashboard: React.FC = () => {
                         </div>
                         <div className="text-xs text-muted-foreground mt-1">
                           {payout.payment_method}
-                          {payout.transaction_id && ` • ${payout.transaction_id}`}
+                          {payout.transaction_id && payout.transaction_id !== "—" && ` • ${payout.transaction_id}`}
                         </div>
                       </div>
                       
