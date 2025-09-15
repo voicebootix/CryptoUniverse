@@ -460,11 +460,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             top_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
             symbols_str = ",".join(top_symbols)
             
-            # Call REAL funding arbitrage strategy
-            arbitrage_result = await trading_strategies_service.funding_arbitrage(
-                symbols=symbols_str,
-                exchanges="all",
-                min_funding_rate=0.005,  # 0.5% minimum
+            # Call REAL funding arbitrage strategy using correct method signature
+            arbitrage_result = await trading_strategies_service.execute_strategy(
+                function="funding_arbitrage",
+                parameters={
+                    "symbols": symbols_str,
+                    "exchanges": "all",
+                    "min_funding_rate": 0.005
+                },
                 user_id=user_profile.user_id
             )
             
@@ -516,10 +519,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             universe_symbols = self._get_symbols_for_statistical_arbitrage(discovered_assets, limit=50)
             universe_str = ",".join(universe_symbols)
             
-            # Call REAL statistical arbitrage strategy
-            stat_arb_result = await trading_strategies_service.statistical_arbitrage(
-                universe=universe_str,
+            # Call REAL statistical arbitrage strategy using correct method signature
+            stat_arb_result = await trading_strategies_service.execute_strategy(
+                function="statistical_arbitrage",
                 strategy_type="mean_reversion",
+                parameters={"universe": universe_str},
                 user_id=user_profile.user_id
             )
             
@@ -571,10 +575,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for pair in correlation_pairs:
                 pair_str = f"{pair[0]}-{pair[1]}"
                 
-                # Call REAL pairs trading strategy
-                pairs_result = await trading_strategies_service.pairs_trading(
-                    pair_symbols=pair_str,
+                # Call REAL pairs trading strategy using correct method signature
+                pairs_result = await trading_strategies_service.execute_strategy(
+                    function="pairs_trading",
                     strategy_type="statistical_arbitrage",
+                    parameters={"pair_symbols": pair_str},
                     user_id=user_profile.user_id
                 )
                 
@@ -627,10 +632,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             momentum_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=30)
             
             for symbol in momentum_symbols:
-                # Call REAL spot momentum strategy
-                momentum_result = await trading_strategies_service.spot_momentum_strategy(
+                # Call REAL spot momentum strategy using correct method signature
+                momentum_result = await trading_strategies_service.execute_strategy(
+                    function="spot_momentum_strategy",
                     symbol=f"{symbol}/USDT",
-                    timeframe="4h",
+                    parameters={"timeframe": "4h"},
                     user_id=user_profile.user_id
                 )
                 
@@ -687,10 +693,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             reversion_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=25)
             
             for symbol in reversion_symbols:
-                # Call REAL spot mean reversion strategy
-                reversion_result = await trading_strategies_service.spot_mean_reversion(
+                # Call REAL spot mean reversion strategy using correct method signature
+                reversion_result = await trading_strategies_service.execute_strategy(
+                    function="spot_mean_reversion",
                     symbol=f"{symbol}/USDT",
-                    timeframe="1h",
+                    parameters={"timeframe": "1h"},
                     user_id=user_profile.user_id
                 )
                 
@@ -743,10 +750,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             breakout_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
             
             for symbol in breakout_symbols:
-                # Call REAL spot breakout strategy
-                breakout_result = await trading_strategies_service.spot_breakout_strategy(
-                    symbol=f"{symbol}/USDT", 
-                    timeframe="1h",
+                # Call REAL spot breakout strategy using correct method signature
+                breakout_result = await trading_strategies_service.execute_strategy(
+                    function="spot_breakout_strategy",
+                    symbol=f"{symbol}/USDT",
+                    parameters={"timeframe": "1h"},
                     user_id=user_profile.user_id
                 )
                 
@@ -798,8 +806,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         opportunities = []
         
         try:
-            # Risk management looks for hedging opportunities
-            hedge_result = await trading_strategies_service.risk_management(
+            # Risk management looks for hedging opportunities using correct method signature
+            hedge_result = await trading_strategies_service.execute_strategy(
+                function="risk_management",
                 user_id=user_profile.user_id
             )
             
@@ -846,8 +855,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         opportunities = []
         
         try:
-            # Portfolio optimization analyzes current allocation
-            optimization_result = await trading_strategies_service.portfolio_optimization(
+            # Portfolio optimization analyzes current allocation using correct method signature
+            optimization_result = await trading_strategies_service.execute_strategy(
+                function="portfolio_optimization",
                 user_id=user_profile.user_id
             )
             
