@@ -141,6 +141,11 @@ class TradingStrategy(Base):
     ai_models = Column(JSON, default=list, nullable=False)
     confidence_threshold = Column(Numeric(5, 2), default=70.0, nullable=False)
     consensus_required = Column(Boolean, default=True, nullable=False)
+
+    # Strategy IDE fields
+    strategy_code = Column(Text, nullable=True)  # User's custom strategy code
+    category = Column(String(50), nullable=True)  # Strategy category
+    meta_data = Column('metadata', JSON, default=dict, nullable=False)  # Additional metadata
     
     # Timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)

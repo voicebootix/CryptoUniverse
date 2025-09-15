@@ -1471,12 +1471,13 @@ This might indicate insufficient portfolio size or market conditions. Try again 
         
         # Strategy patterns for detection
         strategy_patterns = {
-            "risk_parity": [r"risk parity", r"equal risk", r"risk weighted", r"balanced risk"],
-            "equal_weight": [r"equal weight", r"equally", r"same amount", r"equal allocation"],
-            "max_sharpe": [r"sharpe", r"best return", r"optimize return", r"maximum sharpe"],
-            "min_variance": [r"low risk", r"minimum risk", r"conservative", r"min variance", r"lowest risk"],
-            "kelly": [r"kelly", r"optimal sizing", r"kelly criterion"],
-            "adaptive": [r"adaptive", r"smart", r"automatic", r"ai choose", r"best strategy"]
+            "risk_parity": [r"risk parity", r"equal risk", r"risk weighted", r"balanced risk", r"diversify"],
+            "equal_weight": [r"equal weight", r"equally", r"same amount", r"equal allocation", r"simple"],
+            "max_sharpe": [r"sharpe", r"best return", r"optimize return", r"maximum sharpe", r"highest return"],
+            "min_variance": [r"low risk", r"minimum risk", r"conservative", r"min variance", r"lowest risk", r"safe"],
+            "kelly_criterion": [r"kelly", r"optimal sizing", r"kelly criterion", r"position sizing"],
+            "adaptive": [r"adaptive", r"blended", r"mixed approach", r"combination"],
+            "auto": [r"smart", r"automatic", r"ai choose", r"best strategy", r"intelligent", r"optimize", r"rebalance"]
         }
         
         # Check user's message for strategy keywords
@@ -1493,14 +1494,9 @@ This might indicate insufficient portfolio size or market conditions. Try again 
             self.logger.info("Using preferred rebalancing strategy from context", strategy=preferred)
             return preferred
         
-        # Use risk tolerance to pick smart default
-        risk_tolerance = session_context.get("risk_tolerance", "balanced")
-        if risk_tolerance == "conservative":
-            return "min_variance"
-        elif risk_tolerance == "aggressive":
-            return "max_sharpe"
-        else:
-            return "risk_parity"  # Best default for most users
+        # Use intelligent auto-selection as default
+        self.logger.info("No specific strategy detected, using intelligent auto-selection")
+        return "auto"  # Let the system intelligently choose the best strategy
 
     async def _get_portfolio_analysis_with_retry(self, user_id: str, strategy: str, max_retries: int = 2) -> Dict[str, Any]:
         """Get portfolio analysis with retry logic and timeout handling."""

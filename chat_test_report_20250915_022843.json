@@ -1,0 +1,1066 @@
+{
+  "test_summary": {
+    "timestamp": "2025-09-15T02:28:43.794002",
+    "base_url": "https://cryptouniverse.onrender.com/api/v1",
+    "total_categories": 7,
+    "performance_metrics": {
+      "total_tests": 34,
+      "successful_tests": 26,
+      "success_rate": 76.47058823529412,
+      "average_response_time": 21.165127081530436,
+      "timestamp": "2025-09-15T02:28:43.793944"
+    }
+  },
+  "detailed_results": {
+    "authentication": {
+      "login": {
+        "success": true,
+        "timestamp": "2025-09-15T02:18:02.230795",
+        "details": {
+          "token_length": 351,
+          "user_data": {}
+        }
+      }
+    },
+    "endpoints": {
+      "chat_status": {
+        "success": true,
+        "timestamp": "2025-09-15T02:18:06.962934",
+        "details": {
+          "success": true,
+          "chat_engine_status": "operational",
+          "ai_consensus_status": "operational",
+          "master_controller_status": "unknown",
+          "active_sessions": 10,
+          "last_updated": "2025-09-15T02:18:06.915463"
+        }
+      },
+      "create_session": {
+        "success": true,
+        "timestamp": "2025-09-15T02:18:10.115729",
+        "details": {
+          "session_id": null,
+          "success_flag": false
+        }
+      },
+      "get_sessions": {
+        "success": true,
+        "timestamp": "2025-09-15T02:18:17.047906",
+        "details": {
+          "success": true,
+          "sessions": [
+            "0d56529f-387d-43d4-8d59-e43be8c0e5c8",
+            "25016146-2c25-4e3e-a730-a4eeef15f3b6",
+            "74a563b8-ff34-41d4-87dd-5ddc6b1a3ee1",
+            "f5f42b83-7f3a-4f6a-9f0f-42c9195441cf",
+            "ca860a69-da6f-4483-be56-f1980c028c80",
+            "c0c8c052-da75-419d-bc3b-5c26320cf78a",
+            "43aab0c4-55b3-4abe-ad0d-27cb65ff531b",
+            "140f69e7-c544-4d23-b923-d37c20022e0e",
+            "4e565d18-d2e1-49de-8ad5-fbdd72afdde6",
+            "05d70e4f-924c-4501-ae73-780ccf3a39fb"
+          ]
+        }
+      },
+      "quick_portfolio_analysis": {
+        "success": false,
+        "timestamp": "2025-09-15T02:18:20.343108",
+        "details": {
+          "status_code": 500,
+          "error": "{\"error\":\"Failed to perform portfolio analysis\",\"status_code\":500,\"path\":\"/api/v1/chat/portfolio/quick-analysis\",\"timestamp\":9016937.586}"
+        }
+      },
+      "market_opportunities": {
+        "success": false,
+        "timestamp": "2025-09-15T02:18:23.163004",
+        "details": {
+          "status_code": 500,
+          "error": "{\"error\":\"Failed to discover opportunities\",\"status_code\":500,\"path\":\"/api/v1/chat/market/opportunities\",\"timestamp\":9016940.407}"
+        }
+      }
+    },
+    "natural_language": {
+      "portfolio_request": {
+        "success": true,
+        "timestamp": "2025-09-15T02:18:35.953130",
+        "details": {
+          "intent_detected": "portfolio_analysis",
+          "intent_expected": "portfolio_analysis",
+          "intent_correct": true,
+          "confidence": 0.8,
+          "response_time": 12.789998531341553,
+          "content_length": 755,
+          "metadata": {
+            "portfolio_summary": {
+              "total_value": 4092.08,
+              "daily_pnl": 0.0,
+              "daily_pnl_pct": 0.0,
+              "total_pnl": 0,
+              "total_pnl_pct": 0,
+              "positions": [
+                {
+                  "symbol": "XRP",
+                  "amount": 378.962,
+                  "value_usd": 1153.98,
+                  "percentage": 28.2003284393267,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "AAVE",
+                  "amount": 3.10732565,
+                  "value_usd": 955.45,
+                  "percentage": 23.348761510038905,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "ADA",
+                  "amount": 1059.01876762,
+                  "value_usd": 946.45,
+                  "percentage": 23.128824460909854,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SOL",
+                  "amount": 2.35085494,
+                  "value_usd": 568.15,
+                  "percentage": 13.884137162518817,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "XRP",
+                  "amount": 68.99511447,
+                  "value_usd": 210.09,
+                  "percentage": 5.134063850169107,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "DOGE",
+                  "amount": 605.21739217,
+                  "value_usd": 169.26,
+                  "percentage": 4.13628277062032,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "KCS",
+                  "amount": 3.25454735,
+                  "value_usd": 52.39,
+                  "percentage": 1.280278000430099,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "USDC",
+                  "amount": 14.89638597,
+                  "value_usd": 14.9,
+                  "percentage": 0.3641180035580927,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SHIB",
+                  "amount": 691509.74365482,
+                  "value_usd": 9.51,
+                  "percentage": 0.23240014857969538,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                }
+              ],
+              "risk_level": "LOW",
+              "exchanges_connected": 2,
+              "exchanges": [
+                "binance",
+                "kucoin"
+              ],
+              "data_source": "enterprise_optimized_method",
+              "last_updated": "2025-09-15T02:18:29.800444"
+            },
+            "risk_metrics": {
+              "overall_risk": "Medium",
+              "var_24h": 0,
+              "sharpe_ratio": 0,
+              "max_drawdown": 0
+            },
+            "ai_analysis": {
+              "success": true,
+              "analysis": "Portfolio data successfully retrieved. For detailed AI analysis, use the full analysis feature.",
+              "confidence": 0.8,
+              "recommendations": []
+            },
+            "actionable_items": [
+              "rebalance",
+              "risk_analysis",
+              "opportunities",
+              "stop_losses"
+            ]
+          }
+        }
+      },
+      "trade_request": {
+        "success": true,
+        "timestamp": "2025-09-15T02:19:01.004931",
+        "details": {
+          "intent_detected": "trade_execution",
+          "intent_expected": "trade_execution",
+          "intent_correct": true,
+          "confidence": 0.9,
+          "response_time": 24.05159020423889,
+          "content_length": 357,
+          "metadata": {
+            "phases_completed": [
+              "analysis",
+              "consensus",
+              "validation"
+            ],
+            "validation_failed": true,
+            "analysis": {
+              "summary": "Market analysis failed: 'list' object has no attribute 'split'",
+              "risk_assessment": "unknown",
+              "market_conditions": {},
+              "recommendations": []
+            },
+            "consensus": {
+              "recommendation": "SELL",
+              "confidence": 0.7,
+              "portfolio_assessment": {},
+              "market_data": {
+                "summary": "Market analysis failed: 'list' object has no attribute 'split'",
+                "risk_assessment": "unknown",
+                "market_conditions": {},
+                "recommendations": []
+              },
+              "ai_consensus": true
+            },
+            "validation": {
+              "approved": false,
+              "reason": "Validation failed with 70.0% confidence",
+              "risk_checks": {
+                "consensus_confidence": 0.7
+              },
+              "compliance_status": "rejected"
+            }
+          }
+        }
+      },
+      "opportunity_request": {
+        "success": true,
+        "timestamp": "2025-09-15T02:19:46.580504",
+        "details": {
+          "intent_detected": "opportunity_discovery",
+          "intent_expected": "opportunity_discovery",
+          "intent_correct": true,
+          "confidence": 0.8,
+          "response_time": 44.575337409973145,
+          "content_length": 480,
+          "metadata": {
+            "opportunities": [],
+            "service_used": "user_opportunity_discovery",
+            "opportunities_count": 0,
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757902768_03f38858",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 73.9353548817061,
+                "recommendation": "HOLD",
+                "reasoning": "Risk/Reward Ratio Assessment\n\n- **High-Risk/Reward**: AAVE, SOL, and the meme coins (DOGE, SHIB) present a high-risk/reward scenario due to their volatility and speculative nature; Based on the provided data, there are currently no tradable opportunities identified by the strategy (\"success\": false, \"error\": \"No tradeable assets found\", \"opportunities\": []); Confidence Score (1-10):** 2/10\n\nThe extremely low confidence score is due to the complete lack of necessary market data and technical indicators",
+                "confidence_threshold_met": true,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 65.0,
+                    "reasoning": "Risk/Reward Ratio Assessment\n\n- **High-Risk/Reward**: AAVE, SOL, and the meme coins (DOGE, SHIB) present a high-risk/reward scenario due to their volatility and speculative nature",
+                    "cost": 0.022320000000000003,
+                    "response_time": 16.726686000823975
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 80.0,
+                    "reasoning": "Based on the provided data, there are currently no tradable opportunities identified by the strategy (\"success\": false, \"error\": \"No tradeable assets found\", \"opportunities\": [])",
+                    "cost": 0.031185,
+                    "response_time": 11.713449239730835
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 75.0,
+                    "reasoning": "Confidence Score (1-10):** 2/10\n\nThe extremely low confidence score is due to the complete lack of necessary market data and technical indicators",
+                    "cost": 0.0021525000000000003,
+                    "response_time": 12.684067487716675
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.055657500000000006,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T02:19:45.098706",
+                "opportunity_score": 73.9353548817061,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 7.393535488170611,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T02:19:45.098726"
+            }
+          }
+        }
+      },
+      "market_request": {
+        "success": true,
+        "timestamp": "2025-09-15T02:20:03.727585",
+        "details": {
+          "intent_detected": "market_analysis",
+          "intent_expected": "market_analysis",
+          "intent_correct": true,
+          "confidence": 0.7,
+          "response_time": 16.146878242492676,
+          "content_length": 822,
+          "metadata": {
+            "market_overview": {
+              "sentiment": "Live",
+              "trend": "Unknown",
+              "market_phase": "Unknown",
+              "volatility": "Live Market",
+              "fear_greed_index": 50,
+              "btc_dominance": 50.0,
+              "total_market_cap": 0,
+              "total_volume_24h": 0,
+              "arbitrage_opportunities": 0,
+              "last_updated": "2025-09-15T02:19:54.159657",
+              "market_data_count": 0,
+              "available_symbols": []
+            },
+            "sector_analysis": {
+              "sectors": []
+            },
+            "ai_analysis": {
+              "success": true,
+              "analysis": "Market data successfully retrieved. AI analysis temporarily unavailable.",
+              "confidence": 0.7
+            }
+          }
+        }
+      },
+      "rebalancing_request": {
+        "success": false,
+        "timestamp": "2025-09-15T02:20:19.754388",
+        "details": {
+          "intent_detected": "portfolio_analysis",
+          "intent_expected": "rebalancing",
+          "intent_correct": false,
+          "confidence": 0.8,
+          "response_time": 15.026484251022339,
+          "content_length": 755,
+          "metadata": {
+            "portfolio_summary": {
+              "total_value": 4098.63,
+              "daily_pnl": 0.0,
+              "daily_pnl_pct": 0.0,
+              "total_pnl": 0,
+              "total_pnl_pct": 0,
+              "positions": [
+                {
+                  "symbol": "XRP",
+                  "amount": 378.962,
+                  "value_usd": 1155.3,
+                  "percentage": 28.187467519634605,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "AAVE",
+                  "amount": 3.10732565,
+                  "value_usd": 956.76,
+                  "percentage": 23.343409871103272,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "ADA",
+                  "amount": 1059.01876762,
+                  "value_usd": 948.03,
+                  "percentage": 23.130411869331947,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SOL",
+                  "amount": 2.35085494,
+                  "value_usd": 569.42,
+                  "percentage": 13.89293495631467,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "XRP",
+                  "amount": 68.99511447,
+                  "value_usd": 210.36,
+                  "percentage": 5.132446695603165,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "DOGE",
+                  "amount": 605.21739217,
+                  "value_usd": 170.02,
+                  "percentage": 4.148215379285274,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "KCS",
+                  "amount": 3.25454735,
+                  "value_usd": 52.39,
+                  "percentage": 1.2782319945933154,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "USDC",
+                  "amount": 14.89638597,
+                  "value_usd": 14.9,
+                  "percentage": 0.3635361084069555,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SHIB",
+                  "amount": 691509.74365482,
+                  "value_usd": 9.53,
+                  "percentage": 0.23251671900122722,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                }
+              ],
+              "risk_level": "LOW",
+              "exchanges_connected": 2,
+              "exchanges": [
+                "binance",
+                "kucoin"
+              ],
+              "data_source": "enterprise_optimized_method",
+              "last_updated": "2025-09-15T02:20:13.277579"
+            },
+            "risk_metrics": {
+              "overall_risk": "Medium",
+              "var_24h": 0,
+              "sharpe_ratio": 0,
+              "max_drawdown": 0
+            },
+            "ai_analysis": {
+              "success": true,
+              "analysis": "Portfolio data successfully retrieved. For detailed AI analysis, use the full analysis feature.",
+              "confidence": 0.8,
+              "recommendations": []
+            },
+            "actionable_items": [
+              "rebalance",
+              "risk_analysis",
+              "opportunities",
+              "stop_losses"
+            ]
+          }
+        }
+      },
+      "risk_request": {
+        "success": true,
+        "timestamp": "2025-09-15T02:20:59.934467",
+        "details": {
+          "intent_detected": "risk_assessment",
+          "intent_expected": "risk_assessment",
+          "intent_correct": true,
+          "confidence": 0.9,
+          "response_time": 39.1798620223999,
+          "content_length": 885,
+          "metadata": {
+            "risk_analysis": {
+              "overall_risk": "Medium",
+              "var_24h": 0,
+              "var_7d": 0,
+              "max_drawdown": 0,
+              "sharpe_ratio": 0,
+              "beta": 1.0,
+              "volatility": 0.0,
+              "concentration_risk": "Medium",
+              "correlation_risk": "Medium",
+              "recommendations": []
+            },
+            "market_conditions": {
+              "success": true,
+              "risk_factors": {
+                "market_volatility": "Live Market",
+                "portfolio_concentration": "Medium",
+                "correlation_risk": "Medium",
+                "liquidity_risk": "Low",
+                "overall_market_risk": "Live",
+                "portfolio_beta": 1.0,
+                "var_24h": 205.0145,
+                "recommendations": [
+                  "Monitor market volatility",
+                  "Consider diversification",
+                  "Set stop losses for major positions"
+                ]
+              },
+              "last_updated": "2025-09-15T02:20:41.985691"
+            },
+            "ai_assessment": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757902841_9d4854c4",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 56.802269043760134,
+                "recommendation": "HOLD",
+                "reasoning": "### Cryptocurrency Trading Opportunity Analysis\n\n#### 1; The Sharpe ratio of 0 indicates poor risk-adjusted returns; Large sell orders for AAVE, SOL, or KCS might impact market prices due to their smaller positions within the portfolio",
+                "confidence_threshold_met": false,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 75.0,
+                    "reasoning": "### Cryptocurrency Trading Opportunity Analysis\n\n#### 1",
+                    "cost": 0.02602,
+                    "response_time": 13.630528926849365
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 35.0,
+                    "reasoning": "The Sharpe ratio of 0 indicates poor risk-adjusted returns",
+                    "cost": 0.039855,
+                    "response_time": 16.231181859970093
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 40.0,
+                    "reasoning": "Large sell orders for AAVE, SOL, or KCS might impact market prices due to their smaller positions within the portfolio",
+                    "cost": 0.0024425000000000002,
+                    "response_time": 15.03705644607544
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.0683175,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T02:20:58.217905",
+                "opportunity_score": 56.802269043760134,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 5.680226904376013,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T02:20:58.217923"
+            }
+          }
+        }
+      },
+      "emergency_request": {
+        "success": true,
+        "timestamp": "2025-09-15T02:21:04.584463",
+        "details": {
+          "intent_detected": "emergency_command",
+          "intent_expected": "emergency_command",
+          "intent_correct": true,
+          "confidence": 1.0,
+          "response_time": 3.6498095989227295,
+          "content_length": 60,
+          "metadata": {
+            "service_used": "master_controller",
+            "action": "emergency_stop"
+          }
+        }
+      }
+    },
+    "trading_features": {
+      "trading_test_1": {
+        "success": true,
+        "timestamp": "2025-09-15T02:21:19.121418",
+        "details": {
+          "intent": "market_analysis",
+          "confidence": 0.7,
+          "response_time": 13.53650975227356,
+          "requires_approval": false,
+          "content_preview": "\ud83d\udcc8 **Comprehensive Market Analysis**\n\n**Market Overview:**\n\u2022 Overall Sentiment: Live\n\u2022 Trend Directio"
+        }
+      },
+      "trading_test_2": {
+        "success": true,
+        "timestamp": "2025-09-15T02:21:41.128850",
+        "details": {
+          "intent": "trade_execution",
+          "confidence": 0.9,
+          "response_time": 21.007258415222168,
+          "requires_approval": false,
+          "content_preview": "\ud83d\udee1\ufe0f **Trading Request Analysis Complete**\n\n**Phases Completed:** analysis \u2192 consensus \u2192 validation\n\n*"
+        }
+      },
+      "trading_test_3": {
+        "success": true,
+        "timestamp": "2025-09-15T02:22:06.875254",
+        "details": {
+          "intent": "trade_execution",
+          "confidence": 0.9,
+          "response_time": 24.746103048324585,
+          "requires_approval": false,
+          "content_preview": "\ud83d\udee1\ufe0f **Trading Request Analysis Complete**\n\n**Phases Completed:** analysis \u2192 consensus \u2192 validation\n\n*"
+        }
+      },
+      "trading_test_4": {
+        "success": true,
+        "timestamp": "2025-09-15T02:22:14.896109",
+        "details": {
+          "intent": "emergency_command",
+          "confidence": 1.0,
+          "response_time": 7.020666122436523,
+          "requires_approval": false,
+          "content_preview": "\ud83d\udea8 **Emergency Protocol Activated**\n\nEmergency stop activated"
+        }
+      },
+      "trading_test_5": {
+        "success": false,
+        "timestamp": "2025-09-15T02:22:33.674775",
+        "details": {
+          "intent": "general_query",
+          "confidence": 0.7,
+          "response_time": 17.778494119644165,
+          "requires_approval": false,
+          "content_preview": "HOLD"
+        }
+      },
+      "trading_test_6": {
+        "success": false,
+        "timestamp": "2025-09-15T02:22:56.415598",
+        "details": {
+          "intent": "general_query",
+          "confidence": 0.7,
+          "response_time": 21.740602016448975,
+          "requires_approval": false,
+          "content_preview": "SELL"
+        }
+      },
+      "trading_test_7": {
+        "success": false,
+        "timestamp": "2025-09-15T02:23:18.835042",
+        "details": {
+          "intent": "general_query",
+          "confidence": 0.7,
+          "response_time": 21.419015645980835,
+          "requires_approval": false,
+          "content_preview": "HOLD"
+        }
+      }
+    },
+    "portfolio_features": {
+      "portfolio_test_1": {
+        "success": true,
+        "timestamp": "2025-09-15T02:23:34.730984",
+        "details": {
+          "intent": "portfolio_analysis",
+          "confidence": 0.8,
+          "response_time": 14.89562702178955,
+          "has_metadata": true,
+          "content_length": 755
+        }
+      },
+      "portfolio_test_2": {
+        "success": true,
+        "timestamp": "2025-09-15T02:23:50.819903",
+        "details": {
+          "intent": "portfolio_analysis",
+          "confidence": 0.8,
+          "response_time": 15.088546514511108,
+          "has_metadata": true,
+          "content_length": 755
+        }
+      },
+      "portfolio_test_3": {
+        "success": true,
+        "timestamp": "2025-09-15T02:24:03.090284",
+        "details": {
+          "intent": "portfolio_analysis",
+          "confidence": 0.8,
+          "response_time": 11.270164728164673,
+          "has_metadata": true,
+          "content_length": 755
+        }
+      },
+      "portfolio_test_4": {
+        "success": false,
+        "timestamp": "2025-09-15T02:24:24.089400",
+        "details": {
+          "intent": "general_query",
+          "confidence": 0.7,
+          "response_time": 19.99883198738098,
+          "has_metadata": true,
+          "content_length": 4
+        }
+      },
+      "portfolio_test_5": {
+        "success": true,
+        "timestamp": "2025-09-15T02:24:39.440281",
+        "details": {
+          "intent": "portfolio_analysis",
+          "confidence": 0.8,
+          "response_time": 14.35061502456665,
+          "has_metadata": true,
+          "content_length": 755
+        }
+      },
+      "portfolio_test_6": {
+        "success": true,
+        "timestamp": "2025-09-15T02:25:18.818732",
+        "details": {
+          "intent": "risk_assessment",
+          "confidence": 0.9,
+          "response_time": 38.37808871269226,
+          "has_metadata": true,
+          "content_length": 885
+        }
+      },
+      "portfolio_test_7": {
+        "success": true,
+        "timestamp": "2025-09-15T02:25:35.343937",
+        "details": {
+          "intent": "trade_execution",
+          "confidence": 0.9,
+          "response_time": 15.524995803833008,
+          "has_metadata": true,
+          "content_length": 357
+        }
+      }
+    },
+    "opportunity_discovery": {
+      "opportunity_test_1": {
+        "success": true,
+        "timestamp": "2025-09-15T02:26:14.065772",
+        "details": {
+          "intent": "opportunity_discovery",
+          "confidence": 0.8,
+          "response_time": 37.7215051651001,
+          "metadata": {
+            "opportunities": [],
+            "service_used": "user_opportunity_discovery",
+            "opportunities_count": 0,
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757903153_2e4e07a5",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 58.20207152628494,
+                "recommendation": "HOLD",
+                "reasoning": "Given the provided context and portfolio, let's dive into a detailed analysis covering the requested areas:\n\n### 1; However, the portfolio's \"LOW\" risk level and limited number of positions across just 2 exchanges indicates a fairly conservative stance; Confidence Score (1-100) with Reasoning:**\n\n**Confidence Score: 10**\n\nThe extremely low confidence score is due to the complete lack of actionable market data and specific trading opportunities",
+                "confidence_threshold_met": false,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 75.0,
+                    "reasoning": "Given the provided context and portfolio, let's dive into a detailed analysis covering the requested areas:\n\n### 1",
+                    "cost": 0.03416,
+                    "response_time": 16.255008935928345
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 35.0,
+                    "reasoning": "However, the portfolio's \"LOW\" risk level and limited number of positions across just 2 exchanges indicates a fairly conservative stance",
+                    "cost": 0.05196,
+                    "response_time": 19.08767008781433
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 10.0,
+                    "reasoning": "Confidence Score (1-100) with Reasoning:**\n\n**Confidence Score: 10**\n\nThe extremely low confidence score is due to the complete lack of actionable market data and specific trading opportunities",
+                    "cost": 0.00286,
+                    "response_time": 13.961096286773682
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.08898,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T02:26:12.596771",
+                "opportunity_score": 58.20207152628494,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 5.820207152628494,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T02:26:12.596790"
+            }
+          },
+          "ai_analysis": false
+        }
+      },
+      "opportunity_test_2": {
+        "success": true,
+        "timestamp": "2025-09-15T02:26:30.668976",
+        "details": {
+          "intent": "market_analysis",
+          "confidence": 0.7,
+          "response_time": 15.603008031845093,
+          "metadata": {
+            "market_overview": {
+              "sentiment": "Live",
+              "trend": "Unknown",
+              "market_phase": "Unknown",
+              "volatility": "Live Market",
+              "fear_greed_index": 50,
+              "btc_dominance": 50.0,
+              "total_market_cap": 0,
+              "total_volume_24h": 0,
+              "arbitrage_opportunities": 0,
+              "last_updated": "2025-09-15T02:26:21.142327",
+              "market_data_count": 0,
+              "available_symbols": []
+            },
+            "sector_analysis": {
+              "sectors": []
+            },
+            "ai_analysis": {
+              "success": true,
+              "analysis": "Market data successfully retrieved. AI analysis temporarily unavailable.",
+              "confidence": 0.7
+            }
+          },
+          "ai_analysis": false
+        }
+      },
+      "opportunity_test_3": {
+        "success": true,
+        "timestamp": "2025-09-15T02:26:59.214459",
+        "details": {
+          "intent": "opportunity_discovery",
+          "confidence": 0.8,
+          "response_time": 27.545260906219482,
+          "metadata": {
+            "opportunities": [],
+            "service_used": "user_opportunity_discovery",
+            "opportunities_count": 0,
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757903200_9bc42c7c",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 72.25641880626877,
+                "recommendation": "HOLD",
+                "reasoning": "Market Timing Considerations\n\nCryptocurrency markets operate 24/7, making market timing a challenge due to constant fluctuations; - The risk level is rated as LOW, likely due to the small position sizes; However, the user's existing portfolio exhibits a low-risk profile due to its diversification across several established assets and a low overall value. However, execution risks can still arise due to slippage, especially during periods of high volatility",
+                "confidence_threshold_met": true,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 75.0,
+                    "reasoning": "Market Timing Considerations\n\nCryptocurrency markets operate 24/7, making market timing a challenge due to constant fluctuations",
+                    "cost": 0.03263,
+                    "response_time": 15.389615774154663
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 80.0,
+                    "reasoning": "- The risk level is rated as LOW, likely due to the small position sizes",
+                    "cost": 0.05085,
+                    "response_time": 17.22702383995056
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 20.0,
+                    "reasoning": "However, the user's existing portfolio exhibits a low-risk profile due to its diversification across several established assets and a low overall value. However, execution risks can still arise due to slippage, especially during periods of high volatility",
+                    "cost": 0.0027375000000000003,
+                    "response_time": 12.551846981048584
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.0862175,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T02:26:58.020800",
+                "opportunity_score": 72.25641880626877,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 7.225641880626877,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T02:26:58.020820"
+            }
+          },
+          "ai_analysis": false
+        }
+      },
+      "opportunity_test_4": {
+        "success": true,
+        "timestamp": "2025-09-15T02:27:29.615987",
+        "details": {
+          "intent": "opportunity_discovery",
+          "confidence": 0.8,
+          "response_time": 29.40132451057434,
+          "metadata": {
+            "opportunities": [],
+            "service_used": "user_opportunity_discovery",
+            "opportunities_count": 0,
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757903227_99e20a13",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 64.4386412566781,
+                "recommendation": "HOLD",
+                "reasoning": "Confidence Score: 65%\n\nThe confidence score is moderately set at 65% due to several factors:\n- Lack of specific arbitrage opportunities identified in the provided data; Based on the provided data, there are currently no active arbitrage opportunities identified for this user's portfolio and exchange setup; Confidence Score (1-100) with Reasoning:**\n\n**Confidence Score: 10**\n\nThe extremely low confidence score is due to the complete lack of identified arbitrage opportunities and market data",
+                "confidence_threshold_met": false,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 65.0,
+                    "reasoning": "Confidence Score: 65%\n\nThe confidence score is moderately set at 65% due to several factors:\n- Lack of specific arbitrage opportunities identified in the provided data",
+                    "cost": 0.03266,
+                    "response_time": 15.695655822753906
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 70.0,
+                    "reasoning": "Based on the provided data, there are currently no active arbitrage opportunities identified for this user's portfolio and exchange setup",
+                    "cost": 0.051570000000000005,
+                    "response_time": 20.837881326675415
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 10.0,
+                    "reasoning": "Confidence Score (1-100) with Reasoning:**\n\n**Confidence Score: 10**\n\nThe extremely low confidence score is due to the complete lack of identified arbitrage opportunities and market data",
+                    "cost": 0.0028975000000000003,
+                    "response_time": 13.649024248123169
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.0871275,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T02:27:28.462626",
+                "opportunity_score": 64.4386412566781,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 6.44386412566781,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T02:27:28.462647"
+            }
+          },
+          "ai_analysis": false
+        }
+      },
+      "opportunity_test_5": {
+        "success": true,
+        "timestamp": "2025-09-15T02:27:46.499795",
+        "details": {
+          "intent": "market_analysis",
+          "confidence": 0.7,
+          "response_time": 15.883578538894653,
+          "metadata": {
+            "market_overview": {
+              "sentiment": "Live",
+              "trend": "Unknown",
+              "market_phase": "Unknown",
+              "volatility": "Live Market",
+              "fear_greed_index": 50,
+              "btc_dominance": 50.0,
+              "total_market_cap": 0,
+              "total_volume_24h": 0,
+              "arbitrage_opportunities": 0,
+              "last_updated": "2025-09-15T02:27:34.111645",
+              "market_data_count": 0,
+              "available_symbols": []
+            },
+            "sector_analysis": {
+              "sectors": []
+            },
+            "ai_analysis": {
+              "success": true,
+              "analysis": "Market data successfully retrieved. AI analysis temporarily unavailable.",
+              "confidence": 0.7
+            }
+          },
+          "ai_analysis": false
+        }
+      },
+      "opportunity_test_6": {
+        "success": false,
+        "timestamp": "2025-09-15T02:28:10.635031",
+        "details": {
+          "intent": "general_query",
+          "confidence": 0.7,
+          "response_time": 23.135026216506958,
+          "metadata": {
+            "service_used": "ai_consensus",
+            "query_type": "general"
+          },
+          "ai_analysis": false
+        }
+      },
+      "opportunity_test_7": {
+        "success": true,
+        "timestamp": "2025-09-15T02:28:42.793648",
+        "details": {
+          "intent": "opportunity_discovery",
+          "confidence": 0.8,
+          "response_time": 31.15837574005127,
+          "metadata": {
+            "opportunities": [],
+            "service_used": "user_opportunity_discovery",
+            "opportunities_count": 0,
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757903299_d1767287",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 75.34344311214801,
+                "recommendation": "HOLD",
+                "reasoning": "USDC, being a stablecoin, offers low execution risk for trades, whereas assets like SHIB might present higher execution risks due to potential price slippage in volatile markets; Based on the provided data, there are currently no specific trading opportunities identified in the gaming sector that match the user's criteria and portfolio context; Confidence Score (20/100)**\n\nThe low confidence score is due to the *lack of identified opportunities*. This could be due to various factors, including market conditions, the user's current strategy limitations (basic tier and limited active strategies), or the specific criteria used for opportunity identification",
+                "confidence_threshold_met": true,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 70.0,
+                    "reasoning": "USDC, being a stablecoin, offers low execution risk for trades, whereas assets like SHIB might present higher execution risks due to potential price slippage in volatile markets",
+                    "cost": 0.034050000000000004,
+                    "response_time": 16.27843189239502
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 80.0,
+                    "reasoning": "Based on the provided data, there are currently no specific trading opportunities identified in the gaming sector that match the user's criteria and portfolio context",
+                    "cost": 0.051105000000000005,
+                    "response_time": 21.900151014328003
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 75.0,
+                    "reasoning": "Confidence Score (20/100)**\n\nThe low confidence score is due to the *lack of identified opportunities*. This could be due to various factors, including market conditions, the user's current strategy limitations (basic tier and limited active strategies), or the specific criteria used for opportunity identification",
+                    "cost": 0.002905,
+                    "response_time": 14.440847873687744
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.08806000000000001,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T02:28:41.644815",
+                "opportunity_score": 75.34344311214801,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 7.5343443112148005,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T02:28:41.644836"
+            }
+          },
+          "ai_analysis": false
+        }
+      }
+    },
+    "intent_classification": {},
+    "performance": {
+      "total_tests": 34,
+      "successful_tests": 26,
+      "success_rate": 76.47058823529412,
+      "average_response_time": 21.165127081530436,
+      "timestamp": "2025-09-15T02:28:43.793944"
+    }
+  }
+}

@@ -9,12 +9,18 @@ Contains the main service class and all risk management functions:
 """
 
 import asyncio
+import dataclasses
 import json
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 import uuid
 import math
+
+try:
+    from fastapi.encoders import jsonable_encoder
+except ImportError:
+    jsonable_encoder = None
 
 import numpy as np
 import pandas as pd
@@ -973,8 +979,10 @@ class PortfolioRiskService(LoggerMixin):
                 "request_id": request_id,
                 "portfolio_value": portfolio.get("total_value_usd", 0),
                 "risk_metrics": {
-                    "var_95_percent": risk_metrics.var_95,
-                    "var_99_percent": risk_metrics.var_99,
+                    "var_95": risk_metrics.var_95,
+                    "var_95_percent": risk_metrics.var_95 * 100,
+                    "var_99": risk_metrics.var_99,
+                    "var_99_percent": risk_metrics.var_99 * 100,
                     "expected_shortfall": risk_metrics.expected_shortfall,
                     "maximum_drawdown": risk_metrics.maximum_drawdown,
                     "volatility_annual": risk_metrics.volatility_annual,
@@ -1018,12 +1026,12 @@ class PortfolioRiskService(LoggerMixin):
         # Risk-based recommendations
         risk_analysis = assessment_results.get("risk_analysis")
         if risk_analysis:
-            if risk_analysis.get("var_95_percent", 0) > 0.1:
+            if risk_analysis.get("var_95", 0) > 0.1:
                 recommendations.append({
                     "category": "RISK_MANAGEMENT",
-                    "priority": "HIGH",
+                    "priority": "HIGH", 
                     "recommendation": "High portfolio risk detected - consider position size reduction",
-                    "metric": f"VaR 95%: {risk_analysis.get('var_95_percent', 0)*100:.1f}%"
+                    "metric": f"VaR 95%: {risk_analysis.get('var_95_percent', 0):.1f}%"
                 })
             
             if risk_analysis.get("sharpe_ratio", 0) < 1.0:
@@ -1049,7 +1057,7 @@ class PortfolioRiskService(LoggerMixin):
         risk_analysis = assessment_results.get("risk_analysis")
         if risk_analysis:
             sharpe_ratio = risk_analysis.get("sharpe_ratio", 0)
-            var_95 = risk_analysis.get("var_95_percent", 0)
+            var_95 = risk_analysis.get("var_95", 0)
             
             # Sharpe ratio component (0-5 points)
             sharpe_score = min(5, max(0, sharpe_ratio * 2.5))
@@ -1127,6 +1135,74 @@ class PortfolioRiskService(LoggerMixin):
         
         return alerts
     
+    async def optimize_allocation_with_portfolio_data(
+        self, 
+        user_id: str,
+        portfolio_data: Dict[str, Any],
+        strategy: str = "adaptive", 
+        constraints: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """Portfolio allocation optimization using PROVIDED portfolio data (no duplicate API calls)."""
+        
+        request_id = self._generate_request_id()
+        self.logger.info("Optimizing portfolio allocation with provided data", 
+                        user_id=user_id, 
+                        strategy=strategy, 
+                        request_id=request_id,
+                        portfolio_value=portfolio_data.get("total_value_usd", 0),
+                        positions_count=len(portfolio_data.get("positions", [])))
+        
+        try:
+            if not portfolio_data.get("positions"):
+                return {
+                    "success": False,
+                    "error": "No positions found in provided portfolio data",
+                    "function": "optimize_allocation_with_portfolio_data",
+                    "request_id": request_id
+                }
+            
+            # Use the provided portfolio data directly (no additional API calls)
+            portfolio = portfolio_data
+            
+            # Perform optimization using the optimization engine
+            optimization_result = await self.optimization_engine.optimize_portfolio(
+                portfolio, 
+                strategy=OptimizationStrategy(strategy),
+                constraints=constraints or {}
+            )
+            
+            # Generate rebalancing trades if needed
+            if optimization_result.rebalancing_needed:
+                rebalancing_trades = await self._generate_rebalancing_trades(
+                    portfolio, optimization_result.weights
+                )
+                optimization_result.suggested_trades = rebalancing_trades
+            
+            # Update service metrics
+            self.service_metrics["successful_optimizations"] += 1
+            
+            return {
+                "success": True,
+                "function": "optimize_allocation_with_portfolio_data",
+                "request_id": request_id,
+                "optimization_result": optimization_result,
+                "portfolio_data_source": portfolio_data.get("data_source", "provided"),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            self.logger.error("Portfolio optimization with provided data failed", 
+                            error=str(e), 
+                            request_id=request_id,
+                            user_id=user_id)
+            return {
+                "success": False,
+                "error": str(e),
+                "function": "optimize_allocation_with_portfolio_data",
+                "request_id": request_id,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
     async def optimize_allocation(
         self, 
         user_id: str, 
@@ -1158,20 +1234,33 @@ class PortfolioRiskService(LoggerMixin):
             )
             
             # Generate rebalancing trades if needed
-            if optimization_result.get("rebalancing_required"):
+            if optimization_result.rebalancing_needed:
                 rebalancing_trades = await self._generate_rebalancing_trades(
-                    portfolio, optimization_result["optimal_weights"]
+                    portfolio, optimization_result.weights
                 )
-                optimization_result["rebalancing_trades"] = rebalancing_trades
+                # Update the suggested_trades in the dataclass
+                optimization_result.suggested_trades = rebalancing_trades
             
             # Update service metrics
             self.service_metrics["successful_optimizations"] += 1
+            
+            # Convert OptimizationResult dataclass to dict for serialization
+            if hasattr(optimization_result, '__dataclass_fields__'):
+                if jsonable_encoder:
+                    optimization_result_dict = jsonable_encoder(optimization_result)
+                else:
+                    # Fallback for environments without FastAPI
+                    optimization_result_dict = dataclasses.asdict(optimization_result)
+                    # Handle potential Enums and numpy types
+                    optimization_result_dict = self._make_json_serializable(optimization_result_dict)
+            else:
+                optimization_result_dict = optimization_result
             
             return {
                 "success": True,
                 "function": "optimize_allocation",
                 "request_id": request_id,
-                "optimization_result": optimization_result,
+                "optimization_result": optimization_result_dict,
                 "timestamp": datetime.utcnow().isoformat()
             }
             
@@ -1212,10 +1301,9 @@ class PortfolioRiskService(LoggerMixin):
             if risk_result.get("success"):
                 assessment_result["risk_analysis"] = risk_result["risk_metrics"]
             
-            # Position sizing analysis
-            sizing_result = await self.position_sizing(user_id)
-            if sizing_result.get("success"):
-                assessment_result["position_sizing"] = sizing_result["position_sizing"]
+            # Position sizing analysis - skip for general assessment since no specific opportunity
+            # Note: position_sizing requires a specific trading opportunity
+            # assessment_result["position_sizing"] = "Requires specific trading opportunity"
             
             # Correlation analysis
             correlation_result = await self.correlation_analysis(user_id)
@@ -1267,38 +1355,102 @@ class PortfolioRiskService(LoggerMixin):
         """Generate unique request ID."""
         return f"PRS_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     
+    def _make_json_serializable(self, obj: Any) -> Any:
+        """Convert objects to JSON-serializable format."""
+        if isinstance(obj, dict):
+            return {key: self._make_json_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._make_json_serializable(item) for item in obj]
+        elif hasattr(obj, '__dict__') and hasattr(obj, '__class__'):
+            # Handle Enum types
+            if hasattr(obj.__class__, '__members__'):
+                return obj.value if hasattr(obj, 'value') else str(obj)
+        elif hasattr(obj, 'item'):  # numpy scalar
+            return obj.item()
+        elif hasattr(obj, 'tolist'):  # numpy array
+            return obj.tolist()
+        return obj
+    
     async def _generate_rebalancing_trades(
         self, 
         current_portfolio: Dict[str, Any], 
         optimal_weights: Dict[str, float]
     ) -> List[Dict[str, Any]]:
-        """Generate trades needed for rebalancing to optimal weights."""
+        """Generate trades needed for rebalancing to optimal weights - FIXED VERSION."""
         trades = []
-        total_value = current_portfolio.get("total_value", 0)
+        # Use consolidated field with fallback to legacy field
+        total_value = current_portfolio.get("total_value_usd", 0) or current_portfolio.get("total_value", 0)
+        
+        # DEBUG: Log the input data
+        self.logger.info("Generating rebalancing trades", 
+                        total_value=total_value,
+                        optimal_weights_count=len(optimal_weights),
+                        positions_count=len(current_portfolio.get("positions", [])))
+        
+        # DEBUG: Log portfolio positions
+        portfolio_symbols = [pos.get("symbol") for pos in current_portfolio.get("positions", [])]
+        self.logger.info("Portfolio symbols", symbols=portfolio_symbols[:10])  # First 10
+        self.logger.info("Optimal weight symbols", symbols=list(optimal_weights.keys())[:10])  # First 10
         
         for symbol, optimal_weight in optimal_weights.items():
             current_weight = 0
             current_value = 0
+            position_found = False
             
-            # Find current position
+            # Find current position - ENHANCED MATCHING
             for position in current_portfolio.get("positions", []):
-                if position.get("symbol") == symbol:
-                    current_value = position.get("market_value", 0)
+                position_symbol = position.get("symbol")
+                if position_symbol == symbol:
+                    # Use consolidated field with fallback to legacy field
+                    current_value = position.get("value_usd", 0) or position.get("market_value", 0)
                     current_weight = current_value / total_value if total_value > 0 else 0
+                    position_found = True
+                    
+                    # DEBUG: Log successful match
+                    self.logger.info("Position matched", 
+                                   symbol=symbol,
+                                   current_value=current_value,
+                                   current_weight=current_weight)
                     break
+            
+            # DEBUG: Log if position not found
+            if not position_found:
+                self.logger.warning("Position not found for optimization symbol", 
+                                  symbol=symbol,
+                                  optimal_weight=optimal_weight)
             
             target_value = total_value * optimal_weight
             value_difference = target_value - current_value
             
-            if abs(value_difference) > total_value * 0.01:  # 1% threshold
-                trades.append({
+            # FIXED: Lower threshold and always include trades with meaningful differences
+            threshold = max(total_value * 0.005, 1.0)  # 0.5% of portfolio or $1 minimum
+            
+            if abs(value_difference) > threshold:
+                trade = {
                     "symbol": symbol,
                     "action": "BUY" if value_difference > 0 else "SELL",
-                    "target_value": target_value,
-                    "current_value": current_value,
-                    "value_change": value_difference,
-                    "weight_change": optimal_weight - current_weight
-                })
+                    "amount": abs(round(value_difference, 2)),  # FIX: Add amount field that chat system expects
+                    "target_value": round(target_value, 2),
+                    "current_value": round(current_value, 2),
+                    "value_change": round(value_difference, 2),
+                    "weight_change": round(optimal_weight - current_weight, 4),
+                    "current_weight": round(current_weight, 4),
+                    "target_weight": round(optimal_weight, 4),
+                    "current_percentage": round(current_weight * 100, 1),  # FIX: Add percentage fields
+                    "target_percentage": round(optimal_weight * 100, 1)
+                }
+                trades.append(trade)
+                
+                # DEBUG: Log trade generation
+                self.logger.info("Trade generated", 
+                               symbol=symbol,
+                               action=trade["action"],
+                               amount=abs(trade["value_change"]))
+        
+        # DEBUG: Log final results
+        self.logger.info("Rebalancing trades generated", 
+                        trades_count=len(trades),
+                        total_volume=sum(abs(t["value_change"]) for t in trades))
         
         return trades
     
