@@ -443,11 +443,6 @@ const StrategyPublisher: React.FC = () => {
                           </div>
                         )}
 
-                        {submission.status === 'approved' && submission.reviewer_feedback && (
-                          <div className="p-2 bg-green-50 border border-green-200 rounded text-xs text-green-700">
-                            <strong>Reviewer Feedback:</strong> {submission.reviewer_feedback}
-                          </div>
-                        )}
 
                         {/* Requirements Check */}
                         {requirements && (

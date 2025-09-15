@@ -1266,12 +1266,11 @@ async def get_publisher_reviews(
         # Try to get real reviews from database
         try:
             # In a real implementation, you'd query a reviews table
-            # For now, we'll simulate with strategy submission data
+            # For now, we'll simulate with strategy submission data - exclude internal reviewer_feedback
             query = select(
                 StrategySubmission.name,
                 StrategySubmission.average_rating,
-                StrategySubmission.total_reviews,
-                StrategySubmission.reviewer_feedback
+                StrategySubmission.total_reviews
             ).where(
                 and_(
                     StrategySubmission.user_id == str(current_user.id),
@@ -1282,13 +1281,12 @@ async def get_publisher_reviews(
             result = await db.execute(query)
             reviews = result.fetchall()
 
-            # Format reviews data
+            # Format reviews data - only public-facing fields
             reviews_data = [
                 {
                     "strategy_name": review.name,
                     "average_rating": float(review.average_rating or 0),
-                    "total_reviews": review.total_reviews or 0,
-                    "latest_feedback": review.reviewer_feedback or "No feedback available"
+                    "total_reviews": review.total_reviews or 0
                 }
                 for review in reviews
             ]
