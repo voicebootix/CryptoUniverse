@@ -344,12 +344,13 @@ class ProfitSharingService(LoggerMixin):
                 
                 # Record transaction
                 transaction = CreditTransaction(
-                    user_id=user_id,
+                    account_id=credit_account.id,
                     amount=credits_earned,
-                    transaction_type="profit_sharing_payment",
+                    transaction_type=CreditTransactionType.BONUS,
                     description=f"Profit sharing: Paid ${platform_fee:.2f}, earned {credits_earned} credits",
-                    reference_id=payment_result.get("payment_id"),
-                    status="completed"
+                    balance_before=credit_account.available_credits - credits_earned,
+                    balance_after=credit_account.available_credits,
+                    source="system"
                 )
                 db.add(transaction)
                 
@@ -558,12 +559,13 @@ class ProfitSharingService(LoggerMixin):
                 
                 # Create welcome credit transaction
                 welcome_transaction = CreditTransaction(
-                    user_id=user_id,
+                    account_id=credit_account.id,
                     amount=welcome_credits,  # Dynamic credit amount
-                    transaction_type="welcome_bonus",
+                    transaction_type=CreditTransactionType.BONUS,
                     description=f"Welcome Package: ${welcome_profit_potential:.0f} Free Profit Potential ({welcome_credits} credits)",
-                    status="completed",
-                    created_at=datetime.utcnow()
+                    balance_before=credit_account.available_credits - welcome_credits,
+                    balance_after=credit_account.available_credits,
+                    source="system"
                 )
                 
                 db.add(welcome_transaction)

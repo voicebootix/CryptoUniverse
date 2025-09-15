@@ -460,7 +460,18 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             top_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
             symbols_str = ",".join(top_symbols)
             
-            # Call REAL funding arbitrage strategy using correct method signature
+            # Call REAL funding arbitrage strategy using UNIFIED approach (same as rebalancing)
+            # Check if user owns this strategy first
+            strategy_id = "ai_funding_arbitrage"
+            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_profile.user_id)
+            owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
+            
+            if strategy_id not in owned_strategy_ids:
+                self.logger.info("User doesn't own funding arbitrage strategy, skipping", 
+                               user_id=user_profile.user_id, scan_id=scan_id)
+                return opportunities  # Return empty for non-owned strategies
+            
+            # User owns strategy - execute directly without credit consumption
             arbitrage_result = await trading_strategies_service.execute_strategy(
                 function="funding_arbitrage",
                 parameters={
@@ -468,7 +479,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     "exchanges": "all",
                     "min_funding_rate": 0.005
                 },
-                user_id=user_profile.user_id
+                user_id=user_profile.user_id,
+                simulation_mode=True  # Use simulation mode to avoid credit consumption
             )
             
             if arbitrage_result.get("success"):
@@ -638,16 +650,27 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         opportunities = []
         
         try:
+            # Check if user owns spot momentum strategy (should be free strategy)
+            strategy_id = "ai_spot_momentum_strategy"
+            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_profile.user_id)
+            owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
+            
+            if strategy_id not in owned_strategy_ids:
+                self.logger.info("User doesn't own spot momentum strategy, skipping", 
+                               user_id=user_profile.user_id, scan_id=scan_id)
+                return opportunities
+            
             # Get symbols suitable for momentum trading
             momentum_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=30)
             
             for symbol in momentum_symbols:
-                # Call REAL spot momentum strategy using correct method signature
+                # User owns strategy - execute using unified approach
                 momentum_result = await trading_strategies_service.execute_strategy(
                     function="spot_momentum_strategy",
                     symbol=f"{symbol}/USDT",
                     parameters={"timeframe": "4h"},
-                    user_id=user_profile.user_id
+                    user_id=user_profile.user_id,
+                    simulation_mode=True  # Use simulation mode for opportunity scanning
                 )
                 
                 if momentum_result.get("success") and momentum_result.get("signal"):
@@ -816,10 +839,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         opportunities = []
         
         try:
-            # Risk management looks for hedging opportunities using correct method signature
+            # Check if user owns risk management strategy (should be free strategy)
+            strategy_id = "ai_risk_management"
+            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_profile.user_id)
+            owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
+            
+            if strategy_id not in owned_strategy_ids:
+                self.logger.info("User doesn't own risk management strategy, skipping", 
+                               user_id=user_profile.user_id, scan_id=scan_id)
+                return opportunities
+            
+            # User owns strategy - execute using unified approach
             hedge_result = await trading_strategies_service.execute_strategy(
                 function="risk_management",
-                user_id=user_profile.user_id
+                user_id=user_profile.user_id,
+                simulation_mode=True  # Use simulation mode for opportunity scanning
             )
             
             if hedge_result.get("success") and hedge_result.get("hedge_recommendations"):
@@ -865,10 +899,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         opportunities = []
         
         try:
-            # Portfolio optimization analyzes current allocation using correct method signature
+            # Check if user owns portfolio optimization strategy (should be free strategy)
+            strategy_id = "ai_portfolio_optimization"
+            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_profile.user_id)
+            owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
+            
+            if strategy_id not in owned_strategy_ids:
+                self.logger.info("User doesn't own portfolio optimization strategy, skipping", 
+                               user_id=user_profile.user_id, scan_id=scan_id)
+                return opportunities
+            
+            # User owns strategy - execute using unified approach
             optimization_result = await trading_strategies_service.execute_strategy(
                 function="portfolio_optimization",
-                user_id=user_profile.user_id
+                user_id=user_profile.user_id,
+                simulation_mode=True  # Use simulation mode for opportunity scanning
             )
             
             if optimization_result.get("success") and optimization_result.get("rebalancing_recommendations"):
