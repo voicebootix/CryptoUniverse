@@ -231,14 +231,28 @@ class EnterpriseAssetFilter(LoggerMixin):
                 
                 priority += 1
             
-            # Fallback to static exchanges if dynamic discovery fails
-            if not self.dynamic_exchanges:
-                self.logger.warning("No dynamic exchanges loaded, using fallback static exchanges")
-                self.dynamic_exchanges = self.EXCHANGE_APIS.copy()
-                
-                # Mark as fallback
-                for exchange_id in self.dynamic_exchanges:
-                    self.dynamic_exchanges[exchange_id]["source"] = "static_fallback"
+            # ALWAYS merge static exchanges with working parsers FIRST
+            # This ensures we have working exchanges even if dynamic discovery finds others
+            static_exchanges = self.EXCHANGE_APIS.copy()
+            for exchange_id, config in static_exchanges.items():
+                config["source"] = "static_with_parser"
+                config["priority"] = 0  # Highest priority
+            
+            # Merge dynamic exchanges (lower priority)
+            for exchange_id, config in list(self.dynamic_exchanges.items()):
+                if exchange_id not in static_exchanges:
+                    # Only add if we don't already have it statically
+                    config["priority"] = config.get("priority", 999) + 100  # Lower priority
+            
+            # Combine: static exchanges first, then dynamic
+            combined_exchanges = {**static_exchanges, **self.dynamic_exchanges}
+            self.dynamic_exchanges = combined_exchanges
+            
+            self.logger.info(f"✅ Exchange loading completed with static priority",
+                           static_exchanges=len(static_exchanges),
+                           dynamic_exchanges=len([e for e in self.dynamic_exchanges.values() 
+                                                if e.get("source") == "dynamic_discovery"]),
+                           total_exchanges=len(self.dynamic_exchanges))
             
             self.logger.info(f"✅ Dynamic exchange loading completed",
                            total_loaded=len(self.dynamic_exchanges),
@@ -248,10 +262,17 @@ class EnterpriseAssetFilter(LoggerMixin):
         except Exception as e:
             self.logger.error(f"Failed to load dynamic exchanges", error=str(e))
             
-            # Use static fallback
+            # Use static fallback with working parsers
             self.dynamic_exchanges = self.EXCHANGE_APIS.copy()
             for exchange_id in self.dynamic_exchanges:
                 self.dynamic_exchanges[exchange_id]["source"] = "static_fallback"
+                # Ensure parser names match method names
+                if exchange_id == "binance":
+                    self.dynamic_exchanges[exchange_id]["parser"] = "binance_parser"
+                elif exchange_id == "kraken":
+                    self.dynamic_exchanges[exchange_id]["parser"] = "kraken_parser"
+                elif exchange_id == "kucoin":
+                    self.dynamic_exchanges[exchange_id]["parser"] = "kucoin_parser"
     
     def _construct_spot_api(self, exchange_id: str, api_url: str) -> str:
         """Construct spot trading API URL for discovered exchange."""
@@ -357,8 +378,8 @@ class EnterpriseAssetFilter(LoggerMixin):
                         min_tier=min_tier,
                         exchanges=exchanges or "ALL")
         
-        # Initialize async components if needed
-        if not self.session:
+        # Initialize async components if needed (CRITICAL: This was missing!)
+        if not self.session or not self.dynamic_exchanges:
             await self.async_init()
             
         try:
@@ -367,13 +388,14 @@ class EnterpriseAssetFilter(LoggerMixin):
             if min_threshold is None:
                 raise ValueError(f"Invalid tier: {min_tier}")
             
-            # Determine exchanges to scan - use only working exchanges with parsers
+            # Determine exchanges to scan
             if exchanges:
                 target_exchanges = exchanges
             else:
-                # Use only exchanges we know work and have parsers
+                # After loading, dynamic_exchanges will include static exchanges with parsers
+                # Prioritize exchanges with working parsers
                 working_exchanges = ["binance", "kraken", "kucoin"]
-                target_exchanges = [ex for ex in working_exchanges if ex in self.EXCHANGE_APIS]
+                target_exchanges = working_exchanges  # Always include our working exchanges
             asset_types = asset_types or ["spot", "futures"]
             
             # Check cache first (unless force refresh)
@@ -390,12 +412,18 @@ class EnterpriseAssetFilter(LoggerMixin):
             
             exchange_tasks = []
             for exchange_id in target_exchanges:
+                # After async_init, dynamic_exchanges includes static exchanges with parsers
                 if exchange_id in self.dynamic_exchanges:
                     exchange_config = self.dynamic_exchanges[exchange_id]
                     
-                    for asset_type in asset_types:
-                        task = self._fetch_exchange_data(exchange_id, exchange_config, asset_type, scan_id)
-                        exchange_tasks.append(task)
+                    # Only process exchanges that have parsers
+                    parser_name = exchange_config.get("parser", "")
+                    if hasattr(self, parser_name):
+                        for asset_type in asset_types:
+                            task = self._fetch_exchange_data(exchange_id, exchange_config, asset_type, scan_id)
+                            exchange_tasks.append(task)
+                    else:
+                        self.logger.warning(f"No parser method {parser_name} for {exchange_id}", scan_id=scan_id)
             
             # Execute all exchange fetches concurrently
             exchange_results = await asyncio.gather(*exchange_tasks, return_exceptions=True)
