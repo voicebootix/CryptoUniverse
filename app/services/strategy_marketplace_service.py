@@ -158,136 +158,118 @@ class StrategyMarketplaceService(LoggerMixin):
             return fallback_pricing
             
     def _build_ai_strategy_catalog(self) -> Dict[str, Dict[str, Any]]:
-        """Build catalog of your 25+ AI strategies with dynamic pricing."""
-        return {
-            # Derivatives (High-value, premium pricing)
-            "futures_trade": {
-                "name": "AI Futures Trading",
-                "category": "derivatives",
-                "credit_cost_monthly": "DYNAMIC",  # Will be loaded from admin settings
-                "credit_cost_per_execution": "DYNAMIC",
-                "risk_level": "high",
-                "min_capital": 5000,
-                "estimated_monthly_return": "45-80%",
-                "tier": "pro"
-            },
-            "options_trade": {
-                "name": "AI Options Strategies",
-                "category": "derivatives", 
-                "credit_cost_monthly": 100,
-                "credit_cost_per_execution": 8,
-                "risk_level": "high",
-                "min_capital": 10000,
-                "estimated_monthly_return": "35-65%",
-                "tier": "enterprise"
-            },
-            "complex_strategy": {
-                "name": "AI Complex Derivatives",
-                "category": "derivatives",
-                "credit_cost_monthly": 150,
-                "credit_cost_per_execution": 12,
-                "risk_level": "very_high",
-                "min_capital": 25000,
-                "estimated_monthly_return": "60-120%",
-                "tier": "enterprise"
-            },
+        """Build catalog dynamically from ALL available strategy functions."""
+        
+        # Get ALL available functions from trading strategies service
+        all_strategy_functions = [
+            # Derivatives Trading - ALL 12 FUNCTIONS
+            "futures_trade", "options_trade", "perpetual_trade",
+            "leverage_position", "complex_strategy", "margin_status",
+            "funding_arbitrage", "basis_trade", "options_chain",
+            "calculate_greeks", "liquidation_price", "hedge_position",
             
-            # Spot (Medium pricing, popular)
-            "spot_momentum_strategy": {
-                "name": "AI Momentum Trading",
-                "category": "spot",
-                "credit_cost_monthly": 0,  # FREE basic strategy
-                "credit_cost_per_execution": 0,  # FREE basic strategy
-                "risk_level": "medium",
-                "min_capital": 1000,
-                "estimated_monthly_return": "25-45%",
-                "tier": "free"
-            },
-            "spot_mean_reversion": {
-                "name": "AI Mean Reversion",
-                "category": "spot",
-                "credit_cost_monthly": 30,
-                "credit_cost_per_execution": 2,
-                "risk_level": "medium",
-                "min_capital": 1000,
-                "estimated_monthly_return": "20-35%",
-                "tier": "basic"
-            },
-            "spot_breakout_strategy": {
-                "name": "AI Breakout Trading",
-                "category": "spot",
-                "credit_cost_monthly": 35,
-                "credit_cost_per_execution": 3,
-                "risk_level": "medium_high",
-                "min_capital": 2000,
-                "estimated_monthly_return": "30-50%",
-                "tier": "pro"
-            },
+            # Spot Algorithms - ALL 3 FUNCTIONS  
+            "spot_momentum_strategy", "spot_mean_reversion", "spot_breakout_strategy",
             
-            # Algorithmic (High-value, sophisticated)
-            "pairs_trading": {
-                "name": "AI Pairs Trading",
-                "category": "algorithmic",
-                "credit_cost_monthly": 60,
-                "credit_cost_per_execution": 4,
-                "risk_level": "medium",
-                "min_capital": 5000,
-                "estimated_monthly_return": "35-55%",
-                "tier": "pro"
-            },
-            "statistical_arbitrage": {
-                "name": "AI Statistical Arbitrage",
-                "category": "algorithmic",
-                "credit_cost_monthly": 80,
-                "credit_cost_per_execution": 6,
-                "risk_level": "medium_high",
-                "min_capital": 10000,
-                "estimated_monthly_return": "40-70%",
-                "tier": "pro"
-            },
-            "market_making": {
-                "name": "AI Market Making",
-                "category": "algorithmic",
-                "credit_cost_monthly": 90,
-                "credit_cost_per_execution": 7,
-                "risk_level": "medium",
-                "min_capital": 15000,
-                "estimated_monthly_return": "30-50%",
-                "tier": "enterprise"
-            },
-            "scalping_strategy": {
-                "name": "AI Scalping",
-                "category": "algorithmic",
-                "credit_cost_monthly": 45,
-                "credit_cost_per_execution": 1,  # Low per execution due to high frequency
-                "risk_level": "high",
-                "min_capital": 3000,
-                "estimated_monthly_return": "50-90%",
-                "tier": "pro"
-            },
+            # Algorithmic Trading - ALL 6 FUNCTIONS
+            "algorithmic_trading", "pairs_trading", "statistical_arbitrage",
+            "market_making", "scalping_strategy", "swing_trading",
             
-            # Portfolio Management (Essential, FREE basic strategies)
-            "portfolio_optimization": {
-                "name": "AI Portfolio Optimizer",
-                "category": "portfolio",
-                "credit_cost_monthly": 0,  # FREE basic strategy
-                "credit_cost_per_execution": 0,  # FREE basic strategy
-                "risk_level": "low",
-                "min_capital": 1000,
-                "estimated_monthly_return": "15-25%",
-                "tier": "free"
-            },
-            "risk_management": {
-                "name": "AI Risk Manager",
-                "category": "portfolio",
-                "credit_cost_monthly": 0,  # FREE basic strategy
-                "credit_cost_per_execution": 0,  # FREE basic strategy
-                "risk_level": "low",
-                "min_capital": 500,
-                "estimated_monthly_return": "10-20%",
-                "tier": "free"
+            # Risk & Portfolio - ALL 4 FUNCTIONS
+            "position_management", "risk_management", "portfolio_optimization",
+            "strategy_performance"
+        ]
+        
+        # Dynamic catalog generation based on function analysis
+        catalog = {}
+        
+        for strategy_func in all_strategy_functions:
+            # Determine category from function name
+            if any(deriv in strategy_func for deriv in ["futures", "options", "perpetual", "leverage", "complex", "margin", "funding", "basis", "greeks", "liquidation", "hedge"]):
+                category = "derivatives"
+                base_cost = 60
+                risk_level = "high"
+                min_capital = 5000
+                tier = "pro"
+            elif any(spot in strategy_func for spot in ["spot_", "momentum", "reversion", "breakout"]):
+                category = "spot"
+                base_cost = 25 if strategy_func != "spot_momentum_strategy" else 0  # Keep momentum free
+                risk_level = "medium"
+                min_capital = 1000
+                tier = "free" if strategy_func == "spot_momentum_strategy" else "basic"
+            elif any(algo in strategy_func for algo in ["algorithmic", "pairs", "statistical", "market_making", "scalping", "swing"]):
+                category = "algorithmic"
+                base_cost = 40
+                risk_level = "medium_high"
+                min_capital = 3000
+                tier = "pro"
+            else:  # Risk & Portfolio
+                category = "portfolio"
+                base_cost = 25 if strategy_func in ["risk_management", "portfolio_optimization"] else 35
+                risk_level = "low"
+                min_capital = 500
+                tier = "free" if strategy_func in ["risk_management", "portfolio_optimization"] else "basic"
+            
+            # Create dynamic catalog entry
+            catalog[strategy_func] = {
+                "name": self._generate_strategy_name(strategy_func),
+                "category": category,
+                "credit_cost_monthly": base_cost,
+                "credit_cost_per_execution": max(1, base_cost // 25),
+                "risk_level": risk_level,
+                "min_capital": min_capital,
+                "estimated_monthly_return": self._estimate_strategy_return(category, risk_level),
+                "tier": tier,
+                "auto_generated": True  # Mark as dynamically generated
             }
+        
+        return catalog
+    
+    def _generate_strategy_name(self, strategy_func: str) -> str:
+        """Generate human-readable strategy name from function name."""
+        # Convert function names to readable names
+        name_mapping = {
+            "futures_trade": "AI Futures Trading",
+            "options_trade": "AI Options Strategies", 
+            "perpetual_trade": "AI Perpetual Contracts",
+            "leverage_position": "AI Leverage Manager",
+            "complex_strategy": "AI Complex Derivatives",
+            "margin_status": "AI Margin Monitor",
+            "funding_arbitrage": "AI Funding Arbitrage",
+            "basis_trade": "AI Basis Trading",
+            "options_chain": "AI Options Chain Analysis",
+            "calculate_greeks": "AI Greeks Calculator",
+            "liquidation_price": "AI Liquidation Monitor",
+            "hedge_position": "AI Portfolio Hedging",
+            "spot_momentum_strategy": "AI Momentum Trading",
+            "spot_mean_reversion": "AI Mean Reversion",
+            "spot_breakout_strategy": "AI Breakout Trading",
+            "algorithmic_trading": "AI Algorithmic Trading",
+            "pairs_trading": "AI Pairs Trading",
+            "statistical_arbitrage": "AI Statistical Arbitrage",
+            "market_making": "AI Market Making",
+            "scalping_strategy": "AI Scalping",
+            "swing_trading": "AI Swing Trading",
+            "position_management": "AI Position Manager",
+            "risk_management": "AI Risk Manager",
+            "portfolio_optimization": "AI Portfolio Optimizer",
+            "strategy_performance": "AI Performance Tracker"
         }
+        
+        return name_mapping.get(strategy_func, f"AI {strategy_func.replace('_', ' ').title()}")
+    
+    def _estimate_strategy_return(self, category: str, risk_level: str) -> str:
+        """Estimate monthly return based on category and risk."""
+        return_estimates = {
+            ("derivatives", "high"): "45-80%",
+            ("derivatives", "very_high"): "60-120%",
+            ("spot", "medium"): "20-40%",
+            ("algorithmic", "medium_high"): "30-60%",
+            ("portfolio", "low"): "8-15%"
+        }
+        
+        return return_estimates.get((category, risk_level), "15-30%")
+
     
     async def get_marketplace_strategies(
         self, 
