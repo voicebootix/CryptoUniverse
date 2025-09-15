@@ -17,29 +17,22 @@ depends_on = None
 
 
 def upgrade():
-    # Create enum types
-    op.execute("CREATE TYPE strategystatus AS ENUM ('draft', 'submitted', 'under_review', 'approved', 'rejected', 'published', 'withdrawn')")
-    op.execute("CREATE TYPE pricingmodel AS ENUM ('free', 'one_time', 'subscription', 'profit_share')")
-    op.execute("CREATE TYPE risklevel AS ENUM ('low', 'medium', 'high')")
-    op.execute("CREATE TYPE complexitylevel AS ENUM ('beginner', 'intermediate', 'advanced')")
-    op.execute("CREATE TYPE supportlevel AS ENUM ('basic', 'standard', 'premium')")
-
-    # Create strategy_submissions table
+    # Create strategy_submissions table (using String for enums for SQLite compatibility)
     op.create_table('strategy_submissions',
         sa.Column('id', sa.String(36), nullable=False),
         sa.Column('user_id', sa.String(36), nullable=False),
         sa.Column('name', sa.String(255), nullable=False),
         sa.Column('description', sa.Text(), nullable=False),
         sa.Column('category', sa.String(100), nullable=False),
-        sa.Column('risk_level', sa.Enum('low', 'medium', 'high', name='risklevel'), nullable=True),
-        sa.Column('expected_return_min', sa.Float(), nullable=True),
-        sa.Column('expected_return_max', sa.Float(), nullable=True),
-        sa.Column('required_capital', sa.DECIMAL(15, 2), nullable=True),
-        sa.Column('pricing_model', sa.Enum('free', 'one_time', 'subscription', 'profit_share', name='pricingmodel'), nullable=True),
+        sa.Column('risk_level', sa.String(20), nullable=True, default='medium'),
+        sa.Column('expected_return_min', sa.Float(), nullable=True, default=0.0),
+        sa.Column('expected_return_max', sa.Float(), nullable=True, default=0.0),
+        sa.Column('required_capital', sa.DECIMAL(15, 2), nullable=True, default=1000.0),
+        sa.Column('pricing_model', sa.String(20), nullable=True, default='free'),
         sa.Column('price_amount', sa.DECIMAL(10, 2), nullable=True),
         sa.Column('profit_share_percentage', sa.Float(), nullable=True),
-        sa.Column('status', sa.Enum('draft', 'submitted', 'under_review', 'approved', 'rejected', 'published', 'withdrawn', name='strategystatus'), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('status', sa.String(20), nullable=True, default='draft'),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=True),
         sa.Column('submitted_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('reviewed_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('published_at', sa.DateTime(timezone=True), nullable=True),
@@ -51,17 +44,15 @@ def upgrade():
         sa.Column('validation_results', sa.JSON(), nullable=True),
         sa.Column('tags', sa.JSON(), nullable=True),
         sa.Column('target_audience', sa.JSON(), nullable=True),
-        sa.Column('complexity_level', sa.Enum('beginner', 'intermediate', 'advanced', name='complexitylevel'), nullable=True),
-        sa.Column('documentation_quality', sa.Integer(), nullable=True),
-        sa.Column('support_level', sa.Enum('basic', 'standard', 'premium', name='supportlevel'), nullable=True),
+        sa.Column('complexity_level', sa.String(20), nullable=True, default='intermediate'),
+        sa.Column('documentation_quality', sa.Integer(), nullable=True, default=0),
+        sa.Column('support_level', sa.String(20), nullable=True, default='standard'),
         sa.Column('strategy_code', sa.Text(), nullable=True),
         sa.Column('strategy_config', sa.JSON(), nullable=True),
-        sa.Column('total_subscribers', sa.Integer(), nullable=True),
-        sa.Column('total_revenue', sa.DECIMAL(15, 2), nullable=True),
-        sa.Column('average_rating', sa.Float(), nullable=True),
-        sa.Column('total_reviews', sa.Integer(), nullable=True),
-        sa.ForeignKeyConstraint(['reviewer_id'], ['users.id'], ),
-        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
+        sa.Column('total_subscribers', sa.Integer(), nullable=True, default=0),
+        sa.Column('total_revenue', sa.DECIMAL(15, 2), nullable=True, default=0.0),
+        sa.Column('average_rating', sa.Float(), nullable=True, default=0.0),
+        sa.Column('total_reviews', sa.Integer(), nullable=True, default=0),
         sa.PrimaryKeyConstraint('id')
     )
 
@@ -81,10 +72,3 @@ def downgrade():
 
     # Drop table
     op.drop_table('strategy_submissions')
-
-    # Drop enum types
-    op.execute("DROP TYPE IF EXISTS strategystatus")
-    op.execute("DROP TYPE IF EXISTS pricingmodel")
-    op.execute("DROP TYPE IF EXISTS risklevel")
-    op.execute("DROP TYPE IF EXISTS complexitylevel")
-    op.execute("DROP TYPE IF EXISTS supportlevel")
