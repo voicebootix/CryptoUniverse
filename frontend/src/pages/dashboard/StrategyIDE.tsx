@@ -204,7 +204,7 @@ const StrategyIDE: React.FC = () => {
   const validateStrategyMutation = useMutation({
     mutationFn: async (code: string) => {
       const response = await apiClient.post('/strategies/validate', { code });
-      return response.data as ValidationResult;
+      return response.data.validation_result as ValidationResult;
     },
     onSuccess: (result) => {
       setValidationResult(result);
@@ -213,7 +213,7 @@ const StrategyIDE: React.FC = () => {
       if (editorRef.current) {
         const model = editorRef.current.getModel();
         if (model) {
-          const markers = [...result.errors, ...result.warnings].map(issue => ({
+          const markers = [...(result.errors || []), ...(result.warnings || [])].map(issue => ({
             startLineNumber: issue.line,
             startColumn: issue.column,
             endLineNumber: issue.line,
@@ -752,7 +752,7 @@ const StrategyIDE: React.FC = () => {
                       </div>
                     </div>
                     
-                    {validationResult.errors.length > 0 && (
+                    {validationResult.errors && validationResult.errors.length > 0 && (
                       <div className="space-y-1">
                         <div className="text-sm font-medium text-red-600">Errors:</div>
                         {validationResult.errors.slice(0, 3).map((error, i) => (
@@ -762,8 +762,8 @@ const StrategyIDE: React.FC = () => {
                         ))}
                       </div>
                     )}
-                    
-                    {validationResult.warnings.length > 0 && (
+
+                    {validationResult.warnings && validationResult.warnings.length > 0 && (
                       <div className="space-y-1 mt-2">
                         <div className="text-sm font-medium text-yellow-600">Warnings:</div>
                         {validationResult.warnings.slice(0, 2).map((warning, i) => (
