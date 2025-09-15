@@ -124,9 +124,13 @@ async def admin_bulk_test_strategies(
     """
     Admin-only endpoint to test multiple strategies in bulk.
     """
-    
+
     if not current_user.is_admin():
         raise HTTPException(status_code=403, detail="Admin access required")
+
+    # Check environment gate for admin override (mirror admin_test_strategy)
+    if os.getenv("ADMIN_OVERRIDE_ENABLED", "false").lower() != "true":
+        raise HTTPException(status_code=403, detail="Admin override disabled in environment")
     
     results = []
     
@@ -159,7 +163,7 @@ async def admin_bulk_test_strategies(
         "success": True,
         "total_tested": len(request.functions),
         "successful": successful,
-        "success_rate": f"{successful/len(request.functions)*100:.1f}%",
+        "success_rate": f"{successful/len(request.functions)*100:.1f}%" if len(request.functions) > 0 else "0.0%",
         "results": results,
         "admin_testing": True
     }
