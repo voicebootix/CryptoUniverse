@@ -27,6 +27,7 @@ from app.models.user import User, UserRole
 from app.models.trading import TradingStrategy, Trade, Position
 from app.models.exchange import ExchangeAccount, ExchangeStatus
 from app.models.credit import CreditAccount, CreditTransaction
+from app.models.strategy_submission import StrategySubmission, StrategyStatus, PricingModel
 from app.services.trading_strategies import trading_strategies_service
 from app.services.trade_execution import TradeExecutionService
 from app.services.strategy_marketplace_service import strategy_marketplace_service
@@ -999,105 +1000,41 @@ class StrategyParametersUpdateRequest(BaseModel):
 
 @router.get("/publisher/submissions")
 async def get_user_strategy_submissions(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
 ):
     """Get user's strategy submissions for publishing."""
-    
+
     # Check if user has publisher permissions (ADMIN or TRADER roles)
     if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators and traders can view strategy submissions"
         )
-    
+
     await rate_limiter.check_rate_limit(
         key="strategies:publisher:submissions",
         limit=50,
         window=60,
         user_id=str(current_user.id)
     )
-    
+
     try:
-        # Return mock data for now - in a real system this would query a strategy_submissions table
-        submissions = [
-            {
-                "id": "sub_001",
-                "name": "AI Momentum Strategy",
-                "description": "Advanced momentum-based trading strategy using machine learning",
-                "category": "algorithmic",
-                "risk_level": "medium",
-                "expected_return_range": [15.0, 35.0],
-                "required_capital": 5000,
-                "pricing_model": "profit_share",
-                "profit_share_percentage": 25,
-                "status": "submitted",
-                "created_at": "2025-01-10T10:00:00Z",
-                "submitted_at": "2025-01-10T10:30:00Z",
-                "backtest_results": {
-                    "total_return": 28.5,
-                    "sharpe_ratio": 1.85,
-                    "max_drawdown": -12.3,
-                    "win_rate": 0.67,
-                    "total_trades": 156,
-                    "profit_factor": 2.1,
-                    "period_days": 365
-                },
-                "validation_results": {
-                    "is_valid": True,
-                    "security_score": 92,
-                    "performance_score": 85,
-                    "code_quality_score": 88,
-                    "overall_score": 88
-                },
-                "tags": ["momentum", "ai", "crypto"],
-                "target_audience": ["intermediate", "advanced"],
-                "complexity_level": "intermediate",
-                "documentation_quality": 85,
-                "support_level": "standard"
-            },
-            {
-                "id": "sub_002", 
-                "name": "Mean Reversion Pro",
-                "description": "Statistical mean reversion strategy with dynamic thresholds",
-                "category": "mean_reversion",
-                "risk_level": "low",
-                "expected_return_range": [8.0, 18.0],
-                "required_capital": 2000,
-                "pricing_model": "subscription",
-                "price_amount": 49.99,
-                "status": "approved",
-                "created_at": "2025-01-05T14:00:00Z",
-                "submitted_at": "2025-01-05T14:30:00Z",
-                "reviewed_at": "2025-01-08T09:15:00Z",
-                "reviewer_feedback": "Excellent strategy with solid backtesting results. Well documented.",
-                "backtest_results": {
-                    "total_return": 16.2,
-                    "sharpe_ratio": 2.1,
-                    "max_drawdown": -8.7,
-                    "win_rate": 0.72,
-                    "total_trades": 203,
-                    "profit_factor": 1.8,
-                    "period_days": 365
-                },
-                "validation_results": {
-                    "is_valid": True,
-                    "security_score": 95,
-                    "performance_score": 91,
-                    "code_quality_score": 93,
-                    "overall_score": 93
-                },
-                "tags": ["mean_reversion", "statistical", "low_risk"],
-                "target_audience": ["beginner", "intermediate"],
-                "complexity_level": "beginner",
-                "documentation_quality": 95,
-                "support_level": "premium"
-            }
-        ]
-        
+        # Query real submissions from database
+        query = select(StrategySubmission).where(
+            StrategySubmission.user_id == str(current_user.id)
+        ).order_by(desc(StrategySubmission.created_at))
+
+        result = await db.execute(query)
+        submissions = result.scalars().all()
+
+        # Convert to dict format for API response
+        submissions_data = [submission.to_dict() for submission in submissions]
+
         return {
             "success": True,
-            "submissions": submissions,
-            "total_count": len(submissions)
+            "submissions": submissions_data,
+            "total_count": len(submissions_data)
         }
         
     except Exception as e:
@@ -1157,40 +1094,63 @@ async def get_publishing_requirements(
 @router.post("/publisher/submit", status_code=status.HTTP_201_CREATED)
 async def submit_strategy_for_review(
     request: StrategySubmissionRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
 ):
     """Submit a strategy for review and potential publication."""
-    
+
     # Check if user has publisher permissions (ADMIN or TRADER roles)
     if current_user.role not in [UserRole.ADMIN, UserRole.TRADER]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only administrators and traders can submit strategies for review"
         )
-    
+
     await rate_limiter.check_rate_limit(
         key="strategies:publisher:submit",
         limit=10,
         window=60,
         user_id=str(current_user.id)
     )
-    
+
     try:
-        # In a real system, this would create a new submission record
-        submission_id = str(uuid.uuid4())
-        
+        # Create new submission in database
+        submission = StrategySubmission(
+            user_id=str(current_user.id),
+            name=request.name,
+            description=request.description,
+            category=request.category,
+            risk_level=request.risk_level,
+            expected_return_min=request.expected_return_range[0] if request.expected_return_range else 0,
+            expected_return_max=request.expected_return_range[1] if request.expected_return_range else 0,
+            required_capital=request.required_capital,
+            pricing_model=request.pricing_model,
+            price_amount=request.price_amount,
+            profit_share_percentage=request.profit_share_percentage,
+            status=StrategyStatus.SUBMITTED,
+            submitted_at=datetime.utcnow(),
+            tags=request.tags,
+            target_audience=request.target_audience,
+            complexity_level=request.complexity_level,
+            support_level=request.support_level
+        )
+
+        db.add(submission)
+        await db.commit()
+        await db.refresh(submission)
+
         logger.info(
             "Strategy submitted for review",
             user_id=str(current_user.id),
             strategy_name=request.name,
-            submission_id=submission_id,
+            submission_id=submission.id,
             category=request.category,
             risk_level=request.risk_level
         )
-        
+
         return {
             "success": True,
-            "submission_id": submission_id,
+            "submission_id": submission.id,
             "message": f"Strategy '{request.name}' submitted for review successfully",
             "estimated_review_time": "3-5 business days"
         }
