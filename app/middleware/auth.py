@@ -114,6 +114,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 "/static/", 
                 "/health",
                 "/api/v1/trading/ws",  # WebSocket endpoint
+                "/api/v1/telegram/webhook",  # Telegram webhook endpoint
                 "/vite.svg",  # Static assets
                 "/login"  # Login page
             ])):
