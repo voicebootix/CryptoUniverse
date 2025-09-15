@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, 
 from pydantic import BaseModel, field_validator, Field, model_validator, conint, conlist
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
+from sqlalchemy import exc as sa_exc
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -27,7 +28,10 @@ from app.models.user import User, UserRole
 from app.models.trading import TradingStrategy, Trade, Position
 from app.models.exchange import ExchangeAccount, ExchangeStatus
 from app.models.credit import CreditAccount, CreditTransaction
-from app.models.strategy_submission import StrategySubmission, StrategyStatus, PricingModel
+from app.models.strategy_submission import (
+    StrategySubmission, StrategyStatus, PricingModel,
+    RiskLevel, ComplexityLevel, SupportLevel
+)
 from app.services.trading_strategies import trading_strategies_service
 from app.services.trade_execution import TradeExecutionService
 from app.services.strategy_marketplace_service import strategy_marketplace_service
@@ -1037,9 +1041,9 @@ async def get_user_strategy_submissions(
                 "submissions": submissions_data,
                 "total_count": len(submissions_data)
             }
-        except Exception as db_error:
+        except (sa_exc.NoSuchTableError, sa_exc.OperationalError, sa_exc.ProgrammingError) as db_error:
             # If database table doesn't exist, return mock data temporarily
-            logger.warning(f"Database query failed, returning mock data: {str(db_error)}")
+            logger.warning(f"Database table issue, returning mock data: {str(db_error)}")
 
             # Return mock data for demonstration
             submissions = [
@@ -1180,6 +1184,7 @@ async def get_publishing_requirements(
 @router.post("/publisher/submit", status_code=status.HTTP_201_CREATED)
 async def submit_strategy_for_review(
     request: StrategySubmissionRequest,
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_database)
 ):
@@ -1201,25 +1206,29 @@ async def submit_strategy_for_review(
 
     try:
         # Try to create new submission in database
+        persisted = False
+        submission_id = None
+
         try:
+            # Convert string enums to proper enum types
             submission = StrategySubmission(
                 user_id=str(current_user.id),
                 name=request.name,
                 description=request.description,
                 category=request.category,
-                risk_level=request.risk_level,
-                expected_return_min=request.expected_return_range[0] if request.expected_return_range else 0,
-                expected_return_max=request.expected_return_range[1] if request.expected_return_range else 0,
-                required_capital=request.required_capital,
-                pricing_model=request.pricing_model,
-                price_amount=request.price_amount,
-                profit_share_percentage=request.profit_share_percentage,
+                risk_level=RiskLevel(request.risk_level) if request.risk_level else RiskLevel.MEDIUM,
+                expected_return_min=float(request.expected_return_range[0]) if request.expected_return_range else 0.0,
+                expected_return_max=float(request.expected_return_range[1]) if request.expected_return_range else 0.0,
+                required_capital=Decimal(str(request.required_capital)) if request.required_capital else Decimal("1000"),
+                pricing_model=PricingModel(request.pricing_model) if request.pricing_model else PricingModel.FREE,
+                price_amount=Decimal(str(request.price_amount)) if request.price_amount else None,
+                profit_share_percentage=float(request.profit_share_percentage) if request.profit_share_percentage else None,
                 status=StrategyStatus.SUBMITTED,
                 submitted_at=datetime.utcnow(),
                 tags=request.tags,
                 target_audience=request.target_audience,
-                complexity_level=request.complexity_level,
-                support_level=request.support_level
+                complexity_level=ComplexityLevel(request.complexity_level) if request.complexity_level else ComplexityLevel.INTERMEDIATE,
+                support_level=SupportLevel(request.support_level) if request.support_level else SupportLevel.STANDARD
             )
 
             db.add(submission)
@@ -1227,10 +1236,21 @@ async def submit_strategy_for_review(
             await db.refresh(submission)
 
             submission_id = submission.id
-        except Exception as db_error:
-            # If database fails, generate a temporary ID
-            logger.warning(f"Database save failed, using temporary ID: {str(db_error)}")
+            persisted = True
+
+        except (sa_exc.NoSuchTableError, sa_exc.OperationalError, sa_exc.ProgrammingError) as db_error:
+            # If database table doesn't exist, generate a temporary ID
+            logger.warning(f"Database table issue, using temporary ID: {str(db_error)}")
             submission_id = str(uuid.uuid4())
+            persisted = False
+            response.status_code = status.HTTP_202_ACCEPTED
+
+        except Exception as db_error:
+            # Other database errors should still generate temp ID but log differently
+            logger.error(f"Database save failed, using temporary ID: {str(db_error)}")
+            submission_id = str(uuid.uuid4())
+            persisted = False
+            response.status_code = status.HTTP_202_ACCEPTED
 
         logger.info(
             "Strategy submitted for review",
@@ -1238,14 +1258,17 @@ async def submit_strategy_for_review(
             strategy_name=request.name,
             submission_id=submission_id,
             category=request.category,
-            risk_level=request.risk_level
+            risk_level=request.risk_level,
+            persisted=persisted
         )
 
         return {
             "success": True,
             "submission_id": submission_id,
             "message": f"Strategy '{request.name}' submitted for review successfully",
-            "estimated_review_time": "3-5 business days"
+            "estimated_review_time": "3-5 business days",
+            "persisted": persisted,
+            "source": "user_submission"
         }
         
     except Exception as e:
