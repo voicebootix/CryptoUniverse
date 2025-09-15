@@ -205,7 +205,8 @@ class StrategyMarketplaceService(LoggerMixin):
                 tier = "pro"
             else:  # Risk & Portfolio
                 category = "portfolio"
-                base_cost = 25 if strategy_func in ["risk_management", "portfolio_optimization"] else 35
+                # CRITICAL FIX: Make free strategies actually free (0 cost)
+                base_cost = 0 if strategy_func in ["risk_management", "portfolio_optimization"] else 35
                 risk_level = "low"
                 min_capital = 500
                 tier = "free" if strategy_func in ["risk_management", "portfolio_optimization"] else "basic"
@@ -215,7 +216,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 "name": self._generate_strategy_name(strategy_func),
                 "category": category,
                 "credit_cost_monthly": base_cost,
-                "credit_cost_per_execution": max(1, base_cost // 25),
+                "credit_cost_per_execution": 0 if base_cost == 0 else max(1, base_cost // 25),
                 "risk_level": risk_level,
                 "min_capital": min_capital,
                 "estimated_monthly_return": self._estimate_strategy_return(category, risk_level),
