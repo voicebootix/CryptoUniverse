@@ -56,27 +56,52 @@ class StrategyExecuteRequest(BaseModel):
     @field_validator('function')
     @classmethod
     def validate_function(cls, v):
-        # List of available strategy functions from your TradingStrategiesService
-        available_functions = [
-            # Derivatives
-            "futures_trade", "options_trade", "complex_strategy", "perpetual_trade",
-            "leverage_position", "margin_status", "funding_arbitrage", "hedge_position",
+        # DYNAMIC VALIDATION - Get available functions from trading strategies service
+        try:
+            from app.services.trading_strategies import trading_strategies_service
             
-            # Spot Algorithms  
-            "spot_momentum_strategy", "spot_mean_reversion", "spot_breakout_strategy",
+            # Get available functions dynamically by introspection
+            available_functions = []
             
-            # Algorithmic Trading
-            "algorithmic_trading", "pairs_trading", "statistical_arbitrage",
-            "market_making", "scalping_strategy", "swing_trading",
+            # Get all methods from the trading strategies service
+            for attr_name in dir(trading_strategies_service):
+                attr = getattr(trading_strategies_service, attr_name)
+                
+                # Check if it's an async method and looks like a strategy function
+                if (callable(attr) and 
+                    not attr_name.startswith('_') and 
+                    not attr_name in ['logger', 'log', 'async_init', 'cleanup'] and
+                    hasattr(attr, '__code__')):
+                    
+                    # Add to available functions
+                    available_functions.append(attr_name)
             
-            # Risk & Portfolio
-            "position_management", "risk_management", "portfolio_optimization",
-            "strategy_performance"
-        ]
-        
-        if v not in available_functions:
-            raise ValueError(f"Strategy function must be one of: {available_functions}")
-        return v
+            # Also check the execute_strategy method's routing
+            # This ensures we catch all routed functions
+            documented_functions = [
+                # From execute_strategy method routing
+                "futures_trade", "options_trade", "perpetual_trade", "complex_strategy",
+                "spot_momentum_strategy", "spot_mean_reversion", "spot_breakout_strategy",
+                "algorithmic_trading", "pairs_trading", "statistical_arbitrage", 
+                "market_making", "scalping_strategy", "swing_trading",
+                "position_management", "risk_management", "portfolio_optimization",
+                "strategy_performance", "funding_arbitrage", "calculate_greeks",
+                "leverage_position", "margin_status", "options_chain", "basis_trade",
+                "liquidation_price", "hedge_position"
+            ]
+            
+            # Combine dynamic discovery with documented functions
+            all_available = list(set(available_functions + documented_functions))
+            
+            if v not in all_available:
+                raise ValueError(f"Strategy function '{v}' not available. Available functions: {sorted(all_available)}")
+            
+            return v
+            
+        except ImportError:
+            # Fallback if service not available during startup
+            # This allows the API to start even if trading service has issues
+            return v  # Allow all functions during startup
 
 
 class StrategyConfigRequest(BaseModel):
