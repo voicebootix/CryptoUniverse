@@ -1003,6 +1003,22 @@ class StrategyParametersUpdateRequest(BaseModel):
         return v
 
 
+@router.get("/publisher/test")
+async def test_publisher_endpoint():
+    """Test endpoint to verify publisher endpoints are working."""
+    return {
+        "message": "Publisher endpoints are working!",
+        "timestamp": datetime.utcnow().isoformat(),
+        "available_endpoints": [
+            "/publisher/stats",
+            "/publisher/earnings-history",
+            "/publisher/strategy-earnings",
+            "/publisher/reviews",
+            "/publisher/payouts"
+        ]
+    }
+
+
 @router.get("/publisher/stats")
 async def get_publisher_stats(
     current_user: User = Depends(get_current_user),
