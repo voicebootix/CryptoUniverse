@@ -1387,12 +1387,32 @@ class PortfolioRiskService(LoggerMixin):
                         optimal_weights_count=len(optimal_weights),
                         positions_count=len(current_portfolio.get("positions", [])))
         
-        # DEBUG: Log portfolio positions
-        portfolio_symbols = [pos.get("symbol") for pos in current_portfolio.get("positions", [])]
-        self.logger.info("Portfolio symbols", symbols=portfolio_symbols[:10])  # First 10
+        # CRITICAL FIX: Only optimize existing positions to prevent impossible recommendations
+        portfolio_symbols = {pos.get("symbol") for pos in current_portfolio.get("positions", [])}
+        self.logger.info("Portfolio symbols", symbols=list(portfolio_symbols)[:10])  # First 10
         self.logger.info("Optimal weight symbols", symbols=list(optimal_weights.keys())[:10])  # First 10
         
-        for symbol, optimal_weight in optimal_weights.items():
+        # FILTER: Only use weights for symbols actually in portfolio
+        filtered_optimal_weights = {
+            symbol: weight 
+            for symbol, weight in optimal_weights.items() 
+            if symbol in portfolio_symbols
+        }
+        
+        # Renormalize weights to sum to 1.0 after filtering
+        total_weight = sum(filtered_optimal_weights.values())
+        if total_weight > 0:
+            filtered_optimal_weights = {
+                symbol: weight / total_weight 
+                for symbol, weight in filtered_optimal_weights.items()
+            }
+        
+        self.logger.info("Optimization constrained to existing positions", 
+                        original_symbols=len(optimal_weights),
+                        filtered_symbols=len(filtered_optimal_weights),
+                        filtered_symbols_list=list(filtered_optimal_weights.keys())[:10])
+        
+        for symbol, optimal_weight in filtered_optimal_weights.items():
             current_weight = 0
             current_value = 0
             position_found = False
