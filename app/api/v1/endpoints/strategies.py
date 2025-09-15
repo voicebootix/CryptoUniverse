@@ -271,9 +271,13 @@ async def execute_strategy(
                    credits_required=credits_required,
                    ownership_basis=user_owns_strategy)
         
+        # Initialize credit_account variable for later use
+        credit_account = None
+        
         if not request.simulation_mode and credits_required > 0:
             from sqlalchemy import select
-            credit_stmt = select(CreditAccount).where(CreditAccount.user_id == current_user.id)
+            # Use row-level locking to prevent concurrent credit overspending
+            credit_stmt = select(CreditAccount).where(CreditAccount.user_id == current_user.id).with_for_update()
             credit_result = await db.execute(credit_stmt)
             credit_account = credit_result.scalar_one_or_none()
             
@@ -298,25 +302,25 @@ async def execute_strategy(
                 detail=f"Strategy execution failed: {execution_result.get('error', 'Unknown error')}"
             )
         
-        # Deduct credits ONLY for non-owned strategies  
+        # Deduct credits ONLY for non-owned strategies with atomic transaction
         credits_used = 0
         if not request.simulation_mode and execution_result.get("success") and credits_required > 0:
-            credit_account.available_credits -= credits_required
-            credit_account.used_credits += credits_required  # Fixed: should be used_credits not total_used_credits
-            credits_used = credits_required
-            
-            # Record credit transaction with correct model fields
-            credit_tx = CreditTransaction(
-                account_id=credit_account.id,
-                amount=-credits_required,
-                transaction_type=CreditTransactionType.USAGE,
-                description=f"Strategy execution: {request.function} on {request.symbol}",
-                balance_before=credit_account.available_credits + credits_required,
-                balance_after=credit_account.available_credits,
-                source="api"
-            )
-            db.add(credit_tx)
-            await db.commit()
+            async with db.begin():
+                credit_account.available_credits -= credits_required
+                credit_account.used_credits += credits_required
+                credits_used = credits_required
+                
+                # Record credit transaction with correct model fields
+                credit_tx = CreditTransaction(
+                    account_id=credit_account.id,
+                    amount=-credits_required,
+                    transaction_type=CreditTransactionType.USAGE,
+                    description=f"Strategy execution: {request.function} on {request.symbol}",
+                    balance_before=credit_account.available_credits + credits_required,
+                    balance_after=credit_account.available_credits,
+                    source="api"
+                )
+                db.add(credit_tx)
         elif user_owns_strategy:
             logger.info("Strategy executed without credit consumption (owned strategy)", 
                        user_id=str(current_user.id),

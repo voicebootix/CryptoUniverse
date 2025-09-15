@@ -346,8 +346,8 @@ class ProfitSharingService(LoggerMixin):
                 transaction = CreditTransaction(
                     account_id=credit_account.id,
                     amount=credits_earned,
-                    transaction_type=CreditTransactionType.BONUS,
-                    description=f"Profit sharing: Paid ${platform_fee:.2f}, earned {credits_earned} credits",
+                    transaction_type=CreditTransactionType.PURCHASE,
+                    description=f"Profit sharing purchase: Paid ${platform_fee:.2f}, earned {credits_earned} credits",
                     balance_before=credit_account.available_credits - credits_earned,
                     balance_after=credit_account.available_credits,
                     source="system"
@@ -370,7 +370,7 @@ class ProfitSharingService(LoggerMixin):
                     "credits_earned": credits_earned,
                     "new_credit_balance": credit_account.available_credits,
                     "payment_id": payment_result.get("payment_id"),
-                    "earning_potential": credits_earned * self.credit_to_dollar_ratio
+                    "earning_potential": credits_earned * self.credit_to_profit_ratio
                 }
                 
         except Exception as e:
