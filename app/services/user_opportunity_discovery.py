@@ -471,8 +471,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 user_id=user_profile.user_id
             )
             
-            if arbitrage_result.get("success") and arbitrage_result.get("opportunities"):
-                for opp in arbitrage_result["opportunities"]:
+            if arbitrage_result.get("success"):
+                # Extract opportunities from nested analysis structure
+                analysis_data = arbitrage_result.get("funding_arbitrage_analysis", {})
+                opportunities_data = analysis_data.get("opportunities", [])
+                
+                if opportunities_data:
+                    for opp in opportunities_data:
                     # Convert to standardized OpportunityResult
                     opportunity = OpportunityResult(
                         strategy_id="ai_funding_arbitrage",
@@ -527,8 +532,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 user_id=user_profile.user_id
             )
             
-            if stat_arb_result.get("success") and stat_arb_result.get("opportunities"):
-                for opp in stat_arb_result["opportunities"]:
+            if stat_arb_result.get("success"):
+                # Extract opportunities from nested analysis structure  
+                analysis_data = stat_arb_result.get("statistical_arbitrage_analysis", {})
+                opportunities_data = analysis_data.get("opportunities", [])
+                
+                if opportunities_data:
+                    for opp in opportunities_data:
                     opportunity = OpportunityResult(
                         strategy_id="ai_statistical_arbitrage",
                         strategy_name="AI Statistical Arbitrage", 

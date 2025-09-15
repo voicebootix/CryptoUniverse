@@ -1270,6 +1270,66 @@ I encountered an error during the 5-phase execution. The trade was not completed
             self.logger.error("Rate limiting check failed", error=str(e), user_id=user_id)
             return {"allowed": True}  # Fail open for availability
     
+    def _format_strategy_comparison_response(self, strategy_comparison: Dict, user_id: str) -> Dict[str, Any]:
+        """Format strategy comparison results for user display."""
+        
+        strategy_results = strategy_comparison.get("strategy_results", {})
+        recommended_strategy = strategy_comparison.get("recommended_strategy", "adaptive")
+        best_metrics = strategy_comparison.get("best_metrics", {})
+        
+        # Sort strategies by comprehensive score
+        sorted_strategies = sorted(
+            strategy_results.items(),
+            key=lambda x: x[1].get("comprehensive_score", 0),
+            reverse=True
+        )
+        
+        # Format strategy display
+        strategy_display = []
+        for i, (strategy_name, metrics) in enumerate(sorted_strategies[:6]):
+            rank_emoji = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
+            
+            profit_potential = metrics.get("profit_potential", 0)
+            expected_return = metrics.get("expected_return", 0) 
+            sharpe_ratio = metrics.get("sharpe_ratio", 0)
+            
+            strategy_display.append(
+                f"{rank_emoji} **{strategy_name.replace('_', ' ').title()}**\n"
+                f"   • Profit Potential: {profit_potential:.2%}\n" 
+                f"   • Expected Return: {expected_return:.2%}\n"
+                f"   • Sharpe Ratio: {sharpe_ratio:.2f}\n"
+                f"   • Score: {metrics.get('comprehensive_score', 0):.2f}"
+            )
+        
+        strategies_text = "\n\n".join(strategy_display)
+        
+        content = f"""📊 **6-Strategy Profit Analysis Complete**
+
+**🤖 AI Money Manager Recommendation:** 
+**{recommended_strategy.replace('_', ' ').title()}** - Best profit potential of {best_metrics.get('expected_return', 0):.2%}
+
+**📈 All Strategy Comparisons:**
+
+{strategies_text}
+
+**💡 Next Steps:**
+• "**Execute {recommended_strategy}**" - Use AI recommendation 
+• "**Use [strategy name]**" - Choose different strategy
+• "**Autonomous mode**" - Let AI manage automatically
+
+All analysis based on your real portfolio data and current market conditions."""
+        
+        return {
+            "content": content,
+            "confidence": 0.95,
+            "metadata": {
+                "strategy_comparison": strategy_results,
+                "recommended_strategy": recommended_strategy,
+                "ai_recommendation": True,
+                "all_strategies_analyzed": True
+            }
+        }
+    
     async def _handle_rebalancing(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Handle portfolio rebalancing using REAL optimization service with security validation."""
         
@@ -1357,7 +1417,27 @@ Your portfolio is being optimized automatically every 30 minutes.""",
             # 1. Detect strategy from user message
             strategy = self._detect_rebalancing_strategy(message, context)
             
-            # 2. Get current portfolio analysis with timeout and retry
+            # 2. Check if user wants strategy comparison
+            message_lower = message.lower()
+            wants_comparison = any(word in message_lower for word in [
+                "all strategies", "compare strategies", "strategy comparison", 
+                "profit potential", "best strategy", "show strategies"
+            ])
+            
+            # 2a. For strategy comparison requests, show all 6 strategies
+            if wants_comparison or strategy == "auto":
+                try:
+                    strategy_comparison = await self.chat_adapters._analyze_all_strategies_comprehensive(
+                        portfolio_data={}, user_id=user_id
+                    )
+                    
+                    if strategy_comparison and strategy_comparison.get("strategy_results"):
+                        return self._format_strategy_comparison_response(strategy_comparison, user_id)
+                    
+                except Exception as e:
+                    self.logger.error("Strategy comparison failed", error=str(e))
+            
+            # 2b. Get current portfolio analysis with timeout and retry
             portfolio_analysis = await self._get_portfolio_analysis_with_retry(user_id, strategy)
             
             if portfolio_analysis.get("error"):
