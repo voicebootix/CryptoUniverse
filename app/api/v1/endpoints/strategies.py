@@ -237,21 +237,39 @@ async def execute_strategy(
         # Check if user owns this strategy (already purchased)
         strategy_id = f"ai_{request.function}"
         
-        # Get user's owned strategies
+        # Get user's owned strategies (robust ownership check)
         from app.services.strategy_marketplace_service import strategy_marketplace_service
         user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(str(current_user.id))
         
-        owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
+        # Defensive extraction of owned strategies
+        owned_strategy_ids = []
+        if user_portfolio.get("success") and user_portfolio.get("active_strategies"):
+            owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio["active_strategies"] if s.get("strategy_id")]
+        
         user_owns_strategy = strategy_id in owned_strategy_ids
+        
+        # SAFETY: If portfolio service fails, assume user owns free strategies to prevent charging
+        if not user_portfolio.get("success") and strategy_id in ["ai_risk_management", "ai_portfolio_optimization", "ai_spot_momentum_strategy"]:
+            logger.warning("Portfolio service failed, assuming ownership of free strategy", 
+                          user_id=str(current_user.id),
+                          strategy_id=strategy_id)
+            user_owns_strategy = True
         
         logger.info("Strategy ownership check", 
                    user_id=str(current_user.id),
                    strategy_id=strategy_id,
                    user_owns_strategy=user_owns_strategy,
-                   owned_strategies=owned_strategy_ids)
+                   owned_strategies=owned_strategy_ids,
+                   portfolio_success=user_portfolio.get("success", False))
         
-        # Check credits ONLY for non-owned strategies or if no ownership data
-        credits_required = 0 if user_owns_strategy else 1  # Owned strategies are free to execute
+        # EXPLICIT: Owned strategies require 0 credits, non-owned require 1 credit
+        credits_required = 0 if user_owns_strategy else 1
+        
+        logger.info("Credit requirement determined", 
+                   user_id=str(current_user.id),
+                   strategy_id=strategy_id,
+                   credits_required=credits_required,
+                   ownership_basis=user_owns_strategy)
         
         if not request.simulation_mode and credits_required > 0:
             from sqlalchemy import select

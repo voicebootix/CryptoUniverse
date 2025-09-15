@@ -553,9 +553,31 @@ class ProfitSharingService(LoggerMixin):
                         "already_claimed": True
                     }
                 
+                # Get or create user's credit account
+                credit_stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
+                credit_result = await db.execute(credit_stmt)
+                credit_account = credit_result.scalar_one_or_none()
+                
+                if not credit_account:
+                    # Create new credit account for user
+                    credit_account = CreditAccount(
+                        user_id=user_id,
+                        available_credits=0,
+                        total_credits=0,
+                        used_credits=0
+                    )
+                    db.add(credit_account)
+                    await db.flush()  # Get the ID
+                
                 # Calculate welcome credits based on admin configuration
                 welcome_profit_potential = welcome_config.get("welcome_profit_potential", 100)
                 welcome_credits = int(welcome_profit_potential * self.platform_fee_percentage)  # 25% of profit potential
+                
+                # Update credit account balances
+                balance_before = credit_account.available_credits
+                credit_account.available_credits += welcome_credits
+                credit_account.total_credits += welcome_credits
+                balance_after = credit_account.available_credits
                 
                 # Create welcome credit transaction
                 welcome_transaction = CreditTransaction(
@@ -563,8 +585,8 @@ class ProfitSharingService(LoggerMixin):
                     amount=welcome_credits,  # Dynamic credit amount
                     transaction_type=CreditTransactionType.BONUS,
                     description=f"Welcome Package: ${welcome_profit_potential:.0f} Free Profit Potential ({welcome_credits} credits)",
-                    balance_before=credit_account.available_credits - welcome_credits,
-                    balance_after=credit_account.available_credits,
+                    balance_before=balance_before,
+                    balance_after=balance_after,
                     source="system"
                 )
                 
