@@ -145,7 +145,7 @@ const PublisherDashboard: React.FC = () => {
   const { data: stats, isLoading: statsLoading, error: statsError } = useQuery({
     queryKey: ['publisher-stats', selectedPeriod],
     queryFn: async () => {
-      const response = await apiClient.get('/publisher/stats', {
+      const response = await apiClient.get('/strategies/publisher/stats', {
         params: { period: selectedPeriod }
       });
       return response.data as PublisherStats;
@@ -157,8 +157,8 @@ const PublisherDashboard: React.FC = () => {
   const { data: strategyEarnings, isLoading: earningsLoading } = useQuery({
     queryKey: ['publisher-strategy-earnings', selectedPeriod, selectedStrategy],
     queryFn: async () => {
-      const response = await apiClient.get('/publisher/strategy-earnings', {
-        params: { 
+      const response = await apiClient.get('/strategies/publisher/strategy-earnings', {
+        params: {
           period: selectedPeriod,
           strategy_id: selectedStrategy !== 'all' ? selectedStrategy : undefined
         }
@@ -172,33 +172,53 @@ const PublisherDashboard: React.FC = () => {
   const { data: earningsHistory, isLoading: historyLoading } = useQuery({
     queryKey: ['publisher-earnings-history', selectedPeriod],
     queryFn: async () => {
-      const response = await apiClient.get('/publisher/earnings-history', {
+      const response = await apiClient.get('/strategies/publisher/earnings-history', {
         params: { period: selectedPeriod }
       });
-      return response.data.history as EarningsHistory[];
+      return response.data.earnings as EarningsHistory[];
     },
     refetchInterval: 300000 // 5 minutes
   });
 
-  // Fetch user reviews
-  const { data: reviews, isLoading: reviewsLoading } = useQuery({
+  // Fetch strategy reviews summary (simplified)
+  const { data: reviewsData, isLoading: reviewsLoading } = useQuery({
     queryKey: ['publisher-reviews'],
     queryFn: async () => {
-      const response = await apiClient.get('/publisher/reviews');
-      return response.data.reviews as UserReview[];
+      const response = await apiClient.get('/strategies/publisher/reviews');
+      return response.data;
     },
     refetchInterval: 300000
   });
 
+  // Use actual strategy review summaries from backend
+  const strategyReviews = reviewsData?.reviews || [];
+  const overallRating = reviewsData?.overall_rating || 0;
+  const totalReviews = reviewsData?.total_reviews || 0;
+
   // Fetch payout history
-  const { data: payouts, isLoading: payoutsLoading } = useQuery({
+  const { data: payoutsData, isLoading: payoutsLoading } = useQuery({
     queryKey: ['publisher-payouts'],
     queryFn: async () => {
-      const response = await apiClient.get('/publisher/payouts');
-      return response.data.payouts as PayoutRequest[];
+      const response = await apiClient.get('/strategies/publisher/payouts');
+      return response.data;
     },
     refetchInterval: 60000
   });
+
+  // Map payouts using only real backend fields, show "—" for missing data
+  const payouts = payoutsData?.payouts?.map((payout: any, index: number) => ({
+    // Use backend id if available, otherwise show placeholder
+    id: payout.id || "—",
+    amount: payout.amount,
+    status: payout.status,
+    // Map date fields from backend
+    requested_at: payout.date || payout.requested_at || "—",
+    processed_at: payout.processed_at || (payout.status === 'completed' ? payout.date : "—"),
+    // Use backend payment method or show placeholder
+    payment_method: payout.method || payout.payment_method || "—",
+    // Use backend transaction ID or show placeholder
+    transaction_id: payout.transaction_id || "—"
+  })) || [];
 
   const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
@@ -662,29 +682,22 @@ const PublisherDashboard: React.FC = () => {
           </Card>
         </TabsContent>
 
-        {/* User Reviews */}
+        {/* Reviews Summary */}
         <TabsContent value="reviews" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Recent User Reviews</CardTitle>
-              <CardDescription>Latest feedback from your strategy users</CardDescription>
+              <CardTitle>Reviews Summary</CardTitle>
+              <CardDescription>Overview of reviews across all your published strategies</CardDescription>
             </CardHeader>
-            
+
             <CardContent>
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {reviewsLoading ? (
-                  <div className="space-y-4">
-                    {[1, 2, 3].map(i => (
-                      <div key={i} className="p-4 border rounded-lg animate-pulse">
-                        <div className="space-y-2">
-                          <div className="h-4 bg-muted rounded w-1/4" />
-                          <div className="h-3 bg-muted rounded w-full" />
-                          <div className="h-3 bg-muted rounded w-3/4" />
-                        </div>
-                      </div>
-                    ))}
+                  <div className="space-y-4 animate-pulse">
+                    <div className="h-20 bg-muted rounded" />
+                    <div className="h-40 bg-muted rounded" />
                   </div>
-                ) : !reviews || reviews.length === 0 ? (
+                ) : !strategyReviews || strategyReviews.length === 0 ? (
                   <div className="text-center p-12">
                     <MessageSquare className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                     <h3 className="text-lg font-semibold mb-2">No Reviews Yet</h3>
@@ -693,48 +706,65 @@ const PublisherDashboard: React.FC = () => {
                     </p>
                   </div>
                 ) : (
-                  reviews.slice(0, 10).map((review) => (
-                    <div key={review.id} className="p-4 border rounded-lg">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3">
-                            <div className="font-medium">{review.user_name}</div>
-                            <div className="flex items-center gap-1">
-                              {[...Array(5)].map((_, i) => (
-                                <Star
-                                  key={i}
-                                  className={`h-4 w-4 ${
-                                    i < review.rating
-                                      ? 'text-yellow-500 fill-current'
-                                      : 'text-gray-300'
-                                  }`}
+                  <>
+                    {/* Overall Review Stats */}
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <Card>
+                        <CardContent className="p-4 text-center">
+                          <div className="flex items-center justify-center gap-2 mb-2">
+                            <Star className="h-5 w-5 text-yellow-500 fill-current" />
+                            <span className="text-2xl font-bold">{overallRating.toFixed(1)}</span>
+                          </div>
+                          <p className="text-sm text-muted-foreground">Overall Rating</p>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardContent className="p-4 text-center">
+                          <div className="text-2xl font-bold mb-2">{totalReviews}</div>
+                          <p className="text-sm text-muted-foreground">Total Reviews</p>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardContent className="p-4 text-center">
+                          <div className="text-2xl font-bold mb-2">{strategyReviews.length}</div>
+                          <p className="text-sm text-muted-foreground">Reviewed Strategies</p>
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Strategy-by-Strategy Breakdown */}
+                    <div>
+                      <h4 className="font-medium mb-4">Reviews by Strategy</h4>
+                      <div className="space-y-3">
+                        {strategyReviews.map((strategy: any, index: number) => (
+                          <div key={index} className="p-4 border rounded-lg">
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <h5 className="font-medium">{strategy.strategy_name}</h5>
+                                <div className="flex items-center gap-3 mt-1">
+                                  <div className="flex items-center gap-1">
+                                    <Star className="h-4 w-4 text-yellow-500 fill-current" />
+                                    <span className="font-medium">{strategy.average_rating.toFixed(1)}</span>
+                                  </div>
+                                  <span className="text-sm text-muted-foreground">
+                                    {strategy.total_reviews} review{strategy.total_reviews !== 1 ? 's' : ''}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <Progress
+                                  value={(strategy.average_rating / 5) * 100}
+                                  className="w-20"
                                 />
-                              ))}
+                              </div>
                             </div>
-                            {review.verified_purchase && (
-                              <Badge variant="secondary" className="text-xs">
-                                <CheckCircle className="h-3 w-3 mr-1" />
-                                Verified
-                              </Badge>
-                            )}
                           </div>
-                          
-                          <div className="text-sm text-muted-foreground mt-1">
-                            {review.strategy_name} • {formatRelativeTime(new Date(review.created_at))}
-                          </div>
-                          
-                          <p className="text-sm mt-2">{review.review_text}</p>
-                          
-                          {review.helpful_votes > 0 && (
-                            <div className="flex items-center gap-1 mt-2 text-xs text-muted-foreground">
-                              <ThumbsUp className="h-3 w-3" />
-                              <span>{review.helpful_votes} people found this helpful</span>
-                            </div>
-                          )}
-                        </div>
+                        ))}
                       </div>
                     </div>
-                  ))
+                  </>
                 )}
               </div>
             </CardContent>
@@ -789,7 +819,7 @@ const PublisherDashboard: React.FC = () => {
                         </div>
                         <div className="text-xs text-muted-foreground mt-1">
                           {payout.payment_method}
-                          {payout.transaction_id && ` • ${payout.transaction_id}`}
+                          {payout.transaction_id && payout.transaction_id !== "—" && ` • ${payout.transaction_id}`}
                         </div>
                       </div>
                       
