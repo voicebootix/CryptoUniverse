@@ -13,17 +13,22 @@ import json
 import sys
 import os
 
-# Set environment variables
-os.environ['SECRET_KEY'] = 'admin-override-key'
-os.environ['DATABASE_URL'] = 'sqlite:///test.db'
-os.environ['ENVIRONMENT'] = 'development'
+# Configuration - Load from environment variables
+BASE_URL = os.environ.get('BASE_URL')
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD')
 
-sys.path.append('/workspace')
+# Check for required environment variables
+if not all([BASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD]):
+    print("❌ ERROR: Missing required environment variables")
+    print("   Please set BASE_URL, ADMIN_EMAIL, and ADMIN_PASSWORD")
+    sys.exit(1)
 
-# Configuration
-BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
-ADMIN_EMAIL = "admin@cryptouniverse.com"
-ADMIN_PASSWORD = "AdminPass123!"
+# Check for explicit opt-in
+if os.environ.get('CONFIRM_ADMIN_ACTIONS') != 'true':
+    print("❌ ERROR: Admin actions require explicit confirmation")
+    print("   Set CONFIRM_ADMIN_ACTIONS=true to proceed")
+    sys.exit(1)
 
 def method_1_credit_topup():
     """Method 1: Add credits to admin account for purchasing strategies."""
@@ -35,8 +40,16 @@ def method_1_credit_topup():
     session = requests.Session()
     login_data = {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
     
-    response = session.post(f"{BASE_URL}/auth/login", json=login_data)
+    response = session.post(f"{BASE_URL}/auth/login", json=login_data, timeout=15)
+    if not response.ok:
+        print(f"❌ Login failed with status {response.status_code}: {response.text}")
+        return False
+
     token = response.json().get("access_token")
+    if not token or not isinstance(token, str) or len(token) == 0:
+        print(f"❌ Invalid or missing access token")
+        return False
+
     session.headers.update({"Authorization": f"Bearer {token}"})
     
     # Try to add credits (if endpoint exists)
@@ -76,8 +89,16 @@ def method_2_admin_override():
     session = requests.Session()
     login_data = {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
     
-    response = session.post(f"{BASE_URL}/auth/login", json=login_data)
+    response = session.post(f"{BASE_URL}/auth/login", json=login_data, timeout=15)
+    if not response.ok:
+        print(f"❌ Login failed with status {response.status_code}: {response.text}")
+        return False
+
     token = response.json().get("access_token")
+    if not token or not isinstance(token, str) or len(token) == 0:
+        print(f"❌ Invalid or missing access token")
+        return False
+
     session.headers.update({"Authorization": f"Bearer {token}"})
     
     # Try admin override endpoints
@@ -185,8 +206,16 @@ def method_4_api_batch_purchase():
     session = requests.Session()
     login_data = {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
     
-    response = session.post(f"{BASE_URL}/auth/login", json=login_data)
+    response = session.post(f"{BASE_URL}/auth/login", json=login_data, timeout=15)
+    if not response.ok:
+        print(f"❌ Login failed with status {response.status_code}: {response.text}")
+        return False
+
     token = response.json().get("access_token")
+    if not token or not isinstance(token, str) or len(token) == 0:
+        print(f"❌ Invalid or missing access token")
+        return False
+
     session.headers.update({"Authorization": f"Bearer {token}"})
     
     # All strategy IDs from marketplace
@@ -240,12 +269,19 @@ def method_4_api_batch_purchase():
     return success_count > 0
 
 def main():
+    # Additional safety check for admin override
+    if os.environ.get('ADMIN_OVERRIDE_ENABLED') != 'true':
+        print("❌ ERROR: Admin override is disabled")
+        print("   Set ADMIN_OVERRIDE_ENABLED=true to enable admin overrides")
+        print("   This is a safety mechanism to prevent accidental execution")
+        sys.exit(1)
+
     print("🎯 COMPREHENSIVE ADMIN STRATEGY ACCESS SETUP")
     print("=" * 80)
-    
+
     # Try all methods
     method1_success = method_1_credit_topup()
-    method2_success = method_2_admin_override() 
+    method2_success = method_2_admin_override()
     method3_success = method_3_direct_provisioning()
     method4_success = method_4_api_batch_purchase()
     

@@ -9,12 +9,18 @@ import asyncio
 import sys
 import os
 
-# Set environment variables
-os.environ['SECRET_KEY'] = 'test-key'
-os.environ['DATABASE_URL'] = 'postgresql://test:test@localhost/test'
-os.environ['ENVIRONMENT'] = 'development'
+# Set environment variables from existing or use safe defaults
+if 'SECRET_KEY' not in os.environ:
+    os.environ['SECRET_KEY'] = 'test-key-only-for-testing'
+if 'DATABASE_URL' not in os.environ:
+    os.environ['DATABASE_URL'] = 'sqlite:///test_memory.db'  # Use in-memory SQLite for testing
+if 'ENVIRONMENT' not in os.environ:
+    os.environ['ENVIRONMENT'] = 'testing'
 
-sys.path.append('/workspace')
+# Dynamically determine project root
+from pathlib import Path
+project_root = Path(__file__).resolve().parents[0]
+sys.path.insert(0, str(project_root))
 
 async def test_strategy_service_methods():
     """Test trading strategies service with correct method calls."""

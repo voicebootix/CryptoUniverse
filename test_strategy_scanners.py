@@ -27,13 +27,23 @@ async def test_trading_strategies_service():
         
         print("✅ Trading strategies service imported")
         
-        # Test spot momentum strategy for a known symbol
+        # Test spot momentum strategy using execute_strategy method
         print("\n📊 Testing spot_momentum_strategy...")
-        
-        result = await trading_strategies_service.spot_momentum_strategy(
+
+        from app.models.strategy import StrategyParameters
+
+        # Create StrategyParameters instance
+        params = StrategyParameters(
             symbol="BTC/USDT",
-            timeframe="4h",
-            user_id="test"
+            timeframe="4h"
+        )
+
+        result = await trading_strategies_service.execute_strategy(
+            function="spot_momentum_strategy",
+            symbol="BTC/USDT",
+            parameters={"timeframe": "4h"},
+            user_id="test",
+            simulation_mode=True
         )
         
         print(f"   Success: {result.get('success', False)}")
@@ -66,17 +76,22 @@ async def test_opportunity_scanner_directly():
         
         print("✅ Opportunity discovery service imported")
         
-        # Create mock discovered assets (using our real discovery results)
+        # Create mock discovered assets with attribute access
+        import types
+
+        def dict_to_obj(d):
+            return types.SimpleNamespace(**d)
+
         mock_discovered_assets = {
             "tier_professional": [
-                {"symbol": "AVNT", "volume_24h_usd": 21066658, "price_usd": 0.9939},
-                {"symbol": "AVAX", "volume_24h_usd": 18964275, "price_usd": 29.7090},
-                {"symbol": "PUMP", "volume_24h_usd": 15097252, "price_usd": 0.0081}
+                dict_to_obj({"symbol": "AVNT", "volume_24h_usd": 21066658, "price_usd": 0.9939}),
+                dict_to_obj({"symbol": "AVAX", "volume_24h_usd": 18964275, "price_usd": 29.7090}),
+                dict_to_obj({"symbol": "PUMP", "volume_24h_usd": 15097252, "price_usd": 0.0081})
             ],
             "tier_retail": [
-                {"symbol": "HIFI", "volume_24h_usd": 9330189, "price_usd": 0.4055},
-                {"symbol": "PEPE", "volume_24h_usd": 8244452, "price_usd": 0.000018},
-                {"symbol": "LINK", "volume_24h_usd": 10424439, "price_usd": 24.27}
+                dict_to_obj({"symbol": "HIFI", "volume_24h_usd": 9330189, "price_usd": 0.4055}),
+                dict_to_obj({"symbol": "PEPE", "volume_24h_usd": 8244452, "price_usd": 0.000018}),
+                dict_to_obj({"symbol": "LINK", "volume_24h_usd": 10424439, "price_usd": 24.27})
             ]
         }
         
@@ -123,15 +138,20 @@ async def test_get_top_symbols_method():
     try:
         from app.services.user_opportunity_discovery import user_opportunity_discovery
         
-        # Mock discovered assets
+        # Mock discovered assets with attribute access
+        import types
+
+        def dict_to_obj(d):
+            return types.SimpleNamespace(**d)
+
         mock_discovered_assets = {
             "tier_professional": [
-                {"symbol": "AVNT", "volume_24h_usd": 21066658},
-                {"symbol": "AVAX", "volume_24h_usd": 18964275}
+                dict_to_obj({"symbol": "AVNT", "volume_24h_usd": 21066658}),
+                dict_to_obj({"symbol": "AVAX", "volume_24h_usd": 18964275})
             ],
             "tier_retail": [
-                {"symbol": "HIFI", "volume_24h_usd": 9330189},
-                {"symbol": "LINK", "volume_24h_usd": 10424439}
+                dict_to_obj({"symbol": "HIFI", "volume_24h_usd": 9330189}),
+                dict_to_obj({"symbol": "LINK", "volume_24h_usd": 10424439})
             ]
         }
         

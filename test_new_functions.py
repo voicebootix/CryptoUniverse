@@ -8,11 +8,20 @@ Test the 9 newly implemented strategy functions to verify they work
 import requests
 import json
 import time
+import os
+from time import sleep
 
-# Configuration
-BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
-ADMIN_EMAIL = "admin@cryptouniverse.com"
-ADMIN_PASSWORD = "AdminPass123!"
+# Configuration - Load from environment variables
+BASE_URL = os.environ.get('BASE_URL', 'https://cryptouniverse.onrender.com/api/v1')
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD')
+
+# Fail early if credentials are missing
+if not ADMIN_EMAIL or not ADMIN_PASSWORD:
+    raise ValueError(
+        "Missing required environment variables: ADMIN_EMAIL and/or ADMIN_PASSWORD. "
+        "Please set these environment variables before running the tests."
+    )
 
 def test_new_strategy_functions():
     """Test all newly implemented strategy functions."""
@@ -20,14 +29,41 @@ def test_new_strategy_functions():
     print("🚀 TESTING NEWLY IMPLEMENTED STRATEGY FUNCTIONS")
     print("=" * 70)
     
-    # Login
+    # Login with retry and timeout
     session = requests.Session()
     login_data = {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
-    
-    response = session.post(f"{BASE_URL}/auth/login", json=login_data)
-    token = response.json().get("access_token")
-    session.headers.update({"Authorization": f"Bearer {token}"})
-    print("✅ Authenticated successfully")
+
+    max_retries = 3
+    retry_delay = 2  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            response = session.post(f"{BASE_URL}/auth/login", json=login_data, timeout=5)
+
+            # Check status code
+            if response.status_code != 200:
+                response.raise_for_status()
+
+            # Validate response
+            response_data = response.json()
+            token = response_data.get("access_token")
+
+            if not token or not isinstance(token, str) or len(token) == 0:
+                raise ValueError(
+                    f"Invalid or missing access token in response: {response_data}"
+                )
+
+            session.headers.update({"Authorization": f"Bearer {token}"})
+            print("✅ Authenticated successfully")
+            break
+
+        except (requests.exceptions.RequestException, ValueError) as e:
+            print(f"❌ Login attempt {attempt + 1} failed: {e}")
+            if attempt < max_retries - 1:
+                print(f"   Retrying in {retry_delay} seconds...")
+                sleep(retry_delay)
+            else:
+                raise RuntimeError(f"Failed to login after {max_retries} attempts: {e}")
     
     # Test newly implemented functions
     new_functions = [
@@ -100,7 +136,8 @@ def test_new_strategy_functions():
         payload = {
             "function": function,
             "symbol": "BTC/USDT",
-            "parameters": params
+            "parameters": params,
+            "simulate": True  # Add simulation flag to prevent live trades
         }
         
         try:

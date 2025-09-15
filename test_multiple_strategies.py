@@ -8,6 +8,8 @@ Test different strategies to analyze if they generate real or mock data
 import requests
 import json
 import time
+import os
+from time import sleep
 
 # Configuration
 BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
@@ -20,18 +22,48 @@ def test_strategy_data_quality():
     print("🔬 STRATEGY DATA QUALITY ANALYSIS")
     print("=" * 70)
     
-    # Login
+    # Login with retry and timeout
     session = requests.Session()
     login_data = {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
-    
-    response = session.post(f"{BASE_URL}/auth/login", json=login_data)
-    if response.status_code != 200:
-        print(f"❌ Login failed")
-        return
-    
-    token = response.json().get("access_token")
-    session.headers.update({"Authorization": f"Bearer {token}"})
-    print("✅ Authenticated successfully")
+
+    max_retries = 3
+    retry_delay = 2  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            response = session.post(f"{BASE_URL}/auth/login", json=login_data, timeout=10)
+
+            if response.status_code == 200:
+                response_data = response.json()
+                token = response_data.get("access_token")
+
+                if not token or not isinstance(token, str) or len(token) == 0:
+                    print(f"❌ Invalid or empty access token received")
+                    if attempt < max_retries - 1:
+                        print(f"   Retrying in {retry_delay} seconds... (attempt {attempt + 1}/{max_retries})")
+                        sleep(retry_delay)
+                        continue
+                    else:
+                        raise ValueError("Failed to obtain valid access token after all retries")
+
+                session.headers.update({"Authorization": f"Bearer {token}"})
+                print("✅ Authenticated successfully")
+                break
+            else:
+                print(f"❌ Login failed with status {response.status_code}: {response.text}")
+                if attempt < max_retries - 1:
+                    print(f"   Retrying in {retry_delay} seconds... (attempt {attempt + 1}/{max_retries})")
+                    sleep(retry_delay)
+                else:
+                    raise RuntimeError(f"Login failed after {max_retries} attempts")
+
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Request error: {e}")
+            if attempt < max_retries - 1:
+                print(f"   Retrying in {retry_delay} seconds... (attempt {attempt + 1}/{max_retries})")
+                sleep(retry_delay)
+            else:
+                raise
     
     # Test different strategy functions
     strategy_tests = [

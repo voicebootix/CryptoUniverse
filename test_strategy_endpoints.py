@@ -7,6 +7,7 @@ Test all strategy-related endpoints to understand the marketplace structure
 
 import requests
 import json
+import time
 
 # Configuration
 BASE_URL = "https://cryptouniverse.onrender.com/api/v1"

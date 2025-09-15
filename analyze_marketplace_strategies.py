@@ -27,7 +27,7 @@ def analyze_marketplace():
     response = session.post(f"{BASE_URL}/auth/login", json=login_data)
     if response.status_code != 200:
         print(f"❌ Login failed")
-        return
+        return [], {}
     
     token = response.json().get("access_token")
     session.headers.update({"Authorization": f"Bearer {token}"})
