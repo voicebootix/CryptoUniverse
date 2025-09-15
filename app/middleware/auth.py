@@ -31,6 +31,7 @@ PUBLIC_PATHS = {
     "/api/v1/auth/oauth/callback",
     "/api/v1/health",
     "/api/v1/status",
+    "/api/v1/telegram/webhook",  # Telegram webhook endpoint
     "/health",
     "/",
     "/docs",
