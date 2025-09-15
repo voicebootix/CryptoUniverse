@@ -524,29 +524,29 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 if opportunities_data:
                     for opp in opportunities_data:
-                    # Convert to standardized OpportunityResult
-                    opportunity = OpportunityResult(
-                        strategy_id="ai_funding_arbitrage",
-                        strategy_name="AI Funding Arbitrage",
-                        opportunity_type="funding_arbitrage",
-                        symbol=opp.get("symbol", ""),
-                        exchange=opp.get("exchange", ""),
-                        profit_potential_usd=float(opp.get("profit_potential", 0)),
-                        confidence_score=float(opp.get("confidence", 0.7)),
-                        risk_level=opp.get("risk_level", "medium"),
-                        required_capital_usd=float(opp.get("required_capital", 1000)),
-                        estimated_timeframe=opp.get("timeframe", "8h"),
-                        entry_price=opp.get("entry_price"),
-                        exit_price=opp.get("exit_price"),
-                        metadata={
-                            "funding_rate_long": opp.get("funding_rate_long", 0),
-                            "funding_rate_short": opp.get("funding_rate_short", 0),
-                            "spread_percentage": opp.get("spread_percentage", 0),
-                            "exchanges": opp.get("exchanges", [])
-                        },
-                        discovered_at=datetime.utcnow()
-                    )
-                    opportunities.append(opportunity)
+                        # Convert to standardized OpportunityResult
+                        opportunity = OpportunityResult(
+                            strategy_id="ai_funding_arbitrage",
+                            strategy_name="AI Funding Arbitrage",
+                            opportunity_type="funding_arbitrage",
+                            symbol=opp.get("symbol", ""),
+                            exchange=opp.get("exchange", ""),
+                            profit_potential_usd=float(opp.get("profit_potential", 0)),
+                            confidence_score=float(opp.get("confidence", 0.7)),
+                            risk_level=opp.get("risk_level", "medium"),
+                            required_capital_usd=float(opp.get("required_capital", 1000)),
+                            estimated_timeframe=opp.get("timeframe", "8h"),
+                            entry_price=opp.get("entry_price"),
+                            exit_price=opp.get("exit_price"),
+                            metadata={
+                                "funding_rate_long": opp.get("funding_rate_long", 0),
+                                "funding_rate_short": opp.get("funding_rate_short", 0),
+                                "spread_percentage": opp.get("spread_percentage", 0),
+                                "exchanges": opp.get("exchanges", [])
+                            },
+                            discovered_at=datetime.utcnow()
+                        )
+                        opportunities.append(opportunity)
             
         except Exception as e:
             self.logger.error("Funding arbitrage scan failed", 
@@ -585,28 +585,28 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 if opportunities_data:
                     for opp in opportunities_data:
-                    opportunity = OpportunityResult(
-                        strategy_id="ai_statistical_arbitrage",
-                        strategy_name="AI Statistical Arbitrage", 
-                        opportunity_type="statistical_arbitrage",
-                        symbol=opp.get("symbol", ""),
-                        exchange=opp.get("exchange", "binance"),
-                        profit_potential_usd=float(opp.get("profit_potential", 0)),
-                        confidence_score=float(opp.get("confidence", 0.75)),
-                        risk_level=opp.get("risk_level", "medium_high"),
-                        required_capital_usd=float(opp.get("required_capital", 5000)),
-                        estimated_timeframe=opp.get("timeframe", "24h"),
-                        entry_price=opp.get("entry_price"),
-                        exit_price=opp.get("target_price"),
-                        metadata={
-                            "z_score": opp.get("z_score", 0),
-                            "correlation": opp.get("correlation", 0),
-                            "lookback_period": opp.get("lookback_period", "30d"),
-                            "strategy_type": opp.get("strategy_type", "mean_reversion")
-                        },
-                        discovered_at=datetime.utcnow()
-                    )
-                    opportunities.append(opportunity)
+                        opportunity = OpportunityResult(
+                            strategy_id="ai_statistical_arbitrage",
+                            strategy_name="AI Statistical Arbitrage", 
+                            opportunity_type="statistical_arbitrage",
+                            symbol=opp.get("symbol", ""),
+                            exchange=opp.get("exchange", "binance"),
+                            profit_potential_usd=float(opp.get("profit_potential", 0)),
+                            confidence_score=float(opp.get("confidence", 0.75)),
+                            risk_level=opp.get("risk_level", "medium_high"),
+                            required_capital_usd=float(opp.get("required_capital", 5000)),
+                            estimated_timeframe=opp.get("timeframe", "24h"),
+                            entry_price=opp.get("entry_price"),
+                            exit_price=opp.get("target_price"),
+                            metadata={
+                                "z_score": opp.get("z_score", 0),
+                                "correlation": opp.get("correlation", 0),
+                                "lookback_period": opp.get("lookback_period", "30d"),
+                                "strategy_type": opp.get("strategy_type", "mean_reversion")
+                            },
+                            discovered_at=datetime.utcnow()
+                        )
+                        opportunities.append(opportunity)
                     
         except Exception as e:
             self.logger.error("Statistical arbitrage scan failed",
@@ -942,29 +942,29 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 if hedge_recommendations:
                     for hedge in hedge_recommendations:
-                    if hedge.get("urgency_score", 0) > 0.6:  # Medium+ urgency
-                        opportunity = OpportunityResult(
-                            strategy_id="ai_risk_management",
-                            strategy_name="AI Risk Management",
-                            opportunity_type="risk_hedge",
-                            symbol=hedge.get("hedge_instrument", ""),
-                            exchange="binance",
-                            profit_potential_usd=0,  # Risk management protects rather than profits
-                            confidence_score=float(hedge.get("effectiveness", 0.8)),
-                            risk_level="low",
-                            required_capital_usd=float(hedge.get("hedge_cost", 500)),
-                            estimated_timeframe="ongoing",
-                            entry_price=None,
-                            exit_price=None,
-                            metadata={
-                                "hedge_type": hedge.get("hedge_type", ""),
-                                "risk_reduction": hedge.get("risk_reduction_percentage", 0),
-                                "urgency": hedge.get("urgency_score", 0),
-                                "portfolio_protection": True
-                            },
-                            discovered_at=datetime.utcnow()
-                        )
-                        opportunities.append(opportunity)
+                        if hedge.get("urgency_score", 0) > 0.6:  # Medium+ urgency
+                            opportunity = OpportunityResult(
+                                strategy_id="ai_risk_management",
+                                strategy_name="AI Risk Management",
+                                opportunity_type="risk_hedge",
+                                symbol=hedge.get("hedge_instrument", ""),
+                                exchange="binance",
+                                profit_potential_usd=0,  # Risk management protects rather than profits
+                                confidence_score=float(hedge.get("effectiveness", 0.8)),
+                                risk_level="low",
+                                required_capital_usd=float(hedge.get("hedge_cost", 500)),
+                                estimated_timeframe="ongoing",
+                                entry_price=None,
+                                exit_price=None,
+                                metadata={
+                                    "hedge_type": hedge.get("hedge_type", ""),
+                                    "risk_reduction": hedge.get("risk_reduction_percentage", 0),
+                                    "urgency": hedge.get("urgency_score", 0),
+                                    "portfolio_protection": True
+                                },
+                                discovered_at=datetime.utcnow()
+                            )
+                            opportunities.append(opportunity)
                         
         except Exception as e:
             self.logger.error("Risk management scan failed", 
@@ -1007,29 +1007,29 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 if rebalancing_recommendations:
                     for rebal in rebalancing_recommendations:
-                    if rebal.get("improvement_potential", 0) > 0.1:  # 10%+ improvement
-                        opportunity = OpportunityResult(
-                            strategy_id="ai_portfolio_optimization",
-                            strategy_name="AI Portfolio Optimization",
-                            opportunity_type="portfolio_rebalance",
-                            symbol=rebal.get("target_asset", ""),
-                            exchange="binance", 
-                            profit_potential_usd=float(rebal.get("expected_improvement_usd", 0)),
-                            confidence_score=float(rebal.get("confidence", 0.85)),
-                            risk_level="low",
-                            required_capital_usd=float(rebal.get("rebalance_amount", 1000)),
-                            estimated_timeframe="1-7d",
-                            entry_price=None,
-                            exit_price=None,
-                            metadata={
-                                "current_allocation": rebal.get("current_allocation", 0),
-                                "target_allocation": rebal.get("target_allocation", 0),
-                                "sharpe_improvement": rebal.get("sharpe_improvement", 0),
-                                "rebalance_type": rebal.get("action", "")
-                            },
-                            discovered_at=datetime.utcnow()
-                        )
-                        opportunities.append(opportunity)
+                        if rebal.get("improvement_potential", 0) > 0.1:  # 10%+ improvement
+                            opportunity = OpportunityResult(
+                                strategy_id="ai_portfolio_optimization",
+                                strategy_name="AI Portfolio Optimization",
+                                opportunity_type="portfolio_rebalance",
+                                symbol=rebal.get("target_asset", ""),
+                                exchange="binance", 
+                                profit_potential_usd=float(rebal.get("expected_improvement_usd", 0)),
+                                confidence_score=float(rebal.get("confidence", 0.85)),
+                                risk_level="low",
+                                required_capital_usd=float(rebal.get("rebalance_amount", 1000)),
+                                estimated_timeframe="1-7d",
+                                entry_price=None,
+                                exit_price=None,
+                                metadata={
+                                    "current_allocation": rebal.get("current_allocation", 0),
+                                    "target_allocation": rebal.get("target_allocation", 0),
+                                    "sharpe_improvement": rebal.get("sharpe_improvement", 0),
+                                    "rebalance_type": rebal.get("action", "")
+                                },
+                                discovered_at=datetime.utcnow()
+                            )
+                            opportunities.append(opportunity)
                         
         except Exception as e:
             self.logger.error("Portfolio optimization scan failed",
