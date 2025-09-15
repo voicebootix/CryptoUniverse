@@ -250,9 +250,9 @@ class ChatServiceAdaptersFixed:
             # without hardcoding any limitations
             from app.api.v1.endpoints.trading import market_analysis
             
-            # Get all available market data dynamically - no hardcoded limits
+            # Get all available market data dynamically using enterprise asset discovery
             market_result = await market_analysis.realtime_price_tracking(
-                symbols="all",  # Get ALL available symbols, don't limit 
+                symbols="SMART_ADAPTIVE",  # Triggers dynamic asset discovery system
                 exchanges="all",
                 user_id="system"
             )

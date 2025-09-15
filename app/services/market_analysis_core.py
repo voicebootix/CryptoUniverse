@@ -49,7 +49,7 @@ class ExchangeConfigurations:
     """Exchange API configurations for market data."""
     
     BINANCE = {
-        "base_url": "https://api.binance.com",
+        "base_url": "https://api.binance.us",  # Use geo-unrestricted endpoint for market data
         "endpoints": {
             "ticker": "/api/v3/ticker/24hr",
             "price": "/api/v3/ticker/price"
@@ -58,7 +58,8 @@ class ExchangeConfigurations:
         "weight_limits": {
             "ticker": 1,
             "price": 1
-        }
+        },
+        "purpose": "market_data_only"
     }
     
     KRAKEN = {
@@ -105,9 +106,9 @@ class DynamicExchangeManager(LoggerMixin):
     
     def __init__(self):
         self.exchange_configs = {
-            "binance": ExchangeConfigurations.BINANCE,
-            "kraken": ExchangeConfigurations.KRAKEN,
-            "kucoin": ExchangeConfigurations.KUCOIN
+            "kraken": ExchangeConfigurations.KRAKEN,   # Priority 1: Confirmed working
+            "kucoin": ExchangeConfigurations.KUCOIN,   # Priority 2: Confirmed working  
+            "binance": ExchangeConfigurations.BINANCE  # Priority 3: Now uses binance.us
         }
         self.rate_limiters = {}
         self.circuit_breakers = {}
@@ -163,9 +164,9 @@ class DynamicExchangeManager(LoggerMixin):
     
     def __init__(self):
         self.exchange_configs = {
-            "binance": ExchangeConfigurations.BINANCE,
-            "kraken": ExchangeConfigurations.KRAKEN,
-            "kucoin": ExchangeConfigurations.KUCOIN
+            "kraken": ExchangeConfigurations.KRAKEN,   # Priority 1: Confirmed working
+            "kucoin": ExchangeConfigurations.KUCOIN,   # Priority 2: Confirmed working  
+            "binance": ExchangeConfigurations.BINANCE  # Priority 3: Now uses binance.us
         }
         self.rate_limiters = {}
         self.circuit_breakers = {}
@@ -505,9 +506,25 @@ class MarketAnalysisService(LoggerMixin):
                                    
                 except Exception as e:
                     self.logger.exception("Dynamic asset discovery failed", error=str(e))
-                    # Fallback to safe default symbols
-                    symbols = "BTC,ETH,ADA,DOT,LINK,UNI,AAVE,SUSHI"
-                    self.logger.warning("Using fallback symbols for market analysis", fallback_symbols=symbols)
+                    
+                    # Try simple asset discovery as fallback
+                    try:
+                        from app.services.simple_asset_discovery import simple_asset_discovery
+                        await simple_asset_discovery.async_init()
+                        top_symbols = await simple_asset_discovery.get_top_assets(count=20)
+                        
+                        if top_symbols:
+                            symbols = ",".join(top_symbols)
+                            self.logger.info("Using simple asset discovery fallback", symbols_count=len(top_symbols))
+                        else:
+                            # Final fallback to confirmed working symbols
+                            symbols = "BTC,ETH,SOL,ADA,DOT,AVAX,MATIC,LINK"
+                            self.logger.warning("Using final fallback symbols", fallback_symbols=symbols)
+                    except Exception as fallback_error:
+                        self.logger.error("Simple asset discovery also failed", error=str(fallback_error))
+                        # Final fallback to confirmed working symbols
+                        symbols = "BTC,ETH,SOL,ADA,DOT,AVAX,MATIC,LINK"
+                        self.logger.warning("Using final fallback symbols", fallback_symbols=symbols)
             
             symbol_list = [s.strip() for s in symbols.split(",")]
             

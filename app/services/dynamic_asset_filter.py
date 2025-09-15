@@ -77,11 +77,12 @@ class EnterpriseAssetFilter(LoggerMixin):
     EXCHANGE_APIS: ClassVar[Dict[str, Dict[str, Any]]] = {
         "binance": {
             "name": "Binance",
-            "spot_url": "https://api.binance.com/api/v3/ticker/24hr",
+            "spot_url": "https://api.binance.us/api/v3/ticker/24hr",  # Use geo-unrestricted endpoint
             "futures_url": "https://fapi.binance.com/fapi/v1/ticker/24hr",
             "parser": "binance_parser",
             "priority": 1,
-            "rate_limit_per_minute": 1200
+            "rate_limit_per_minute": 1200,
+            "note": "Uses binance.us for public data, binance.com for trading"
         },
         "kraken": {
             "name": "Kraken",
@@ -366,8 +367,13 @@ class EnterpriseAssetFilter(LoggerMixin):
             if min_threshold is None:
                 raise ValueError(f"Invalid tier: {min_tier}")
             
-            # Determine exchanges to scan
-            target_exchanges = exchanges or list(self.dynamic_exchanges.keys())
+            # Determine exchanges to scan - use only working exchanges with parsers
+            if exchanges:
+                target_exchanges = exchanges
+            else:
+                # Use only exchanges we know work and have parsers
+                working_exchanges = ["binance", "kraken", "kucoin"]
+                target_exchanges = [ex for ex in working_exchanges if ex in self.EXCHANGE_APIS]
             asset_types = asset_types or ["spot", "futures"]
             
             # Check cache first (unless force refresh)
@@ -869,6 +875,108 @@ class EnterpriseAssetFilter(LoggerMixin):
         """Cleanup resources."""
         if self.session:
             await self.session.close()
+    
+    def _parse_binance_data(self, data: Any, exchange_id: str, asset_type: str) -> List[AssetInfo]:
+        """Parse Binance API response."""
+        assets = []
+        
+        try:
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict) and 'symbol' in item:
+                        # Extract symbol and volume
+                        symbol = item.get('symbol', '').replace('USDT', '').replace('BUSD', '')
+                        volume_24h = float(item.get('quoteVolume', 0))
+                        price = float(item.get('lastPrice', 0))
+                        
+                        if symbol and volume_24h > 0 and price > 0:
+                            # Classify by volume tier
+                            tier = self._classify_volume_tier(volume_24h)
+                            
+                            assets.append(AssetInfo(
+                                symbol=symbol,
+                                exchange=exchange_id,
+                                volume_24h_usd=volume_24h,
+                                price_usd=price,
+                                market_cap_usd=None,
+                                tier=tier,
+                                last_updated=datetime.now(),
+                                metadata={"source": "binance_24hr_ticker"}
+                            ))
+        except Exception as e:
+            self.logger.error("Binance parser failed", error=str(e))
+        
+        return assets
+    
+    def _parse_kraken_data(self, data: Any, exchange_id: str, asset_type: str) -> List[AssetInfo]:
+        """Parse Kraken API response."""
+        assets = []
+        
+        try:
+            if isinstance(data, dict) and 'result' in data:
+                for symbol, ticker in data['result'].items():
+                    if isinstance(ticker, dict):
+                        # Extract base symbol
+                        base_symbol = symbol.replace('USDT', '').replace('USD', '')
+                        volume_24h = float(ticker.get('v', [0, 0])[1]) if ticker.get('v') else 0
+                        price = float(ticker.get('c', [0])[0]) if ticker.get('c') else 0
+                        
+                        if base_symbol and volume_24h > 0 and price > 0:
+                            tier = self._classify_volume_tier(volume_24h * price)
+                            
+                            assets.append(AssetInfo(
+                                symbol=base_symbol,
+                                exchange=exchange_id,
+                                volume_24h_usd=volume_24h * price,
+                                price_usd=price,
+                                market_cap_usd=None,
+                                tier=tier,
+                                last_updated=datetime.now(),
+                                metadata={"source": "kraken_ticker"}
+                            ))
+        except Exception as e:
+            self.logger.error("Kraken parser failed", error=str(e))
+        
+        return assets
+    
+    def _parse_kucoin_data(self, data: Any, exchange_id: str, asset_type: str) -> List[AssetInfo]:
+        """Parse KuCoin API response."""
+        assets = []
+        
+        try:
+            if isinstance(data, dict) and 'data' in data:
+                ticker_data = data['data']
+                if isinstance(ticker_data, dict) and 'ticker' in ticker_data:
+                    for item in ticker_data['ticker']:
+                        if isinstance(item, dict):
+                            symbol = item.get('symbol', '').replace('-USDT', '').replace('-USDC', '')
+                            volume_24h = float(item.get('volValue', 0))
+                            price = float(item.get('last', 0))
+                            
+                            if symbol and volume_24h > 0 and price > 0:
+                                tier = self._classify_volume_tier(volume_24h)
+                                
+                                assets.append(AssetInfo(
+                                    symbol=symbol,
+                                    exchange=exchange_id,
+                                    volume_24h_usd=volume_24h,
+                                    price_usd=price,
+                                    market_cap_usd=None,
+                                    tier=tier,
+                                    last_updated=datetime.now(),
+                                    metadata={"source": "kucoin_all_tickers"}
+                                ))
+        except Exception as e:
+            self.logger.error("KuCoin parser failed", error=str(e))
+        
+        return assets
+    
+    def _classify_volume_tier(self, volume_24h_usd: float) -> str:
+        """Classify asset by volume tier."""
+        for tier in self.VOLUME_TIERS:
+            if volume_24h_usd >= tier.min_volume_usd:
+                return tier.name
+        return "tier_any"
 
 
 # Global service instance
