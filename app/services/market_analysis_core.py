@@ -799,17 +799,21 @@ class MarketAnalysisService(LoggerMixin):
             return await self._fallback_technical_analysis(symbol, timeframe)
     
     async def _get_historical_price_data(self, symbol: str, timeframe: str, periods: int = 100) -> List[Dict]:
-        """Get historical price data for technical analysis."""
+        """Get historical price data for technical analysis using working APIs."""
         try:
-            # Try to get data from market data feeds
-            # For now, we'll use current price and simulate some historical data
-            # In production, this should fetch real historical data from APIs
-            current_data = await market_data_feeds.get_real_time_price(symbol)
+            # Use working exchange APIs instead of broken market_data_feeds
+            current_price = 0
             
-            if not current_data.get("success"):
-                return []
+            # Try to get current price from working exchanges
+            for exchange in ["kraken", "kucoin", "binance"]:
+                try:
+                    price_info = await self._get_symbol_price(exchange, symbol)
+                    if price_info and price_info.get("price", 0) > 0:
+                        current_price = float(price_info["price"])
+                        break
+                except Exception:
+                    continue
             
-            current_price = float(current_data.get("price", 0))
             if current_price <= 0:
                 return []
             

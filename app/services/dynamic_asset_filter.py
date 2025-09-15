@@ -717,8 +717,52 @@ class EnterpriseAssetFilter(LoggerMixin):
                 
         return assets
     
+    async def kraken_parser(self, data: Any, exchange_id: str, asset_type: str) -> Dict[str, AssetInfo]:
+        """Parse Kraken API response format."""
+        assets = {}
+        
+        if isinstance(data, dict) and "result" in data:
+            for symbol, ticker in data["result"].items():
+                try:
+                    # Extract base symbol from Kraken format (XBTUSDT -> BTC)
+                    base_symbol = symbol.replace("XBT", "BTC").replace("USDT", "").replace("USD", "")
+                    if base_symbol.startswith("X"):
+                        base_symbol = base_symbol[1:]  # Remove X prefix
+                    
+                    if not base_symbol or len(base_symbol) < 2:
+                        continue
+                    
+                    # Extract price and volume from Kraken format
+                    price_usd = float(ticker["c"][0]) if ticker.get("c") and len(ticker["c"]) > 0 else 0
+                    volume_24h = float(ticker["v"][1]) if ticker.get("v") and len(ticker["v"]) > 1 else 0
+                    volume_usd = volume_24h * price_usd
+                    
+                    if volume_usd > 0 and price_usd > 0:
+                        assets[base_symbol] = AssetInfo(
+                            symbol=base_symbol,
+                            exchange=exchange_id,
+                            volume_24h_usd=volume_usd,
+                            price_usd=price_usd,
+                            market_cap_usd=None,
+                            tier="",  # Will be classified later
+                            last_updated=datetime.utcnow(),
+                            metadata={
+                                "price_change_pct": float(ticker.get("p", [0])[1]) if ticker.get("p") else 0,
+                                "high_24h": float(ticker.get("h", [0])[1]) if ticker.get("h") else 0,
+                                "low_24h": float(ticker.get("l", [0])[1]) if ticker.get("l") else 0,
+                                "trades_count": int(ticker.get("t", [0])[1]) if ticker.get("t") else 0,
+                                "source": "kraken_ticker"
+                            }
+                        )
+                        
+                except (ValueError, TypeError, IndexError, KeyError) as e:
+                    self.logger.warning(f"Failed to parse Kraken asset {symbol}", error=str(e))
+                    continue
+                    
+        return assets
+    
     # Additional parsers for other exchanges would be implemented here...
-    # okx_parser, coinbase_parser, kraken_parser, etc.
+    # okx_parser, coinbase_parser, etc.
     
     async def okx_parser(self, data: Any, exchange_id: str, asset_type: str) -> Dict[str, AssetInfo]:
         """Parse OKX API response format.""" 
