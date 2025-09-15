@@ -145,7 +145,7 @@ class TradingStrategy(Base):
     # Strategy IDE fields
     strategy_code = Column(Text, nullable=True)  # User's custom strategy code
     category = Column(String(50), nullable=True)  # Strategy category
-    metadata = Column(JSON, default=dict, nullable=False)  # Additional metadata
+    meta_data = Column('metadata', JSON, default=dict, nullable=False)  # Additional metadata
     
     # Timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)

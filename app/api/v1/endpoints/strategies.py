@@ -9,6 +9,7 @@ Real strategy execution with user exchange integration - no mock data.
 """
 
 import asyncio
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
@@ -29,6 +30,7 @@ from app.models.user import User, UserRole
 from app.models.trading import TradingStrategy, Trade, Position, StrategyType
 from app.models.exchange import ExchangeAccount, ExchangeStatus
 from app.models.credit import CreditAccount, CreditTransaction
+from app.core.redis import get_redis_client
 from app.models.strategy_submission import (
     StrategySubmission, StrategyStatus, PricingModel,
     RiskLevel, ComplexityLevel, SupportLevel
@@ -42,6 +44,39 @@ settings = get_settings()
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+# Rate limiting utility
+async def check_rate_limit(key: str, limit: int, window: int, user_id: str):
+    """Simple rate limiting utility."""
+    try:
+        redis = await get_redis_client()
+        if not redis:
+            return  # Skip rate limiting if Redis unavailable
+
+        current_time = int(time.time())
+        rate_key = f"rate_limit:{key}:{user_id}"
+
+        # Use Redis sliding window
+        pipe = redis.pipeline()
+        pipe.zremrangebyscore(rate_key, 0, current_time - window)
+        pipe.zadd(rate_key, {str(current_time): current_time})
+        pipe.zcard(rate_key)
+        pipe.expire(rate_key, window)
+        results = await pipe.execute()
+
+        current_count = results[2]
+
+        if current_count > limit:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded. Max {limit} requests per {window} seconds.",
+                headers={"Retry-After": str(window)}
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("Rate limiting failed", error=str(e))
+        # Continue without rate limiting if Redis fails
 
 # Initialize services
 trade_executor = TradeExecutionService()
@@ -852,6 +887,9 @@ class StrategySaveRequest(BaseModel):
     description: Optional[str] = None
     category: str = "custom"
     parameters: Dict[str, Any] = Field(default_factory=dict)
+    risk_parameters: Optional[Dict[str, Any]] = None
+    entry_conditions: Optional[List[Dict[str, Any]]] = None
+    exit_conditions: Optional[List[Dict[str, Any]]] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class StrategyBacktestRequest(BaseModel):
@@ -1076,9 +1114,16 @@ async def validate_strategy_code(
 ):
     """Validate strategy code for syntax and logic errors."""
 
+    # Rate limiting
+    await check_rate_limit(
+        key="strategies:validate",
+        limit=20,
+        window=60,
+        user_id=str(current_user.id)
+    )
+
     try:
         import ast
-        import re
 
         code = request.code
         errors = []
@@ -1086,9 +1131,9 @@ async def validate_strategy_code(
         performance_hints = []
         security_issues = []
 
-        # Basic syntax validation using AST
+        # Parse AST for proper code analysis
         try:
-            ast.parse(code)
+            tree = ast.parse(code)
         except SyntaxError as e:
             errors.append({
                 "line": e.lineno or 1,
@@ -1096,9 +1141,70 @@ async def validate_strategy_code(
                 "message": f"Syntax Error: {e.msg}",
                 "severity": "error"
             })
+            # If syntax is invalid, return early
+            return {
+                "success": True,
+                "validation_result": {
+                    "is_valid": False,
+                    "errors": errors,
+                    "warnings": warnings,
+                    "performance_hints": performance_hints,
+                    "security_issues": security_issues
+                }
+            }
 
-        # Check for required function
-        if "def strategy_logic" not in code:
+        # AST-based validation
+        class StrategyValidator(ast.NodeVisitor):
+            def __init__(self):
+                self.has_strategy_logic = False
+                self.dangerous_imports = set()
+                self.has_print_calls = False
+                self.has_iterrows = False
+                self.has_range_len_loop = False
+                self.print_lines = []
+
+            def visit_FunctionDef(self, node):
+                if node.name == 'strategy_logic':
+                    self.has_strategy_logic = True
+                self.generic_visit(node)
+
+            def visit_Import(self, node):
+                dangerous_modules = {'os', 'subprocess', 'sys', 'shutil', 'pickle', 'exec', 'eval'}
+                for alias in node.names:
+                    if alias.name in dangerous_modules:
+                        self.dangerous_imports.add(alias.name)
+                self.generic_visit(node)
+
+            def visit_ImportFrom(self, node):
+                dangerous_modules = {'os', 'subprocess', 'sys', 'shutil', 'pickle'}
+                if node.module in dangerous_modules:
+                    self.dangerous_imports.add(node.module)
+                self.generic_visit(node)
+
+            def visit_Call(self, node):
+                # Check for print calls
+                if isinstance(node.func, ast.Name) and node.func.id == 'print':
+                    self.has_print_calls = True
+                    self.print_lines.append(node.lineno)
+
+                # Check for .iterrows() calls
+                if isinstance(node.func, ast.Attribute) and node.func.attr == 'iterrows':
+                    self.has_iterrows = True
+
+                # Check for range(len()) patterns
+                if (isinstance(node.func, ast.Name) and node.func.id == 'range' and
+                    len(node.args) == 1 and isinstance(node.args[0], ast.Call) and
+                    isinstance(node.args[0].func, ast.Name) and node.args[0].func.id == 'len'):
+                    self.has_range_len_loop = True
+
+                self.generic_visit(node)
+
+        # Run validation
+        validator = StrategyValidator()
+        validator.visit(tree)
+
+        # Check required function
+        if not validator.has_strategy_logic:
             errors.append({
                 "line": 1,
                 "column": 1,
@@ -1106,27 +1212,26 @@ async def validate_strategy_code(
                 "severity": "error"
             })
 
-        # Security checks
-        dangerous_imports = ['os', 'subprocess', 'sys', 'shutil', 'pickle']
-        for imp in dangerous_imports:
-            if f"import {imp}" in code or f"from {imp}" in code:
-                security_issues.append(f"Potentially dangerous import detected: {imp}")
+        # Security issues
+        for dangerous_import in validator.dangerous_imports:
+            security_issues.append(f"Potentially dangerous import detected: {dangerous_import}")
 
         # Performance hints
-        if ".iterrows()" in code:
+        if validator.has_iterrows:
             performance_hints.append("Consider using vectorized operations instead of .iterrows() for better performance")
 
-        if "for i in range(len(" in code:
+        if validator.has_range_len_loop:
             performance_hints.append("Consider using pandas vectorized operations instead of explicit loops")
 
-        # Check for common issues
-        if "print(" in code:
-            warnings.append({
-                "line": 1,
-                "column": 1,
-                "message": "Consider using logging instead of print statements",
-                "severity": "warning"
-            })
+        # Warnings
+        if validator.has_print_calls:
+            for line in validator.print_lines:
+                warnings.append({
+                    "line": line,
+                    "column": 1,
+                    "message": "Consider using logging instead of print statements",
+                    "severity": "warning"
+                })
 
         is_valid = len(errors) == 0
 
@@ -1142,7 +1247,7 @@ async def validate_strategy_code(
         }
 
     except Exception as e:
-        logger.error("Strategy validation failed", error=str(e))
+        logger.exception("Strategy validation failed", user_id=str(current_user.id))
         return {
             "success": False,
             "validation_result": {
@@ -1168,7 +1273,30 @@ async def save_strategy(
 ):
     """Save a strategy draft to the database."""
 
+    # Rate limiting
+    await check_rate_limit(
+        key="strategies:save",
+        limit=10,
+        window=60,
+        user_id=str(current_user.id)
+    )
+
     try:
+        # Prepare safe defaults for non-nullable fields
+        risk_parameters = request.risk_parameters or {
+            "max_risk_per_trade": 2.0,
+            "max_drawdown": 10.0,
+            "position_size": 1.0
+        }
+
+        entry_conditions = request.entry_conditions or [
+            {"type": "signal", "condition": "strategy_logic_generated"}
+        ]
+
+        exit_conditions = request.exit_conditions or [
+            {"type": "signal", "condition": "strategy_logic_generated"}
+        ]
+
         # Create new strategy record
         strategy = TradingStrategy(
             user_id=current_user.id,
@@ -1176,11 +1304,14 @@ async def save_strategy(
             description=request.description or f"Custom strategy: {request.name}",
             strategy_type=StrategyType.ALGORITHMIC,
             parameters=request.parameters,
+            risk_parameters=risk_parameters,
+            entry_conditions=entry_conditions,
+            exit_conditions=exit_conditions,
             strategy_code=request.code,
             category=request.category,
             is_simulation=True,  # Default to simulation mode
             is_active=False,     # Not active until user enables
-            metadata=request.metadata
+            meta_data=request.metadata
         )
 
         db.add(strategy)
@@ -1202,7 +1333,7 @@ async def save_strategy(
 
     except Exception as e:
         await db.rollback()
-        logger.error("Strategy save failed", error=str(e))
+        logger.exception("Strategy save failed", user_id=str(current_user.id), strategy_name=request.name)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to save strategy: {str(e)}"
@@ -1216,16 +1347,50 @@ async def backtest_strategy(
 ):
     """Run backtest on strategy code with historical data."""
 
+    # Rate limiting
+    await check_rate_limit(
+        key="strategies:backtest",
+        limit=5,
+        window=60,
+        user_id=str(current_user.id)
+    )
+
     try:
         import pandas as pd
         import numpy as np
         from datetime import datetime, timedelta
         import random
 
-        # Generate mock historical data for backtesting
-        start_date = datetime.strptime(request.start_date, "%Y-%m-%d")
-        end_date = datetime.strptime(request.end_date, "%Y-%m-%d")
+        # Input validation
+        try:
+            start_date = datetime.strptime(request.start_date, "%Y-%m-%d")
+            end_date = datetime.strptime(request.end_date, "%Y-%m-%d")
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid date format. Use YYYY-MM-DD format: {str(e)}"
+            )
+
+        # Validate date range
+        if start_date >= end_date:
+            raise HTTPException(
+                status_code=422,
+                detail="Start date must be before end date"
+            )
+
         days = (end_date - start_date).days
+        if days <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Date range must span at least one day"
+            )
+
+        # Validate initial capital
+        if request.initial_capital <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="Initial capital must be greater than 0"
+            )
 
         # Create synthetic price data
         np.random.seed(42)  # For reproducible results
@@ -1270,15 +1435,28 @@ async def backtest_strategy(
             data['strategy_returns'] = data['position'] * data['returns']
             data['cumulative_returns'] = (1 + data['strategy_returns']).cumprod()
 
-            # Calculate performance metrics
+            # Guard against empty dataset
+            if data.empty or len(data) == 0:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Generated dataset is empty. Try a different date range."
+                )
+
+            # Calculate performance metrics with safety guards
             total_return = (data['cumulative_returns'].iloc[-1] - 1) * 100
             daily_returns = data['strategy_returns'].dropna()
+
+            # Avoid division by zero
             sharpe_ratio = daily_returns.mean() / daily_returns.std() * np.sqrt(252) if daily_returns.std() > 0 else 0
             max_drawdown = ((data['cumulative_returns'] / data['cumulative_returns'].expanding().max()) - 1).min() * 100
 
             total_trades = len(data[data['signal'] != 0])
             winning_trades = len(data[(data['signal'] != 0) & (data['strategy_returns'] > 0)])
             win_rate = winning_trades / total_trades if total_trades > 0 else 0
+
+            # Safe annualized return calculation
+            safe_days = max(1, days)
+            annualized_return = total_return * 365 / safe_days
 
             return {
                 "success": True,
@@ -1289,7 +1467,7 @@ async def backtest_strategy(
                     "initial_capital": request.initial_capital,
                     "final_capital": request.initial_capital * data['cumulative_returns'].iloc[-1],
                     "total_return": round(total_return, 2),
-                    "annualized_return": round(total_return * 365 / days, 2),
+                    "annualized_return": round(annualized_return, 2),
                     "sharpe_ratio": round(sharpe_ratio, 2),
                     "max_drawdown": round(max_drawdown, 2),
                     "volatility": round(daily_returns.std() * np.sqrt(252) * 100, 2),
@@ -1325,8 +1503,11 @@ async def backtest_strategy(
                 "backtest_result": None
             }
 
+    except HTTPException:
+        # Re-raise HTTP exceptions (validation errors)
+        raise
     except Exception as e:
-        logger.error("Backtest failed", error=str(e))
+        logger.exception("Backtest failed", user_id=str(current_user.id), symbol=request.symbol)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Backtest failed: {str(e)}"
