@@ -368,9 +368,9 @@ const MyStrategies: React.FC = () => {
                 <Activity className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{portfolio.summary.active_strategies}</div>
+                <div className="text-2xl font-bold">{portfolio?.summary?.active_strategies || 0}</div>
                 <p className="text-xs text-muted-foreground">
-                  of {portfolio.summary.total_strategies} total
+                  of {portfolio?.summary?.total_strategies || 0} total
                 </p>
               </CardContent>
             </Card>
@@ -381,11 +381,11 @@ const MyStrategies: React.FC = () => {
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className={`text-2xl font-bold ${portfolio.summary.total_pnl_usd >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  {formatCurrency(portfolio.summary.total_pnl_usd)}
+                <div className={`text-2xl font-bold ${(portfolio?.summary?.total_pnl_usd || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  {formatCurrency(portfolio?.summary?.total_pnl_usd || 0)}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {formatPercentage(portfolio.summary.total_pnl_percentage)} return
+                  {formatPercentage(portfolio?.summary?.total_pnl_percentage || 0)} return
                 </p>
               </CardContent>
             </Card>
@@ -397,10 +397,10 @@ const MyStrategies: React.FC = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {formatNumber(portfolio.summary.monthly_credit_cost)} credits
+                  {formatNumber(portfolio?.summary?.monthly_credit_cost || 0)} credits
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {portfolio.summary.welcome_strategies} free strategies
+                  {portfolio?.summary?.welcome_strategies || 0} free strategies
                 </p>
               </CardContent>
             </Card>
@@ -412,10 +412,10 @@ const MyStrategies: React.FC = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-purple-500">
-                  {formatCurrency(portfolio.summary.profit_potential_remaining)}
+                  {formatCurrency(portfolio?.summary?.profit_potential_remaining || 0)}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  of {formatCurrency(portfolio.summary.profit_potential_used + portfolio.summary.profit_potential_remaining)} available
+                  of {formatCurrency((portfolio?.summary?.profit_potential_used || 0) + (portfolio?.summary?.profit_potential_remaining || 0))} available
                 </p>
               </CardContent>
             </Card>
