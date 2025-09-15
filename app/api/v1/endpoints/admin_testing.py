@@ -12,6 +12,7 @@ from app.models.user import User
 from app.services.trading_strategies import trading_strategies_service
 import structlog
 import os
+import inspect
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/admin/testing", tags=["Admin Testing"])
@@ -90,22 +91,26 @@ async def admin_list_all_strategies(
     if not current_user.is_admin():
         raise HTTPException(status_code=403, detail="Admin access required")
     
-    # Get all strategy functions via introspection
+    # Get all strategy functions via introspection (including bound methods)
     all_functions = []
-    
-    for attr_name in dir(trading_strategies_service):
-        attr = getattr(trading_strategies_service, attr_name)
-        
-        if (callable(attr) and 
-            not attr_name.startswith('_') and 
-            not attr_name in ['logger', 'log', 'async_init', 'cleanup'] and
-            hasattr(attr, '__code__')):
-            
-            all_functions.append({
-                "function_name": attr_name,
-                "is_strategy": True,
-                "testable": True
-            })
+    excluded_names = {'logger', 'log', 'async_init', 'cleanup'}
+
+    for name, member in inspect.getmembers(trading_strategies_service):
+        # Skip private/protected names and excluded methods
+        if name.startswith('_') or name in excluded_names:
+            continue
+
+        # Check if it's a callable method or function
+        if inspect.ismethod(member) or inspect.isfunction(member):
+            # For bound methods, check the underlying function's __code__
+            func = member.__func__ if inspect.ismethod(member) else member
+            if hasattr(func, '__code__'):
+                all_functions.append({
+                    "function_name": name,
+                    "is_strategy": True,
+                    "testable": True,
+                    "type": "method" if inspect.ismethod(member) else "function"
+                })
     
     return {
         "success": True,
