@@ -53,18 +53,19 @@ class StrategyExecuteRequest(BaseModel):
     def validate_function(cls, v):
         # List of available strategy functions from your TradingStrategiesService
         available_functions = [
-            # Derivatives
+            # Derivatives Trading - ALL 12 FUNCTIONS IMPLEMENTED
             "futures_trade", "options_trade", "complex_strategy", "perpetual_trade",
             "leverage_position", "margin_status", "funding_arbitrage", "hedge_position",
+            "basis_trade", "options_chain", "calculate_greeks", "liquidation_price",
             
-            # Spot Algorithms  
+            # Spot Algorithms - ALL 3 FUNCTIONS  
             "spot_momentum_strategy", "spot_mean_reversion", "spot_breakout_strategy",
             
-            # Algorithmic Trading
+            # Algorithmic Trading - ALL 6 FUNCTIONS
             "algorithmic_trading", "pairs_trading", "statistical_arbitrage",
             "market_making", "scalping_strategy", "swing_trading",
             
-            # Risk & Portfolio
+            # Risk & Portfolio - ALL 4 FUNCTIONS
             "position_management", "risk_management", "portfolio_optimization",
             "strategy_performance"
         ]
