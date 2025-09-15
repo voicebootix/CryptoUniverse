@@ -190,18 +190,10 @@ const PublisherDashboard: React.FC = () => {
     refetchInterval: 300000
   });
 
-  // Convert strategy-level reviews to display format
-  const reviews = reviewsData?.reviews?.map((strategy: any, index: number) => ({
-    id: `review-${index}`,
-    strategy_id: `strategy-${index}`,
-    strategy_name: strategy.strategy_name,
-    user_name: 'Multiple Users',
-    rating: Math.round(strategy.average_rating),
-    review_text: `${strategy.total_reviews} user reviews with ${strategy.average_rating.toFixed(1)} average rating`,
-    created_at: new Date().toISOString(),
-    verified_purchase: true,
-    helpful_votes: strategy.total_reviews
-  })) || [];
+  // Use actual strategy review summaries from backend
+  const strategyReviews = reviewsData?.reviews || [];
+  const overallRating = reviewsData?.overall_rating || 0;
+  const totalReviews = reviewsData?.total_reviews || 0;
 
   // Fetch payout history
   const { data: payoutsData, isLoading: payoutsLoading } = useQuery({
@@ -685,29 +677,22 @@ const PublisherDashboard: React.FC = () => {
           </Card>
         </TabsContent>
 
-        {/* User Reviews */}
+        {/* Reviews Summary */}
         <TabsContent value="reviews" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Recent User Reviews</CardTitle>
-              <CardDescription>Latest feedback from your strategy users</CardDescription>
+              <CardTitle>Reviews Summary</CardTitle>
+              <CardDescription>Overview of reviews across all your published strategies</CardDescription>
             </CardHeader>
-            
+
             <CardContent>
-              <div className="space-y-4">
+              <div className="space-y-6">
                 {reviewsLoading ? (
-                  <div className="space-y-4">
-                    {[1, 2, 3].map(i => (
-                      <div key={i} className="p-4 border rounded-lg animate-pulse">
-                        <div className="space-y-2">
-                          <div className="h-4 bg-muted rounded w-1/4" />
-                          <div className="h-3 bg-muted rounded w-full" />
-                          <div className="h-3 bg-muted rounded w-3/4" />
-                        </div>
-                      </div>
-                    ))}
+                  <div className="space-y-4 animate-pulse">
+                    <div className="h-20 bg-muted rounded" />
+                    <div className="h-40 bg-muted rounded" />
                   </div>
-                ) : !reviews || reviews.length === 0 ? (
+                ) : !strategyReviews || strategyReviews.length === 0 ? (
                   <div className="text-center p-12">
                     <MessageSquare className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                     <h3 className="text-lg font-semibold mb-2">No Reviews Yet</h3>
@@ -716,48 +701,65 @@ const PublisherDashboard: React.FC = () => {
                     </p>
                   </div>
                 ) : (
-                  reviews.slice(0, 10).map((review) => (
-                    <div key={review.id} className="p-4 border rounded-lg">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3">
-                            <div className="font-medium">{review.user_name}</div>
-                            <div className="flex items-center gap-1">
-                              {[...Array(5)].map((_, i) => (
-                                <Star
-                                  key={i}
-                                  className={`h-4 w-4 ${
-                                    i < review.rating
-                                      ? 'text-yellow-500 fill-current'
-                                      : 'text-gray-300'
-                                  }`}
+                  <>
+                    {/* Overall Review Stats */}
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <Card>
+                        <CardContent className="p-4 text-center">
+                          <div className="flex items-center justify-center gap-2 mb-2">
+                            <Star className="h-5 w-5 text-yellow-500 fill-current" />
+                            <span className="text-2xl font-bold">{overallRating.toFixed(1)}</span>
+                          </div>
+                          <p className="text-sm text-muted-foreground">Overall Rating</p>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardContent className="p-4 text-center">
+                          <div className="text-2xl font-bold mb-2">{totalReviews}</div>
+                          <p className="text-sm text-muted-foreground">Total Reviews</p>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardContent className="p-4 text-center">
+                          <div className="text-2xl font-bold mb-2">{strategyReviews.length}</div>
+                          <p className="text-sm text-muted-foreground">Reviewed Strategies</p>
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Strategy-by-Strategy Breakdown */}
+                    <div>
+                      <h4 className="font-medium mb-4">Reviews by Strategy</h4>
+                      <div className="space-y-3">
+                        {strategyReviews.map((strategy: any, index: number) => (
+                          <div key={index} className="p-4 border rounded-lg">
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <h5 className="font-medium">{strategy.strategy_name}</h5>
+                                <div className="flex items-center gap-3 mt-1">
+                                  <div className="flex items-center gap-1">
+                                    <Star className="h-4 w-4 text-yellow-500 fill-current" />
+                                    <span className="font-medium">{strategy.average_rating.toFixed(1)}</span>
+                                  </div>
+                                  <span className="text-sm text-muted-foreground">
+                                    {strategy.total_reviews} review{strategy.total_reviews !== 1 ? 's' : ''}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <Progress
+                                  value={(strategy.average_rating / 5) * 100}
+                                  className="w-20"
                                 />
-                              ))}
+                              </div>
                             </div>
-                            {review.verified_purchase && (
-                              <Badge variant="secondary" className="text-xs">
-                                <CheckCircle className="h-3 w-3 mr-1" />
-                                Verified
-                              </Badge>
-                            )}
                           </div>
-                          
-                          <div className="text-sm text-muted-foreground mt-1">
-                            {review.strategy_name} • {formatRelativeTime(new Date(review.created_at))}
-                          </div>
-                          
-                          <p className="text-sm mt-2">{review.review_text}</p>
-                          
-                          {review.helpful_votes > 0 && (
-                            <div className="flex items-center gap-1 mt-2 text-xs text-muted-foreground">
-                              <ThumbsUp className="h-3 w-3" />
-                              <span>{review.helpful_votes} people found this helpful</span>
-                            </div>
-                          )}
-                        </div>
+                        ))}
                       </div>
                     </div>
-                  ))
+                  </>
                 )}
               </div>
             </CardContent>
