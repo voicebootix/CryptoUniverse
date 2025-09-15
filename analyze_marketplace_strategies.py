@@ -8,6 +8,7 @@ Analyze all strategies in the marketplace, their tiers, costs, and capabilities
 import requests
 import json
 import time
+import os
 
 # Configuration
 BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
@@ -24,14 +25,30 @@ def analyze_marketplace():
     session = requests.Session()
     login_data = {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
     
-    response = session.post(f"{BASE_URL}/auth/login", json=login_data)
-    if response.status_code != 200:
-        print(f"❌ Login failed")
+    try:
+        response = session.post(f"{BASE_URL}/auth/login", json=login_data, timeout=10)
+
+        if not response.ok:
+            print(f"❌ Login failed with status {response.status_code}")
+            print(f"   Response: {response.text[:200]}")
+            return [], {}
+
+        response_data = response.json()
+        token = response_data.get("access_token")
+
+        if not token or not isinstance(token, str) or len(token) == 0:
+            print(f"❌ Invalid or missing access token in response")
+            return [], {}
+
+        session.headers.update({"Authorization": f"Bearer {token}"})
+        print("✅ Authenticated successfully")
+
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Request error during login: {e}")
         return [], {}
-    
-    token = response.json().get("access_token")
-    session.headers.update({"Authorization": f"Bearer {token}"})
-    print("✅ Authenticated successfully")
+    except json.JSONDecodeError as e:
+        print(f"❌ Failed to parse login response: {e}")
+        return [], {}
     
     # Get all marketplace strategies
     print(f"\n📊 FETCHING ALL MARKETPLACE STRATEGIES")
@@ -149,17 +166,41 @@ def analyze_marketplace():
 
 def test_strategy_accessibility(strategies):
     """Test strategy accessibility and credit requirements."""
-    
+
     print(f"\n🔐 TESTING STRATEGY ACCESSIBILITY")
     print("=" * 60)
+
+    # Check for dry-run mode
+    dry_run = os.environ.get('CONFIRM_ADMIN_ACTIONS') != 'true' and \
+              os.environ.get('ADMIN_OVERRIDE_ENABLED') != 'true'
+
+    if dry_run:
+        print("⚠️  DRY-RUN MODE: Purchase requests will be simulated")
+        print("   Set CONFIRM_ADMIN_ACTIONS=true or ADMIN_OVERRIDE_ENABLED=true for real purchases")
     
     # Login
     session = requests.Session()
     login_data = {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
     
-    response = session.post(f"{BASE_URL}/auth/login", json=login_data)
-    token = response.json().get("access_token")
-    session.headers.update({"Authorization": f"Bearer {token}"})
+    try:
+        response = session.post(f"{BASE_URL}/auth/login", json=login_data, timeout=10)
+
+        if not response.ok:
+            print(f"❌ Login failed with status {response.status_code}")
+            return []
+
+        response_data = response.json()
+        token = response_data.get("access_token")
+
+        if not token:
+            print(f"❌ Invalid or missing access token")
+            return []
+
+        session.headers.update({"Authorization": f"Bearer {token}"})
+
+    except Exception as e:
+        print(f"❌ Login error: {e}")
+        return []
     
     # Test purchasing different tier strategies
     test_strategies = [
@@ -181,10 +222,28 @@ def test_strategy_accessibility(strategies):
         
         print(f"\n🎯 Testing: {strategy_id} ({tier} tier)")
         
-        # Test purchase endpoint
+        # Test purchase endpoint (with dry-run check)
         try:
+            if dry_run:
+                # Simulate purchase in dry-run mode
+                print(f"   🔵 DRY-RUN: Would purchase {strategy_id} for ${expected_cost} credits")
+                print(f"   Request URL: {BASE_URL}/strategies/purchase")
+                print(f"   Parameters: strategy_id={strategy_id}, subscription_type=monthly")
+
+                accessibility_results.append({
+                    "strategy_id": strategy_id,
+                    "tier": tier,
+                    "accessible": True,  # Assume would be accessible
+                    "actual_cost": expected_cost,
+                    "expected_cost": expected_cost,
+                    "cost_match": True,
+                    "dry_run": True
+                })
+                continue
+
+            # Real purchase (only if explicitly confirmed)
             url = f"{BASE_URL}/strategies/purchase?strategy_id={strategy_id}&subscription_type=monthly"
-            response = session.post(url)
+            response = session.post(url, timeout=10)
             
             if response.status_code == 200:
                 result = response.json()

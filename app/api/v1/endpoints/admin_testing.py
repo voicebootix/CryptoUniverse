@@ -11,6 +11,7 @@ from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
 from app.services.trading_strategies import trading_strategies_service
 import structlog
+import os
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/admin/testing", tags=["Admin Testing"])
@@ -44,7 +45,11 @@ async def admin_test_strategy(
     # Verify admin access (call the method, not just reference it)
     if not current_user.is_admin():
         raise HTTPException(status_code=403, detail="Admin access required")
-    
+
+    # Check environment gate for admin override
+    if os.getenv("ADMIN_OVERRIDE_ENABLED", "false").lower() != "true":
+        raise HTTPException(status_code=403, detail="Admin override disabled in environment")
+
     try:
         logger.info("Admin testing strategy", 
                    function=request.function, 
@@ -70,8 +75,8 @@ async def admin_test_strategy(
         }
         
     except Exception as e:
-        logger.error("Admin strategy testing failed", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Strategy testing failed: {str(e)}")
+        logger.exception("Admin strategy testing failed")
+        raise HTTPException(status_code=500, detail=f"Strategy testing failed: {str(e)}") from e
 
 
 @router.get("/strategy/list-all")
