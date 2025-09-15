@@ -1022,7 +1022,10 @@ async def get_publisher_stats(
             ).group_by(StrategySubmission.status)
 
             result = await db.execute(query)
-            status_counts = {row.status: row.count for row in result}
+            status_counts = {
+                (row.status.value if hasattr(row.status, 'value') else str(row.status)): row.count
+                for row in result
+            }
 
             # Get total revenue
             revenue_query = select(
