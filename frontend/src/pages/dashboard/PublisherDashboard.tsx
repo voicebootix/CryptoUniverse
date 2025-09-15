@@ -809,8 +809,8 @@ const PublisherDashboard: React.FC = () => {
                     </p>
                   </div>
                 ) : (
-                  payouts.map((payout: PayoutRequest) => (
-                    <div key={payout.id} className="flex items-center justify-between p-4 border rounded-lg">
+                  payouts.map((payout: PayoutRequest, index: number) => (
+                    <div key={payout.id && payout.id !== "—" ? payout.id : `payout-${index}`} className="flex items-center justify-between p-4 border rounded-lg">
                       <div>
                         <div className="font-medium">{formatCurrency(payout.amount)}</div>
                         <div className="text-sm text-muted-foreground">
