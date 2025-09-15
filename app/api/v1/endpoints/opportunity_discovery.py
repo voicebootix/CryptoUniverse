@@ -24,6 +24,7 @@ from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user, require_role
 from app.models.user import User, UserRole
 from app.services.user_opportunity_discovery import user_opportunity_discovery
+from app.services.working_opportunity_scanner import working_opportunity_scanner
 from app.services.user_onboarding_service import user_onboarding_service
 from app.services.rate_limit import rate_limiter
 
