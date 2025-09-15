@@ -145,7 +145,7 @@ const PublisherDashboard: React.FC = () => {
   const { data: stats, isLoading: statsLoading, error: statsError } = useQuery({
     queryKey: ['publisher-stats', selectedPeriod],
     queryFn: async () => {
-      const response = await apiClient.get('/publisher/stats', {
+      const response = await apiClient.get('/strategies/publisher/stats', {
         params: { period: selectedPeriod }
       });
       return response.data as PublisherStats;
@@ -157,8 +157,8 @@ const PublisherDashboard: React.FC = () => {
   const { data: strategyEarnings, isLoading: earningsLoading } = useQuery({
     queryKey: ['publisher-strategy-earnings', selectedPeriod, selectedStrategy],
     queryFn: async () => {
-      const response = await apiClient.get('/publisher/strategy-earnings', {
-        params: { 
+      const response = await apiClient.get('/strategies/publisher/strategy-earnings', {
+        params: {
           period: selectedPeriod,
           strategy_id: selectedStrategy !== 'all' ? selectedStrategy : undefined
         }
@@ -172,33 +172,56 @@ const PublisherDashboard: React.FC = () => {
   const { data: earningsHistory, isLoading: historyLoading } = useQuery({
     queryKey: ['publisher-earnings-history', selectedPeriod],
     queryFn: async () => {
-      const response = await apiClient.get('/publisher/earnings-history', {
+      const response = await apiClient.get('/strategies/publisher/earnings-history', {
         params: { period: selectedPeriod }
       });
-      return response.data.history as EarningsHistory[];
+      return response.data.earnings as EarningsHistory[];
     },
     refetchInterval: 300000 // 5 minutes
   });
 
-  // Fetch user reviews
-  const { data: reviews, isLoading: reviewsLoading } = useQuery({
+  // Fetch strategy reviews summary (simplified)
+  const { data: reviewsData, isLoading: reviewsLoading } = useQuery({
     queryKey: ['publisher-reviews'],
     queryFn: async () => {
-      const response = await apiClient.get('/publisher/reviews');
-      return response.data.reviews as UserReview[];
+      const response = await apiClient.get('/strategies/publisher/reviews');
+      return response.data;
     },
     refetchInterval: 300000
   });
 
+  // Convert strategy-level reviews to display format
+  const reviews = reviewsData?.reviews?.map((strategy: any, index: number) => ({
+    id: `review-${index}`,
+    strategy_id: `strategy-${index}`,
+    strategy_name: strategy.strategy_name,
+    user_name: 'Multiple Users',
+    rating: Math.round(strategy.average_rating),
+    review_text: `${strategy.total_reviews} user reviews with ${strategy.average_rating.toFixed(1)} average rating`,
+    created_at: new Date().toISOString(),
+    verified_purchase: true,
+    helpful_votes: strategy.total_reviews
+  })) || [];
+
   // Fetch payout history
-  const { data: payouts, isLoading: payoutsLoading } = useQuery({
+  const { data: payoutsData, isLoading: payoutsLoading } = useQuery({
     queryKey: ['publisher-payouts'],
     queryFn: async () => {
-      const response = await apiClient.get('/publisher/payouts');
-      return response.data.payouts as PayoutRequest[];
+      const response = await apiClient.get('/strategies/publisher/payouts');
+      return response.data;
     },
     refetchInterval: 60000
   });
+
+  const payouts = payoutsData?.payouts?.map((payout: any, index: number) => ({
+    id: `payout-${index}`,
+    amount: payout.amount,
+    status: payout.status,
+    requested_at: payout.date,
+    processed_at: payout.status === 'completed' ? payout.date : undefined,
+    payment_method: payout.method || 'bank_transfer',
+    transaction_id: `tx-${index}`
+  })) || [];
 
   const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
