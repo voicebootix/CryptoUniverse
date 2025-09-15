@@ -1270,17 +1270,20 @@ I encountered an error during the 5-phase execution. The trade was not completed
             self.logger.error("Rate limiting check failed", error=str(e), user_id=user_id)
             return {"allowed": True}  # Fail open for availability
     
-    def _format_strategy_comparison_response(self, strategy_comparison: Dict, user_id: str) -> Dict[str, Any]:
+    def _format_strategy_comparison_response(self, strategy_comparison: Dict, _user_id: str) -> Dict[str, Any]:
         """Format strategy comparison results for user display."""
         
-        strategy_results = strategy_comparison.get("strategy_results", {})
+        # Normalize input to handle different adapter response formats
+        strategy_results = (strategy_comparison.get("strategy_results") or 
+                          strategy_comparison.get("all_results") or 
+                          strategy_comparison.get("all_strategies") or {})
         recommended_strategy = strategy_comparison.get("recommended_strategy", "adaptive")
         best_metrics = strategy_comparison.get("best_metrics", {})
         
-        # Sort strategies by comprehensive score
+        # Sort strategies by score (handle different score field names)
         sorted_strategies = sorted(
             strategy_results.items(),
-            key=lambda x: x[1].get("comprehensive_score", 0),
+            key=lambda x: x[1].get("final_score", x[1].get("comprehensive_score", 0)),
             reverse=True
         )
         
@@ -1289,16 +1292,18 @@ I encountered an error during the 5-phase execution. The trade was not completed
         for i, (strategy_name, metrics) in enumerate(sorted_strategies[:6]):
             rank_emoji = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
             
-            profit_potential = metrics.get("profit_potential", 0)
+            # Handle different metric field names
+            profit_potential = metrics.get("profit_potential", metrics.get("risk_adjusted_return", 0))
             expected_return = metrics.get("expected_return", 0) 
             sharpe_ratio = metrics.get("sharpe_ratio", 0)
+            score = metrics.get("final_score", metrics.get("comprehensive_score", 0))
             
             strategy_display.append(
                 f"{rank_emoji} **{strategy_name.replace('_', ' ').title()}**\n"
                 f"   • Profit Potential: {profit_potential:.2%}\n" 
                 f"   • Expected Return: {expected_return:.2%}\n"
                 f"   • Sharpe Ratio: {sharpe_ratio:.2f}\n"
-                f"   • Score: {metrics.get('comprehensive_score', 0):.2f}"
+                f"   • Score: {score:.2f}"
             )
         
         strategies_text = "\n\n".join(strategy_display)
@@ -1306,7 +1311,7 @@ I encountered an error during the 5-phase execution. The trade was not completed
         content = f"""📊 **6-Strategy Profit Analysis Complete**
 
 **🤖 AI Money Manager Recommendation:** 
-**{recommended_strategy.replace('_', ' ').title()}** - Best profit potential of {best_metrics.get('expected_return', 0):.2%}
+**{recommended_strategy.replace('_', ' ').title()}** - Best expected return of {best_metrics.get('expected_return', 0):.2%}
 
 **📈 All Strategy Comparisons:**
 
@@ -1424,18 +1429,22 @@ Your portfolio is being optimized automatically every 30 minutes.""",
                 "profit potential", "best strategy", "show strategies"
             ])
             
-            # 2a. For strategy comparison requests, show all 6 strategies
+            # 2a. For strategy comparison requests, show all 6 strategies  
             if wants_comparison or strategy == "auto":
                 try:
                     strategy_comparison = await self.chat_adapters._analyze_all_strategies_comprehensive(
                         portfolio_data={}, user_id=user_id
                     )
                     
-                    if strategy_comparison and strategy_comparison.get("strategy_results"):
+                    # Check for any of the possible result keys
+                    has_results = any(
+                        k in strategy_comparison for k in ("strategy_results", "all_results", "all_strategies")
+                    )
+                    if strategy_comparison and has_results:
                         return self._format_strategy_comparison_response(strategy_comparison, user_id)
                     
                 except Exception as e:
-                    self.logger.error("Strategy comparison failed", error=str(e))
+                    self.logger.exception("Strategy comparison failed")
             
             # 2b. Get current portfolio analysis with timeout and retry
             portfolio_analysis = await self._get_portfolio_analysis_with_retry(user_id, strategy)

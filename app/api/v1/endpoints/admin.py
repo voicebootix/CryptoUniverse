@@ -23,7 +23,7 @@ from app.models.user import User, UserRole, UserStatus
 from app.models.tenant import Tenant
 from app.models.trading import Trade, Position
 from app.models.exchange import ExchangeAccount
-from app.models.credit import CreditAccount, CreditTransaction
+from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.models.system import SystemHealth, AuditLog
 from app.services.master_controller import MasterSystemController
 from app.services.background import BackgroundServiceManager
@@ -1195,11 +1195,13 @@ async def manage_user(
             
             # Record transaction
             credit_tx = CreditTransaction(
-                user_id=target_user.id,
+                account_id=credit_account.id,
                 amount=request.credit_amount,
-                transaction_type="admin_adjustment",
+                transaction_type=CreditTransactionType.ADJUSTMENT,
                 description=f"Admin credit reset by {current_user.email}",
-                reference_id=str(current_user.id)
+                balance_before=credit_account.available_credits - request.credit_amount,
+                balance_after=credit_account.available_credits,
+                source="admin"
             )
             db.add(credit_tx)
             

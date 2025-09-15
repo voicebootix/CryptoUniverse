@@ -232,7 +232,8 @@ class ChatServiceAdapters:
                 return {
                     "needs_rebalancing": False,
                     "deviation_score": 0,
-                    "recommended_trades": []
+                    "recommended_trades": [],
+                    "analysis_type": "rebalancing"  # Ensure analysis_type is always present
                 }
             
             optimization_data = optimization_result.get("optimization_result", {})
@@ -258,14 +259,25 @@ class ChatServiceAdapters:
                 "deviation_score": deviation_score,
                 "recommended_trades": recommended_trades,
                 "risk_reduction": optimization_data.get("risk_reduction_percentage", 0),
-                "expected_improvement": optimization_data.get("expected_return_improvement", 0)
+                "expected_improvement": optimization_data.get("expected_return_improvement", 0),
+                "analysis_type": "rebalancing"  # Ensure analysis_type is always present
             }
             
+        except KeyError as ke:
+            logger.error("Rebalancing analysis failed - missing key", 
+                        missing_key=str(ke), 
+                        user_id=user_id)
+            return {
+                "needs_rebalancing": False,
+                "error": f"Missing required data field: {str(ke)}",
+                "analysis_type": "error"  # Ensure analysis_type is always present
+            }
         except Exception as e:
             logger.error("Rebalancing analysis failed", error=str(e), user_id=user_id)
             return {
                 "needs_rebalancing": False,
-                "error": str(e)
+                "error": str(e),
+                "analysis_type": "error"  # Ensure analysis_type is always present
             }
     
     async def discover_opportunities(self, user_id: str, risk_tolerance: str = "balanced") -> Dict[str, Any]:

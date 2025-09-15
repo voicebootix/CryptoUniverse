@@ -21,7 +21,7 @@ from app.core.database import get_database
 from app.core.logging import LoggerMixin
 from app.models.user import User
 from app.models.trading import Trade, TradingStrategy
-from app.models.credit import CreditAccount, CreditTransaction
+from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.models.subscription import Subscription
 
 settings = get_settings()

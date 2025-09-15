@@ -28,7 +28,7 @@ from app.api.v1.endpoints.auth import get_current_user, require_role
 from app.models.user import User, UserRole
 from app.models.trading import TradingStrategy, Trade, Position
 from app.models.exchange import ExchangeAccount, ExchangeStatus
-from app.models.credit import CreditAccount, CreditTransaction
+from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.models.strategy_submission import (
     StrategySubmission, StrategyStatus, PricingModel,
     RiskLevel, ComplexityLevel, SupportLevel

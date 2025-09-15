@@ -16,7 +16,9 @@ from typing import Dict, List, Any
 BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
 WS_URL = "wss://cryptouniverse.onrender.com/api/v1"
 ADMIN_EMAIL = "admin@cryptouniverse.com"
-ADMIN_PASSWORD = "AdminPass123!"
+import os
+
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "AdminPass123!")
 
 class RenderChatTester:
     def __init__(self):
