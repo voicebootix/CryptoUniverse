@@ -306,10 +306,10 @@ class ConversationalAIOrchestrator(LoggerMixin):
             }
             
         except Exception as e:
-            self.logger.error("Conversation processing failed", error=str(e), user_id=user_id)
+            self.logger.exception("Conversation processing failed", user_id=user_id, exc_info=True)
             yield {
                 "type": ResponseType.ERROR.value,
-                "content": f"I encountered an error processing your request: {str(e)}. Please try again.",
+                "content": "I encountered an error processing your request. Please try again.",
                 "timestamp": datetime.utcnow().isoformat()
             }
     

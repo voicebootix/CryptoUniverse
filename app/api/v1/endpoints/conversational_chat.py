@@ -1,4 +1,4 @@
-"""
+THIS SHOULD BE A LINTER ERROR"""
 Conversational AI Chat Endpoints
 
 Provides streaming conversational AI interface to ALL platform features:
@@ -295,10 +295,10 @@ async def conversational_chat_stream(
                                 "timestamp": datetime.utcnow().isoformat()
                             }))
                     except Exception as e:
-                        logger.error("Conversation processing error", error=str(e))
+                        logger.exception("Conversation processing error", exc_info=True)
                         await websocket.send_text(json.dumps({
                             "type": "error",
-                            "message": f"Error processing conversation: {str(e)}",
+                            "message": "Error processing conversation. Please try again.",
                             "timestamp": datetime.utcnow().isoformat()
                         }))
             
@@ -386,15 +386,15 @@ async def confirm_action(
         }
         
     except Exception as e:
-        logger.error(
+        logger.exception(
             "Action confirmation failed",
-            error=str(e),
             user_id=str(current_user.id),
-            action_type=request.action_type
+            action_type=request.action_type,
+            exc_info=True
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Action confirmation failed: {str(e)}"
+            detail="Action confirmation failed"
         )
 
 
@@ -535,10 +535,10 @@ async def get_conversational_capabilities(
         }
         
     except Exception as e:
-        logger.error("Failed to get capabilities", error=str(e), user_id=str(current_user.id))
+        logger.exception("Failed to get capabilities", user_id=str(current_user.id), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get capabilities: {str(e)}"
+            detail="Failed to get capabilities"
         )
 
 
@@ -581,8 +581,8 @@ async def get_personality_info(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to get personality info", error=str(e))
+        logger.exception("Failed to get personality info", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get personality info: {str(e)}"
+            detail="Failed to get personality info"
         )
