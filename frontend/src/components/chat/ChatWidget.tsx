@@ -97,7 +97,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
             exit={{ opacity: 0, scale: 0.8, y: 20 }}
             className={`fixed bottom-20 right-6 z-50 ${className}`}
           >
-            <Card className={`w-80 ${isWidgetMinimized ? 'h-14' : 'h-96'} transition-all duration-300 shadow-lg border`}>
+            <Card className={`w-80 ${isWidgetMinimized ? 'h-14' : 'h-96'} transition-all duration-300 shadow-lg border bg-card/95 backdrop-blur-sm border-border/50`}>
               {/* Header */}
               <CardHeader className="flex flex-row items-center justify-between space-y-0 py-3 px-4">
                 <div className="flex items-center gap-2">
@@ -147,10 +147,10 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
                           )}
                           
                           <div
-                            className={`max-w-[85%] rounded-lg px-3 py-2 text-xs ${
+                            className={`max-w-[85%] rounded-lg px-3 py-2 text-xs shadow-sm ${
                               message.type === 'user'
-                                ? 'bg-primary text-primary-foreground'
-                                : 'bg-muted'
+                                ? 'bg-primary text-primary-foreground border border-primary/20'
+                                : 'bg-muted/90 backdrop-blur-sm'
                             }`}
                           >
                             <div>{message.content}</div>
@@ -179,7 +179,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
                           <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
                             <Loader className="h-3 w-3 animate-spin text-primary" />
                           </div>
-                          <div className="bg-muted rounded-lg px-3 py-2 text-xs">
+                          <div className="bg-muted/90 backdrop-blur-sm rounded-lg px-3 py-2 text-xs shadow-sm">
                             <div className="flex items-center gap-1">
                               <div className="flex space-x-1">
                                 <div className="w-1 h-1 bg-primary/60 rounded-full animate-bounce"></div>
