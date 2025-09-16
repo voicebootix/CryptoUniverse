@@ -181,7 +181,22 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # STEP 3: Get user's active strategy portfolio
             portfolio_result = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
             
+            # CRITICAL DEBUG: Log detailed portfolio information
+            self.logger.info("🔍 STRATEGY PORTFOLIO DEBUG",
+                           scan_id=scan_id,
+                           user_id=user_id,
+                           portfolio_success=portfolio_result.get("success"),
+                           portfolio_keys=list(portfolio_result.keys()),
+                           active_strategies_count=len(portfolio_result.get("active_strategies", [])),
+                           total_strategies=portfolio_result.get("total_strategies", 0),
+                           active_strategies_list=[s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])],
+                           portfolio_error=portfolio_result.get("error"))
+            
             if not portfolio_result.get("success") or not portfolio_result.get("active_strategies"):
+                self.logger.warning("❌ NO STRATEGIES FOUND IN PORTFOLIO",
+                                  scan_id=scan_id,
+                                  user_id=user_id,
+                                  portfolio_result=portfolio_result)
                 return await self._handle_no_strategies_user(user_id, scan_id)
             
             active_strategies = portfolio_result["active_strategies"]
