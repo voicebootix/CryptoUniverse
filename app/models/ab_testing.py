@@ -49,7 +49,7 @@ class ABTest(Base):
 
     # Relationships
     creator = relationship("User", back_populates="ab_tests")
-    variants = relationship("ABTestVariant", back_populates="test", cascade="all, delete-orphan")
+    variants = relationship("ABTestVariant", back_populates="test", cascade="all, delete-orphan", foreign_keys="ABTestVariant.test_id")
     winning_variant = relationship("ABTestVariant", foreign_keys=[winning_variant_id], post_update=True)
     results = relationship("ABTestResult", back_populates="test", cascade="all, delete-orphan")
 
