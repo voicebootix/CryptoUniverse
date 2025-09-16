@@ -477,11 +477,11 @@ async def get_chat_status(
     Shows health of all integrated services and features.
     """
     try:
-        status = await unified_chat_service.get_service_status()
+        service_status = await unified_chat_service.get_service_status()
         
         return {
             "success": True,
-            "service_status": status,
+            "service_status": service_status,
             "timestamp": datetime.utcnow().isoformat()
         }
         

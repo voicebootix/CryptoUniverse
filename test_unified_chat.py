@@ -41,13 +41,13 @@ class UnifiedChatTester:
                 json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
             )
             
-            if response.status == 200:
+            if response.status_code == 200:
                 data = response.json()
                 self.token = data["access_token"]
                 print("✅ Login successful")
                 return True
             else:
-                print(f"❌ Login failed: {response.status}")
+                print(f"❌ Login failed: {response.status_code}")
                 return False
     
     async def test_basic_chat(self):
@@ -76,7 +76,7 @@ class UnifiedChatTester:
                 
                 elapsed_time = time.time() - start_time
                 
-                if response.status == 200:
+                if response.status_code == 200:
                     data = response.json()
                     if data.get("success"):
                         print(f"✅ '{message}' - Response in {elapsed_time:.2f}s")
@@ -89,7 +89,7 @@ class UnifiedChatTester:
                         print(f"❌ '{message}' - Failed: {data.get('error')}")
                         self.failed_tests += 1
                 else:
-                    print(f"❌ '{message}' - HTTP {response.status}")
+                    print(f"❌ '{message}' - HTTP {response.status_code}")
                     self.failed_tests += 1
     
     async def test_streaming_chat(self):
@@ -97,24 +97,43 @@ class UnifiedChatTester:
         print("\n🌊 Testing streaming chat...")
         
         import httpx
-        headers = {"Authorization": f"Bearer {self.token}"}
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Accept": "text/event-stream"
+        }
         
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Use GET with query parameters for SSE endpoint
+            async with client.stream(
+                "GET",
                 f"{API_BASE_URL}/chat/stream",
                 headers=headers,
-                json={
+                params={
                     "message": "Give me a detailed portfolio analysis",
-                    "stream": True
+                    "session_id": None,
+                    "conversation_mode": "live_trading"
                 }
-            )
-            
-            if response.status == 200:
-                print("✅ Streaming endpoint accessible")
-                self.passed_tests += 1
-            else:
-                print(f"❌ Streaming failed: HTTP {response.status}")
-                self.failed_tests += 1
+            ) as response:
+                if response.status_code == 200:
+                    print("✅ Streaming endpoint accessible")
+                    
+                    # Read some chunks to verify streaming works
+                    chunk_count = 0
+                    async for line in response.aiter_lines():
+                        if line.startswith("data: "):
+                            chunk_count += 1
+                            if chunk_count >= 3:  # Just verify we get some chunks
+                                break
+                    
+                    if chunk_count > 0:
+                        print(f"✅ Received {chunk_count} streaming chunks")
+                        self.passed_tests += 1
+                    else:
+                        print("❌ No streaming data received")
+                        self.failed_tests += 1
+                else:
+                    print(f"❌ Streaming failed: HTTP {response.status_code}")
+                    self.failed_tests += 1
     
     async def test_conversation_modes(self):
         """Test different conversation modes."""
@@ -141,7 +160,7 @@ class UnifiedChatTester:
                     }
                 )
                 
-                if response.status == 200:
+                if response.status_code == 200:
                     data = response.json()
                     if data.get("success"):
                         print(f"✅ {mode} mode - Working")
@@ -150,7 +169,7 @@ class UnifiedChatTester:
                         print(f"❌ {mode} mode - Failed")
                         self.failed_tests += 1
                 else:
-                    print(f"❌ {mode} mode - HTTP {response.status}")
+                    print(f"❌ {mode} mode - HTTP {response.status_code}")
                     self.failed_tests += 1
     
     async def test_credit_validation(self):
@@ -161,22 +180,23 @@ class UnifiedChatTester:
         headers = {"Authorization": f"Bearer {self.token}"}
         
         # Test trade that should require credits
-        response = await httpx.AsyncClient().post(
-            f"{API_BASE_URL}/chat/message",
-            headers=headers,
-            json={
-                "message": "Execute a trade to buy $1000 of Bitcoin",
-                "conversation_mode": "live_trading"
-            }
-        )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{API_BASE_URL}/chat/message",
+                headers=headers,
+                json={
+                    "message": "Execute a trade to buy $1000 of Bitcoin",
+                    "conversation_mode": "live_trading"
+                }
+            )
         
-        if response.status == 200:
+        if response.status_code == 200:
             data = response.json()
             # Should either succeed or show credit requirement
             print("✅ Credit validation working")
             self.passed_tests += 1
         else:
-            print(f"❌ Credit validation failed: HTTP {response.status}")
+            print(f"❌ Credit validation failed: HTTP {response.status_code}")
             self.failed_tests += 1
     
     async def test_paper_trading_no_credits(self):
@@ -186,16 +206,17 @@ class UnifiedChatTester:
         import httpx
         headers = {"Authorization": f"Bearer {self.token}"}
         
-        response = await httpx.AsyncClient().post(
-            f"{API_BASE_URL}/chat/message",
-            headers=headers,
-            json={
-                "message": "Buy $5000 of Bitcoin",
-                "conversation_mode": "paper_trading"
-            }
-        )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{API_BASE_URL}/chat/message",
+                headers=headers,
+                json={
+                    "message": "Buy $5000 of Bitcoin",
+                    "conversation_mode": "paper_trading"
+                }
+            )
         
-        if response.status == 200:
+        if response.status_code == 200:
             data = response.json()
             if data.get("success"):
                 print("✅ Paper trading works without credits")
@@ -204,7 +225,7 @@ class UnifiedChatTester:
                 print(f"❌ Paper trading failed: {data.get('error')}")
                 self.failed_tests += 1
         else:
-            print(f"❌ Paper trading HTTP {response.status}")
+            print(f"❌ Paper trading HTTP {response.status_code}")
             self.failed_tests += 1
     
     async def test_real_data_integration(self):
@@ -214,13 +235,14 @@ class UnifiedChatTester:
         import httpx
         headers = {"Authorization": f"Bearer {self.token}"}
         
-        response = await httpx.AsyncClient().post(
-            f"{API_BASE_URL}/chat/message",
-            headers=headers,
-            json={"message": "What is my exact portfolio balance?"}
-        )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{API_BASE_URL}/chat/message",
+                headers=headers,
+                json={"message": "What is my exact portfolio balance?"}
+            )
         
-        if response.status == 200:
+        if response.status_code == 200:
             data = response.json()
             if data.get("success"):
                 content = data.get("content", "")
@@ -238,7 +260,7 @@ class UnifiedChatTester:
                     print("❌ No real data found in response")
                     self.failed_tests += 1
         else:
-            print(f"❌ Real data test failed: HTTP {response.status}")
+            print(f"❌ Real data test failed: HTTP {response.status_code}")
             self.failed_tests += 1
     
     async def test_capabilities_endpoint(self):
@@ -248,12 +270,13 @@ class UnifiedChatTester:
         import httpx
         headers = {"Authorization": f"Bearer {self.token}"}
         
-        response = await httpx.AsyncClient().get(
-            f"{API_BASE_URL}/chat/capabilities",
-            headers=headers
-        )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{API_BASE_URL}/chat/capabilities",
+                headers=headers
+            )
         
-        if response.status == 200:
+        if response.status_code == 200:
             data = response.json()
             if data.get("success"):
                 caps = data.get("capabilities", {})
@@ -268,7 +291,7 @@ class UnifiedChatTester:
                 print("❌ Capabilities failed")
                 self.failed_tests += 1
         else:
-            print(f"❌ Capabilities HTTP {response.status}")
+            print(f"❌ Capabilities HTTP {response.status_code}")
             self.failed_tests += 1
     
     async def test_service_status(self):
@@ -278,12 +301,13 @@ class UnifiedChatTester:
         import httpx
         headers = {"Authorization": f"Bearer {self.token}"}
         
-        response = await httpx.AsyncClient().get(
-            f"{API_BASE_URL}/chat/status",
-            headers=headers
-        )
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{API_BASE_URL}/chat/status",
+                headers=headers
+            )
         
-        if response.status == 200:
+        if response.status_code == 200:
             data = response.json()
             if data.get("success"):
                 status = data.get("service_status", {})
@@ -295,7 +319,7 @@ class UnifiedChatTester:
                 print(f"❌ Status check failed: {data.get('error')}")
                 self.failed_tests += 1
         else:
-            print(f"❌ Status HTTP {response.status}")
+            print(f"❌ Status HTTP {response.status_code}")
             self.failed_tests += 1
     
     async def run_all_tests(self):
