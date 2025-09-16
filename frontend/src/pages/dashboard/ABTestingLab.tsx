@@ -69,6 +69,17 @@ import {
   Scatter
 } from 'recharts';
 
+// Helper function for type-safe HTTP status extraction
+const getHttpStatus = (err: unknown): number | undefined => {
+  if (err && typeof err === 'object' && 'response' in err) {
+    const response = (err as any).response;
+    if (response && typeof response.status === 'number') {
+      return response.status;
+    }
+  }
+  return undefined;
+};
+
 interface ABTestVariant {
   id: string;
   name: string;
@@ -300,6 +311,14 @@ const ABTestingLab: React.FC = () => {
   };
 
   if (metricsError || testsError) {
+    // Check if this is an authentication error (type-safe)
+    const metricsStatus = getHttpStatus(metricsError);
+    const testsStatus = getHttpStatus(testsError);
+    const isAuthError = metricsStatus === 401 ||
+                       testsStatus === 401 ||
+                       metricsStatus === 500 ||
+                       testsStatus === 500;
+
     return (
       <div className="p-6">
         <Card>
@@ -307,12 +326,22 @@ const ABTestingLab: React.FC = () => {
             <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
             <h3 className="text-lg font-semibold mb-2">Failed to Load AB Testing Data</h3>
             <p className="text-muted-foreground mb-4">
-              Unable to fetch AB testing information. Please try again.
+              {isAuthError
+                ? "Authentication service is currently unavailable. Please try again later or contact support."
+                : "Unable to fetch AB testing information. Please try again."
+              }
             </p>
-            <Button onClick={() => queryClient.invalidateQueries()}>
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Retry
-            </Button>
+            <div className="space-y-2">
+              <Button onClick={() => queryClient.invalidateQueries()}>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Retry
+              </Button>
+              {isAuthError && (
+                <p className="text-xs text-muted-foreground">
+                  Error: {metricsStatus || testsStatus} - Authentication service error
+                </p>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
