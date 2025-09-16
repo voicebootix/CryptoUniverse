@@ -1,0 +1,906 @@
+[
+  {
+    "test_name": "list_sessions",
+    "status": "success",
+    "sessions_count": 0,
+    "raw_response": {
+      "success": true,
+      "sessions": []
+    }
+  },
+  {
+    "test_name": "Portfolio Balance Query",
+    "status": "success",
+    "response_time": 18.96426749229431,
+    "message": "",
+    "intent": "portfolio_analysis",
+    "metadata": {
+      "portfolio_summary": {
+        "total_value": 4150.25,
+        "daily_pnl": 0.0,
+        "daily_pnl_pct": 0.0,
+        "total_pnl": 0,
+        "total_pnl_pct": 0,
+        "positions": [
+          {
+            "symbol": "XRP",
+            "amount": 378.962,
+            "value_usd": 1175.88,
+            "percentage": 28.332751039094035,
+            "exchange": "binance",
+            "change_24h": 0
+          },
+          {
+            "symbol": "ADA",
+            "amount": 1059.01876762,
+            "value_usd": 974.83,
+            "percentage": 23.488464550328295,
+            "exchange": "binance",
+            "change_24h": 0
+          },
+          {
+            "symbol": "DOGE",
+            "amount": 605.21739217,
+            "value_usd": 173.16,
+            "percentage": 4.172278778386844,
+            "exchange": "binance",
+            "change_24h": 0
+          },
+          {
+            "symbol": "USDC",
+            "amount": 14.89638597,
+            "value_usd": 14.9,
+            "percentage": 0.3590145171977592,
+            "exchange": "binance",
+            "change_24h": 0
+          },
+          {
+            "symbol": "REEF",
+            "amount": 4330.8403,
+            "value_usd": 2.98,
+            "percentage": 0.07180290343955184,
+            "exchange": "binance",
+            "change_24h": 0
+          }
+        ],
+        "risk_level": "LOW",
+        "exchanges_connected": 1,
+        "exchanges": [
+          "binance"
+        ],
+        "data_source": "enterprise_optimized_method",
+        "last_updated": "2025-09-13T17:17:33.534009"
+      },
+      "risk_metrics": {
+        "overall_risk": "Medium",
+        "var_24h": 0,
+        "sharpe_ratio": 0,
+        "max_drawdown": 0
+      },
+      "ai_analysis": {
+        "success": true,
+        "analysis": "Portfolio data successfully retrieved. For detailed AI analysis, use the full analysis feature.",
+        "confidence": 0.8,
+        "recommendations": []
+      },
+      "actionable_items": [
+        "rebalance",
+        "risk_analysis",
+        "opportunities",
+        "stop_losses"
+      ]
+    },
+    "raw_response": {
+      "success": true,
+      "session_id": "486f1e8b-a274-4813-aa38-9ccf34889892",
+      "message_id": "msg_60308f931b604ce5be9c1dbeb6b10bbf",
+      "content": "\ud83d\udcb0 **Your Portfolio Summary**\n\n**Current Balance:**\n\u2022 Total Portfolio Value: $4,150.25\n\u2022 Available Cash: $0.00\n\u2022 Today's P&L: $0.00 (+0.00%)\n\u2022 Overall P&L: $0.00 (+0.00%)\n\n**Risk Assessment:**\n\u2022 Risk Level: Medium\n\u2022 Active Positions: 5\n\n**Top 5 Holdings:**\n1. XRP (binance): $1,175.88 (28.3%)   Amount: 378.9620\n2. ADA (binance): $974.83 (23.5%)   Amount: 1,059.0188\n3. DOGE (binance): $173.16 (4.2%)   Amount: 605.2174\n4. USDC (binance): $14.90 (0.4%)   Amount: 14.8964\n5. REEF (binance): $2.98 (0.1%)   Amount: 4,330.8403\n\n**Quick Actions:**\n\u2022 Ask \"Show me more details\" for full analysis\n\u2022 Ask \"What should I buy?\" for recommendations\n\u2022 Ask \"How risky is my portfolio?\" for risk analysis\n\nYour portfolio is connected and showing live data from your exchanges!",
+      "intent": "portfolio_analysis",
+      "confidence": 0.8,
+      "requires_approval": false,
+      "decision_id": null,
+      "metadata": {
+        "portfolio_summary": {
+          "total_value": 4150.25,
+          "daily_pnl": 0.0,
+          "daily_pnl_pct": 0.0,
+          "total_pnl": 0,
+          "total_pnl_pct": 0,
+          "positions": [
+            {
+              "symbol": "XRP",
+              "amount": 378.962,
+              "value_usd": 1175.88,
+              "percentage": 28.332751039094035,
+              "exchange": "binance",
+              "change_24h": 0
+            },
+            {
+              "symbol": "ADA",
+              "amount": 1059.01876762,
+              "value_usd": 974.83,
+              "percentage": 23.488464550328295,
+              "exchange": "binance",
+              "change_24h": 0
+            },
+            {
+              "symbol": "DOGE",
+              "amount": 605.21739217,
+              "value_usd": 173.16,
+              "percentage": 4.172278778386844,
+              "exchange": "binance",
+              "change_24h": 0
+            },
+            {
+              "symbol": "USDC",
+              "amount": 14.89638597,
+              "value_usd": 14.9,
+              "percentage": 0.3590145171977592,
+              "exchange": "binance",
+              "change_24h": 0
+            },
+            {
+              "symbol": "REEF",
+              "amount": 4330.8403,
+              "value_usd": 2.98,
+              "percentage": 0.07180290343955184,
+              "exchange": "binance",
+              "change_24h": 0
+            }
+          ],
+          "risk_level": "LOW",
+          "exchanges_connected": 1,
+          "exchanges": [
+            "binance"
+          ],
+          "data_source": "enterprise_optimized_method",
+          "last_updated": "2025-09-13T17:17:33.534009"
+        },
+        "risk_metrics": {
+          "overall_risk": "Medium",
+          "var_24h": 0,
+          "sharpe_ratio": 0,
+          "max_drawdown": 0
+        },
+        "ai_analysis": {
+          "success": true,
+          "analysis": "Portfolio data successfully retrieved. For detailed AI analysis, use the full analysis feature.",
+          "confidence": 0.8,
+          "recommendations": []
+        },
+        "actionable_items": [
+          "rebalance",
+          "risk_analysis",
+          "opportunities",
+          "stop_losses"
+        ]
+      },
+      "timestamp": "2025-09-13T17:17:39.623858",
+      "ai_analysis": null
+    }
+  },
+  {
+    "test_name": "Rebalancing Opportunities",
+    "status": "success",
+    "response_time": 32.8879451751709,
+    "message": "",
+    "intent": "rebalancing",
+    "metadata": {
+      "rebalance_analysis": {
+        "needs_rebalancing": false,
+        "error": "'dict' object has no attribute 'rebalancing_needed'"
+      },
+      "portfolio_data": {
+        "total_value": 4148.91,
+        "daily_pnl": 0.0,
+        "daily_pnl_pct": 0.0,
+        "total_pnl": 0,
+        "total_pnl_pct": 0,
+        "positions": [
+          {
+            "symbol": "XRP",
+            "amount": 378.962,
+            "value_usd": 1175.43,
+            "percentage": 28.331055626658568,
+            "exchange": "binance",
+            "change_24h": 0
+          },
+          {
+            "symbol": "ADA",
+            "amount": 1059.01876762,
+            "value_usd": 974.3,
+            "percentage": 23.483276330409673,
+            "exchange": "binance",
+            "change_24h": 0
+          },
+          {
+            "symbol": "DOGE",
+            "amount": 605.21739217,
+            "value_usd": 172.97,
+            "percentage": 4.169046809885006,
+            "exchange": "binance",
+            "change_24h": 0
+          },
+          {
+            "symbol": "USDC",
+            "amount": 14.89638597,
+            "value_usd": 14.9,
+            "percentage": 0.35913047041271084,
+            "exchange": "binance",
+            "change_24h": 0
+          },
+          {
+            "symbol": "REEF",
+            "amount": 4330.8403,
+            "value_usd": 2.98,
+            "percentage": 0.07182609408254216,
+            "exchange": "binance",
+            "change_24h": 0
+          }
+        ],
+        "risk_level": "LOW",
+        "exchanges_connected": 1,
+        "exchanges": [
+          "binance"
+        ],
+        "data_source": "enterprise_optimized_method",
+        "last_updated": "2025-09-13T17:17:54.604873"
+      },
+      "ai_analysis": {
+        "success": true,
+        "function": "analyze_opportunity",
+        "request_id": "AICS_1757783874_6b9808f4",
+        "opportunity_analysis": {
+          "success": true,
+          "consensus_score": 56.39173372348208,
+          "recommendation": "HOLD",
+          "reasoning": "Technical indicators may not be as reliable due to its meme coin status, but a sharp increase in social media activity could precede price movements. DOGE and REEF present higher risks due to their potential for large price swings; However, the REEF position may face higher liquidity risks due to its much smaller market cap; The 24-hour change being 0 across all assets is unusual and likely indicates a data feed issue rather than actual market stagnation. Market Timing Considerations (Confidence: 10%)**\n\nDue to the absence of market data (e",
+          "confidence_threshold_met": false,
+          "model_responses": [
+            {
+              "provider": "gpt4",
+              "confidence": 75.0,
+              "reasoning": "Technical indicators may not be as reliable due to its meme coin status, but a sharp increase in social media activity could precede price movements. DOGE and REEF present higher risks due to their potential for large price swings",
+              "cost": 0.019000000000000003,
+              "response_time": 15.366933107376099
+            },
+            {
+              "provider": "claude",
+              "confidence": 35.0,
+              "reasoning": "However, the REEF position may face higher liquidity risks due to its much smaller market cap",
+              "cost": 0.02817,
+              "response_time": 18.356361389160156
+            },
+            {
+              "provider": "gemini",
+              "confidence": 20.0,
+              "reasoning": "The 24-hour change being 0 across all assets is unusual and likely indicates a data feed issue rather than actual market stagnation. Market Timing Considerations (Confidence: 10%)**\n\nDue to the absence of market data (e",
+              "cost": 0.0020375000000000002,
+              "response_time": 15.27714467048645
+            }
+          ],
+          "cost_summary": {
+            "total_cost": 0.0492075,
+            "models_used": 3
+          },
+          "timestamp": "2025-09-13T17:18:12.983784",
+          "opportunity_score": 56.39173372348208,
+          "execution_priority": "MEDIUM",
+          "suggested_allocation": 5.639173372348209,
+          "time_horizon": "MEDIUM_TERM"
+        },
+        "timestamp": "2025-09-13T17:18:12.983801"
+      },
+      "needs_rebalancing": false
+    },
+    "raw_response": {
+      "success": true,
+      "session_id": "486f1e8b-a274-4813-aa38-9ccf34889892",
+      "message_id": "msg_31a959954ec24eb88ac299bc68068ce5",
+      "content": "\u2705 **Portfolio is Optimally Balanced**\n\n**Current Status:**\n\u2022 Portfolio Value: $4,148.91\n\u2022 Allocation Variance: < 3% (Excellent)\n\u2022 Risk Level: LOW\n\nYour portfolio is well-balanced according to your current strategy. No rebalancing needed at this time.\n\n**Monitoring:**\n\u2022 I'll continue watching for optimization opportunities\n\u2022 You'll be notified when rebalancing becomes beneficial\n\u2022 Current allocation is within target ranges\n\n**Alternative Actions:**\n\u2022 \"Change strategy\" - Switch to different allocation model\n\u2022 \"Increase risk tolerance\" - Adjust for higher returns\n\u2022 \"Add new assets\" - Expand portfolio diversity",
+      "intent": "rebalancing",
+      "confidence": 0.95,
+      "requires_approval": false,
+      "decision_id": null,
+      "metadata": {
+        "rebalance_analysis": {
+          "needs_rebalancing": false,
+          "error": "'dict' object has no attribute 'rebalancing_needed'"
+        },
+        "portfolio_data": {
+          "total_value": 4148.91,
+          "daily_pnl": 0.0,
+          "daily_pnl_pct": 0.0,
+          "total_pnl": 0,
+          "total_pnl_pct": 0,
+          "positions": [
+            {
+              "symbol": "XRP",
+              "amount": 378.962,
+              "value_usd": 1175.43,
+              "percentage": 28.331055626658568,
+              "exchange": "binance",
+              "change_24h": 0
+            },
+            {
+              "symbol": "ADA",
+              "amount": 1059.01876762,
+              "value_usd": 974.3,
+              "percentage": 23.483276330409673,
+              "exchange": "binance",
+              "change_24h": 0
+            },
+            {
+              "symbol": "DOGE",
+              "amount": 605.21739217,
+              "value_usd": 172.97,
+              "percentage": 4.169046809885006,
+              "exchange": "binance",
+              "change_24h": 0
+            },
+            {
+              "symbol": "USDC",
+              "amount": 14.89638597,
+              "value_usd": 14.9,
+              "percentage": 0.35913047041271084,
+              "exchange": "binance",
+              "change_24h": 0
+            },
+            {
+              "symbol": "REEF",
+              "amount": 4330.8403,
+              "value_usd": 2.98,
+              "percentage": 0.07182609408254216,
+              "exchange": "binance",
+              "change_24h": 0
+            }
+          ],
+          "risk_level": "LOW",
+          "exchanges_connected": 1,
+          "exchanges": [
+            "binance"
+          ],
+          "data_source": "enterprise_optimized_method",
+          "last_updated": "2025-09-13T17:17:54.604873"
+        },
+        "ai_analysis": {
+          "success": true,
+          "function": "analyze_opportunity",
+          "request_id": "AICS_1757783874_6b9808f4",
+          "opportunity_analysis": {
+            "success": true,
+            "consensus_score": 56.39173372348208,
+            "recommendation": "HOLD",
+            "reasoning": "Technical indicators may not be as reliable due to its meme coin status, but a sharp increase in social media activity could precede price movements. DOGE and REEF present higher risks due to their potential for large price swings; However, the REEF position may face higher liquidity risks due to its much smaller market cap; The 24-hour change being 0 across all assets is unusual and likely indicates a data feed issue rather than actual market stagnation. Market Timing Considerations (Confidence: 10%)**\n\nDue to the absence of market data (e",
+            "confidence_threshold_met": false,
+            "model_responses": [
+              {
+                "provider": "gpt4",
+                "confidence": 75.0,
+                "reasoning": "Technical indicators may not be as reliable due to its meme coin status, but a sharp increase in social media activity could precede price movements. DOGE and REEF present higher risks due to their potential for large price swings",
+                "cost": 0.019000000000000003,
+                "response_time": 15.366933107376099
+              },
+              {
+                "provider": "claude",
+                "confidence": 35.0,
+                "reasoning": "However, the REEF position may face higher liquidity risks due to its much smaller market cap",
+                "cost": 0.02817,
+                "response_time": 18.356361389160156
+              },
+              {
+                "provider": "gemini",
+                "confidence": 20.0,
+                "reasoning": "The 24-hour change being 0 across all assets is unusual and likely indicates a data feed issue rather than actual market stagnation. Market Timing Considerations (Confidence: 10%)**\n\nDue to the absence of market data (e",
+                "cost": 0.0020375000000000002,
+                "response_time": 15.27714467048645
+              }
+            ],
+            "cost_summary": {
+              "total_cost": 0.0492075,
+              "models_used": 3
+            },
+            "timestamp": "2025-09-13T17:18:12.983784",
+            "opportunity_score": 56.39173372348208,
+            "execution_priority": "MEDIUM",
+            "suggested_allocation": 5.639173372348209,
+            "time_horizon": "MEDIUM_TERM"
+          },
+          "timestamp": "2025-09-13T17:18:12.983801"
+        },
+        "needs_rebalancing": false
+      },
+      "timestamp": "2025-09-13T17:18:14.552470",
+      "ai_analysis": null
+    }
+  },
+  {
+    "test_name": "Trading Opportunities",
+    "status": "success",
+    "response_time": 37.30771780014038,
+    "message": "",
+    "intent": "opportunity_discovery",
+    "metadata": {
+      "opportunities": [],
+      "service_used": "user_opportunity_discovery",
+      "opportunities_count": 0,
+      "ai_analysis": {
+        "success": true,
+        "function": "analyze_opportunity",
+        "request_id": "AICS_1757783913_7e24ac7e",
+        "opportunity_analysis": {
+          "success": true,
+          "consensus_score": 80.01085883514314,
+          "recommendation": "HOLD",
+          "reasoning": "- Assets like XRP and ADA present a moderate risk with potentially higher rewards due to their established platforms and development activities. - DOGE and REEF represent higher risk but also the potential for significant rewards due to their volatility and market sentiment-driven movements; Based on the provided opportunity data, there are currently no active trading opportunities identified for the user's account; ## Cryptocurrency Trading Opportunity Analysis\n\n**1",
+          "confidence_threshold_met": true,
+          "model_responses": [
+            {
+              "provider": "gpt4",
+              "confidence": 75.0,
+              "reasoning": "- Assets like XRP and ADA present a moderate risk with potentially higher rewards due to their established platforms and development activities. - DOGE and REEF represent higher risk but also the potential for significant rewards due to their volatility and market sentiment-driven movements",
+              "cost": 0.02824,
+              "response_time": 17.688814163208008
+            },
+            {
+              "provider": "claude",
+              "confidence": 90.0,
+              "reasoning": "Based on the provided opportunity data, there are currently no active trading opportunities identified for the user's account",
+              "cost": 0.04314,
+              "response_time": 19.113656044006348
+            },
+            {
+              "provider": "gemini",
+              "confidence": 10.0,
+              "reasoning": "## Cryptocurrency Trading Opportunity Analysis\n\n**1",
+              "cost": 0.0025225,
+              "response_time": 13.735509395599365
+            }
+          ],
+          "cost_summary": {
+            "total_cost": 0.0739025,
+            "models_used": 3
+          },
+          "timestamp": "2025-09-13T17:18:52.360005",
+          "opportunity_score": 80.01085883514314,
+          "execution_priority": "MEDIUM",
+          "suggested_allocation": 8.001085883514314,
+          "time_horizon": "MEDIUM_TERM"
+        },
+        "timestamp": "2025-09-13T17:18:52.360023"
+      }
+    },
+    "raw_response": {
+      "success": true,
+      "session_id": "486f1e8b-a274-4813-aa38-9ccf34889892",
+      "message_id": "msg_68f2ad54e983491390f00167d5bfc5cd",
+      "content": "\ud83d\udd0d **Opportunity Scan Complete**\n\nAfter comprehensive analysis, no significant trading opportunities meet the current risk and return criteria.\n\n**Analysis Completed:**\n\u2022 All strategy models executed successfully\n\u2022 Risk thresholds applied correctly  \n\u2022 Market conditions analyzed\n\n**Current Assessment:**\n\u2022 Markets in consolidation phase\n\u2022 Volatility below opportunity threshold\n\u2022 Existing positions recommended to hold\n\n**Options:**\n\u2022 \"Lower risk threshold\" - See more aggressive opportunities\n\u2022 \"Check specific sectors\" - DeFi, Layer 1, Gaming analysis\n\u2022 \"Review positions\" - Optimize current holdings",
+      "intent": "opportunity_discovery",
+      "confidence": 0.8,
+      "requires_approval": false,
+      "decision_id": null,
+      "metadata": {
+        "opportunities": [],
+        "service_used": "user_opportunity_discovery",
+        "opportunities_count": 0,
+        "ai_analysis": {
+          "success": true,
+          "function": "analyze_opportunity",
+          "request_id": "AICS_1757783913_7e24ac7e",
+          "opportunity_analysis": {
+            "success": true,
+            "consensus_score": 80.01085883514314,
+            "recommendation": "HOLD",
+            "reasoning": "- Assets like XRP and ADA present a moderate risk with potentially higher rewards due to their established platforms and development activities. - DOGE and REEF represent higher risk but also the potential for significant rewards due to their volatility and market sentiment-driven movements; Based on the provided opportunity data, there are currently no active trading opportunities identified for the user's account; ## Cryptocurrency Trading Opportunity Analysis\n\n**1",
+            "confidence_threshold_met": true,
+            "model_responses": [
+              {
+                "provider": "gpt4",
+                "confidence": 75.0,
+                "reasoning": "- Assets like XRP and ADA present a moderate risk with potentially higher rewards due to their established platforms and development activities. - DOGE and REEF represent higher risk but also the potential for significant rewards due to their volatility and market sentiment-driven movements",
+                "cost": 0.02824,
+                "response_time": 17.688814163208008
+              },
+              {
+                "provider": "claude",
+                "confidence": 90.0,
+                "reasoning": "Based on the provided opportunity data, there are currently no active trading opportunities identified for the user's account",
+                "cost": 0.04314,
+                "response_time": 19.113656044006348
+              },
+              {
+                "provider": "gemini",
+                "confidence": 10.0,
+                "reasoning": "## Cryptocurrency Trading Opportunity Analysis\n\n**1",
+                "cost": 0.0025225,
+                "response_time": 13.735509395599365
+              }
+            ],
+            "cost_summary": {
+              "total_cost": 0.0739025,
+              "models_used": 3
+            },
+            "timestamp": "2025-09-13T17:18:52.360005",
+            "opportunity_score": 80.01085883514314,
+            "execution_priority": "MEDIUM",
+            "suggested_allocation": 8.001085883514314,
+            "time_horizon": "MEDIUM_TERM"
+          },
+          "timestamp": "2025-09-13T17:18:52.360023"
+        }
+      },
+      "timestamp": "2025-09-13T17:18:53.799314",
+      "ai_analysis": null
+    }
+  },
+  {
+    "test_name": "Market Analysis",
+    "status": "success",
+    "response_time": 14.26660943031311,
+    "message": "",
+    "intent": "market_analysis",
+    "metadata": {
+      "market_overview": {
+        "sentiment": "Live",
+        "trend": "Unknown",
+        "market_phase": "Unknown",
+        "volatility": "Live Market",
+        "fear_greed_index": 50,
+        "btc_dominance": 50.0,
+        "total_market_cap": 0,
+        "total_volume_24h": 0,
+        "arbitrage_opportunities": 0,
+        "last_updated": "2025-09-13T17:19:00.271545",
+        "market_data_count": 0,
+        "available_symbols": []
+      },
+      "sector_analysis": {
+        "sectors": []
+      },
+      "ai_analysis": {
+        "success": true,
+        "analysis": "Market data successfully retrieved. AI analysis temporarily unavailable.",
+        "confidence": 0.7
+      }
+    },
+    "raw_response": {
+      "success": true,
+      "session_id": "486f1e8b-a274-4813-aa38-9ccf34889892",
+      "message_id": "msg_c720d7bea09e42b99111ea80a107f3e4",
+      "content": "\ud83d\udcc8 **Comprehensive Market Analysis**\n\n**Market Overview:**\n\u2022 Overall Sentiment: Live\n\u2022 Trend Direction: Unknown\n\u2022 Market Phase: Unknown\n\u2022 Volatility Level: Live Market\n\n**Key Metrics:**\n\u2022 Total Market Cap: $0B\n\u2022 24h Volume: $0B\n\u2022 BTC Dominance: 50.0%\n\u2022 Fear & Greed: 50/100\n\n**Sector Performance:**\n\n\ud83e\udd16 **AI Multi-Model Analysis:**\nMarket data successfully retrieved. AI analysis temporarily unavailable.\n\n**Trading Implications:**\nGenerating trading insights...\n\n**Recommended Focus Areas:**\nIdentifying key opportunities...\n\n**Available Actions:**\n\u2022 \"Analyze [specific crypto]\" - Deep dive on asset\n\u2022 \"Find sector opportunities\" - Explore hot sectors\n\u2022 \"Risk assessment\" - Check portfolio against market risks\n\u2022 \"Rebalance for market\" - Optimize for current conditions\n\nWhat aspect of the market would you like to explore?",
+      "intent": "market_analysis",
+      "confidence": 0.7,
+      "requires_approval": false,
+      "decision_id": null,
+      "metadata": {
+        "market_overview": {
+          "sentiment": "Live",
+          "trend": "Unknown",
+          "market_phase": "Unknown",
+          "volatility": "Live Market",
+          "fear_greed_index": 50,
+          "btc_dominance": 50.0,
+          "total_market_cap": 0,
+          "total_volume_24h": 0,
+          "arbitrage_opportunities": 0,
+          "last_updated": "2025-09-13T17:19:00.271545",
+          "market_data_count": 0,
+          "available_symbols": []
+        },
+        "sector_analysis": {
+          "sectors": []
+        },
+        "ai_analysis": {
+          "success": true,
+          "analysis": "Market data successfully retrieved. AI analysis temporarily unavailable.",
+          "confidence": 0.7
+        }
+      },
+      "timestamp": "2025-09-13T17:19:10.123126",
+      "ai_analysis": null
+    }
+  },
+  {
+    "test_name": "Risk Analysis",
+    "status": "success",
+    "response_time": 15.51961636543274,
+    "message": "",
+    "intent": "market_analysis",
+    "metadata": {
+      "market_overview": {
+        "sentiment": "Live",
+        "trend": "Unknown",
+        "market_phase": "Unknown",
+        "volatility": "Live Market",
+        "fear_greed_index": 50,
+        "btc_dominance": 50.0,
+        "total_market_cap": 0,
+        "total_volume_24h": 0,
+        "arbitrage_opportunities": 0,
+        "last_updated": "2025-09-13T17:19:18.271677",
+        "market_data_count": 0,
+        "available_symbols": []
+      },
+      "sector_analysis": {
+        "sectors": []
+      },
+      "ai_analysis": {
+        "success": true,
+        "analysis": "Market data successfully retrieved. AI analysis temporarily unavailable.",
+        "confidence": 0.7
+      }
+    },
+    "raw_response": {
+      "success": true,
+      "session_id": "486f1e8b-a274-4813-aa38-9ccf34889892",
+      "message_id": "msg_dfca217e0cc64979b48277b4c49eb43b",
+      "content": "\ud83d\udcc8 **Comprehensive Market Analysis**\n\n**Market Overview:**\n\u2022 Overall Sentiment: Live\n\u2022 Trend Direction: Unknown\n\u2022 Market Phase: Unknown\n\u2022 Volatility Level: Live Market\n\n**Key Metrics:**\n\u2022 Total Market Cap: $0B\n\u2022 24h Volume: $0B\n\u2022 BTC Dominance: 50.0%\n\u2022 Fear & Greed: 50/100\n\n**Sector Performance:**\n\n\ud83e\udd16 **AI Multi-Model Analysis:**\nMarket data successfully retrieved. AI analysis temporarily unavailable.\n\n**Trading Implications:**\nGenerating trading insights...\n\n**Recommended Focus Areas:**\nIdentifying key opportunities...\n\n**Available Actions:**\n\u2022 \"Analyze [specific crypto]\" - Deep dive on asset\n\u2022 \"Find sector opportunities\" - Explore hot sectors\n\u2022 \"Risk assessment\" - Check portfolio against market risks\n\u2022 \"Rebalance for market\" - Optimize for current conditions\n\nWhat aspect of the market would you like to explore?",
+      "intent": "market_analysis",
+      "confidence": 0.7,
+      "requires_approval": false,
+      "decision_id": null,
+      "metadata": {
+        "market_overview": {
+          "sentiment": "Live",
+          "trend": "Unknown",
+          "market_phase": "Unknown",
+          "volatility": "Live Market",
+          "fear_greed_index": 50,
+          "btc_dominance": 50.0,
+          "total_market_cap": 0,
+          "total_volume_24h": 0,
+          "arbitrage_opportunities": 0,
+          "last_updated": "2025-09-13T17:19:18.271677",
+          "market_data_count": 0,
+          "available_symbols": []
+        },
+        "sector_analysis": {
+          "sectors": []
+        },
+        "ai_analysis": {
+          "success": true,
+          "analysis": "Market data successfully retrieved. AI analysis temporarily unavailable.",
+          "confidence": 0.7
+        }
+      },
+      "timestamp": "2025-09-13T17:19:27.665081",
+      "ai_analysis": null
+    }
+  },
+  {
+    "test_name": "Portfolio Optimization",
+    "status": "success",
+    "response_time": 17.141217947006226,
+    "message": "",
+    "intent": "portfolio_analysis",
+    "metadata": {
+      "portfolio_summary": {
+        "total_value": 4143.179999999999,
+        "daily_pnl": 0.0,
+        "daily_pnl_pct": 0.0,
+        "total_pnl": 0,
+        "total_pnl_pct": 0,
+        "positions": [
+          {
+            "symbol": "XRP",
+            "amount": 378.962,
+            "value_usd": 1174.67,
+            "percentage": 28.351893955850343,
+            "exchange": "binance",
+            "change_24h": 0
+          },
+          {
+            "symbol": "ADA",
+            "amount": 1059.01876762,
+            "value_usd": 972.81,
+            "percentage": 23.479790885262048,
+            "exchange": "binance",
+            "change_24h": 0
+          },
+          {
+            "symbol": "DOGE",
+            "amount": 605.21739217,
+            "value_usd": 172.6,
+            "percentage": 4.165882245038835,
+            "exchange": "binance",
+            "change_24h": 0
+          },
+          {
+            "symbol": "USDC",
+            "amount": 14.89638597,
+            "value_usd": 14.9,
+            "percentage": 0.35962714629825404,
+            "exchange": "binance",
+            "change_24h": 0
+          },
+          {
+            "symbol": "REEF",
+            "amount": 4330.8403,
+            "value_usd": 2.98,
+            "percentage": 0.07192542925965081,
+            "exchange": "binance",
+            "change_24h": 0
+          }
+        ],
+        "risk_level": "LOW",
+        "exchanges_connected": 1,
+        "exchanges": [
+          "binance"
+        ],
+        "data_source": "enterprise_optimized_method",
+        "last_updated": "2025-09-13T17:19:40.698123"
+      },
+      "risk_metrics": {
+        "overall_risk": "Medium",
+        "var_24h": 0,
+        "sharpe_ratio": 0,
+        "max_drawdown": 0
+      },
+      "ai_analysis": {
+        "success": true,
+        "analysis": "Portfolio data successfully retrieved. For detailed AI analysis, use the full analysis feature.",
+        "confidence": 0.8,
+        "recommendations": []
+      },
+      "actionable_items": [
+        "rebalance",
+        "risk_analysis",
+        "opportunities",
+        "stop_losses"
+      ]
+    },
+    "raw_response": {
+      "success": true,
+      "session_id": "486f1e8b-a274-4813-aa38-9ccf34889892",
+      "message_id": "msg_ed36a15e60ce4e1a82305d662b476872",
+      "content": "\ud83d\udcb0 **Your Portfolio Summary**\n\n**Current Balance:**\n\u2022 Total Portfolio Value: $4,143.18\n\u2022 Available Cash: $0.00\n\u2022 Today's P&L: $0.00 (+0.00%)\n\u2022 Overall P&L: $0.00 (+0.00%)\n\n**Risk Assessment:**\n\u2022 Risk Level: Medium\n\u2022 Active Positions: 5\n\n**Top 5 Holdings:**\n1. XRP (binance): $1,174.67 (28.4%)   Amount: 378.9620\n2. ADA (binance): $972.81 (23.5%)   Amount: 1,059.0188\n3. DOGE (binance): $172.60 (4.2%)   Amount: 605.2174\n4. USDC (binance): $14.90 (0.4%)   Amount: 14.8964\n5. REEF (binance): $2.98 (0.1%)   Amount: 4,330.8403\n\n**Quick Actions:**\n\u2022 Ask \"Show me more details\" for full analysis\n\u2022 Ask \"What should I buy?\" for recommendations\n\u2022 Ask \"How risky is my portfolio?\" for risk analysis\n\nYour portfolio is connected and showing live data from your exchanges!",
+      "intent": "portfolio_analysis",
+      "confidence": 0.8,
+      "requires_approval": false,
+      "decision_id": null,
+      "metadata": {
+        "portfolio_summary": {
+          "total_value": 4143.179999999999,
+          "daily_pnl": 0.0,
+          "daily_pnl_pct": 0.0,
+          "total_pnl": 0,
+          "total_pnl_pct": 0,
+          "positions": [
+            {
+              "symbol": "XRP",
+              "amount": 378.962,
+              "value_usd": 1174.67,
+              "percentage": 28.351893955850343,
+              "exchange": "binance",
+              "change_24h": 0
+            },
+            {
+              "symbol": "ADA",
+              "amount": 1059.01876762,
+              "value_usd": 972.81,
+              "percentage": 23.479790885262048,
+              "exchange": "binance",
+              "change_24h": 0
+            },
+            {
+              "symbol": "DOGE",
+              "amount": 605.21739217,
+              "value_usd": 172.6,
+              "percentage": 4.165882245038835,
+              "exchange": "binance",
+              "change_24h": 0
+            },
+            {
+              "symbol": "USDC",
+              "amount": 14.89638597,
+              "value_usd": 14.9,
+              "percentage": 0.35962714629825404,
+              "exchange": "binance",
+              "change_24h": 0
+            },
+            {
+              "symbol": "REEF",
+              "amount": 4330.8403,
+              "value_usd": 2.98,
+              "percentage": 0.07192542925965081,
+              "exchange": "binance",
+              "change_24h": 0
+            }
+          ],
+          "risk_level": "LOW",
+          "exchanges_connected": 1,
+          "exchanges": [
+            "binance"
+          ],
+          "data_source": "enterprise_optimized_method",
+          "last_updated": "2025-09-13T17:19:40.698123"
+        },
+        "risk_metrics": {
+          "overall_risk": "Medium",
+          "var_24h": 0,
+          "sharpe_ratio": 0,
+          "max_drawdown": 0
+        },
+        "ai_analysis": {
+          "success": true,
+          "analysis": "Portfolio data successfully retrieved. For detailed AI analysis, use the full analysis feature.",
+          "confidence": 0.8,
+          "recommendations": []
+        },
+        "actionable_items": [
+          "rebalance",
+          "risk_analysis",
+          "opportunities",
+          "stop_losses"
+        ]
+      },
+      "timestamp": "2025-09-13T17:19:46.811590",
+      "ai_analysis": null
+    }
+  },
+  {
+    "test_name": "Trading History",
+    "status": "success",
+    "response_time": 18.850365161895752,
+    "message": "",
+    "intent": "general_query",
+    "metadata": {
+      "service_used": "ai_consensus",
+      "query_type": "general"
+    },
+    "raw_response": {
+      "success": true,
+      "session_id": "486f1e8b-a274-4813-aa38-9ccf34889892",
+      "message_id": "msg_3eb21794a2034a098a97c5314fdb6ca7",
+      "content": "SELL",
+      "intent": "general_query",
+      "confidence": 0.7,
+      "requires_approval": false,
+      "decision_id": null,
+      "metadata": {
+        "service_used": "ai_consensus",
+        "query_type": "general"
+      },
+      "timestamp": "2025-09-13T17:20:07.664011",
+      "ai_analysis": null
+    }
+  },
+  {
+    "test_name": "Strategy Recommendation",
+    "status": "success",
+    "response_time": 19.958900690078735,
+    "message": "",
+    "intent": "general_query",
+    "metadata": {
+      "service_used": "ai_consensus",
+      "query_type": "general"
+    },
+    "raw_response": {
+      "success": true,
+      "session_id": "486f1e8b-a274-4813-aa38-9ccf34889892",
+      "message_id": "msg_33914afb5a024988b1be81020435bcdc",
+      "content": "SELL",
+      "intent": "general_query",
+      "confidence": 0.7,
+      "requires_approval": false,
+      "decision_id": null,
+      "metadata": {
+        "service_used": "ai_consensus",
+        "query_type": "general"
+      },
+      "timestamp": "2025-09-13T17:20:29.540214",
+      "ai_analysis": null
+    }
+  },
+  {
+    "test_name": "session_messages",
+    "status": "success",
+    "messages_count": 0,
+    "raw_response": {
+      "success": true,
+      "session_id": "486f1e8b-a274-4813-aa38-9ccf34889892",
+      "messages": [],
+      "total_messages": 0
+    }
+  }
+]

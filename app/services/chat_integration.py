@@ -377,7 +377,23 @@ Reply with:
 • Estimated Improvement: {rebalance_analysis.get('expected_improvement', 0):.1f}%
 
 🤖 **AI Analysis:**
-{ai_analysis.get('analysis', 'Analyzing rebalancing strategy...')}
+{ai_analysis.get('analysis', 'Analyzing rebalancing strategy...')}"""
+
+                # DEBUG: Add debug information if available
+                debug_info = rebalance_analysis.get('debug_info')
+                if debug_info:
+                    response_content += f"""
+
+🔍 **Debug Information:**
+• Portfolio Positions: {debug_info.get('portfolio_positions_count', 0)}
+• Optimization Weights: {debug_info.get('optimization_weights_count', 0)}
+• Portfolio Symbols: {debug_info.get('portfolio_symbols', [])}
+• Optimization Symbols: {debug_info.get('optimization_symbols', [])}
+• Position Values: {debug_info.get('position_values', [])}
+• Optimization Weights: {debug_info.get('optimization_weights', {})}
+• Total Value: ${debug_info.get('portfolio_total_value', 0):,.2f}"""
+
+                response_content += f"""
 
 **Execution Options:**
 • "✅ Execute rebalancing" - Automatic execution

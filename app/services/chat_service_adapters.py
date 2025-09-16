@@ -232,40 +232,55 @@ class ChatServiceAdapters:
                 return {
                     "needs_rebalancing": False,
                     "deviation_score": 0,
-                    "recommended_trades": []
+                    "recommended_trades": [],
+                    "analysis_type": "rebalancing"  # Ensure analysis_type is always present
                 }
             
             optimization_data = optimization_result.get("optimization_result", {})
             
-            # Check if rebalancing is needed
+            # Check if rebalancing is needed (defensive extraction)
             needs_rebalancing = optimization_data.get("rebalancing_needed", False)
             deviation_score = optimization_data.get("deviation_percentage", 0)
             
-            # Format recommended trades
+            # Format recommended trades (defensive extraction)
             recommended_trades = []
-            for trade in optimization_data.get("recommended_trades", []):
-                recommended_trades.append({
-                    "symbol": trade.get("symbol"),
-                    "action": trade.get("action"),  # buy/sell
-                    "amount": trade.get("amount_usd"),
-                    "current_percentage": trade.get("current_allocation"),
-                    "target_percentage": trade.get("target_allocation"),
-                    "reason": trade.get("reason", "Portfolio optimization")
-                })
+            raw_trades = optimization_data.get("recommended_trades", [])
+            if isinstance(raw_trades, list):
+                for trade in raw_trades:
+                    if isinstance(trade, dict):
+                        recommended_trades.append({
+                            "symbol": trade.get("symbol", "Unknown"),
+                            "action": trade.get("action", "HOLD"),  # buy/sell
+                            "amount": trade.get("amount_usd", 0),
+                            "current_percentage": trade.get("current_allocation", 0),
+                            "target_percentage": trade.get("target_allocation", 0),
+                            "reason": trade.get("reason", "Portfolio optimization")
+                        })
             
             return {
                 "needs_rebalancing": needs_rebalancing,
                 "deviation_score": deviation_score,
                 "recommended_trades": recommended_trades,
                 "risk_reduction": optimization_data.get("risk_reduction_percentage", 0),
-                "expected_improvement": optimization_data.get("expected_return_improvement", 0)
+                "expected_improvement": optimization_data.get("expected_return_improvement", 0),
+                "analysis_type": "rebalancing"  # Ensure analysis_type is always present
             }
             
+        except KeyError as ke:
+            logger.error("Rebalancing analysis failed - missing key", 
+                        missing_key=str(ke), 
+                        user_id=user_id)
+            return {
+                "needs_rebalancing": False,
+                "error": f"Missing required data field: {str(ke)}",
+                "analysis_type": "error"  # Ensure analysis_type is always present
+            }
         except Exception as e:
             logger.error("Rebalancing analysis failed", error=str(e), user_id=user_id)
             return {
                 "needs_rebalancing": False,
-                "error": str(e)
+                "error": str(e),
+                "analysis_type": "error"  # Ensure analysis_type is always present
             }
     
     async def discover_opportunities(self, user_id: str, risk_tolerance: str = "balanced") -> Dict[str, Any]:
@@ -281,7 +296,9 @@ class ChatServiceAdapters:
             
             if not pipeline_result.get("success"):
                 return {
-                    "opportunities": []
+                    "opportunities": [],
+                    "analysis_type": "opportunity_discovery",
+                    "error": pipeline_result.get("error", "Pipeline execution failed")
                 }
             
             # Extract opportunities from pipeline results (trading strategies + AI consensus)
@@ -308,14 +325,25 @@ class ChatServiceAdapters:
                 "opportunities": formatted_opportunities,
                 "market_conditions": ai_consensus.get("market_context", {}),
                 "pipeline_source": "5_phase_system",
+                "analysis_type": "opportunity_discovery",
                 "last_updated": datetime.utcnow().isoformat()
             }
             
+        except KeyError as ke:
+            logger.error("Opportunity discovery failed - missing key", 
+                        missing_key=str(ke), 
+                        user_id=user_id)
+            return {
+                "opportunities": [],
+                "error": f"Missing required data field: {str(ke)}",
+                "analysis_type": "opportunity_discovery"
+            }
         except Exception as e:
             logger.error("Opportunity discovery failed", error=str(e))
             return {
                 "opportunities": [],
-                "error": str(e)
+                "error": str(e),
+                "analysis_type": "opportunity_discovery"
             }
     
     async def get_comprehensive_analysis(self) -> Dict[str, Any]:
@@ -338,7 +366,9 @@ class ChatServiceAdapters:
                     "total_market_cap": 0,
                     "total_volume_24h": 0,
                     "btc_dominance": 50,
-                    "fear_greed_index": 50
+                    "fear_greed_index": 50,
+                    "analysis_type": "market_overview",
+                    "error": pipeline_result.get("error", "Pipeline failed")
                 }
             
             # Extract comprehensive data from pipeline results
@@ -356,14 +386,24 @@ class ChatServiceAdapters:
                 "btc_dominance": market_analysis.get("btc_dominance", 50),
                 "fear_greed_index": ai_consensus.get("fear_greed_index", 50),
                 "pipeline_source": "5_phase_system",
+                "analysis_type": "market_overview",
                 "last_updated": datetime.utcnow().isoformat()
             }
             
+        except KeyError as ke:
+            logger.error("Comprehensive analysis failed - missing key", 
+                        missing_key=str(ke))
+            return {
+                "sentiment": "Unknown",
+                "error": f"Missing required data field: {str(ke)}",
+                "analysis_type": "market_overview"
+            }
         except Exception as e:
             logger.error("Comprehensive analysis failed", error=str(e))
             return {
                 "sentiment": "Unknown",
-                "error": str(e)
+                "error": str(e),
+                "analysis_type": "market_overview"
             }
     
     async def get_sector_analysis(self) -> Dict[str, Any]:
@@ -381,12 +421,17 @@ class ChatServiceAdapters:
             
             return {
                 "sectors": sectors,
+                "analysis_type": "sector_analysis",
                 "last_updated": datetime.utcnow().isoformat()
             }
             
         except Exception as e:
             logger.error("Sector analysis failed", error=str(e))
-            return {"sectors": []}
+            return {
+                "sectors": [],
+                "analysis_type": "sector_analysis",
+                "error": str(e)
+            }
     
     async def comprehensive_market_scan(self) -> Dict[str, Any]:
         """Comprehensive market scan for opportunities."""
@@ -401,12 +446,16 @@ class ChatServiceAdapters:
                 "volume_leaders": ["BTC", "ETH", "SOL"],
                 "breakout_candidates": ["MATIC", "LINK", "UNI"],
                 "oversold_opportunities": ["ADA", "XRP"],
+                "analysis_type": "market_scan",
                 "last_updated": datetime.utcnow().isoformat()
             }
             
         except Exception as e:
             logger.error("Market scan failed", error=str(e))
-            return {}
+            return {
+                "analysis_type": "market_scan",
+                "error": str(e)
+            }
     
     async def get_market_risk_factors(self) -> Dict[str, Any]:
         """Get current market risk factors."""

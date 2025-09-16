@@ -13,8 +13,8 @@ import structlog
 # Import endpoint routers
 from app.api.v1.endpoints import (
     auth, trading, admin, exchanges, strategies, credits,
-    telegram, paper_trading, chat, market_analysis, api_keys, ai_consensus,
-    password_reset, health, opportunity_discovery
+    telegram, paper_trading, chat, conversational_chat, market_analysis, api_keys, ai_consensus,
+    password_reset, health, opportunity_discovery, admin_testing
 )
 
 logger = structlog.get_logger(__name__)
@@ -35,7 +35,9 @@ api_router.include_router(telegram.router, prefix="/telegram", tags=["Telegram"]
 api_router.include_router(paper_trading.router, prefix="/paper-trading", tags=["Paper Trading"])
 api_router.include_router(market_analysis.router, prefix="/market", tags=["Market Analysis"])
 api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
+api_router.include_router(admin_testing.router, tags=["Admin Testing"])  # Admin testing endpoints
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
+api_router.include_router(conversational_chat.router, prefix="/conversational-chat", tags=["Conversational AI Chat"])
 api_router.include_router(ai_consensus.router, prefix="/ai-consensus", tags=["AI Consensus"])
 api_router.include_router(opportunity_discovery.router, prefix="/opportunities", tags=["Opportunity Discovery"])
 

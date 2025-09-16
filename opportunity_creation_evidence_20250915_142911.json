@@ -1,0 +1,109 @@
+{
+  "diagnostic_timestamp": "2025-09-15T14:29:11.059998",
+  "target_system": "https://cryptouniverse.onrender.com/api/v1",
+  "evidence": {
+    "qualifying_signals": {
+      "signal_results": {
+        "BTC": {
+          "strength": 5,
+          "confidence": 50,
+          "action": "HOLD",
+          "qualifies": false
+        },
+        "ETH": {
+          "strength": 5,
+          "confidence": 50,
+          "action": "HOLD",
+          "qualifies": false
+        },
+        "SOL": {
+          "strength": 8,
+          "confidence": 80,
+          "action": "SELL",
+          "qualifies": true
+        },
+        "ADA": {
+          "strength": 5,
+          "confidence": 50,
+          "action": "HOLD",
+          "qualifies": false
+        },
+        "XRP": {
+          "strength": 3,
+          "confidence": 30,
+          "action": "HOLD",
+          "qualifies": false
+        },
+        "DOGE": {
+          "strength": 5,
+          "confidence": 50,
+          "action": "HOLD",
+          "qualifies": false
+        },
+        "MATIC": {
+          "strength": 8,
+          "confidence": 80,
+          "action": "SELL",
+          "qualifies": true
+        },
+        "DOT": {
+          "strength": 5,
+          "confidence": 50,
+          "action": "HOLD",
+          "qualifies": false
+        },
+        "AVAX": {
+          "strength": 5,
+          "confidence": 50,
+          "action": "HOLD",
+          "qualifies": false
+        },
+        "LINK": {
+          "strength": 5,
+          "confidence": 50,
+          "action": "HOLD",
+          "qualifies": false
+        }
+      },
+      "qualifying_signals": [
+        {
+          "asset": "SOL",
+          "strength": 8,
+          "confidence": 80,
+          "action": "SELL"
+        },
+        {
+          "asset": "MATIC",
+          "strength": 8,
+          "confidence": 80,
+          "action": "SELL"
+        }
+      ],
+      "total_tested": 10,
+      "qualifying_count": 2
+    },
+    "strategy_scanners": {
+      "risk_management": {
+        "success": false,
+        "execution_time": "N/A",
+        "has_recommendations": false,
+        "recommendation_count": 0,
+        "error": "The read operation timed out"
+      },
+      "portfolio_optimization": {
+        "success": true,
+        "execution_time": "N/A",
+        "has_recommendations": false,
+        "recommendation_count": 0
+      },
+      "spot_momentum_strategy": {
+        "success": true,
+        "execution_time": "N/A",
+        "has_recommendations": true,
+        "recommendation_count": 0,
+        "signal_strength": 5
+      }
+    }
+  },
+  "conclusion": "Qualifying signals exist but opportunity creation is broken"
+}

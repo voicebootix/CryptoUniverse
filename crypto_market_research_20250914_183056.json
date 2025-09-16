@@ -1,0 +1,118 @@
+{
+  "research_data": {
+    "XRP": {
+      "market_cap_rank": 7,
+      "use_case": "Cross-border payments, banking partnerships",
+      "volatility": "Medium-High",
+      "realistic_annual_return": 0.12,
+      "risk_level": "Medium-High",
+      "max_allocation_recommendation": 0.25,
+      "notes": "Regulatory uncertainty but strong institutional adoption"
+    },
+    "ADA": {
+      "market_cap_rank": 10,
+      "use_case": "Smart contracts, academic research-based blockchain",
+      "volatility": "High",
+      "realistic_annual_return": 0.15,
+      "risk_level": "High",
+      "max_allocation_recommendation": 0.2,
+      "notes": "Strong development but slower ecosystem growth"
+    },
+    "DOGE": {
+      "market_cap_rank": 8,
+      "use_case": "Meme coin, payments, Elon Musk influence",
+      "volatility": "Very High",
+      "realistic_annual_return": 0.1,
+      "risk_level": "Very High",
+      "max_allocation_recommendation": 0.1,
+      "notes": "Highly speculative, social media driven"
+    },
+    "USDC": {
+      "market_cap_rank": 6,
+      "use_case": "Stablecoin, USD-backed, DeFi collateral",
+      "volatility": "Very Low",
+      "realistic_annual_return": 0.04,
+      "risk_level": "Very Low",
+      "max_allocation_recommendation": 0.3,
+      "notes": "Stable value, good for risk management"
+    },
+    "REEF": {
+      "market_cap_rank": 200,
+      "use_case": "DeFi aggregation, yield farming",
+      "volatility": "Extremely High",
+      "realistic_annual_return": -0.05,
+      "risk_level": "Extremely High",
+      "max_allocation_recommendation": 0.05,
+      "notes": "Small cap, high risk of total loss, limited liquidity"
+    }
+  },
+  "portfolio_analysis": {
+    "total_value": 2296.5800000000004,
+    "asset_weights": {
+      "XRP": 0.5030871992266761,
+      "ADA": 0.4140025603288367,
+      "DOGE": 0.07512475071628245,
+      "USDC": 0.006487908106837122,
+      "REEF": 0.0012975816213674244
+    },
+    "risk_assessment": {},
+    "recommendations": []
+  },
+  "optimization_params": {
+    "expected_returns": {
+      "XRP": 0.12,
+      "ADA": 0.15,
+      "DOGE": 0.1,
+      "USDC": 0.04,
+      "REEF": -0.05
+    },
+    "max_allocations": {
+      "XRP": 0.25,
+      "ADA": 0.2,
+      "DOGE": 0.1,
+      "USDC": 0.3,
+      "REEF": 0.05
+    },
+    "min_allocations": {
+      "XRP": 0.02,
+      "ADA": 0.02,
+      "DOGE": 0.02,
+      "USDC": 0.05,
+      "REEF": 0.02
+    },
+    "risk_constraints": {},
+    "strategy_recommendations": {
+      "conservative": {
+        "description": "Focus on USDC with limited crypto exposure",
+        "target_allocations": {
+          "USDC": 0.5,
+          "XRP": 0.2,
+          "ADA": 0.15,
+          "DOGE": 0.1,
+          "REEF": 0.05
+        }
+      },
+      "balanced": {
+        "description": "Balanced exposure across asset classes",
+        "target_allocations": {
+          "USDC": 0.3,
+          "XRP": 0.25,
+          "ADA": 0.2,
+          "DOGE": 0.15,
+          "REEF": 0.1
+        }
+      },
+      "aggressive": {
+        "description": "Higher crypto exposure for growth",
+        "target_allocations": {
+          "USDC": 0.15,
+          "XRP": 0.3,
+          "ADA": 0.25,
+          "DOGE": 0.2,
+          "REEF": 0.1
+        }
+      }
+    }
+  },
+  "timestamp": "2025-09-14T18:30:56.913297"
+}

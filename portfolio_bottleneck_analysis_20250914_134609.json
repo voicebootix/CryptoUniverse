@@ -1,0 +1,109 @@
+{
+  "investigation_time": "2025-09-14T13:46:09.412739",
+  "base_url": "https://cryptouniverse.onrender.com",
+  "timings": {
+    "user_profile": {
+      "duration": 0.24714159965515137,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/users/me'",
+      "timestamp": "2025-09-14T13:46:06.496623"
+    },
+    "exchange_accounts": {
+      "duration": 0.19463515281677246,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/exchanges/accounts'",
+      "timestamp": "2025-09-14T13:46:06.691258"
+    },
+    "exchange_balances": {
+      "duration": 0.2187647819519043,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/exchanges/balances'",
+      "timestamp": "2025-09-14T13:46:06.910023"
+    },
+    "portfolio_positions": {
+      "duration": 0.192185640335083,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/portfolio/positions'",
+      "timestamp": "2025-09-14T13:46:07.102208"
+    },
+    "portfolio_summary_full": {
+      "duration": 0.16556525230407715,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/portfolio/summary'",
+      "timestamp": "2025-09-14T13:46:07.267774"
+    },
+    "exchange_binance_balance": {
+      "duration": 0.19900774955749512,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/exchanges/binance/balance'",
+      "timestamp": "2025-09-14T13:46:07.466781"
+    },
+    "exchange_kraken_balance": {
+      "duration": 0.1687636375427246,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/exchanges/kraken/balance'",
+      "timestamp": "2025-09-14T13:46:07.635545"
+    },
+    "exchange_kucoin_balance": {
+      "duration": 0.2473433017730713,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/exchanges/kucoin/balance'",
+      "timestamp": "2025-09-14T13:46:07.882888"
+    },
+    "exchange_coinbase_balance": {
+      "duration": 0.1787257194519043,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/exchanges/coinbase/balance'",
+      "timestamp": "2025-09-14T13:46:08.061614"
+    },
+    "trading_history": {
+      "duration": 0.20522022247314453,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/trading/history'",
+      "timestamp": "2025-09-14T13:46:08.268843"
+    },
+    "portfolio_history": {
+      "duration": 0.1917409896850586,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/portfolio/history'",
+      "timestamp": "2025-09-14T13:46:08.460584"
+    },
+    "user_settings": {
+      "duration": 0.19840025901794434,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/users/settings'",
+      "timestamp": "2025-09-14T13:46:08.658985"
+    },
+    "portfolio_risk": {
+      "duration": 0.198014497756958,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/portfolio/risk'",
+      "timestamp": "2025-09-14T13:46:08.856999"
+    },
+    "portfolio_analytics": {
+      "duration": 0.17782092094421387,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/portfolio/analytics'",
+      "timestamp": "2025-09-14T13:46:09.034820"
+    },
+    "market_prices": {
+      "duration": 0.1982567310333252,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/market/prices'",
+      "timestamp": "2025-09-14T13:46:09.233077"
+    },
+    "market_analysis": {
+      "duration": 0.16666603088378906,
+      "success": false,
+      "error": "405, message='Method Not Allowed', url='https://cryptouniverse.onrender.com/api/v1/market/analysis'",
+      "timestamp": "2025-09-14T13:46:09.399743"
+    }
+  },
+  "analysis": {
+    "successful_operations": 0,
+    "failed_operations": 16,
+    "slowest_operation": null,
+    "total_sequential_time": 0,
+    "critical_operations": []
+  }
+}

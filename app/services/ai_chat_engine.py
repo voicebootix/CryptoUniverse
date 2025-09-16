@@ -1270,6 +1270,71 @@ I encountered an error during the 5-phase execution. The trade was not completed
             self.logger.error("Rate limiting check failed", error=str(e), user_id=user_id)
             return {"allowed": True}  # Fail open for availability
     
+    def _format_strategy_comparison_response(self, strategy_comparison: Dict, _user_id: str) -> Dict[str, Any]:
+        """Format strategy comparison results for user display."""
+        
+        # Normalize input to handle different adapter response formats
+        strategy_results = (strategy_comparison.get("strategy_results") or 
+                          strategy_comparison.get("all_results") or 
+                          strategy_comparison.get("all_strategies") or {})
+        recommended_strategy = strategy_comparison.get("recommended_strategy", "adaptive")
+        best_metrics = strategy_comparison.get("best_metrics", {})
+        
+        # Sort strategies by score (handle different score field names)
+        sorted_strategies = sorted(
+            strategy_results.items(),
+            key=lambda x: x[1].get("final_score", x[1].get("comprehensive_score", 0)),
+            reverse=True
+        )
+        
+        # Format strategy display
+        strategy_display = []
+        for i, (strategy_name, metrics) in enumerate(sorted_strategies[:6]):
+            rank_emoji = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else f"{i+1}."
+            
+            # Handle different metric field names
+            profit_potential = metrics.get("profit_potential", metrics.get("risk_adjusted_return", 0))
+            expected_return = metrics.get("expected_return", 0) 
+            sharpe_ratio = metrics.get("sharpe_ratio", 0)
+            score = metrics.get("final_score", metrics.get("comprehensive_score", 0))
+            
+            strategy_display.append(
+                f"{rank_emoji} **{strategy_name.replace('_', ' ').title()}**\n"
+                f"   • Profit Potential: {profit_potential:.2%}\n" 
+                f"   • Expected Return: {expected_return:.2%}\n"
+                f"   • Sharpe Ratio: {sharpe_ratio:.2f}\n"
+                f"   • Score: {score:.2f}"
+            )
+        
+        strategies_text = "\n\n".join(strategy_display)
+        
+        content = f"""📊 **6-Strategy Profit Analysis Complete**
+
+**🤖 AI Money Manager Recommendation:** 
+**{recommended_strategy.replace('_', ' ').title()}** - Best expected return of {best_metrics.get('expected_return', 0):.2%}
+
+**📈 All Strategy Comparisons:**
+
+{strategies_text}
+
+**💡 Next Steps:**
+• "**Execute {recommended_strategy}**" - Use AI recommendation 
+• "**Use [strategy name]**" - Choose different strategy
+• "**Autonomous mode**" - Let AI manage automatically
+
+All analysis based on your real portfolio data and current market conditions."""
+        
+        return {
+            "content": content,
+            "confidence": 0.95,
+            "metadata": {
+                "strategy_comparison": strategy_results,
+                "recommended_strategy": recommended_strategy,
+                "ai_recommendation": True,
+                "all_strategies_analyzed": True
+            }
+        }
+    
     async def _handle_rebalancing(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Handle portfolio rebalancing using REAL optimization service with security validation."""
         
@@ -1357,7 +1422,31 @@ Your portfolio is being optimized automatically every 30 minutes.""",
             # 1. Detect strategy from user message
             strategy = self._detect_rebalancing_strategy(message, context)
             
-            # 2. Get current portfolio analysis with timeout and retry
+            # 2. Check if user wants strategy comparison
+            message_lower = message.lower()
+            wants_comparison = any(word in message_lower for word in [
+                "all strategies", "compare strategies", "strategy comparison", 
+                "profit potential", "best strategy", "show strategies"
+            ])
+            
+            # 2a. For strategy comparison requests, show all 6 strategies  
+            if wants_comparison or strategy == "auto":
+                try:
+                    strategy_comparison = await self.chat_adapters._analyze_all_strategies_comprehensive(
+                        portfolio_data={}, user_id=user_id
+                    )
+                    
+                    # Check for any of the possible result keys
+                    has_results = any(
+                        k in strategy_comparison for k in ("strategy_results", "all_results", "all_strategies")
+                    )
+                    if strategy_comparison and has_results:
+                        return self._format_strategy_comparison_response(strategy_comparison, user_id)
+                    
+                except Exception as e:
+                    self.logger.exception("Strategy comparison failed")
+            
+            # 2b. Get current portfolio analysis with timeout and retry
             portfolio_analysis = await self._get_portfolio_analysis_with_retry(user_id, strategy)
             
             if portfolio_analysis.get("error"):
@@ -1471,12 +1560,13 @@ This might indicate insufficient portfolio size or market conditions. Try again 
         
         # Strategy patterns for detection
         strategy_patterns = {
-            "risk_parity": [r"risk parity", r"equal risk", r"risk weighted", r"balanced risk"],
-            "equal_weight": [r"equal weight", r"equally", r"same amount", r"equal allocation"],
-            "max_sharpe": [r"sharpe", r"best return", r"optimize return", r"maximum sharpe"],
-            "min_variance": [r"low risk", r"minimum risk", r"conservative", r"min variance", r"lowest risk"],
-            "kelly": [r"kelly", r"optimal sizing", r"kelly criterion"],
-            "adaptive": [r"adaptive", r"smart", r"automatic", r"ai choose", r"best strategy"]
+            "risk_parity": [r"risk parity", r"equal risk", r"risk weighted", r"balanced risk", r"diversify"],
+            "equal_weight": [r"equal weight", r"equally", r"same amount", r"equal allocation", r"simple"],
+            "max_sharpe": [r"sharpe", r"best return", r"optimize return", r"maximum sharpe", r"highest return"],
+            "min_variance": [r"low risk", r"minimum risk", r"conservative", r"min variance", r"lowest risk", r"safe"],
+            "kelly_criterion": [r"kelly", r"optimal sizing", r"kelly criterion", r"position sizing"],
+            "adaptive": [r"adaptive", r"blended", r"mixed approach", r"combination"],
+            "auto": [r"smart", r"automatic", r"ai choose", r"best strategy", r"intelligent", r"optimize", r"rebalance"]
         }
         
         # Check user's message for strategy keywords
@@ -1493,14 +1583,9 @@ This might indicate insufficient portfolio size or market conditions. Try again 
             self.logger.info("Using preferred rebalancing strategy from context", strategy=preferred)
             return preferred
         
-        # Use risk tolerance to pick smart default
-        risk_tolerance = session_context.get("risk_tolerance", "balanced")
-        if risk_tolerance == "conservative":
-            return "min_variance"
-        elif risk_tolerance == "aggressive":
-            return "max_sharpe"
-        else:
-            return "risk_parity"  # Best default for most users
+        # Use intelligent auto-selection as default
+        self.logger.info("No specific strategy detected, using intelligent auto-selection")
+        return "auto"  # Let the system intelligently choose the best strategy
 
     async def _get_portfolio_analysis_with_retry(self, user_id: str, strategy: str, max_retries: int = 2) -> Dict[str, Any]:
         """Get portfolio analysis with retry logic and timeout handling."""

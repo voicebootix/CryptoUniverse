@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import axios, { AxiosError } from 'axios';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -54,17 +55,17 @@ interface UserStrategy {
   category: string;
   is_ai_strategy: boolean;
   publisher_name?: string;
-  
+
   // Status & Subscription
   is_active: boolean;
   subscription_type: 'welcome' | 'purchased' | 'trial';
   activated_at: string;
   expires_at?: string;
-  
+
   // Pricing
   credit_cost_monthly: number;
   credit_cost_per_execution: number;
-  
+
   // Performance Metrics
   total_trades: number;
   winning_trades: number;
@@ -75,13 +76,13 @@ interface UserStrategy {
   current_drawdown: number;
   max_drawdown: number;
   sharpe_ratio?: number;
-  
+
   // Risk & Configuration
   risk_level: string;
   allocation_percentage: number;
   max_position_size: number;
   stop_loss_percentage: number;
-  
+
   // Recent Performance
   last_7_days_pnl: number;
   last_30_days_pnl: number;
@@ -108,6 +109,21 @@ interface PortfolioSummary {
   profit_potential_remaining: number;
 }
 
+interface UserStrategyPortfolio {
+  summary: PortfolioSummary;
+  strategies: UserStrategy[];
+}
+
+// Type guard for error response
+const isErrorResponse = (obj: unknown): obj is { detail: string } => {
+  return (
+    obj !== null &&
+    typeof obj === 'object' &&
+    'detail' in obj &&
+    typeof (obj as any).detail === 'string'
+  );
+};
+
 const MyStrategies: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -116,11 +132,34 @@ const MyStrategies: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'paused'>('all');
 
   // Fetch user's strategy portfolio
-  const { data: portfolio, isLoading: portfolioLoading, error: portfolioError } = useQuery({
+  const { data: portfolio, isLoading: portfolioLoading, error: portfolioError } = useQuery<UserStrategyPortfolio, AxiosError>({
     queryKey: ['user-strategy-portfolio'],
     queryFn: async () => {
-      const response = await apiClient.get('/strategies/user/portfolio');
-      return response.data as { summary: PortfolioSummary; strategies: UserStrategy[] };
+      try {
+        const response = await apiClient.get<UserStrategyPortfolio>('/strategies/my-portfolio');
+        return response.data;
+      } catch (error: unknown) {
+        console.error('Failed to fetch portfolio:', error);
+        // Return empty portfolio if endpoint not found
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
+          return {
+            summary: {
+              total_strategies: 0,
+              active_strategies: 0,
+              welcome_strategies: 0,
+              purchased_strategies: 0,
+              total_portfolio_value: 0,
+              total_pnl_usd: 0,
+              total_pnl_percentage: 0,
+              monthly_credit_cost: 0,
+              profit_potential_used: 0,
+              profit_potential_remaining: 100
+            },
+            strategies: []
+          };
+        }
+        throw error;
+      }
     },
     refetchInterval: 30000,
     retry: 2,
@@ -139,23 +178,31 @@ const MyStrategies: React.FC = () => {
       toast.success(`Strategy ${variables.active ? 'activated' : 'paused'} successfully`);
       queryClient.invalidateQueries({ queryKey: ['user-strategy-portfolio'] });
     },
-    onError: (error: any) => {
-      toast.error(`Failed to update strategy: ${error.response?.data?.detail || error.message}`);
+    onError: (error: unknown) => {
+      const message = axios.isAxiosError(error)
+        ? error.response?.data?.detail || error.message
+        : 'Failed to update strategy';
+      toast.error(`Failed to update strategy: ${message}`);
     }
   });
 
   // Strategy configuration update mutation
   const updateStrategyConfigMutation = useMutation({
     mutationFn: async ({ strategyId, config }: { strategyId: string; config: any }) => {
-      const response = await apiClient.put(`/strategies/${strategyId}/config`, config);
+      const response = await apiClient.put(`/strategies/${strategyId}/config`, {
+        parameters: config
+      });
       return response.data;
     },
     onSuccess: () => {
       toast.success('Strategy configuration updated successfully');
       queryClient.invalidateQueries({ queryKey: ['user-strategy-portfolio'] });
     },
-    onError: (error: any) => {
-      toast.error(`Failed to update configuration: ${error.response?.data?.detail || error.message}`);
+    onError: (error: unknown) => {
+      const message = axios.isAxiosError(error)
+        ? error.response?.data?.detail || error.message
+        : 'Failed to update configuration';
+      toast.error(`Failed to update configuration: ${message}`);
     }
   });
 
@@ -201,18 +248,67 @@ const MyStrategies: React.FC = () => {
   const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
   if (portfolioError) {
+    let errorMessage = 'Unable to load your strategies. Please try again later.';
+    let isNetworkError = false;
+    let isServerError = false;
+    let isTimeoutError = false;
+
+    if (axios.isAxiosError(portfolioError)) {
+      // Check for network errors (request made but no response)
+      if (portfolioError.request && !portfolioError.response) {
+        isNetworkError = true;
+        errorMessage = 'Network connection error. Please check your internet connection.';
+      }
+      // Check for timeout errors
+      else if (portfolioError.code === 'ECONNABORTED') {
+        isTimeoutError = true;
+        errorMessage = 'Request timed out. The server may be starting up. Please try again.';
+      }
+      // Check for server errors (5xx)
+      else if (portfolioError.response?.status && portfolioError.response.status >= 500) {
+        isServerError = true;
+        errorMessage = 'Server error. Our servers are experiencing issues.';
+      }
+      // Other axios errors
+      else {
+        const responseData = portfolioError.response?.data;
+        if (typeof responseData === 'string') {
+          errorMessage = responseData;
+        } else if (isErrorResponse(responseData)) {
+          errorMessage = responseData.detail;
+        } else {
+          errorMessage = portfolioError.message;
+        }
+      }
+    } else if (portfolioError && typeof portfolioError === 'object' && 'message' in portfolioError) {
+      errorMessage = (portfolioError as Error).message;
+    }
+
     return (
       <div className="container mx-auto p-6">
         <div className="text-center py-12">
           <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold mb-2">Failed to Load Strategies</h3>
+          <h3 className="text-lg font-semibold mb-2">
+            {isNetworkError ? 'Connection Problem' : isTimeoutError ? 'Request Timeout' : 'Failed to Load Strategies'}
+          </h3>
           <p className="text-muted-foreground mb-4">
-            {portfolioError instanceof Error ? portfolioError.message : 'Unknown error occurred'}
+            {isNetworkError
+              ? 'Please check your internet connection and try again.'
+              : isServerError
+              ? 'Our servers are experiencing issues. Please try again in a few moments.'
+              : isTimeoutError
+              ? 'The server is taking longer than expected. Please wait and try again.'
+              : errorMessage}
           </p>
-          <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['user-strategy-portfolio'] })}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Retry
-          </Button>
+          <div className="flex gap-2 justify-center">
+            <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['user-strategy-portfolio'] })}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry
+            </Button>
+            <Button variant="outline" onClick={() => navigate('/dashboard/strategies')}>
+              Browse Strategies
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -237,7 +333,7 @@ const MyStrategies: React.FC = () => {
         </div>
         <div className="ml-auto">
           <Button 
-            onClick={() => navigate('/dashboard/strategy-marketplace')}
+            onClick={() => navigate('/dashboard/strategies')}
             className="bg-gradient-to-r from-blue-500 to-purple-600"
           >
             <Gem className="h-4 w-4 mr-2" />
@@ -272,9 +368,9 @@ const MyStrategies: React.FC = () => {
                 <Activity className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{portfolio.summary.active_strategies}</div>
+                <div className="text-2xl font-bold">{portfolio?.summary?.active_strategies || 0}</div>
                 <p className="text-xs text-muted-foreground">
-                  of {portfolio.summary.total_strategies} total
+                  of {portfolio?.summary?.total_strategies || 0} total
                 </p>
               </CardContent>
             </Card>
@@ -285,11 +381,11 @@ const MyStrategies: React.FC = () => {
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className={`text-2xl font-bold ${portfolio.summary.total_pnl_usd >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  {formatCurrency(portfolio.summary.total_pnl_usd)}
+                <div className={`text-2xl font-bold ${(portfolio?.summary?.total_pnl_usd || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  {formatCurrency(portfolio?.summary?.total_pnl_usd || 0)}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {formatPercentage(portfolio.summary.total_pnl_percentage)} return
+                  {formatPercentage(portfolio?.summary?.total_pnl_percentage || 0)} return
                 </p>
               </CardContent>
             </Card>
@@ -301,10 +397,10 @@ const MyStrategies: React.FC = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {formatNumber(portfolio.summary.monthly_credit_cost)} credits
+                  {formatNumber(portfolio?.summary?.monthly_credit_cost || 0)} credits
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {portfolio.summary.welcome_strategies} free strategies
+                  {portfolio?.summary?.welcome_strategies || 0} free strategies
                 </p>
               </CardContent>
             </Card>
@@ -316,10 +412,10 @@ const MyStrategies: React.FC = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-purple-500">
-                  {formatCurrency(portfolio.summary.profit_potential_remaining)}
+                  {formatCurrency(portfolio?.summary?.profit_potential_remaining || 0)}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  of {formatCurrency(portfolio.summary.profit_potential_used + portfolio.summary.profit_potential_remaining)} available
+                  of {formatCurrency((portfolio?.summary?.profit_potential_used || 0) + (portfolio?.summary?.profit_potential_remaining || 0))} available
                 </p>
               </CardContent>
             </Card>
