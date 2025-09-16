@@ -6,12 +6,13 @@ for trading strategies to optimize performance through experimentation.
 """
 
 import uuid
-from datetime import datetime, timedelta
+import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, HTTPException, Depends, Query, status, BackgroundTasks
+from enum import Enum
+from fastapi import APIRouter, HTTPException, Depends, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func
 from app.core.database import get_database
 from app.middleware.auth import get_current_user
 from app.models.user import User
@@ -20,6 +21,18 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+# Enums for validation
+class SuccessMetric(str, Enum):
+    """Valid success metrics for A/B tests with direction-aware comparison."""
+    total_return = "total_return"
+    sharpe_ratio = "sharpe_ratio"
+    win_rate = "win_rate"
+    profit_factor = "profit_factor"
+    max_drawdown = "max_drawdown"
+    volatility = "volatility"
+    avg_trade_duration = "avg_trade_duration"
+    total_trades = "total_trades"
 
 # Pydantic Models
 class ABTestVariantCreate(BaseModel):
@@ -67,7 +80,7 @@ class ABTestCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: str = Field(..., max_length=1000)
     hypothesis: str = Field(..., min_length=10, max_length=1000)
-    success_metric: str = Field(default="total_return")
+    success_metric: SuccessMetric = Field(default=SuccessMetric.total_return)
     min_sample_size: int = Field(ge=100, le=100000, default=1000)
     confidence_level: int = Field(ge=90, le=99, default=95)
     test_duration_days: int = Field(ge=1, le=90, default=30)
@@ -121,7 +134,10 @@ class ABTestListResponse(BaseModel):
     page: int
     page_size: int
 
-# In-memory storage for demo (replace with database models later)
+# DEMO MODE ONLY: In-memory storage (replace with database models later)
+# TODO: Replace with SQLAlchemy-backed repository/service layer for production
+# TODO: This is unsafe for concurrent/multi-worker deployments
+_demo_mode_lock = asyncio.Lock()
 ab_tests_storage: Dict[str, Dict] = {}
 ab_test_metrics_cache: Dict = {
     "total_tests": 0,
@@ -130,7 +146,19 @@ ab_test_metrics_cache: Dict = {
     "successful_optimizations": 0,
     "avg_improvement": 0.0,
     "total_participants": 0,
-    "last_updated": datetime.utcnow()
+    "last_updated": datetime.now(timezone.utc)
+}
+
+# Metric direction mapping for proper winner selection
+METRIC_DIRECTIONS = {
+    "total_return": "max",
+    "sharpe_ratio": "max",
+    "win_rate": "max",
+    "profit_factor": "max",
+    "max_drawdown": "min",  # Lower drawdown is better
+    "volatility": "min",    # Lower volatility is often better
+    "avg_trade_duration": "min",  # Usually faster is better
+    "total_trades": "max",
 }
 
 def generate_mock_performance_data():
@@ -160,35 +188,36 @@ def calculate_statistical_significance(p_value: float, confidence_level: float) 
     else:
         return "not_significant"
 
-def update_metrics_cache():
-    """Update the metrics cache based on current tests."""
+async def update_metrics_cache():
+    """Update the metrics cache based on current tests. Thread-safe for demo mode."""
     global ab_test_metrics_cache
 
-    total_tests = len(ab_tests_storage)
-    running_tests = len([t for t in ab_tests_storage.values() if t["status"] == "running"])
-    completed_tests = len([t for t in ab_tests_storage.values() if t["status"] == "completed"])
-    successful_optimizations = len([t for t in ab_tests_storage.values()
-                                  if t["status"] == "completed" and t.get("winning_variant_id")])
+    async with _demo_mode_lock:
+        total_tests = len(ab_tests_storage)
+        running_tests = len([t for t in ab_tests_storage.values() if t["status"] == "running"])
+        completed_tests = len([t for t in ab_tests_storage.values() if t["status"] == "completed"])
+        successful_optimizations = len([t for t in ab_tests_storage.values()
+                                      if t["status"] == "completed" and t.get("winning_variant_id")])
 
-    improvements = []
-    total_participants = 0
+        improvements = []
+        total_participants = 0
 
-    for test in ab_tests_storage.values():
-        total_participants += test.get("total_participants", 0)
-        if test["status"] == "completed" and test.get("effect_size", 0) > 0:
-            improvements.append(test["effect_size"])
+        for test in ab_tests_storage.values():
+            total_participants += test.get("total_participants", 0)
+            if test["status"] == "completed" and test.get("effect_size", 0) > 0:
+                improvements.append(test["effect_size"])
 
-    avg_improvement = sum(improvements) / len(improvements) if improvements else 0.0
+        avg_improvement = sum(improvements) / len(improvements) if improvements else 0.0
 
-    ab_test_metrics_cache.update({
-        "total_tests": total_tests,
-        "running_tests": running_tests,
-        "completed_tests": completed_tests,
-        "successful_optimizations": successful_optimizations,
-        "avg_improvement": avg_improvement,
-        "total_participants": total_participants,
-        "last_updated": datetime.utcnow()
-    })
+        ab_test_metrics_cache.update({
+            "total_tests": total_tests,
+            "running_tests": running_tests,
+            "completed_tests": completed_tests,
+            "successful_optimizations": successful_optimizations,
+            "avg_improvement": avg_improvement,
+            "total_participants": total_participants,
+            "last_updated": datetime.now(timezone.utc)
+        })
 
 @router.get("/metrics", response_model=ABTestMetrics, tags=["A/B Testing"])
 async def get_ab_testing_metrics(current_user: User = Depends(get_current_user)):
@@ -196,7 +225,7 @@ async def get_ab_testing_metrics(current_user: User = Depends(get_current_user))
     try:
         logger.info("ab_testing.get_metrics", user_id=current_user.id)
 
-        update_metrics_cache()
+        await update_metrics_cache()
 
         return ABTestMetrics(**ab_test_metrics_cache)
 
@@ -218,11 +247,12 @@ async def get_ab_tests(
     try:
         logger.info("ab_testing.get_tests", user_id=current_user.id, status_filter=status_filter)
 
-        # Filter tests by user and status
-        user_tests = [
-            test for test in ab_tests_storage.values()
-            if test["created_by"] == str(current_user.id)
-        ]
+        # Filter tests by user and status (thread-safe read)
+        async with _demo_mode_lock:
+            user_tests = [
+                test for test in ab_tests_storage.values()
+                if test["created_by"] == str(current_user.id)
+            ]
 
         if status_filter and status_filter != "all":
             user_tests = [test for test in user_tests if test["status"] == status_filter]
@@ -267,7 +297,6 @@ async def get_ab_tests(
 @router.post("/tests", response_model=ABTestResponse, tags=["A/B Testing"])
 async def create_ab_test(
     test_data: ABTestCreate,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user)
 ):
     """Create a new A/B test."""
@@ -313,7 +342,7 @@ async def create_ab_test(
                     performance_data["p_value"], test_data.confidence_level
                 ),
                 "confidence_level": test_data.confidence_level,
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
                 "started_at": None,
                 "completed_at": None
             }
@@ -325,7 +354,7 @@ async def create_ab_test(
             "name": test_data.name,
             "description": test_data.description,
             "hypothesis": test_data.hypothesis,
-            "success_metric": test_data.success_metric,
+            "success_metric": test_data.success_metric.value,
             "status": "draft",
             "min_sample_size": test_data.min_sample_size,
             "confidence_level": test_data.confidence_level,
@@ -336,17 +365,18 @@ async def create_ab_test(
             "statistical_power": 0.0,
             "effect_size": 0.0,
             "variants": variants,
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
             "started_at": None,
             "completed_at": None,
             "created_by": str(current_user.id)
         }
 
-        # Store test
-        ab_tests_storage[test_id] = test
+        # Store test (thread-safe write)
+        async with _demo_mode_lock:
+            ab_tests_storage[test_id] = test
 
         # Update metrics
-        update_metrics_cache()
+        await update_metrics_cache()
 
         # Convert to response model
         variant_models = [ABTestVariant(**v) for v in variants]
@@ -372,7 +402,6 @@ async def create_ab_test(
 @router.post("/tests/{test_id}/start", response_model=ABTestResponse, tags=["A/B Testing"])
 async def start_ab_test(
     test_id: str,
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user)
 ):
     """Start an A/B test."""
@@ -402,22 +431,23 @@ async def start_ab_test(
                 detail=f"Cannot start test in {test['status']} status"
             )
 
-        # Start test
-        test["status"] = "running"
-        test["started_at"] = datetime.utcnow()
+        # Start test (thread-safe update)
+        async with _demo_mode_lock:
+            test["status"] = "running"
+            test["started_at"] = datetime.now(timezone.utc)
 
-        # Start variants
-        for variant in test["variants"]:
-            variant["status"] = "running"
-            if not variant["started_at"]:
-                variant["started_at"] = datetime.utcnow()
+            # Start variants
+            for variant in test["variants"]:
+                variant["status"] = "running"
+                if not variant["started_at"]:
+                    variant["started_at"] = datetime.now(timezone.utc)
 
-        # Simulate some participants
-        import random
-        test["total_participants"] = random.randint(100, 1500)
+            # Simulate some participants
+            import random
+            test["total_participants"] = random.randint(100, 1500)
 
         # Update metrics
-        update_metrics_cache()
+        await update_metrics_cache()
 
         logger.info("ab_testing.test_started", test_id=test_id, user_id=current_user.id)
 
@@ -467,15 +497,16 @@ async def pause_ab_test(
                 detail=f"Cannot pause test in {test['status']} status"
             )
 
-        # Pause test
-        test["status"] = "paused"
+        # Pause test (thread-safe update)
+        async with _demo_mode_lock:
+            test["status"] = "paused"
 
-        # Pause variants
-        for variant in test["variants"]:
-            variant["status"] = "paused"
+            # Pause variants
+            for variant in test["variants"]:
+                variant["status"] = "paused"
 
         # Update metrics
-        update_metrics_cache()
+        await update_metrics_cache()
 
         logger.info("ab_testing.test_paused", test_id=test_id, user_id=current_user.id)
 
@@ -525,37 +556,46 @@ async def stop_ab_test(
                 detail=f"Cannot stop test in {test['status']} status"
             )
 
-        # Stop test
-        test["status"] = "completed"
-        test["completed_at"] = datetime.utcnow()
+        # Stop test (thread-safe update)
+        async with _demo_mode_lock:
+            test["status"] = "completed"
+            test["completed_at"] = datetime.now(timezone.utc)
 
-        # Complete variants
-        for variant in test["variants"]:
-            variant["status"] = "completed"
-            variant["completed_at"] = datetime.utcnow()
+            # Complete variants
+            for variant in test["variants"]:
+                variant["status"] = "completed"
+                variant["completed_at"] = datetime.now(timezone.utc)
 
-        # Determine winner (variant with highest return and statistical significance)
-        significant_variants = [
-            v for v in test["variants"]
-            if v["statistical_significance"] == "significant"
-        ]
+            # Determine winner (direction-aware based on selected metric)
+            significant_variants = [
+                v for v in test["variants"]
+                if v["statistical_significance"] == "significant"
+            ]
 
-        if significant_variants:
-            winner = max(significant_variants, key=lambda x: x[test["success_metric"]])
-            test["winning_variant_id"] = winner["id"]
-            test["effect_size"] = winner[test["success_metric"]] - min(
-                v[test["success_metric"]] for v in test["variants"] if v["is_control"]
-            )
-        else:
-            test["winning_variant_id"] = None
-            test["effect_size"] = 0.0
+            if significant_variants:
+                metric = test["success_metric"]
+                direction = METRIC_DIRECTIONS[metric]
+                control = next(v for v in test["variants"] if v["is_control"])
 
-        # Set statistical power
-        import random
-        test["statistical_power"] = round(random.uniform(0.8, 0.95), 2)
+                if direction == "max":
+                    winner = max(significant_variants, key=lambda x: x[metric])
+                    effect = winner[metric] - control[metric]
+                else:
+                    winner = min(significant_variants, key=lambda x: x[metric])
+                    effect = control[metric] - winner[metric]
+
+                test["winning_variant_id"] = winner["id"]
+                test["effect_size"] = round(effect, 4)
+            else:
+                test["winning_variant_id"] = None
+                test["effect_size"] = 0.0
+
+            # Set statistical power
+            import random
+            test["statistical_power"] = round(random.uniform(0.8, 0.95), 2)
 
         # Update metrics
-        update_metrics_cache()
+        await update_metrics_cache()
 
         logger.info("ab_testing.test_stopped", test_id=test_id, user_id=current_user.id,
                    winner_id=test.get("winning_variant_id"))
@@ -646,11 +686,12 @@ async def delete_ab_test(
                 detail="Can only delete tests in draft status"
             )
 
-        # Delete test
-        del ab_tests_storage[test_id]
+        # Delete test (thread-safe delete)
+        async with _demo_mode_lock:
+            del ab_tests_storage[test_id]
 
         # Update metrics
-        update_metrics_cache()
+        await update_metrics_cache()
 
         logger.info("ab_testing.test_deleted", test_id=test_id, user_id=current_user.id)
 
