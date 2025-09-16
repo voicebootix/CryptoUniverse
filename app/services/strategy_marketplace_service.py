@@ -975,7 +975,21 @@ class StrategyMarketplaceService(LoggerMixin):
             raise  # Re-raise to ensure purchase_strategy_access knows it failed
     
     async def get_user_strategy_portfolio(self, user_id: str) -> Dict[str, Any]:
-        """Get user's purchased/active strategies."""
+        """Get user's purchased/active strategies with timeout protection."""
+        import asyncio
+        
+        try:
+            # Add timeout protection to prevent 55+ second hangs
+            return await asyncio.wait_for(self._get_user_strategy_portfolio_internal(user_id), timeout=10.0)
+        except asyncio.TimeoutError:
+            self.logger.error("❌ Strategy portfolio retrieval timed out", user_id=user_id)
+            return {"success": False, "error": "Portfolio retrieval timeout"}
+        except Exception as e:
+            self.logger.error("Failed to get user strategy portfolio", error=str(e))
+            return {"success": False, "error": str(e)}
+    
+    async def _get_user_strategy_portfolio_internal(self, user_id: str) -> Dict[str, Any]:
+        """Internal method for strategy portfolio retrieval."""
         try:
             from app.core.redis import get_redis_client
             redis = await get_redis_client()
@@ -1054,75 +1068,46 @@ class StrategyMarketplaceService(LoggerMixin):
             return {"success": False, "error": str(e)}
     
     async def _recover_missing_strategies(self, user_id: str, redis) -> bool:
-        """Comprehensive strategy recovery mechanism."""
+        """Lightweight Redis-only strategy recovery mechanism."""
         try:
-            # Check if user has a credit account (sign they've been onboarded)
-            async for db in get_database():
-                from app.models.credit import CreditAccount
-                from app.models.user import User
-                from sqlalchemy import select
-                
-                # Check credit account
-                credit_stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
-                credit_result = await db.execute(credit_stmt)
-                credit_account = credit_result.scalar_one_or_none()
-                
-                # Check user exists
-                user_stmt = select(User).where(User.id == user_id)
-                user_result = await db.execute(user_stmt)
-                user = user_result.scalar_one_or_none()
-                
-                if not user:
-                    self.logger.warning("User not found during recovery", user_id=user_id)
-                    return False
-                
-                strategies_to_provision = []
-                
-                if credit_account:
-                    # User has been onboarded - re-provision free strategies
-                    self.logger.info("🔄 Re-provisioning free strategies for existing user", user_id=user_id)
-                    strategies_to_provision = [
-                        "ai_risk_management", 
-                        "ai_portfolio_optimization", 
-                        "ai_spot_momentum_strategy"
-                    ]
-                    recovery_reason = "existing_user_recovery"
+            self.logger.info("🔄 EMERGENCY STRATEGY RECOVERY INITIATED", user_id=user_id)
+            
+            # SIMPLIFIED APPROACH: Always provision core free strategies
+            # Avoid database calls that can cause deadlocks
+            strategies_to_provision = [
+                "ai_risk_management", 
+                "ai_portfolio_optimization", 
+                "ai_spot_momentum_strategy"
+            ]
+            recovery_reason = "redis_emergency_recovery"
+            
+            # Provision strategies to Redis with safe operations
+            for strategy_id in strategies_to_provision:
+                result = await self._safe_redis_operation(redis.sadd, f"user_strategies:{user_id}", strategy_id)
+                if result is not None:
+                    self.logger.info("✅ Strategy recovered", 
+                                   user_id=user_id, 
+                                   strategy_id=strategy_id,
+                                   reason=recovery_reason)
                 else:
-                    # User never onboarded properly - trigger basic onboarding
-                    self.logger.info("🔄 User never properly onboarded, provisioning basic strategies", user_id=user_id)
-                    strategies_to_provision = [
-                        "ai_risk_management", 
-                        "ai_portfolio_optimization"
-                    ]
-                    recovery_reason = "incomplete_onboarding_recovery"
-                
-                # Provision strategies to Redis with safe operations
-                for strategy_id in strategies_to_provision:
-                    result = await self._safe_redis_operation(redis.sadd, f"user_strategies:{user_id}", strategy_id)
-                    if result is not None:
-                        self.logger.info("✅ Strategy recovered", 
-                                       user_id=user_id, 
-                                       strategy_id=strategy_id,
-                                       reason=recovery_reason)
-                    else:
-                        self.logger.error("❌ Failed to recover strategy - Redis operation failed",
-                                        user_id=user_id, strategy_id=strategy_id)
-                
-                # Verify recovery worked
-                recovered_strategies = await self._safe_redis_operation(redis.smembers, f"user_strategies:{user_id}")
-                if recovered_strategies is None:
-                    recovered_strategies = set()
-                success = len(recovered_strategies) > 0
-                
-                if success:
-                    self.logger.info("🎯 Strategy recovery completed successfully", 
-                                   user_id=user_id,
-                                   strategies_count=len(recovered_strategies),
-                                   strategies=list(recovered_strategies))
-                else:
-                    self.logger.error("❌ Strategy recovery failed - Redis still empty", user_id=user_id)
-                
-                return success
+                    self.logger.error("❌ Failed to recover strategy - Redis operation failed",
+                                    user_id=user_id, strategy_id=strategy_id)
+            
+            # Verify recovery worked
+            recovered_strategies = await self._safe_redis_operation(redis.smembers, f"user_strategies:{user_id}")
+            if recovered_strategies is None:
+                recovered_strategies = set()
+            success = len(recovered_strategies) > 0
+            
+            if success:
+                self.logger.info("🎯 Strategy recovery completed successfully", 
+                               user_id=user_id,
+                               strategies_count=len(recovered_strategies),
+                               strategies=list(recovered_strategies))
+            else:
+                self.logger.error("❌ Strategy recovery failed - Redis still empty", user_id=user_id)
+            
+            return success
                 
         except Exception as e:
             self.logger.error("❌ Strategy recovery failed with exception", 
