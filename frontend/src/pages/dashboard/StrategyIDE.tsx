@@ -203,7 +203,18 @@ const StrategyIDE: React.FC = () => {
   // Validate strategy mutation
   const validateStrategyMutation = useMutation({
     mutationFn: async (code: string) => {
-      console.log('🔍 Starting validation request...', { code: code.substring(0, 50) + '...' });
+      // Create secure hash of code for logging (no code content exposed)
+      const encoder = new TextEncoder();
+      const data = encoder.encode(code);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+      console.log('🔍 Starting validation request...', {
+        codeLength: code.length,
+        codeHash: hashHex.substring(0, 16), // First 16 chars of hash
+        hasContent: code.trim().length > 0
+      });
       try {
         const response = await apiClient.post('/strategies/validate', { code });
         console.log('✅ Validation response received:', response.data);
