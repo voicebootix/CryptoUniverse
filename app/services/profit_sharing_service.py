@@ -21,7 +21,7 @@ from app.core.database import get_database
 from app.core.logging import LoggerMixin
 from app.models.user import User
 from app.models.trading import Trade, TradingStrategy
-from app.models.credit import CreditAccount, CreditTransaction
+from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.models.subscription import Subscription
 
 settings = get_settings()
@@ -302,6 +302,9 @@ class ProfitSharingService(LoggerMixin):
     ) -> Dict[str, Any]:
         """Process profit sharing payment and credit allocation."""
         try:
+            # Ensure pricing is loaded before using credit_to_profit_ratio
+            await self.ensure_pricing_loaded()
+            
             platform_fee = profit_sharing_data["platform_fee"]
             credits_earned = profit_sharing_data["credits_earned"]
             
@@ -344,12 +347,13 @@ class ProfitSharingService(LoggerMixin):
                 
                 # Record transaction
                 transaction = CreditTransaction(
-                    user_id=user_id,
+                    account_id=credit_account.id,
                     amount=credits_earned,
-                    transaction_type="profit_sharing_payment",
-                    description=f"Profit sharing: Paid ${platform_fee:.2f}, earned {credits_earned} credits",
-                    reference_id=payment_result.get("payment_id"),
-                    status="completed"
+                    transaction_type=CreditTransactionType.PURCHASE,
+                    description=f"Profit sharing purchase: Paid ${platform_fee:.2f}, earned {credits_earned} credits",
+                    balance_before=credit_account.available_credits - credits_earned,
+                    balance_after=credit_account.available_credits,
+                    source="system"
                 )
                 db.add(transaction)
                 
@@ -369,7 +373,7 @@ class ProfitSharingService(LoggerMixin):
                     "credits_earned": credits_earned,
                     "new_credit_balance": credit_account.available_credits,
                     "payment_id": payment_result.get("payment_id"),
-                    "earning_potential": credits_earned * self.credit_to_dollar_ratio
+                    "earning_potential": credits_earned * self.credit_to_profit_ratio
                 }
                 
         except Exception as e:
@@ -552,18 +556,41 @@ class ProfitSharingService(LoggerMixin):
                         "already_claimed": True
                     }
                 
+                # Get or create user's credit account
+                credit_stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
+                credit_result = await db.execute(credit_stmt)
+                credit_account = credit_result.scalar_one_or_none()
+                
+                if not credit_account:
+                    # Create new credit account for user
+                    credit_account = CreditAccount(
+                        user_id=user_id,
+                        available_credits=0,
+                        total_credits=0,
+                        used_credits=0
+                    )
+                    db.add(credit_account)
+                    await db.flush()  # Get the ID
+                
                 # Calculate welcome credits based on admin configuration
                 welcome_profit_potential = welcome_config.get("welcome_profit_potential", 100)
                 welcome_credits = int(welcome_profit_potential * self.platform_fee_percentage)  # 25% of profit potential
                 
+                # Update credit account balances
+                balance_before = credit_account.available_credits
+                credit_account.available_credits += welcome_credits
+                credit_account.total_credits += welcome_credits
+                balance_after = credit_account.available_credits
+                
                 # Create welcome credit transaction
                 welcome_transaction = CreditTransaction(
-                    user_id=user_id,
+                    account_id=credit_account.id,
                     amount=welcome_credits,  # Dynamic credit amount
-                    transaction_type="welcome_bonus",
+                    transaction_type=CreditTransactionType.BONUS,
                     description=f"Welcome Package: ${welcome_profit_potential:.0f} Free Profit Potential ({welcome_credits} credits)",
-                    status="completed",
-                    created_at=datetime.utcnow()
+                    balance_before=balance_before,
+                    balance_after=balance_after,
+                    source="system"
                 )
                 
                 db.add(welcome_transaction)

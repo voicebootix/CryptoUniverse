@@ -24,7 +24,7 @@ from app.api.v1.endpoints.auth import get_current_user, require_role
 from app.models.user import User, UserRole
 from app.models.trading import Trade, Position, Order, TradingStrategy
 from app.models.exchange import ExchangeAccount
-from app.models.credit import CreditAccount, CreditTransaction
+from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.services.trade_execution import TradeExecutionService
 from app.services.master_controller import MasterSystemController
 from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
@@ -241,11 +241,13 @@ async def execute_manual_trade(
                 
                 # Record transaction
                 credit_tx = CreditTransaction(
-                    user_id=current_user.id,
+                    account_id=credit_account.id,
                     amount=-credit_cost,
-                    transaction_type="trade_execution",
+                    transaction_type=CreditTransactionType.USAGE,
                     description=f"Trade: {request.action} {request.symbol}",
-                    reference_id=result.get("trade_id")
+                    balance_before=credit_account.available_credits + credit_cost,
+                    balance_after=credit_account.available_credits,
+                    source="api"
                 )
                 db.add(credit_tx)
                 await db.commit()

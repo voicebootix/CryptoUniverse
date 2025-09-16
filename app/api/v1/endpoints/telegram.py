@@ -564,27 +564,45 @@ async def _verify_telegram_webhook(request: Request) -> bool:
         # Get webhook secret from settings
         webhook_secret = getattr(settings, 'TELEGRAM_WEBHOOK_SECRET', None)
         if not webhook_secret:
-            logger.info("Webhook verification skipped - no secret configured")
-            return True  # Skip verification if not configured
+            # Only skip verification in development/test environments
+            environment = getattr(settings, 'ENVIRONMENT', 'production').lower()
+            allow_unverified = getattr(settings, 'TELEGRAM_ALLOW_UNVERIFIED', 'false').lower() == 'true'
+            
+            if environment in {"development", "test"} or allow_unverified:
+                logger.info("Webhook verification skipped", 
+                          environment=environment, 
+                          allow_unverified=allow_unverified)
+                return True
+            else:
+                logger.error("Webhook secret not configured in production environment")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Webhook verification not properly configured"
+                )
         
-        # Verify signature
+        # Verify signature using constant-time comparison
         signature = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
-        is_valid = signature == webhook_secret
+        
+        # Use secrets.compare_digest for timing attack protection
+        import secrets
+        signature_str = signature or ""
+        is_valid = secrets.compare_digest(signature_str, webhook_secret)
         
         if not is_valid:
             logger.warning("Webhook verification failed", 
-                         expected_secret=webhook_secret[:8] + "...", 
-                         received_signature=signature[:8] + "..." if signature else "None")
+                         has_signature=bool(signature),
+                         signature_length=len(signature) if signature else 0)
         else:
             logger.info("Webhook verification passed")
             
         return is_valid
         
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
     except Exception as e:
-        logger.error("Webhook verification failed", error=str(e))
-        # In production, be more permissive to avoid blocking legitimate messages
-        logger.warning("Allowing webhook due to verification error")
-        return True
+        logger.exception("Webhook verification failed with unexpected error")
+        # Fail closed on unexpected errors
+        return False
 
 
 async def _process_telegram_message(webhook_data: Dict[str, Any], db: AsyncSession):

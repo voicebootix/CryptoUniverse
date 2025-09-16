@@ -206,19 +206,15 @@ const PublisherDashboard: React.FC = () => {
   });
 
   // Map payouts using only real backend fields, show "—" for missing data
-  const payouts = payoutsData?.payouts?.map((payout: any, index: number) => ({
-    // Use backend id if available, otherwise show placeholder
-    id: payout.id || "—",
+  const payouts = payoutsData?.payouts?.map((payout: any) => ({
+    id: payout.id ?? null,
     amount: payout.amount,
     status: payout.status,
-    // Map date fields from backend
-    requested_at: payout.date || payout.requested_at || "—",
-    processed_at: payout.processed_at || (payout.status === 'completed' ? payout.date : "—"),
-    // Use backend payment method or show placeholder
-    payment_method: payout.method || payout.payment_method || "—",
-    // Use backend transaction ID or show placeholder
-    transaction_id: payout.transaction_id || "—"
-  })) || [];
+    requested_at: payout.date ?? payout.requested_at ?? null,
+    processed_at: payout.processed_at ?? (payout.status === 'completed' ? payout.date ?? null : null),
+    payment_method: payout.method ?? payout.payment_method ?? null,
+    transaction_id: payout.transaction_id ?? null
+  })) ?? [];
 
   const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
