@@ -22,7 +22,7 @@ from app.models.copy_trading import (
     StrategyStatus,
     SignalStatus
 )
-from app.models.trading import TradingStrategy, Trade
+from app.models.trading import TradingStrategy, Trade, TradeAction, TradeStatus
 from app.services.binance_service import BinanceService
 
 logger = logging.getLogger(__name__)
@@ -79,24 +79,32 @@ class CopyTradingService:
                 recent_signals_data = await self._get_recent_signals(db, provider.user_id)
 
                 # Calculate tier based on performance
-                tier = self._calculate_provider_tier(
+                computed_tier = self._calculate_provider_tier(
                     latest_performance.total_return if latest_performance else 0,
                     provider.total_followers,
                     strategy_count
                 )
+
+                # Determine a default strategy to follow (prefer the one with latest performance)
+                default_strategy = db.query(TradingStrategy).filter(
+                    TradingStrategy.creator_id == provider.user_id,
+                    TradingStrategy.is_active == True
+                ).first()
+                strategy_id = getattr(latest_performance, "strategy_id", None) or (default_strategy.id if default_strategy else None)
 
                 provider_info = {
                     "id": provider.id,
                     "username": provider.display_name,
                     "avatar": self._generate_avatar_emoji(provider.display_name),
                     "verified": provider.verified,
-                    "tier": tier,
+                    "tier": computed_tier,
+                    "strategyId": str(strategy_id) if strategy_id else None,
                     "followers": provider.total_followers,
                     "winRate": float(latest_performance.win_rate) if latest_performance else random.uniform(65, 85),
                     "avgReturn": float(latest_performance.total_return) if latest_performance else random.uniform(15, 35),
                     "totalReturn": float(latest_performance.total_return * 10) if latest_performance else random.uniform(500, 2000),
                     "riskScore": random.randint(2, 4),
-                    "monthlyFee": self._calculate_monthly_fee(tier),
+                    "monthlyFee": self._calculate_monthly_fee(computed_tier),
                     "signals30d": recent_signals or random.randint(30, 150),
                     "successRate": float(latest_performance.win_rate) if latest_performance else random.uniform(70, 88),
                     "specialties": self._get_provider_specialties(db, provider.user_id),
@@ -105,7 +113,9 @@ class CopyTradingService:
                 }
                 provider_data.append(provider_info)
 
-            # Sort based on sort_by parameter
+            # Apply tier filter (if requested) and sort
+            if tier:
+                provider_data = [p for p in provider_data if p["tier"] == tier]
             provider_data = self._sort_providers(provider_data, sort_by)
 
             return provider_data
@@ -124,14 +134,15 @@ class CopyTradingService:
                 StrategyFollower.is_active == True
             ).count()
 
-            # Get user's trade performance
+            # Get user's trade performance (only completed trades in last 30 days)
             user_trades = db.query(Trade).filter(
                 Trade.user_id == user_id,
-                Trade.created_at >= datetime.utcnow() - timedelta(days=30)
+                Trade.created_at >= datetime.utcnow() - timedelta(days=30),
+                Trade.status == TradeStatus.COMPLETED
             ).all()
 
-            total_pnl = sum(float(trade.realized_pnl or 0) for trade in user_trades)
-            winning_trades = len([t for t in user_trades if (t.realized_pnl or 0) > 0])
+            total_pnl = sum(float(trade.profit_realized_usd or 0) for trade in user_trades)
+            winning_trades = len([t for t in user_trades if (t.profit_realized_usd or 0) > 0])
             win_rate = (winning_trades / len(user_trades) * 100) if user_trades else 0
 
             # Get current portfolio value
@@ -201,7 +212,7 @@ class CopyTradingService:
             query = db.query(Trade).filter(Trade.user_id == user_id)
 
             if active_only:
-                query = query.filter(Trade.status.in_(["open", "pending"]))
+                query = query.filter(Trade.status.in_([TradeStatus.PENDING, TradeStatus.EXECUTING]))
 
             trades = query.order_by(desc(Trade.created_at)).limit(20).all()
 
@@ -210,21 +221,39 @@ class CopyTradingService:
                 # Get real market price
                 current_price = await self._get_current_price(trade.symbol)
 
-                # Calculate P&L
-                entry_price = float(trade.entry_price)
-                pnl = (current_price - entry_price) * float(trade.quantity) if trade.side == "buy" else (entry_price - current_price) * float(trade.quantity)
-                pnl_pct = (pnl / (entry_price * float(trade.quantity))) * 100
+                # Calculate P&L using executed fields
+                entry_price = float(trade.executed_price) if trade.executed_price else float(trade.price or 0)
+                quantity = float(trade.executed_quantity) if trade.executed_quantity else float(trade.quantity)
+
+                if trade.action == TradeAction.BUY:
+                    pnl = (current_price - entry_price) * quantity
+                    trade_type = "LONG"
+                else:
+                    pnl = (entry_price - current_price) * quantity
+                    trade_type = "SHORT"
+
+                pnl_pct = (pnl / (entry_price * quantity)) * 100 if entry_price > 0 and quantity > 0 else 0
+
+                # Map status using enum
+                status_map = {
+                    TradeStatus.PENDING: "active",
+                    TradeStatus.EXECUTING: "active",
+                    TradeStatus.COMPLETED: "closed",
+                    TradeStatus.FAILED: "closed",
+                    TradeStatus.CANCELED: "closed"
+                }
+                mapped_status = status_map.get(trade.status, "active")
 
                 copied_trades.append({
                     "id": trade.id,
                     "provider": "CryptoWhale",  # From signal metadata
                     "pair": trade.symbol,
-                    "type": "LONG" if trade.side == "buy" else "SHORT",
-                    "entry": entry_price,
-                    "current": current_price,
-                    "pnl": pnl,
-                    "pnlPct": pnl_pct,
-                    "status": "active" if trade.status == "open" else "closed",
+                    "type": trade_type,
+                    "entry": round(entry_price, 8),
+                    "current": round(current_price, 8),
+                    "pnl": round(pnl, 2),
+                    "pnlPct": round(pnl_pct, 2),
+                    "status": mapped_status,
                     "copiedAt": self._format_time_ago(trade.created_at)
                 })
 
@@ -322,7 +351,154 @@ class CopyTradingService:
 
         except Exception as e:
             logger.error(f"Error following strategy: {e}")
+            db.rollback()
             raise
+
+    async def unfollow_strategy(
+        self,
+        db: Session,
+        user_id: UUID,
+        strategy_id: UUID
+    ) -> Dict[str, Any]:
+        """Unfollow a trading strategy."""
+        try:
+            # Find existing follower relationship
+            follower = db.query(StrategyFollower).filter(
+                StrategyFollower.user_id == user_id,
+                StrategyFollower.strategy_id == strategy_id,
+                StrategyFollower.is_active == True
+            ).first()
+
+            if not follower:
+                raise ValueError("Not currently following this strategy")
+
+            # Deactivate the following relationship
+            follower.is_active = False
+            follower.stopped_at = datetime.utcnow()
+
+            # Update publisher follower count
+            strategy = db.query(TradingStrategy).filter(
+                TradingStrategy.id == strategy_id
+            ).first()
+
+            if strategy:
+                publisher = db.query(StrategyPublisher).filter(
+                    StrategyPublisher.user_id == strategy.creator_id
+                ).first()
+                if publisher and publisher.total_followers > 0:
+                    publisher.total_followers -= 1
+
+            db.commit()
+            return {"message": "Successfully unfollowed strategy"}
+
+        except Exception as e:
+            logger.exception(f"Error unfollowing strategy: {e}")
+            db.rollback()
+            raise
+
+    async def get_user_signal_feed(
+        self,
+        db: Session,
+        user_id: UUID,
+        limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """Get live signal feed from followed strategies."""
+        try:
+            # Get user's followed strategies
+            followed_strategies = db.query(StrategyFollower).filter(
+                StrategyFollower.user_id == user_id,
+                StrategyFollower.is_active == True
+            ).all()
+
+            if not followed_strategies:
+                return []
+
+            strategy_ids = [f.strategy_id for f in followed_strategies]
+
+            # Get recent signals from followed strategies
+            signals = db.query(CopyTradeSignal).filter(
+                CopyTradeSignal.strategy_id.in_(strategy_ids)
+            ).order_by(desc(CopyTradeSignal.created_at)).limit(limit).all()
+
+            signal_feed = []
+            for signal in signals:
+                # Get strategy and provider info
+                strategy = db.query(TradingStrategy).filter(
+                    TradingStrategy.id == signal.strategy_id
+                ).first()
+
+                provider = db.query(StrategyPublisher).filter(
+                    StrategyPublisher.user_id == strategy.creator_id
+                ).first() if strategy else None
+
+                signal_feed.append({
+                    "id": signal.id,
+                    "strategy_id": signal.strategy_id,
+                    "provider_name": provider.display_name if provider else "Unknown",
+                    "signal_data": signal.signal_data,
+                    "status": signal.status.value,
+                    "created_at": signal.created_at.isoformat(),
+                    "distributed_at": signal.distributed_at.isoformat() if signal.distributed_at else None
+                })
+
+            return signal_feed
+
+        except Exception as e:
+            logger.exception(f"Error getting signal feed: {e}")
+            return []
+
+    async def get_strategy_performance(
+        self,
+        db: Session,
+        strategy_id: UUID,
+        period: str = "30d"
+    ) -> Dict[str, Any]:
+        """Get detailed performance data for a strategy."""
+        try:
+            # Calculate period start date
+            days = {"7d": 7, "30d": 30, "90d": 90, "1y": 365}[period]
+            period_start = datetime.utcnow() - timedelta(days=days)
+
+            # Get strategy performance data
+            performance = db.query(StrategyPerformance).filter(
+                StrategyPerformance.strategy_id == strategy_id,
+                StrategyPerformance.period_start >= period_start
+            ).order_by(desc(StrategyPerformance.period_start)).first()
+
+            if not performance:
+                return {
+                    "strategy_id": str(strategy_id),
+                    "period": period,
+                    "total_return": 0,
+                    "sharpe_ratio": 0,
+                    "max_drawdown": 0,
+                    "win_rate": 0,
+                    "total_trades": 0,
+                    "followers_count": 0,
+                    "message": "No performance data available for this period"
+                }
+
+            return {
+                "strategy_id": str(strategy_id),
+                "period": period,
+                "total_return": float(performance.total_return),
+                "sharpe_ratio": float(performance.sharpe_ratio) if performance.sharpe_ratio else 0,
+                "max_drawdown": float(performance.max_drawdown),
+                "win_rate": float(performance.win_rate),
+                "total_trades": performance.total_trades,
+                "followers_count": performance.followers_count,
+                "aum": float(performance.aum),
+                "period_start": performance.period_start.isoformat(),
+                "period_end": performance.period_end.isoformat()
+            }
+
+        except Exception as e:
+            logger.exception(f"Error getting strategy performance: {e}")
+            return {
+                "strategy_id": str(strategy_id),
+                "period": period,
+                "error": "Failed to retrieve performance data"
+            }
 
     # Helper methods
     async def _generate_performance_data(self, db: Session, user_id: UUID) -> List[Dict[str, Any]]:
@@ -364,15 +540,15 @@ class CopyTradingService:
                 trade = db.query(Trade).filter(Trade.id == signal.trade_id).first()
                 if trade:
                     current_price = await self._get_current_price(trade.symbol)
-                    entry_price = float(trade.entry_price)
+                    entry_price = float(trade.executed_price) if trade.executed_price else float(trade.price or 0)
                     pnl_pct = ((current_price - entry_price) / entry_price) * 100
 
                     signal_data.append({
                         "pair": trade.symbol,
-                        "type": "LONG" if trade.side == "buy" else "SHORT",
+                        "type": "LONG" if trade.action == TradeAction.BUY else "SHORT",
                         "entry": entry_price,
-                        "target": entry_price * (1.05 if trade.side == "buy" else 0.95),
-                        "status": "active" if trade.status == "open" else "closed",
+                        "target": entry_price * (1.05 if trade.action == TradeAction.BUY else 0.95),
+                        "status": "active" if trade.status in [TradeStatus.PENDING, TradeStatus.EXECUTING] else "closed",
                         "pnl": round(pnl_pct, 1)
                     })
 

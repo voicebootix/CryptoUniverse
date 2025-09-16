@@ -384,6 +384,7 @@ const CopyTradingNetwork: React.FC = () => {
   const [myStats, setMyStats] = useState<any>(mockMyStats);
   const [activeCopiedTrades, setActiveCopiedTrades] = useState<any[]>([]);
   const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
+  const [followingData, setFollowingData] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
@@ -399,7 +400,7 @@ const CopyTradingNetwork: React.FC = () => {
 
     try {
       // Load data in parallel
-      const [providersRes, statsRes, tradesRes, leaderRes] = await Promise.allSettled([
+      const [providersRes, statsRes, tradesRes, leaderRes, followingRes] = await Promise.allSettled([
         apiService.getSignalProviders({
           verified_only: showOnlyVerified,
           tier: filterTier === 'all' ? undefined : filterTier,
@@ -407,7 +408,8 @@ const CopyTradingNetwork: React.FC = () => {
         }),
         apiService.getMyCopyTradingStats(),
         apiService.getCopiedTrades(),
-        apiService.getLeaderboard('30d')
+        apiService.getLeaderboard('30d'),
+        apiService.getFollowing()
       ]);
 
       // Handle providers
@@ -437,6 +439,14 @@ const CopyTradingNetwork: React.FC = () => {
         setLeaderboardData(mockLeaderboardData);
       }
 
+      // Handle following
+      if (followingRes.status === 'fulfilled' && followingRes.value.success) {
+        setFollowingData(followingRes.value.data || []);
+      } else {
+        console.warn('Using empty following data');
+        setFollowingData([]);
+      }
+
     } catch (err) {
       console.error('Failed to load copy trading data:', err);
       setError('Failed to load data. Using cached data.');
@@ -444,6 +454,7 @@ const CopyTradingNetwork: React.FC = () => {
       setSignalProviders(mockSignalProviders);
       setActiveCopiedTrades(mockActiveCopiedTrades);
       setLeaderboardData(mockLeaderboardData);
+      setFollowingData([]);
     } finally {
       setLoading(false);
     }
@@ -792,7 +803,9 @@ const CopyTradingNetwork: React.FC = () => {
                       className="bg-gradient-to-r from-purple-600 to-pink-600 text-white"
                       onClick={async () => {
                         try {
-                          await apiService.followStrategy(provider.id.toString(), 10, 20); // 10% allocation, 20% max drawdown
+                          // Use strategyId if available, otherwise fall back to provider id
+                          const strategyId = provider.strategyId || provider.id.toString();
+                          await apiService.followStrategy(strategyId, 10, 20); // 10% allocation, 20% max drawdown
                           toast({
                             title: 'Success',
                             description: `Now following ${provider.username}`,
@@ -925,40 +938,86 @@ const CopyTradingNetwork: React.FC = () => {
             <h3 className="text-lg font-semibold mb-4">
               Providers You're Following
             </h3>
-            <div className="space-y-4">
-              {signalProviders.slice(0, 3).map((provider) => (
-                <div
-                  key={provider.id}
-                  className="flex items-center justify-between p-4 border rounded-lg"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="text-3xl">{provider.avatar}</div>
-                    <div>
-                      <p className="font-semibold">{provider.username}</p>
-                      <p className="text-sm text-gray-500">
-                        Following since Dec 2023
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-6">
-                    <div>
-                      <p className="text-sm text-gray-500">Your Return</p>
-                      <p className="text-lg font-semibold text-green-600">
-                        +{formatPercentage(provider.avgReturn)}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Switch checked={true} />
-                      <span className="text-sm">Auto-copy</span>
-                    </div>
-                    <Button variant="outline" size="sm">
-                      <Settings className="w-4 h-4 mr-2" />
-                      Settings
-                    </Button>
-                  </div>
+            {followingData.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-gray-400 mb-4">
+                  <Users className="w-16 h-16 mx-auto mb-2" />
+                  <p>You're not following any providers yet</p>
+                  <p className="text-sm">Discover signal providers in the Discover tab</p>
                 </div>
-              ))}
-            </div>
+                <Button
+                  onClick={() => setActiveTab('discover')}
+                  className="bg-gradient-to-r from-purple-600 to-pink-600 text-white"
+                >
+                  Find Providers
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {followingData.map((following) => (
+                  <div
+                    key={following.id}
+                    className="flex items-center justify-between p-4 border rounded-lg"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="text-3xl">{following.avatar || '👤'}</div>
+                      <div>
+                        <p className="font-semibold">{following.provider_name}</p>
+                        <p className="text-sm text-gray-500">
+                          Following since {new Date(following.started_at).toLocaleDateString()}
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          Allocation: {following.allocation_percentage}%
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                      <div>
+                        <p className="text-sm text-gray-500">Your Return</p>
+                        <p className={`text-lg font-semibold ${following.return >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {following.return >= 0 ? '+' : ''}{formatPercentage(following.return)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Switch checked={true} />
+                        <span className="text-sm">Auto-copy</span>
+                      </div>
+                      <Button variant="outline" size="sm">
+                        <Settings className="w-4 h-4 mr-2" />
+                        Settings
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          try {
+                            // Use the strategy_id from the following data
+                            const response = await fetch(`/api/v1/copy-trading/unfollow/${following.strategy_id}`, {
+                              method: 'DELETE'
+                            });
+                            if (!response.ok) throw new Error('Failed to unfollow');
+                            toast({
+                              title: 'Success',
+                              description: `Unfollowed ${following.provider_name}`,
+                            });
+                            loadData(); // Refresh data
+                          } catch (err) {
+                            toast({
+                              title: 'Error',
+                              description: 'Failed to unfollow strategy',
+                              variant: 'destructive'
+                            });
+                          }
+                        }}
+                      >
+                        <UserMinus className="w-4 h-4 mr-1" />
+                        Unfollow
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         </TabsContent>
 
