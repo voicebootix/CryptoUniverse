@@ -12,7 +12,7 @@ import json
 import time
 from typing import Dict, List, Optional, Any, AsyncGenerator
 from datetime import datetime
-import httpx
+import aiohttp
 import structlog
 
 from app.core.config import get_settings
@@ -98,15 +98,15 @@ class ChatAIService(LoggerMixin):
                 request_data["max_tokens"] = max_tokens
             
             # Make API call with timeout
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
                     self.api_url,
                     headers=self.headers,
-                    json=request_data
-                )
-                
-                response.raise_for_status()
-                result = response.json()
+                    json=request_data,
+                    timeout=aiohttp.ClientTimeout(total=self.timeout)
+                ) as response:
+                    response.raise_for_status()
+                    result = await response.json()
             
             # Extract response
             if result.get("choices") and len(result["choices"]) > 0:
@@ -156,7 +156,7 @@ class ChatAIService(LoggerMixin):
                     "elapsed_time": time.time() - start_time
                 }
                 
-        except httpx.TimeoutException:
+        except asyncio.TimeoutError:
             elapsed_time = time.time() - start_time
             self.logger.error(
                 "ChatGPT request timed out",
@@ -169,26 +169,19 @@ class ChatAIService(LoggerMixin):
                 "elapsed_time": elapsed_time
             }
             
-        except httpx.HTTPStatusError as e:
+        except aiohttp.ClientResponseError as e:
             elapsed_time = time.time() - start_time
             self.logger.error(
                 "ChatGPT API error",
-                status_code=e.response.status_code,
+                status_code=e.status,
                 error=str(e),
                 elapsed_time=elapsed_time
             )
             
-            # Parse error message
-            try:
-                error_data = e.response.json()
-                error_message = error_data.get("error", {}).get("message", str(e))
-            except:
-                error_message = str(e)
-            
             return {
                 "success": False,
-                "error": error_message,
-                "status_code": e.response.status_code,
+                "error": str(e),
+                "status_code": e.status,
                 "elapsed_time": elapsed_time
             }
             
@@ -235,16 +228,17 @@ class ChatAIService(LoggerMixin):
             }
             
             # Stream API call
-            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=5.0)) as client:
-                async with client.stream(
-                    "POST",
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
                     self.api_url,
                     headers=self.headers,
-                    json=request_data
+                    json=request_data,
+                    timeout=aiohttp.ClientTimeout(total=60.0)
                 ) as response:
                     response.raise_for_status()
                     
-                    async for line in response.aiter_lines():
+                    async for line in response.content:
+                        line = line.decode('utf-8').strip()
                         if line.startswith("data: "):
                             data = line[6:]  # Remove "data: " prefix
                             

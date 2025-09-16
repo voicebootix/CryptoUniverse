@@ -26,11 +26,11 @@ class UnifiedChatTester:
     
     async def login(self):
         """Authenticate and get JWT token."""
-        import httpx
+        import aiohttp
         
         print("🔐 Logging in...")
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
+        async with aiohttp.ClientSession() as session:
+            response = await session.post(
                 f"{API_BASE_URL}/auth/login",
                 json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
             )
