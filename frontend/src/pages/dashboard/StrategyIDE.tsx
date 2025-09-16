@@ -209,16 +209,15 @@ const StrategyIDE: React.FC = () => {
         console.log('✅ Validation response received:', response.data);
         return response.data.validation_result as ValidationResult;
       } catch (error) {
-        console.error('❌ Validation request failed:', error);
-        // Add more detailed error logging
+        console.error('❌ Validation request failed');
+        // Sanitized error logging - no sensitive data
         if (error.response) {
           console.error('Response error:', {
             status: error.response.status,
-            data: error.response.data,
-            headers: error.response.headers
+            message: error.response.data?.message || 'Server error'
           });
         } else if (error.request) {
-          console.error('Request error:', error.request);
+          console.error('Request failed to send');
         } else {
           console.error('Setup error:', error.message);
         }
@@ -273,7 +272,19 @@ const StrategyIDE: React.FC = () => {
   // Run backtest mutation
   const runBacktestMutation = useMutation({
     mutationFn: async (data: { code: string; symbol?: string; start_date?: string; end_date?: string; initial_capital?: number }) => {
-      console.log('🚀 Starting backtest request...', data);
+      // Add authentication check before starting
+      const { useAuthStore } = await import('@/store/authStore');
+      const { isAuthenticated, tokens } = useAuthStore.getState();
+
+      console.log('🔐 Backtest auth check:', { isAuthenticated, hasToken: !!tokens?.access_token });
+
+      if (!isAuthenticated || !tokens?.access_token) {
+        console.error('❌ Not authenticated for backtest');
+        toast.error('Please login to use Strategy IDE');
+        throw new Error('Authentication required');
+      }
+
+      console.log('🚀 Starting backtest request...');
 
       // Calculate date range from period_days or use defaults
       const endDate = new Date();
@@ -296,16 +307,15 @@ const StrategyIDE: React.FC = () => {
         console.log('✅ Backtest response received:', response.data);
         return response.data.backtest_result as BacktestResult;
       } catch (error) {
-        console.error('❌ Backtest request failed:', error);
-        // Add detailed error logging
+        console.error('❌ Backtest request failed');
+        // Sanitized error logging - no sensitive data
         if (error.response) {
           console.error('Response error:', {
             status: error.response.status,
-            data: error.response.data,
-            headers: error.response.headers
+            message: error.response.data?.message || 'Server error'
           });
         } else if (error.request) {
-          console.error('Request error:', error.request);
+          console.error('Request failed to send');
         } else {
           console.error('Setup error:', error.message);
         }
