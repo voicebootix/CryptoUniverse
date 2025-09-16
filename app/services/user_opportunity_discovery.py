@@ -288,12 +288,55 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # STEP 8: Build comprehensive response
             execution_time = (time.time() - discovery_start_time) * 1000
             
+            # Calculate signal statistics for transparency
+            signal_stats = {
+                "total_signals_analyzed": 0,
+                "signals_by_strength": {
+                    "very_strong (>6.0)": 0,
+                    "strong (4.5-6.0)": 0,
+                    "moderate (3.0-4.5)": 0,
+                    "weak (<3.0)": 0
+                },
+                "threshold_analysis": {
+                    "original_threshold": 6.0,
+                    "opportunities_above_original": 0,
+                    "opportunities_shown": len(ranked_opportunities),
+                    "additional_opportunities_revealed": 0
+                }
+            }
+            
+            # Count opportunities by signal strength
+            for opp in ranked_opportunities:
+                signal_strength = opp.metadata.get("signal_strength", 0)
+                signal_stats["total_signals_analyzed"] += 1
+                
+                if signal_strength > 6.0:
+                    signal_stats["signals_by_strength"]["very_strong (>6.0)"] += 1
+                    signal_stats["threshold_analysis"]["opportunities_above_original"] += 1
+                elif signal_strength > 4.5:
+                    signal_stats["signals_by_strength"]["strong (4.5-6.0)"] += 1
+                elif signal_strength > 3.0:
+                    signal_stats["signals_by_strength"]["moderate (3.0-4.5)"] += 1
+                else:
+                    signal_stats["signals_by_strength"]["weak (<3.0)"] += 1
+            
+            signal_stats["threshold_analysis"]["additional_opportunities_revealed"] = (
+                len(ranked_opportunities) - signal_stats["threshold_analysis"]["opportunities_above_original"]
+            )
+            
             result = {
                 "success": True,
                 "scan_id": scan_id,
                 "user_id": user_id,
                 "opportunities": [self._serialize_opportunity(opp) for opp in ranked_opportunities],
                 "total_opportunities": len(ranked_opportunities),
+                "signal_analysis": signal_stats,
+                "threshold_transparency": {
+                    "message": f"Found {len(ranked_opportunities)} total opportunities. "
+                              f"{signal_stats['threshold_analysis']['opportunities_above_original']} meet our highest standards (>6.0), "
+                              f"but we're showing all {len(ranked_opportunities)} to give you full market visibility.",
+                    "recommendation": "Focus on HIGH confidence opportunities for best results"
+                },
                 "user_profile": {
                     "active_strategies": user_profile.active_strategy_count,
                     "user_tier": user_profile.user_tier,
@@ -641,23 +684,37 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 if pairs_result.get("success") and pairs_result.get("trading_signals"):
                     signals = pairs_result["trading_signals"]
+                    signal_strength = signals.get("signal_strength", 0)
                     
-                    # More lenient threshold for pairs trading
-                    if signals.get("signal_strength", 0) > 5.0:  # Adjusted for 1-10 scale
+                    # Track ALL signals for transparency
+                    self.logger.info(f"🎯 PAIRS TRADING SIGNAL ANALYSIS",
+                                   scan_id=scan_id,
+                                   symbol=pair_str,
+                                   signal_strength=signal_strength,
+                                   qualifies_threshold=signal_strength > 5.0)
+                    
+                    # Create opportunity for ALL signals above 3.0 but mark quality
+                    if signal_strength > 3.0:  # Capture more opportunities
+                        quality_tier = "high" if signal_strength > 5.0 else "medium" if signal_strength > 4.0 else "low"
+                        
                         opportunity = OpportunityResult(
                             strategy_id="ai_pairs_trading",
-                            strategy_name="AI Pairs Trading",
+                            strategy_name=f"AI Pairs Trading ({quality_tier.upper()} confidence)",
                             opportunity_type="pairs_trading",
                             symbol=pair_str,
                             exchange="binance",
                             profit_potential_usd=float(signals.get("expected_profit", 0)),
-                            confidence_score=float(signals.get("signal_strength", 0.7)),
-                            risk_level=signals.get("risk_level", "medium"),
+                            confidence_score=float(signal_strength) * 10,
+                            risk_level=self._signal_to_risk_level(signal_strength),
                             required_capital_usd=float(signals.get("required_capital", 10000)),
                             estimated_timeframe=signals.get("timeframe", "72h"),
                             entry_price=signals.get("entry_price"),
                             exit_price=signals.get("exit_price"),
                             metadata={
+                                "signal_strength": signal_strength,
+                                "quality_tier": quality_tier,
+                                "meets_original_threshold": signal_strength > 5.0,
+                                "recommendation": "STRONG BUY" if signal_strength > 5.0 else "CONSIDER" if signal_strength > 4.0 else "MONITOR",
                                 "correlation": pairs_result.get("correlation_analysis", {}).get("correlation", 0),
                                 "spread_z_score": signals.get("spread_z_score", 0),
                                 "signal_type": signals.get("signal_type", ""),
@@ -715,7 +772,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     if not signals:
                         continue  # Skip if no signal data
                     
-                    # CRITICAL DEBUG: Log all signal analysis
+                    # Track ALL signals for transparency
                     signal_strength = signals.get("strength", 0)
                     signal_confidence = signals.get("confidence", 0)
                     signal_action = signals.get("action", "HOLD")
@@ -728,61 +785,39 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    signal_action=signal_action,
                                    qualifies_threshold=signal_strength > 6.0)
                     
-                    if signal_strength > 6.0:  # Strong momentum signals (scale 1-10)
-                        self.logger.info(f"🚀 CREATING OPPORTUNITY FOR QUALIFYING SIGNAL",
-                                       scan_id=scan_id,
-                                       symbol=symbol,
-                                       signal_strength=signal_strength)
+                    # Create opportunity for ALL signals above 3.0 but mark quality
+                    if signal_strength > 3.0:  # Capture more opportunities
+                        quality_tier = "high" if signal_strength > 6.0 else "medium" if signal_strength > 4.5 else "low"
                         
                         try:
-                            # Get indicators from the full response (these are at root level)
                             execution_data = momentum_result.get("execution_result", {})
                             indicators = execution_data.get("indicators", {}) or momentum_result.get("indicators", {})
                             risk_mgmt = execution_data.get("risk_management", {}) or momentum_result.get("risk_management", {})
                             
                             opportunity = OpportunityResult(
                                 strategy_id="ai_spot_momentum_strategy",
-                                strategy_name="AI Spot Momentum",
+                                strategy_name=f"AI Spot Momentum ({quality_tier.upper()} confidence)",
                                 opportunity_type="spot_momentum",
                                 symbol=symbol,
                                 exchange="binance",
-                                profit_potential_usd=float(risk_mgmt.get("take_profit", 100)),  # Default $100 profit target
-                                confidence_score=float(signals.get("confidence", 70)) / 100,  # Convert to 0-1 scale
-                                risk_level="medium",
-                                required_capital_usd=float(risk_mgmt.get("position_size", 1000)),
-                                estimated_timeframe="4-12h",
-                                entry_price=None,  # Will be filled by execution service
-                                exit_price=None,   # Will be calculated based on profit target
+                                profit_potential_usd=float(risk_mgmt.get("take_profit", 100)),
+                                confidence_score=float(signal_confidence) * 10 if signal_confidence else signal_strength * 10,
+                                risk_level=self._signal_to_risk_level(signal_strength),
+                                required_capital_usd=1000.0,
+                                estimated_timeframe="4-24h",
+                                entry_price=float(indicators.get("price", {}).get("current", 0)) if indicators.get("price") else None,
+                                exit_price=float(risk_mgmt.get("take_profit_price", 0)) if risk_mgmt.get("take_profit_price") else None,
                                 metadata={
-                                    "momentum_score": indicators.get("momentum_score", 0),
-                                    "rsi": indicators.get("rsi", 0),
-                                    "macd_trend": indicators.get("macd_trend", "NEUTRAL"),
-                                    "signal_strength": signals.get("strength", 0),
-                                    "stop_loss": risk_mgmt.get("stop_loss", 0)
+                                    "signal_strength": signal_strength,
+                                    "signal_confidence": signal_confidence,
+                                    "signal_action": signal_action,
+                                    "quality_tier": quality_tier,
+                                    "meets_original_threshold": signal_strength > 6.0,
+                                    "recommendation": "STRONG BUY" if signal_strength > 6.0 else "CONSIDER" if signal_strength > 4.5 else "MONITOR"
                                 },
                                 discovered_at=datetime.utcnow()
                             )
                             opportunities.append(opportunity)
-                            
-                            self.logger.info(f"✅ OPPORTUNITY CREATED SUCCESSFULLY",
-                                           scan_id=scan_id,
-                                           symbol=symbol,
-                                           opportunity_id=opportunity.strategy_id,
-                                           opportunities_count=len(opportunities))
-                        
-                        except Exception as opp_creation_error:
-                            self.logger.error(f"🚨 OPPORTUNITY CREATION FAILED",
-                                            scan_id=scan_id,
-                                            symbol=symbol,
-                                            signal_strength=signal_strength,
-                                            error=str(opp_creation_error),
-                                            exc_info=True)
-                    else:
-                        self.logger.info(f"❌ Signal below threshold",
-                                       scan_id=scan_id,
-                                       symbol=symbol,
-                                       signal_strength=signal_strength,
-                                       threshold=6.0)
                         
         except Exception as e:
             self.logger.error("Spot momentum scan failed",
@@ -815,24 +850,39 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 if reversion_result.get("success") and reversion_result.get("signals"):
                     signals = reversion_result["signals"]
+                    deviation_score = abs(float(signals.get("deviation_score", 0)))
                     
-                    # Look for oversold/overbought conditions
-                    if abs(float(signals.get("deviation_score", 0))) > 2.0:  # 2+ standard deviations
+                    # Track ALL signals for transparency
+                    self.logger.info(f"🎯 MEAN REVERSION SIGNAL ANALYSIS",
+                                   scan_id=scan_id,
+                                   symbol=symbol,
+                                   deviation_score=deviation_score,
+                                   qualifies_threshold=deviation_score > 2.0)
+                    
+                    # Create opportunity for ALL signals above 1.0 but mark quality
+                    if deviation_score > 1.0:  # Capture more opportunities
+                        quality_tier = "high" if deviation_score > 2.0 else "medium" if deviation_score > 1.5 else "low"
+                        signal_strength = min(deviation_score * 2, 10)  # Convert to 1-10 scale
+                        
                         opportunity = OpportunityResult(
                             strategy_id="ai_spot_mean_reversion",
-                            strategy_name="AI Mean Reversion",
+                            strategy_name=f"AI Mean Reversion ({quality_tier.upper()} confidence)",
                             opportunity_type="mean_reversion",
                             symbol=symbol,
                             exchange="binance",
                             profit_potential_usd=float(signals.get("reversion_target", 0)),
-                            confidence_score=float(signals.get("confidence", 0.75)),
-                            risk_level="medium",
+                            confidence_score=float(signals.get("confidence", 0.75)) * 100,
+                            risk_level=self._signal_to_risk_level(signal_strength),
                             required_capital_usd=float(signals.get("min_capital", 2000)),
                             estimated_timeframe="6-24h", 
                             entry_price=signals.get("entry_price"),
                             exit_price=signals.get("mean_price"),
                             metadata={
+                                "signal_strength": signal_strength,
                                 "deviation_score": signals.get("deviation_score", 0),
+                                "quality_tier": quality_tier,
+                                "meets_original_threshold": deviation_score > 2.0,
+                                "recommendation": "STRONG BUY" if deviation_score > 2.0 else "CONSIDER" if deviation_score > 1.5 else "MONITOR",
                                 "rsi": signals.get("rsi", 0),
                                 "bollinger_position": signals.get("bollinger_position", 0),
                                 "mean_price": signals.get("mean_price", 0)
@@ -872,22 +922,39 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 if breakout_result.get("success") and breakout_result.get("breakout_signals"):
                     signals = breakout_result["breakout_signals"]
+                    breakout_probability = signals.get("breakout_probability", 0)
                     
-                    if signals.get("breakout_probability", 0) > 0.75:  # High probability breakouts
+                    # Track ALL signals for transparency
+                    self.logger.info(f"🎯 BREAKOUT SIGNAL ANALYSIS",
+                                   scan_id=scan_id,
+                                   symbol=symbol,
+                                   breakout_probability=breakout_probability,
+                                   qualifies_threshold=breakout_probability > 0.75)
+                    
+                    # Create opportunity for ALL signals above 0.5 but mark quality
+                    if breakout_probability > 0.5:  # Capture more opportunities
+                        quality_tier = "high" if breakout_probability > 0.75 else "medium" if breakout_probability > 0.65 else "low"
+                        signal_strength = breakout_probability * 10  # Convert to 1-10 scale
+                        
                         opportunity = OpportunityResult(
                             strategy_id="ai_spot_breakout_strategy",
-                            strategy_name="AI Breakout Trading",
+                            strategy_name=f"AI Breakout Trading ({quality_tier.upper()} confidence)",
                             opportunity_type="breakout",
                             symbol=symbol,
                             exchange="binance",
                             profit_potential_usd=float(signals.get("profit_potential", 0)),
-                            confidence_score=float(signals.get("breakout_probability", 0.8)),
-                            risk_level="medium_high",
+                            confidence_score=float(breakout_probability) * 100,
+                            risk_level=self._signal_to_risk_level(signal_strength),
                             required_capital_usd=float(signals.get("min_capital", 3000)),
                             estimated_timeframe="2-8h",
                             entry_price=signals.get("breakout_price"),
                             exit_price=signals.get("target_price"),
                             metadata={
+                                "signal_strength": signal_strength,
+                                "breakout_probability": breakout_probability,
+                                "quality_tier": quality_tier,
+                                "meets_original_threshold": breakout_probability > 0.75,
+                                "recommendation": "STRONG BUY" if breakout_probability > 0.75 else "CONSIDER" if breakout_probability > 0.65 else "MONITOR",
                                 "support_level": signals.get("support_level", 0),
                                 "resistance_level": signals.get("resistance_level", 0),
                                 "volume_surge": signals.get("volume_surge", 0),
@@ -1073,6 +1140,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     # ================================================================================
     # UTILITY METHODS
     # ================================================================================
+    
+    def _signal_to_risk_level(self, signal_strength: float) -> str:
+        """Convert signal strength to risk level for transparency."""
+        if signal_strength > 7.0:
+            return "low"
+        elif signal_strength > 5.0:
+            return "medium"
+        elif signal_strength > 3.0:
+            return "medium_high"
+        else:
+            return "high"
     
     def _get_top_symbols_by_volume(self, discovered_assets: Dict[str, List[Any]], limit: int = 20) -> List[str]:
         """Get top symbols by volume across all tiers."""
