@@ -305,8 +305,7 @@ POST /api/v1/conversational-chat/action/confirm
 ### **4. WebSocket Connection**
 ```javascript
 const ws = new WebSocket(
-  'wss://cryptouniverse.onrender.com/api/v1/conversational-chat/stream/session-id',
-  ['bearer', 'your-jwt-token', 'json']
+  `wss://cryptouniverse.onrender.com/api/v1/conversational-chat/stream/session-id?token=${process.env.JWT_TOKEN}`
 );
 
 ws.onmessage = (event) => {
@@ -382,19 +381,25 @@ ws.send(JSON.stringify({
 - **Personality system tests**
 
 ### **Manual Testing Commands**
+
+**First, set your authentication token:**
+```bash
+export BEARER_TOKEN="your-jwt-token-here"
+```
+
 ```bash
 # Test capabilities
-curl -H "Authorization: Bearer YOUR_TOKEN" \
+curl -H "Authorization: Bearer $BEARER_TOKEN" \
   https://cryptouniverse.onrender.com/api/v1/conversational-chat/capabilities
 
 # Test conversation
-curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
+curl -X POST -H "Authorization: Bearer $BEARER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"message": "How is my portfolio doing?", "conversation_mode": "live_trading"}' \
   https://cryptouniverse.onrender.com/api/v1/conversational-chat/conversational
 
 # Test personality
-curl -H "Authorization: Bearer YOUR_TOKEN" \
+curl -H "Authorization: Bearer $BEARER_TOKEN" \
   https://cryptouniverse.onrender.com/api/v1/conversational-chat/personality/beast_mode
 ```
 

@@ -18,12 +18,13 @@ import json
 import time
 import asyncio
 import websockets
+import os
 from datetime import datetime
 
-# Configuration
-BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
-ADMIN_EMAIL = "admin@cryptouniverse.com"
-ADMIN_PASSWORD = "AdminPass123!"
+# Configuration - use environment variables for security
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000/api/v1")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 
 class ConversationalAITester:
     def __init__(self):
@@ -34,18 +35,27 @@ class ConversationalAITester:
         """Login and get access token."""
         print("🔐 Logging in...")
         
+        # Check required environment variables
+        if not ADMIN_EMAIL or not ADMIN_PASSWORD:
+            raise ValueError(
+                "Required environment variables missing. Please set:\n"
+                "export ADMIN_EMAIL='your-admin-email'\n"
+                "export ADMIN_PASSWORD='your-admin-password'\n"
+                "export BASE_URL='your-api-base-url' (optional)"
+            )
+        
         login_data = {
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         }
         
-        response = self.session.post(f"{BASE_URL}/auth/login", json=login_data)
+        response = self.session.post(f"{BASE_URL}/auth/login", json=login_data, timeout=15)
         
         if response.status_code == 200:
             data = response.json()
             self.token = data["access_token"]
             self.session.headers.update({"Authorization": f"Bearer {self.token}"})
-            print(f"✅ Login successful! Token: {self.token[:20]}...")
+            print("✅ Login successful!")
             return True
         else:
             print(f"❌ Login failed: {response.status_code} - {response.text}")
@@ -55,7 +65,7 @@ class ConversationalAITester:
         """Test the capabilities endpoint."""
         print("\n🧠 Testing Conversational AI Capabilities...")
         
-        response = self.session.get(f"{BASE_URL}/conversational-chat/capabilities")
+        response = self.session.get(f"{BASE_URL}/conversational-chat/capabilities", timeout=15)
         
         if response.status_code == 200:
             data = response.json()
@@ -82,7 +92,7 @@ class ConversationalAITester:
         trading_modes = ["conservative", "balanced", "aggressive", "beast_mode"]
         
         for mode in trading_modes:
-            response = self.session.get(f"{BASE_URL}/conversational-chat/personality/{mode}")
+            response = self.session.get(f"{BASE_URL}/conversational-chat/personality/{mode}", timeout=15)
             
             if response.status_code == 200:
                 data = response.json()
@@ -134,7 +144,7 @@ class ConversationalAITester:
             }
             
             start_time = time.time()
-            response = self.session.post(f"{BASE_URL}/conversational-chat/conversational", json=request_data)
+            response = self.session.post(f"{BASE_URL}/conversational-chat/conversational", json=request_data, timeout=15)
             response_time = time.time() - start_time
             
             if response.status_code == 200:

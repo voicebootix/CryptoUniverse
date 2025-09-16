@@ -32,7 +32,8 @@ from app.core.redis import get_redis_client
 
 # Import ALL existing services (no changes to existing code)
 from app.services.unified_ai_manager import UnifiedAIManager, OperationMode, InterfaceType
-from app.services.master_controller import MasterSystemController, TradingMode
+from app.services.master_controller import MasterSystemController
+from app.services.master_controller import TradingMode
 from app.services.strategy_marketplace_service import strategy_marketplace_service
 from app.services.paper_trading_engine import paper_trading_engine
 from app.services.trading_strategies import trading_strategies_service
@@ -176,6 +177,31 @@ class ConversationalAIOrchestrator(LoggerMixin):
                 self.profit_sharing = None
         return self.profit_sharing
     
+    def _normalize_trading_mode(self, mode_str: str) -> TradingMode:
+        """Safely normalize trading mode string to TradingMode enum."""
+        try:
+            # Normalize the string (uppercase, handle common variations)
+            normalized = mode_str.upper().strip()
+            
+            # Handle common variations
+            mode_mapping = {
+                "CONSERVATIVE": TradingMode.CONSERVATIVE,
+                "BALANCED": TradingMode.BALANCED,
+                "AGGRESSIVE": TradingMode.AGGRESSIVE,
+                "BEAST_MODE": TradingMode.BEAST_MODE,
+                "BEAST": TradingMode.BEAST_MODE,
+            }
+            
+            if normalized in mode_mapping:
+                return mode_mapping[normalized]
+            
+            # Try direct enum conversion
+            return TradingMode(normalized.lower())
+            
+        except (ValueError, AttributeError):
+            self.logger.warning(f"Invalid trading mode '{mode_str}', defaulting to BALANCED")
+            return TradingMode.BALANCED
+    
     def _initialize_personalities(self) -> Dict[TradingMode, Dict[str, Any]]:
         """Initialize AI personalities based on existing trading modes."""
         return {
@@ -316,7 +342,7 @@ class ConversationalAIOrchestrator(LoggerMixin):
         ]
         
         # Determine trading mode from user profile or default to balanced
-        trading_mode = TradingMode(user_profile.get("trading_mode", "balanced"))
+        trading_mode = self._normalize_trading_mode(user_profile.get("trading_mode", "balanced"))
         
         return ConversationContext(
             user_id=user_id,
@@ -614,7 +640,7 @@ class ConversationalAIOrchestrator(LoggerMixin):
     async def _get_detailed_portfolio_analysis(self, user_id: str) -> Dict[str, Any]:
         """Get detailed portfolio analysis."""
         try:
-            analysis = await self.portfolio_risk.get_portfolio_analysis(user_id)
+            analysis = await self.portfolio_risk.risk_analysis(user_id)
             return analysis
         except Exception as e:
             self.logger.warning("Failed to get portfolio analysis", error=str(e))
@@ -641,7 +667,7 @@ class ConversationalAIOrchestrator(LoggerMixin):
     async def _get_opportunities_data(self, user_id: str) -> Dict[str, Any]:
         """Get opportunity discovery data."""
         try:
-            opportunities = await self.opportunity_discovery.discover_opportunities(user_id)
+            opportunities = await self.opportunity_discovery.discover_opportunities_for_user(user_id)
             return opportunities
         except Exception as e:
             self.logger.warning("Failed to get opportunities data", error=str(e))
@@ -650,7 +676,7 @@ class ConversationalAIOrchestrator(LoggerMixin):
     async def _get_risk_analysis(self, user_id: str) -> Dict[str, Any]:
         """Get comprehensive risk analysis."""
         try:
-            risk_analysis = await self.portfolio_risk.assess_portfolio_risk(user_id)
+            risk_analysis = await self.portfolio_risk.risk_analysis(user_id)
             return risk_analysis
         except Exception as e:
             self.logger.warning("Failed to get risk analysis", error=str(e))

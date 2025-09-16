@@ -158,7 +158,7 @@ async def conversational_chat(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Conversational chat processing failed: {str(e)}"
+            detail="An internal error occurred while processing the request"
         )
 
 
@@ -176,40 +176,39 @@ async def conversational_chat_stream(
     user_id = None
     
     try:
-        # Authenticate user (similar to existing chat WebSocket)
-        selected_subprotocol = None
+        # Authenticate user via query params or cookies (secure method)
         token = None
         
-        # Read subprotocols for authentication
-        subprotocols = getattr(websocket, 'scope', {}).get('subprotocols', [])
-        safe_subprotocols = {"json", "jwt"}
-        
-        if subprotocols:
-            # Look for bearer authentication
-            bearer_index = None
-            for i, subprotocol in enumerate(subprotocols):
-                if subprotocol.lower() in safe_subprotocols:
-                    selected_subprotocol = subprotocol.lower()
-                
-                if subprotocol.lower() == "bearer":
-                    bearer_index = i
+        # Try to get token from query parameters
+        query_params = getattr(websocket, 'scope', {}).get('query_string', b'').decode()
+        if 'token=' in query_params:
+            for param in query_params.split('&'):
+                if param.startswith('token='):
+                    token = param.split('=', 1)[1]
                     break
-            
-            # Extract token
-            if bearer_index is not None and bearer_index + 1 < len(subprotocols):
-                token = subprotocols[bearer_index + 1]
-            
-            # Authenticate
-            if token:
-                try:
-                    from app.core.security import verify_access_token
-                    from jose import JWTError
-                    payload = verify_access_token(token)
-                    if payload and payload.get("sub"):
-                        user_id = payload["sub"]
-                        logger.info("Conversational WebSocket authenticated", user_id=user_id)
-                except JWTError as e:
-                    logger.warning("WebSocket JWT authentication failed", error=str(e))
+        
+        # If no token in query params, try cookies
+        if not token:
+            cookies = getattr(websocket, 'scope', {}).get('headers', [])
+            for name, value in cookies:
+                if name == b'cookie':
+                    cookie_str = value.decode()
+                    for cookie in cookie_str.split(';'):
+                        if 'access_token=' in cookie:
+                            token = cookie.split('access_token=')[1].split(';')[0].strip()
+                            break
+        
+        # Authenticate with token
+        if token:
+            try:
+                from app.core.security import verify_access_token
+                from jose import JWTError
+                payload = verify_access_token(token)
+                if payload and payload.get("sub"):
+                    user_id = payload["sub"]
+                    logger.info("Conversational WebSocket authenticated", user_id=user_id)
+            except JWTError as e:
+                logger.warning("WebSocket JWT authentication failed", error=str(e))
         
         # Require authentication
         if not user_id:
@@ -218,10 +217,7 @@ async def conversational_chat_stream(
             return
         
         # Accept connection
-        if selected_subprotocol:
-            await websocket.accept(subprotocol=selected_subprotocol)
-        else:
-            await websocket.accept()
+        await websocket.accept()
         
         # Connect to WebSocket manager
         await manager.connect(websocket, user_id)

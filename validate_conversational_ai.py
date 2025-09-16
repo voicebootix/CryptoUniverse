@@ -127,6 +127,7 @@ def validate_implementation():
     # Check router integration
     print(f"\n📁 Validating: Router Integration")
     router_file = "/workspace/app/api/v1/router.py"
+    router_content = ""
     
     if os.path.exists(router_file):
         with open(router_file, 'r') as f:
@@ -155,7 +156,7 @@ def validate_implementation():
     total_files = len(files_to_check) + 1  # +1 for router
     valid_files = sum(1 for r in validation_results if r["syntax_valid"] and not r["issues"])
     
-    if "conversational_chat" in router_content:
+    if router_content and "conversational_chat" in router_content:
         valid_files += 1
     
     print(f"Files Validated: {valid_files}/{total_files}")
