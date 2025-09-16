@@ -359,8 +359,8 @@ const AIMoneyManager: React.FC = () => {
 
       {/* Main Content - Split View as Specified */}
       <div className="flex-1 grid grid-cols-12 gap-6 p-6">
-        {/* LEFT: Conversational Interface (col-span-7) */}
-        <div className="col-span-7 flex flex-col">
+        {/* LEFT: Conversational Interface (col-span-5) - Made smaller */}
+        <div className="col-span-5 flex flex-col">
           <Card className="flex-1 flex flex-col">
             <CardHeader className="pb-0">
               <CardTitle className="flex items-center gap-2">
@@ -382,8 +382,8 @@ const AIMoneyManager: React.FC = () => {
           </Card>
         </div>
 
-        {/* RIGHT: Action Panel (col-span-5) */}
-        <div className="col-span-5 space-y-6">
+        {/* RIGHT: Action Panel (col-span-7) - Made larger */}
+        <div className="col-span-7 space-y-6">
           {/* 5-Phase Visualizer */}
           <PhaseProgressVisualizer
             currentPhase={currentPhase}
