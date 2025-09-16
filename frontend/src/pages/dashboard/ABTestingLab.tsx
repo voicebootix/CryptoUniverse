@@ -69,6 +69,17 @@ import {
   Scatter
 } from 'recharts';
 
+// Helper function for type-safe HTTP status extraction
+const getHttpStatus = (err: unknown): number | undefined => {
+  if (err && typeof err === 'object' && 'response' in err) {
+    const response = (err as any).response;
+    if (response && typeof response.status === 'number') {
+      return response.status;
+    }
+  }
+  return undefined;
+};
+
 interface ABTestVariant {
   id: string;
   name: string;
@@ -300,11 +311,13 @@ const ABTestingLab: React.FC = () => {
   };
 
   if (metricsError || testsError) {
-    // Check if this is an authentication error
-    const isAuthError = metricsError?.response?.status === 401 ||
-                       testsError?.response?.status === 401 ||
-                       metricsError?.response?.status === 500 ||
-                       testsError?.response?.status === 500;
+    // Check if this is an authentication error (type-safe)
+    const metricsStatus = getHttpStatus(metricsError);
+    const testsStatus = getHttpStatus(testsError);
+    const isAuthError = metricsStatus === 401 ||
+                       testsStatus === 401 ||
+                       metricsStatus === 500 ||
+                       testsStatus === 500;
 
     return (
       <div className="p-6">
@@ -325,7 +338,7 @@ const ABTestingLab: React.FC = () => {
               </Button>
               {isAuthError && (
                 <p className="text-xs text-muted-foreground">
-                  Error: {metricsError?.response?.status || testsError?.response?.status} - Authentication service error
+                  Error: {metricsStatus || testsStatus} - Authentication service error
                 </p>
               )}
             </div>
