@@ -395,10 +395,10 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
           </div>
         )}
         
-        <div className={`max-w-[80%] ${isUser ? 'order-1' : 'order-2'}`}>
-          <div className={`rounded-lg px-4 py-3 ${
-            isUser ? 'bg-primary text-primary-foreground' : 
-            message.type === 'phase' ? 'bg-muted border border-primary/20' : 'bg-muted'
+        <div className={`max-w-[85%] ${isUser ? 'order-1' : 'order-2'}`}>
+          <div className={`rounded-lg px-4 py-3 shadow-sm ${
+            isUser ? 'bg-primary text-primary-foreground border border-primary/20' :
+            message.type === 'phase' ? 'bg-muted/90 border border-primary/20 backdrop-blur-sm' : 'bg-muted/90 backdrop-blur-sm'
           }`}>
             <div className="text-sm whitespace-pre-wrap">{message.content}</div>
             <div className="flex items-center gap-2 mt-2">
@@ -424,7 +424,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
   };
 
   return (
-    <Card className={`flex flex-col h-full ${className}`}>
+    <Card className={`flex flex-col h-full bg-card/95 backdrop-blur-sm border border-border/50 shadow-lg ${className}`}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -476,7 +476,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
       )}
 
       <CardContent className="flex-1 flex flex-col p-0">
-        <ScrollArea className="flex-1 px-6">
+        <ScrollArea className="flex-1 px-6 messages-container" style={{ maxHeight: '50vh' }}>
           <div className="space-y-4 py-4">
             <AnimatePresence>
               {messages.map((message) => (
