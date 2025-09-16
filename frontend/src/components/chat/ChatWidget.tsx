@@ -97,7 +97,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
             exit={{ opacity: 0, scale: 0.8, y: 20 }}
             className={`fixed bottom-20 right-6 z-50 ${className}`}
           >
-            <Card className={`w-80 ${isWidgetMinimized ? 'h-14' : 'h-96'} transition-all duration-300 shadow-lg border bg-card/95 backdrop-blur-sm border-border/50`}>
+            <Card className={`w-80 ${isWidgetMinimized ? 'h-14' : 'max-h-[50vh]'} transition-all duration-300 shadow-lg border bg-card/95 backdrop-blur-sm border-border/50`}>
               {/* Header */}
               <CardHeader className="flex flex-row items-center justify-between space-y-0 py-3 px-4">
                 <div className="flex items-center gap-2">
@@ -131,9 +131,9 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
 
               {/* Chat Content */}
               {!isWidgetMinimized && (
-                <CardContent className="flex flex-col h-80 p-0">
+                <CardContent className="flex flex-col p-0">
                   {/* Messages */}
-                  <ScrollArea className="flex-1 px-4">
+                  <ScrollArea className="flex-1 px-4 max-h-[calc(50vh-8rem)]">
                     <div className="space-y-3 py-2">
                       {messages.map((message) => (
                         <div
