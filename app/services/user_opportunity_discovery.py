@@ -755,41 +755,41 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             momentum_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=30)
             
             for symbol in momentum_symbols:
-                # User owns strategy - execute using unified approach
-                momentum_result = await trading_strategies_service.execute_strategy(
-                    function="spot_momentum_strategy",
-                    symbol=f"{symbol}/USDT",
-                    parameters={"timeframe": "4h"},
-                    user_id=user_profile.user_id,
-                    simulation_mode=True  # Use simulation mode for opportunity scanning
-                )
-                
-                if momentum_result.get("success"):
-                    # CRITICAL FIX: Extract signal from correct nesting level
-                    execution_result = momentum_result.get("execution_result", {})
-                    signals = execution_result.get("signal")
+                try:
+                    # User owns strategy - execute using unified approach
+                    momentum_result = await trading_strategies_service.execute_strategy(
+                        function="spot_momentum_strategy",
+                        symbol=f"{symbol}/USDT",
+                        parameters={"timeframe": "4h"},
+                        user_id=user_profile.user_id,
+                        simulation_mode=True  # Use simulation mode for opportunity scanning
+                    )
                     
-                    if not signals:
-                        continue  # Skip if no signal data
-                    
-                    # Track ALL signals for transparency
-                    signal_strength = signals.get("strength", 0)
-                    signal_confidence = signals.get("confidence", 0)
-                    signal_action = signals.get("action", "HOLD")
-                    
-                    self.logger.info(f"🎯 MOMENTUM SIGNAL ANALYSIS",
-                                   scan_id=scan_id,
-                                   symbol=symbol,
-                                   signal_strength=signal_strength,
-                                   signal_confidence=signal_confidence,
-                                   signal_action=signal_action,
-                                   qualifies_threshold=signal_strength > 6.0)
-                    
-                    # Create opportunity for ALL signals above 3.0 but mark quality
-                    if signal_strength > 3.0:  # Capture more opportunities
-                        quality_tier = "high" if signal_strength > 6.0 else "medium" if signal_strength > 4.5 else "low"
+                    if momentum_result.get("success"):
+                        # CRITICAL FIX: Extract signal from correct nesting level
+                        execution_result = momentum_result.get("execution_result", {})
+                        signals = execution_result.get("signal")
                         
-                        try:
+                        if not signals:
+                            continue  # Skip if no signal data
+                        
+                        # Track ALL signals for transparency
+                        signal_strength = signals.get("strength", 0)
+                        signal_confidence = signals.get("confidence", 0)
+                        signal_action = signals.get("action", "HOLD")
+                        
+                        self.logger.info(f"🎯 MOMENTUM SIGNAL ANALYSIS",
+                                       scan_id=scan_id,
+                                       symbol=symbol,
+                                       signal_strength=signal_strength,
+                                       signal_confidence=signal_confidence,
+                                       signal_action=signal_action,
+                                       qualifies_threshold=signal_strength > 6.0)
+                        
+                        # Create opportunity for ALL signals above 3.0 but mark quality
+                        if signal_strength > 3.0:  # Capture more opportunities
+                            quality_tier = "high" if signal_strength > 6.0 else "medium" if signal_strength > 4.5 else "low"
+                            
                             execution_data = momentum_result.get("execution_result", {})
                             indicators = execution_data.get("indicators", {}) or momentum_result.get("indicators", {})
                             risk_mgmt = execution_data.get("risk_management", {}) or momentum_result.get("risk_management", {})
@@ -818,6 +818,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 discovered_at=datetime.utcnow()
                             )
                             opportunities.append(opportunity)
+                            
+                except Exception as symbol_error:
+                    self.logger.warning(f"Failed to process symbol {symbol}", 
+                                      scan_id=scan_id, error=str(symbol_error))
+                    continue
                         
         except Exception as e:
             self.logger.error("Spot momentum scan failed",
