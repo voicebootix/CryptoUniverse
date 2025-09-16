@@ -31,7 +31,7 @@ from app.core.config import get_settings
 from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
-from app.models.credit import CreditAccount, CreditTransaction
+from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.models.trading import Trade, TradeStatus
 from app.models.exchange import ExchangeAccount
 from app.services.profit_sharing_service import profit_sharing_service
@@ -519,10 +519,11 @@ async def _store_pending_payment(
         transaction = CreditTransaction(
             account_id=credit_account.id,  # Use account_id instead of user_id
             amount=credit_amount,
-            transaction_type="credit_purchase",
+            transaction_type=CreditTransactionType.PURCHASE,
             description=f"Credit purchase: {credit_amount} credits for ${payment_data['amount_usd']}",
-            reference_id=payment_data["payment_id"],
-            status="pending"
+            balance_before=credit_account.available_credits,
+            balance_after=credit_account.available_credits + credit_amount,
+            source="api"
         )
         db.add(transaction)
         await db.commit()

@@ -186,6 +186,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             
             active_strategies = portfolio_result["active_strategies"]
             
+            # CRITICAL DEBUG: Log user's active strategies
+            self.logger.info("🎯 USER ACTIVE STRATEGIES", 
+                           scan_id=scan_id,
+                           user_id=user_id,
+                           strategy_count=len(active_strategies),
+                           strategies=[s.get("strategy_id") for s in active_strategies])
+            
             # STEP 4: Get enterprise asset discovery based on user tier
             discovered_assets = await enterprise_asset_filter.discover_all_assets_with_volume_filtering(
                 min_tier=user_profile.max_asset_tier,
@@ -219,25 +226,52 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             
             # Process results
             for i, result in enumerate(strategy_scan_results):
+                strategy_name = active_strategies[i].get("name", "Unknown")
+                strategy_id = active_strategies[i].get("strategy_id", "Unknown")
+                
                 if isinstance(result, Exception):
-                    strategy_name = active_strategies[i].get("name", "Unknown")
                     self.logger.warning("Strategy scan failed", 
                                       scan_id=scan_id,
                                       strategy=strategy_name, 
                                       error=str(result))
                     continue
                 
+                # CRITICAL DEBUG: Log what each strategy scanner returned
+                self.logger.info("🔍 STRATEGY SCAN RESULT",
+                               scan_id=scan_id,
+                               strategy_name=strategy_name,
+                               strategy_id=strategy_id,
+                               result_type=type(result).__name__,
+                               has_opportunities=bool(result.get("opportunities") if isinstance(result, dict) else False),
+                               opportunities_count=len(result.get("opportunities", [])) if isinstance(result, dict) else 0)
+                
                 if isinstance(result, dict) and result.get("opportunities"):
-                    strategy_id = result["strategy_id"]
+                    result_strategy_id = result["strategy_id"]
                     opportunities = result["opportunities"]
                     
-                    strategy_results[strategy_id] = {
+                    self.logger.info("✅ OPPORTUNITIES FOUND FROM STRATEGY",
+                                   scan_id=scan_id,
+                                   strategy_id=result_strategy_id,
+                                   opportunities_count=len(opportunities))
+                    
+                    strategy_results[result_strategy_id] = {
                         "count": len(opportunities),
                         "total_potential": sum(opp.profit_potential_usd for opp in opportunities),
                         "avg_confidence": sum(opp.confidence_score for opp in opportunities) / len(opportunities) if opportunities else 0
                     }
                     
                     all_opportunities.extend(opportunities)
+                elif isinstance(result, dict):
+                    self.logger.warning("❌ STRATEGY RETURNED EMPTY OPPORTUNITIES",
+                                      scan_id=scan_id,
+                                      strategy_name=strategy_name,
+                                      strategy_id=strategy_id,
+                                      result_keys=list(result.keys()))
+                else:
+                    self.logger.warning("❌ STRATEGY RETURNED INVALID RESULT TYPE",
+                                      scan_id=scan_id,
+                                      strategy_name=strategy_name,
+                                      result_type=type(result).__name__)
             
             # STEP 6: Rank and filter opportunities
             ranked_opportunities = await self._rank_and_filter_opportunities(
@@ -460,7 +494,18 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             top_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
             symbols_str = ",".join(top_symbols)
             
-            # Call REAL funding arbitrage strategy using correct method signature
+            # Call REAL funding arbitrage strategy using UNIFIED approach (same as rebalancing)
+            # Check if user owns this strategy first
+            strategy_id = "ai_funding_arbitrage"
+            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_profile.user_id)
+            owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
+            
+            if strategy_id not in owned_strategy_ids:
+                self.logger.info("User doesn't own funding arbitrage strategy, skipping", 
+                               user_id=user_profile.user_id, scan_id=scan_id)
+                return opportunities  # Return empty for non-owned strategies
+            
+            # User owns strategy - execute directly without credit consumption
             arbitrage_result = await trading_strategies_service.execute_strategy(
                 function="funding_arbitrage",
                 parameters={
@@ -468,34 +513,40 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     "exchanges": "all",
                     "min_funding_rate": 0.005
                 },
-                user_id=user_profile.user_id
+                user_id=user_profile.user_id,
+                simulation_mode=True  # Use simulation mode to avoid credit consumption
             )
             
-            if arbitrage_result.get("success") and arbitrage_result.get("opportunities"):
-                for opp in arbitrage_result["opportunities"]:
-                    # Convert to standardized OpportunityResult
-                    opportunity = OpportunityResult(
-                        strategy_id="ai_funding_arbitrage",
-                        strategy_name="AI Funding Arbitrage",
-                        opportunity_type="funding_arbitrage",
-                        symbol=opp.get("symbol", ""),
-                        exchange=opp.get("exchange", ""),
-                        profit_potential_usd=float(opp.get("profit_potential", 0)),
-                        confidence_score=float(opp.get("confidence", 0.7)),
-                        risk_level=opp.get("risk_level", "medium"),
-                        required_capital_usd=float(opp.get("required_capital", 1000)),
-                        estimated_timeframe=opp.get("timeframe", "8h"),
-                        entry_price=opp.get("entry_price"),
-                        exit_price=opp.get("exit_price"),
-                        metadata={
-                            "funding_rate_long": opp.get("funding_rate_long", 0),
-                            "funding_rate_short": opp.get("funding_rate_short", 0),
-                            "spread_percentage": opp.get("spread_percentage", 0),
-                            "exchanges": opp.get("exchanges", [])
-                        },
-                        discovered_at=datetime.utcnow()
-                    )
-                    opportunities.append(opportunity)
+            if arbitrage_result.get("success"):
+                # Extract opportunities from nested analysis structure
+                analysis_data = arbitrage_result.get("funding_arbitrage_analysis", {})
+                opportunities_data = analysis_data.get("opportunities", [])
+                
+                if opportunities_data:
+                    for opp in opportunities_data:
+                        # Convert to standardized OpportunityResult
+                        opportunity = OpportunityResult(
+                            strategy_id="ai_funding_arbitrage",
+                            strategy_name="AI Funding Arbitrage",
+                            opportunity_type="funding_arbitrage",
+                            symbol=opp.get("symbol", ""),
+                            exchange=opp.get("exchange", ""),
+                            profit_potential_usd=float(opp.get("profit_potential", 0)),
+                            confidence_score=float(opp.get("confidence", 0.7)),
+                            risk_level=opp.get("risk_level", "medium"),
+                            required_capital_usd=float(opp.get("required_capital", 1000)),
+                            estimated_timeframe=opp.get("timeframe", "8h"),
+                            entry_price=opp.get("entry_price"),
+                            exit_price=opp.get("exit_price"),
+                            metadata={
+                                "funding_rate_long": opp.get("funding_rate_long", 0),
+                                "funding_rate_short": opp.get("funding_rate_short", 0),
+                                "spread_percentage": opp.get("spread_percentage", 0),
+                                "exchanges": opp.get("exchanges", [])
+                            },
+                            discovered_at=datetime.utcnow()
+                        )
+                        opportunities.append(opportunity)
             
         except Exception as e:
             self.logger.error("Funding arbitrage scan failed", 
@@ -527,30 +578,35 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 user_id=user_profile.user_id
             )
             
-            if stat_arb_result.get("success") and stat_arb_result.get("opportunities"):
-                for opp in stat_arb_result["opportunities"]:
-                    opportunity = OpportunityResult(
-                        strategy_id="ai_statistical_arbitrage",
-                        strategy_name="AI Statistical Arbitrage", 
-                        opportunity_type="statistical_arbitrage",
-                        symbol=opp.get("symbol", ""),
-                        exchange=opp.get("exchange", "binance"),
-                        profit_potential_usd=float(opp.get("profit_potential", 0)),
-                        confidence_score=float(opp.get("confidence", 0.75)),
-                        risk_level=opp.get("risk_level", "medium_high"),
-                        required_capital_usd=float(opp.get("required_capital", 5000)),
-                        estimated_timeframe=opp.get("timeframe", "24h"),
-                        entry_price=opp.get("entry_price"),
-                        exit_price=opp.get("target_price"),
-                        metadata={
-                            "z_score": opp.get("z_score", 0),
-                            "correlation": opp.get("correlation", 0),
-                            "lookback_period": opp.get("lookback_period", "30d"),
-                            "strategy_type": opp.get("strategy_type", "mean_reversion")
-                        },
-                        discovered_at=datetime.utcnow()
-                    )
-                    opportunities.append(opportunity)
+            if stat_arb_result.get("success"):
+                # Extract opportunities from nested analysis structure  
+                analysis_data = stat_arb_result.get("statistical_arbitrage_analysis", {})
+                opportunities_data = analysis_data.get("opportunities", [])
+                
+                if opportunities_data:
+                    for opp in opportunities_data:
+                        opportunity = OpportunityResult(
+                            strategy_id="ai_statistical_arbitrage",
+                            strategy_name="AI Statistical Arbitrage", 
+                            opportunity_type="statistical_arbitrage",
+                            symbol=opp.get("symbol", ""),
+                            exchange=opp.get("exchange", "binance"),
+                            profit_potential_usd=float(opp.get("profit_potential", 0)),
+                            confidence_score=float(opp.get("confidence", 0.75)),
+                            risk_level=opp.get("risk_level", "medium_high"),
+                            required_capital_usd=float(opp.get("required_capital", 5000)),
+                            estimated_timeframe=opp.get("timeframe", "24h"),
+                            entry_price=opp.get("entry_price"),
+                            exit_price=opp.get("target_price"),
+                            metadata={
+                                "z_score": opp.get("z_score", 0),
+                                "correlation": opp.get("correlation", 0),
+                                "lookback_period": opp.get("lookback_period", "30d"),
+                                "strategy_type": opp.get("strategy_type", "mean_reversion")
+                            },
+                            discovered_at=datetime.utcnow()
+                        )
+                        opportunities.append(opportunity)
                     
         except Exception as e:
             self.logger.error("Statistical arbitrage scan failed",
@@ -628,49 +684,105 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         opportunities = []
         
         try:
+            # Check if user owns spot momentum strategy (should be free strategy)
+            strategy_id = "ai_spot_momentum_strategy"
+            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_profile.user_id)
+            owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
+            
+            if strategy_id not in owned_strategy_ids:
+                self.logger.info("User doesn't own spot momentum strategy, skipping", 
+                               user_id=user_profile.user_id, scan_id=scan_id)
+                return opportunities
+            
             # Get symbols suitable for momentum trading
             momentum_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=30)
             
             for symbol in momentum_symbols:
-                # Call REAL spot momentum strategy using correct method signature
+                # User owns strategy - execute using unified approach
                 momentum_result = await trading_strategies_service.execute_strategy(
                     function="spot_momentum_strategy",
                     symbol=f"{symbol}/USDT",
                     parameters={"timeframe": "4h"},
-                    user_id=user_profile.user_id
+                    user_id=user_profile.user_id,
+                    simulation_mode=True  # Use simulation mode for opportunity scanning
                 )
                 
-                if momentum_result.get("success") and momentum_result.get("signal"):
-                    signals = momentum_result["signal"]
+                if momentum_result.get("success"):
+                    # CRITICAL FIX: Extract signal from correct nesting level
+                    execution_result = momentum_result.get("execution_result", {})
+                    signals = execution_result.get("signal")
                     
-                    if signals.get("strength", 0) > 6.0:  # Strong momentum signals (scale 1-10)
-                        # Get indicators from the full response
-                        indicators = momentum_result.get("indicators", {})
-                        risk_mgmt = momentum_result.get("risk_management", {})
+                    if not signals:
+                        continue  # Skip if no signal data
+                    
+                    # CRITICAL DEBUG: Log all signal analysis
+                    signal_strength = signals.get("strength", 0)
+                    signal_confidence = signals.get("confidence", 0)
+                    signal_action = signals.get("action", "HOLD")
+                    
+                    self.logger.info(f"🎯 MOMENTUM SIGNAL ANALYSIS",
+                                   scan_id=scan_id,
+                                   symbol=symbol,
+                                   signal_strength=signal_strength,
+                                   signal_confidence=signal_confidence,
+                                   signal_action=signal_action,
+                                   qualifies_threshold=signal_strength > 6.0)
+                    
+                    if signal_strength > 6.0:  # Strong momentum signals (scale 1-10)
+                        self.logger.info(f"🚀 CREATING OPPORTUNITY FOR QUALIFYING SIGNAL",
+                                       scan_id=scan_id,
+                                       symbol=symbol,
+                                       signal_strength=signal_strength)
                         
-                        opportunity = OpportunityResult(
-                            strategy_id="ai_spot_momentum_strategy",
-                            strategy_name="AI Spot Momentum",
-                            opportunity_type="spot_momentum",
-                            symbol=symbol,
-                            exchange="binance",
-                            profit_potential_usd=float(risk_mgmt.get("take_profit", 100)),  # Default $100 profit target
-                            confidence_score=float(signals.get("confidence", 70)) / 100,  # Convert to 0-1 scale
-                            risk_level="medium",
-                            required_capital_usd=float(risk_mgmt.get("position_size", 1000)),
-                            estimated_timeframe="4-12h",
-                            entry_price=None,  # Will be filled by execution service
-                            exit_price=None,   # Will be calculated based on profit target
-                            metadata={
-                                "momentum_score": indicators.get("momentum_score", 0),
-                                "rsi": indicators.get("rsi", 0),
-                                "macd_trend": indicators.get("macd_trend", "NEUTRAL"),
-                                "signal_strength": signals.get("strength", 0),
-                                "stop_loss": risk_mgmt.get("stop_loss", 0)
-                            },
-                            discovered_at=datetime.utcnow()
-                        )
-                        opportunities.append(opportunity)
+                        try:
+                            # Get indicators from the full response (these are at root level)
+                            execution_data = momentum_result.get("execution_result", {})
+                            indicators = execution_data.get("indicators", {}) or momentum_result.get("indicators", {})
+                            risk_mgmt = execution_data.get("risk_management", {}) or momentum_result.get("risk_management", {})
+                            
+                            opportunity = OpportunityResult(
+                                strategy_id="ai_spot_momentum_strategy",
+                                strategy_name="AI Spot Momentum",
+                                opportunity_type="spot_momentum",
+                                symbol=symbol,
+                                exchange="binance",
+                                profit_potential_usd=float(risk_mgmt.get("take_profit", 100)),  # Default $100 profit target
+                                confidence_score=float(signals.get("confidence", 70)) / 100,  # Convert to 0-1 scale
+                                risk_level="medium",
+                                required_capital_usd=float(risk_mgmt.get("position_size", 1000)),
+                                estimated_timeframe="4-12h",
+                                entry_price=None,  # Will be filled by execution service
+                                exit_price=None,   # Will be calculated based on profit target
+                                metadata={
+                                    "momentum_score": indicators.get("momentum_score", 0),
+                                    "rsi": indicators.get("rsi", 0),
+                                    "macd_trend": indicators.get("macd_trend", "NEUTRAL"),
+                                    "signal_strength": signals.get("strength", 0),
+                                    "stop_loss": risk_mgmt.get("stop_loss", 0)
+                                },
+                                discovered_at=datetime.utcnow()
+                            )
+                            opportunities.append(opportunity)
+                            
+                            self.logger.info(f"✅ OPPORTUNITY CREATED SUCCESSFULLY",
+                                           scan_id=scan_id,
+                                           symbol=symbol,
+                                           opportunity_id=opportunity.strategy_id,
+                                           opportunities_count=len(opportunities))
+                        
+                        except Exception as opp_creation_error:
+                            self.logger.error(f"🚨 OPPORTUNITY CREATION FAILED",
+                                            scan_id=scan_id,
+                                            symbol=symbol,
+                                            signal_strength=signal_strength,
+                                            error=str(opp_creation_error),
+                                            exc_info=True)
+                    else:
+                        self.logger.info(f"❌ Signal below threshold",
+                                       scan_id=scan_id,
+                                       symbol=symbol,
+                                       signal_strength=signal_strength,
+                                       threshold=6.0)
                         
         except Exception as e:
             self.logger.error("Spot momentum scan failed",
@@ -806,37 +918,53 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         opportunities = []
         
         try:
-            # Risk management looks for hedging opportunities using correct method signature
+            # Check if user owns risk management strategy (should be free strategy)
+            strategy_id = "ai_risk_management"
+            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_profile.user_id)
+            owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
+            
+            if strategy_id not in owned_strategy_ids:
+                self.logger.info("User doesn't own risk management strategy, skipping", 
+                               user_id=user_profile.user_id, scan_id=scan_id)
+                return opportunities
+            
+            # User owns strategy - execute using unified approach
             hedge_result = await trading_strategies_service.execute_strategy(
                 function="risk_management",
-                user_id=user_profile.user_id
+                user_id=user_profile.user_id,
+                simulation_mode=True  # Use simulation mode for opportunity scanning
             )
             
-            if hedge_result.get("success") and hedge_result.get("hedge_recommendations"):
-                for hedge in hedge_result["hedge_recommendations"]:
-                    if hedge.get("urgency_score", 0) > 0.6:  # Medium+ urgency
-                        opportunity = OpportunityResult(
-                            strategy_id="ai_risk_management",
-                            strategy_name="AI Risk Management",
-                            opportunity_type="risk_hedge",
-                            symbol=hedge.get("hedge_instrument", ""),
-                            exchange="binance",
-                            profit_potential_usd=0,  # Risk management protects rather than profits
-                            confidence_score=float(hedge.get("effectiveness", 0.8)),
-                            risk_level="low",
-                            required_capital_usd=float(hedge.get("hedge_cost", 500)),
-                            estimated_timeframe="ongoing",
-                            entry_price=None,
-                            exit_price=None,
-                            metadata={
-                                "hedge_type": hedge.get("hedge_type", ""),
-                                "risk_reduction": hedge.get("risk_reduction_percentage", 0),
-                                "urgency": hedge.get("urgency_score", 0),
-                                "portfolio_protection": True
-                            },
-                            discovered_at=datetime.utcnow()
-                        )
-                        opportunities.append(opportunity)
+            if hedge_result.get("success"):
+                # CRITICAL FIX: Extract hedge recommendations from correct nesting level
+                execution_result = hedge_result.get("execution_result", {})
+                hedge_recommendations = execution_result.get("hedge_recommendations", []) or hedge_result.get("hedge_recommendations", [])
+                
+                if hedge_recommendations:
+                    for hedge in hedge_recommendations:
+                        if hedge.get("urgency_score", 0) > 0.6:  # Medium+ urgency
+                            opportunity = OpportunityResult(
+                                strategy_id="ai_risk_management",
+                                strategy_name="AI Risk Management",
+                                opportunity_type="risk_hedge",
+                                symbol=hedge.get("hedge_instrument", ""),
+                                exchange="binance",
+                                profit_potential_usd=0,  # Risk management protects rather than profits
+                                confidence_score=float(hedge.get("effectiveness", 0.8)),
+                                risk_level="low",
+                                required_capital_usd=float(hedge.get("hedge_cost", 500)),
+                                estimated_timeframe="ongoing",
+                                entry_price=None,
+                                exit_price=None,
+                                metadata={
+                                    "hedge_type": hedge.get("hedge_type", ""),
+                                    "risk_reduction": hedge.get("risk_reduction_percentage", 0),
+                                    "urgency": hedge.get("urgency_score", 0),
+                                    "portfolio_protection": True
+                                },
+                                discovered_at=datetime.utcnow()
+                            )
+                            opportunities.append(opportunity)
                         
         except Exception as e:
             self.logger.error("Risk management scan failed", 
@@ -855,37 +983,53 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         opportunities = []
         
         try:
-            # Portfolio optimization analyzes current allocation using correct method signature
+            # Check if user owns portfolio optimization strategy (should be free strategy)
+            strategy_id = "ai_portfolio_optimization"
+            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_profile.user_id)
+            owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
+            
+            if strategy_id not in owned_strategy_ids:
+                self.logger.info("User doesn't own portfolio optimization strategy, skipping", 
+                               user_id=user_profile.user_id, scan_id=scan_id)
+                return opportunities
+            
+            # User owns strategy - execute using unified approach
             optimization_result = await trading_strategies_service.execute_strategy(
                 function="portfolio_optimization",
-                user_id=user_profile.user_id
+                user_id=user_profile.user_id,
+                simulation_mode=True  # Use simulation mode for opportunity scanning
             )
             
-            if optimization_result.get("success") and optimization_result.get("rebalancing_recommendations"):
-                for rebal in optimization_result["rebalancing_recommendations"]:
-                    if rebal.get("improvement_potential", 0) > 0.1:  # 10%+ improvement
-                        opportunity = OpportunityResult(
-                            strategy_id="ai_portfolio_optimization",
-                            strategy_name="AI Portfolio Optimization",
-                            opportunity_type="portfolio_rebalance",
-                            symbol=rebal.get("target_asset", ""),
-                            exchange="binance", 
-                            profit_potential_usd=float(rebal.get("expected_improvement_usd", 0)),
-                            confidence_score=float(rebal.get("confidence", 0.85)),
-                            risk_level="low",
-                            required_capital_usd=float(rebal.get("rebalance_amount", 1000)),
-                            estimated_timeframe="1-7d",
-                            entry_price=None,
-                            exit_price=None,
-                            metadata={
-                                "current_allocation": rebal.get("current_allocation", 0),
-                                "target_allocation": rebal.get("target_allocation", 0),
-                                "sharpe_improvement": rebal.get("sharpe_improvement", 0),
-                                "rebalance_type": rebal.get("action", "")
-                            },
-                            discovered_at=datetime.utcnow()
-                        )
-                        opportunities.append(opportunity)
+            if optimization_result.get("success"):
+                # CRITICAL FIX: Extract rebalancing recommendations from correct nesting level
+                execution_result = optimization_result.get("execution_result", {})
+                rebalancing_recommendations = execution_result.get("rebalancing_recommendations", [])
+                
+                if rebalancing_recommendations:
+                    for rebal in rebalancing_recommendations:
+                        if rebal.get("improvement_potential", 0) > 0.1:  # 10%+ improvement
+                            opportunity = OpportunityResult(
+                                strategy_id="ai_portfolio_optimization",
+                                strategy_name="AI Portfolio Optimization",
+                                opportunity_type="portfolio_rebalance",
+                                symbol=rebal.get("target_asset", ""),
+                                exchange="binance", 
+                                profit_potential_usd=float(rebal.get("expected_improvement_usd", 0)),
+                                confidence_score=float(rebal.get("confidence", 0.85)),
+                                risk_level="low",
+                                required_capital_usd=float(rebal.get("rebalance_amount", 1000)),
+                                estimated_timeframe="1-7d",
+                                entry_price=None,
+                                exit_price=None,
+                                metadata={
+                                    "current_allocation": rebal.get("current_allocation", 0),
+                                    "target_allocation": rebal.get("target_allocation", 0),
+                                    "sharpe_improvement": rebal.get("sharpe_improvement", 0),
+                                    "rebalance_type": rebal.get("action", "")
+                                },
+                                discovered_at=datetime.utcnow()
+                            )
+                            opportunities.append(opportunity)
                         
         except Exception as e:
             self.logger.error("Portfolio optimization scan failed",

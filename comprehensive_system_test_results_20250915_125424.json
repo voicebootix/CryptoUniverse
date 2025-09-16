@@ -1,0 +1,1931 @@
+{
+  "test_timestamp": "2025-09-15T12:54:24.044443",
+  "system_tested": "https://cryptouniverse.onrender.com/api/v1",
+  "test_results": {
+    "opportunities": {
+      "test": "opportunities_current",
+      "results": [
+        {
+          "query": "Find me the best cryptocurrency trading opportunities right now",
+          "error": "The read operation timed out",
+          "success": false
+        },
+        {
+          "query": "Show me opportunities",
+          "response_content": "\ud83d\udd0d **Opportunity Scan Complete**\n\nAfter comprehensive analysis, no significant trading opportunities meet the current risk and return criteria.\n\n**Analysis Completed:**\n\u2022 All strategy models executed successfully\n\u2022 Risk thresholds applied correctly  \n\u2022 Market conditions analyzed\n\n**Current Assessment:**\n\u2022 Markets in consolidation phase\n\u2022 Volatility below opportunity threshold\n\u2022 Existing positions recommended to hold\n\n**Options:**\n\u2022 \"Lower risk threshold\" - See more aggressive opportunities\n\u2022 \"Che...",
+          "intent": "opportunity_discovery",
+          "metadata": {
+            "opportunities": [],
+            "service_used": "user_opportunity_discovery",
+            "opportunities_count": 0,
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757940212_ad5067ba",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 66.94281298299845,
+                "recommendation": "HOLD",
+                "reasoning": "- The score is not higher due to the inherent volatility and unpredictability of the cryptocurrency market, as well as the current lack of specific opportunity identification in the provided data; However, the lack of active opportunities indicates there may not be any compelling trades to execute at the moment; ## Cryptocurrency Trading Opportunity Analysis\n\n**1",
+                "confidence_threshold_met": false,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 75.0,
+                    "reasoning": "- The score is not higher due to the inherent volatility and unpredictability of the cryptocurrency market, as well as the current lack of specific opportunity identification in the provided data",
+                    "cost": 0.03321,
+                    "response_time": 19.259536266326904
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 65.0,
+                    "reasoning": "However, the lack of active opportunities indicates there may not be any compelling trades to execute at the moment",
+                    "cost": 0.052395000000000004,
+                    "response_time": 23.031036853790283
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 10.0,
+                    "reasoning": "## Cryptocurrency Trading Opportunity Analysis\n\n**1",
+                    "cost": 0.0025375000000000003,
+                    "response_time": 10.972439289093018
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.08814250000000001,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T12:43:55.567402",
+                "opportunity_score": 66.94281298299845,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 6.6942812982998445,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T12:43:55.567424"
+            }
+          },
+          "analysis": {
+            "has_opportunities": true,
+            "opportunity_count": 0,
+            "shows_strategies": false,
+            "shows_assets": true,
+            "has_profit_potential": true,
+            "mentions_analysis": true,
+            "response_type": "no_opportunities_found"
+          }
+        },
+        {
+          "query": "What opportunities are available",
+          "response_content": "\ud83d\udd0d **Opportunity Scan Complete**\n\nAfter comprehensive analysis, no significant trading opportunities meet the current risk and return criteria.\n\n**Analysis Completed:**\n\u2022 All strategy models executed successfully\n\u2022 Risk thresholds applied correctly  \n\u2022 Market conditions analyzed\n\n**Current Assessment:**\n\u2022 Markets in consolidation phase\n\u2022 Volatility below opportunity threshold\n\u2022 Existing positions recommended to hold\n\n**Options:**\n\u2022 \"Lower risk threshold\" - See more aggressive opportunities\n\u2022 \"Che...",
+          "intent": "opportunity_discovery",
+          "metadata": {
+            "opportunities": [],
+            "service_used": "user_opportunity_discovery",
+            "opportunities_count": 0,
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757940264_8e9e6a43",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 67.23522167487684,
+                "recommendation": "HOLD",
+                "reasoning": "Market Timing Considerations\n\n- The crypto market is known for its volatility and can shift rapidly due to external factors like regulatory news or macroeconomic indicators; Based on the provided opportunity data, there are currently no specific trading opportunities identified; Confidence Score (1-100) with Reasoning:**\n\n**Confidence Score: 10**\n\nThe extremely low confidence score is due to the lack of actionable market data and specific trading opportunities",
+                "confidence_threshold_met": false,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 65.0,
+                    "reasoning": "Market Timing Considerations\n\n- The crypto market is known for its volatility and can shift rapidly due to external factors like regulatory news or macroeconomic indicators",
+                    "cost": 0.03271,
+                    "response_time": 29.75769877433777
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 75.0,
+                    "reasoning": "Based on the provided opportunity data, there are currently no specific trading opportunities identified",
+                    "cost": 0.04956,
+                    "response_time": 14.970759630203247
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 10.0,
+                    "reasoning": "Confidence Score (1-100) with Reasoning:**\n\n**Confidence Score: 10**\n\nThe extremely low confidence score is due to the lack of actionable market data and specific trading opportunities",
+                    "cost": 0.0025725,
+                    "response_time": 10.781050205230713
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.08484250000000002,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T12:44:54.428050",
+                "opportunity_score": 67.23522167487684,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 6.723522167487684,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T12:44:54.428073"
+            }
+          },
+          "analysis": {
+            "has_opportunities": true,
+            "opportunity_count": 0,
+            "shows_strategies": false,
+            "shows_assets": true,
+            "has_profit_potential": true,
+            "mentions_analysis": true,
+            "response_type": "no_opportunities_found"
+          }
+        },
+        {
+          "query": "Find trading opportunities with high profit potential",
+          "response_content": "\ud83d\udd0d **Opportunity Scan Complete**\n\nAfter comprehensive analysis, no significant trading opportunities meet the current risk and return criteria.\n\n**Analysis Completed:**\n\u2022 All strategy models executed successfully\n\u2022 Risk thresholds applied correctly  \n\u2022 Market conditions analyzed\n\n**Current Assessment:**\n\u2022 Markets in consolidation phase\n\u2022 Volatility below opportunity threshold\n\u2022 Existing positions recommended to hold\n\n**Options:**\n\u2022 \"Lower risk threshold\" - See more aggressive opportunities\n\u2022 \"Che...",
+          "intent": "opportunity_discovery",
+          "metadata": {
+            "opportunities": [],
+            "service_used": "user_opportunity_discovery",
+            "opportunities_count": 0,
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757940329_01305cd3",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 58.20207152628494,
+                "recommendation": "BUY",
+                "reasoning": "### Cryptocurrency Trading Opportunity Analysis\n\n#### 1; Based on the provided opportunity data, here is my institutional-grade analysis:\n\nTechnical Indicators & Momentum:\nThe data does not include any technical indicators or price momentum signals to analyze; Confidence Score (1-100) with Reasoning:**\n\n**Confidence Score: 10**\n\nThe extremely low confidence score is due to the lack of actionable data",
+                "confidence_threshold_met": false,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 75.0,
+                    "reasoning": "### Cryptocurrency Trading Opportunity Analysis\n\n#### 1",
+                    "cost": 0.032440000000000004,
+                    "response_time": 13.808372497558594
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 35.0,
+                    "reasoning": "Based on the provided opportunity data, here is my institutional-grade analysis:\n\nTechnical Indicators & Momentum:\nThe data does not include any technical indicators or price momentum signals to analyze",
+                    "cost": 0.05112,
+                    "response_time": 16.93555235862732
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 10.0,
+                    "reasoning": "Confidence Score (1-100) with Reasoning:**\n\n**Confidence Score: 10**\n\nThe extremely low confidence score is due to the lack of actionable data",
+                    "cost": 0.0028325000000000004,
+                    "response_time": 13.744580745697021
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.0863925,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T12:45:46.087757",
+                "opportunity_score": 58.20207152628494,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 5.820207152628494,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T12:45:46.087776"
+            }
+          },
+          "analysis": {
+            "has_opportunities": true,
+            "opportunity_count": 0,
+            "shows_strategies": false,
+            "shows_assets": true,
+            "has_profit_potential": true,
+            "mentions_analysis": true,
+            "response_type": "no_opportunities_found"
+          }
+        }
+      ],
+      "summary": {
+        "total_tests": 4,
+        "successful_tests": 3,
+        "opportunities_found": 0,
+        "shows_strategies": 0,
+        "shows_assets": 3,
+        "response_types": [
+          "no_opportunities_found",
+          "no_opportunities_found",
+          "no_opportunities_found"
+        ]
+      }
+    },
+    "rebalancing": {
+      "test": "rebalancing_strategies",
+      "results": [
+        {
+          "query": "rebalance my portfolio",
+          "response_content": "\ud83d\udcb0 **Your Portfolio Summary**\n\n**Current Balance:**\n\u2022 Total Portfolio Value: $3,984.06\n\u2022 Available Cash: $0.00\n\u2022 Today's P&L: $0.00 (+0.00%)\n\u2022 Overall P&L: $0.00 (+0.00%)\n\n**Risk Assessment:**\n\u2022 Risk Level: Medium\n\u2022 Active Positions: 9\n\n**Top 5 Holdings:**\n1. XRP (binance): $1,134.99 (28.5%)   Amount: 378.9620\n2. AAVE (kucoin): $929.99 (23.3%)   Amount: 3.1073\n3. ADA (binance): $912.45 (22.9%)   Amount: 1,059.0188\n4. SOL (kucoin): $554.07 (13.9%)   Amount: 2.3509\n5. XRP (kucoin): $206.67 (5.2%)   Amount: 68.9951\n\n**Quick Actions:**\n\u2022 Ask \"Show me more details\" for full analysis\n\u2022 Ask \"What should I buy?\" for recommendations\n\u2022 Ask \"How risky is my portfolio?\" for risk analysis\n\nYour portfolio is connected and showing live data from your exchanges!",
+          "intent": "portfolio_analysis",
+          "metadata": {
+            "portfolio_summary": {
+              "total_value": 3984.0600000000013,
+              "daily_pnl": 0.0,
+              "daily_pnl_pct": 0.0,
+              "total_pnl": 0,
+              "total_pnl_pct": 0,
+              "positions": [
+                {
+                  "symbol": "XRP",
+                  "amount": 378.962,
+                  "value_usd": 1134.99,
+                  "percentage": 28.488275778979222,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "AAVE",
+                  "amount": 3.10732565,
+                  "value_usd": 929.99,
+                  "percentage": 23.342770942204677,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "ADA",
+                  "amount": 1059.01876762,
+                  "value_usd": 912.45,
+                  "percentage": 22.90251652836553,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SOL",
+                  "amount": 2.35085494,
+                  "value_usd": 554.07,
+                  "percentage": 13.907170072739866,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "XRP",
+                  "amount": 68.99511447,
+                  "value_usd": 206.67,
+                  "percentage": 5.187421876176561,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "DOGE",
+                  "amount": 605.21739217,
+                  "value_usd": 159.55,
+                  "percentage": 4.004708764426238,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "KCS",
+                  "amount": 3.25454735,
+                  "value_usd": 51.0,
+                  "percentage": 1.2801012032951307,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "USDC",
+                  "amount": 14.89638597,
+                  "value_usd": 14.9,
+                  "percentage": 0.37399035155093036,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SHIB",
+                  "amount": 691509.74365482,
+                  "value_usd": 9.01,
+                  "percentage": 0.22615121258213974,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                }
+              ],
+              "risk_level": "LOW",
+              "exchanges_connected": 2,
+              "exchanges": [
+                "binance",
+                "kucoin"
+              ],
+              "data_source": "enterprise_optimized_method",
+              "last_updated": "2025-09-15T12:46:10.532018"
+            },
+            "risk_metrics": {
+              "overall_risk": "Medium",
+              "var_24h": 0,
+              "sharpe_ratio": 0,
+              "max_drawdown": 0
+            },
+            "ai_analysis": {
+              "success": true,
+              "analysis": "Portfolio data successfully retrieved. For detailed AI analysis, use the full analysis feature.",
+              "confidence": 0.8,
+              "recommendations": []
+            },
+            "actionable_items": [
+              "rebalance",
+              "risk_analysis",
+              "opportunities",
+              "stop_losses"
+            ]
+          },
+          "analysis": {
+            "shows_strategy_comparison": false,
+            "shows_profit_potential": false,
+            "strategy_count": 0,
+            "has_recommendations": true,
+            "mentions_ai_recommendation": true,
+            "shows_risk_reduction": false,
+            "shows_expected_improvement": false,
+            "response_type": "portfolio_display",
+            "mentioned_strategies": []
+          }
+        },
+        {
+          "query": "rebalance using risk parity strategy",
+          "response_content": "\u2705 **Portfolio is Optimally Balanced**\n\n**Current Status:**\n\u2022 Portfolio Value: $3,982.39\n\u2022 Allocation Variance: < 3% (Excellent)\n\u2022 Risk Level: LOW\n\nYour portfolio is well-balanced according to your current strategy. No rebalancing needed at this time.\n\n**Monitoring:**\n\u2022 I'll continue watching for optimization opportunities\n\u2022 You'll be notified when rebalancing becomes beneficial\n\u2022 Current allocation is within target ranges\n\n**Alternative Actions:**\n\u2022 \"Change strategy\" - Switch to different allocation model\n\u2022 \"Increase risk tolerance\" - Adjust for higher returns\n\u2022 \"Add new assets\" - Expand portfolio diversity",
+          "intent": "rebalancing",
+          "metadata": {
+            "rebalance_analysis": {
+              "needs_rebalancing": false,
+              "error": "'analysis_type'"
+            },
+            "portfolio_data": {
+              "total_value": 3982.3900000000012,
+              "daily_pnl": 0.0,
+              "daily_pnl_pct": 0.0,
+              "total_pnl": 0,
+              "total_pnl_pct": 0,
+              "positions": [
+                {
+                  "symbol": "XRP",
+                  "amount": 378.962,
+                  "value_usd": 1134.65,
+                  "percentage": 28.49168464163479,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "AAVE",
+                  "amount": 3.10732565,
+                  "value_usd": 929.49,
+                  "percentage": 23.340004369235555,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "ADA",
+                  "amount": 1059.01876762,
+                  "value_usd": 912.13,
+                  "percentage": 22.90408523524817,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SOL",
+                  "amount": 2.35085494,
+                  "value_usd": 553.79,
+                  "percentage": 13.905971037492556,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "XRP",
+                  "amount": 68.99511447,
+                  "value_usd": 206.59,
+                  "percentage": 5.18758835774497,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "DOGE",
+                  "amount": 605.21739217,
+                  "value_usd": 159.42,
+                  "percentage": 4.003123752319585,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "KCS",
+                  "amount": 3.25454735,
+                  "value_usd": 51.0,
+                  "percentage": 1.280638008833891,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "USDC",
+                  "amount": 14.89638597,
+                  "value_usd": 14.9,
+                  "percentage": 0.37414718297303867,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SHIB",
+                  "amount": 691509.74365482,
+                  "value_usd": 9.0,
+                  "percentage": 0.2259949427353925,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                }
+              ],
+              "risk_level": "LOW",
+              "exchanges_connected": 2,
+              "exchanges": [
+                "binance",
+                "kucoin"
+              ],
+              "data_source": "enterprise_optimized_method",
+              "last_updated": "2025-09-15T12:46:41.565075"
+            },
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757940410_6e20383c",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 69.82492095093102,
+                "recommendation": "BUY",
+                "reasoning": "Given the provided portfolio data and the request to analyze the trading opportunity using institutional rigor, let's break down the analysis into the requested sections:\n\n### 1; Portfolio Analysis:\nBased on the provided portfolio data, the portfolio is heavily concentrated in a few cryptocurrencies, namely XRP (33; * **Low-Risk Assets:**  The presence of USDC (stablecoin) indicates a desire for stability, but its current allocation is minimal",
+                "confidence_threshold_met": false,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 70.0,
+                    "reasoning": "Given the provided portfolio data and the request to analyze the trading opportunity using institutional rigor, let's break down the analysis into the requested sections:\n\n### 1",
+                    "cost": 0.024050000000000002,
+                    "response_time": 19.87559223175049
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 65.0,
+                    "reasoning": "Portfolio Analysis:\nBased on the provided portfolio data, the portfolio is heavily concentrated in a few cryptocurrencies, namely XRP (33",
+                    "cost": 0.037425,
+                    "response_time": 22.275590419769287
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 75.0,
+                    "reasoning": "* **Low-Risk Assets:**  The presence of USDC (stablecoin) indicates a desire for stability, but its current allocation is minimal",
+                    "cost": 0.0022900000000000004,
+                    "response_time": 14.40099048614502
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.063765,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T12:47:13.073152",
+                "opportunity_score": 69.82492095093102,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 6.982492095093102,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T12:47:13.073175"
+            },
+            "needs_rebalancing": false
+          },
+          "analysis": {
+            "shows_strategy_comparison": false,
+            "shows_profit_potential": false,
+            "strategy_count": 0,
+            "has_recommendations": false,
+            "mentions_ai_recommendation": false,
+            "shows_risk_reduction": false,
+            "shows_expected_improvement": false,
+            "response_type": "already_balanced",
+            "mentioned_strategies": []
+          }
+        },
+        {
+          "query": "rebalance using equal weight strategy",
+          "response_content": "\u2705 **Portfolio is Optimally Balanced**\n\n**Current Status:**\n\u2022 Portfolio Value: $3,980.63\n\u2022 Allocation Variance: < 3% (Excellent)\n\u2022 Risk Level: LOW\n\nYour portfolio is well-balanced according to your current strategy. No rebalancing needed at this time.\n\n**Monitoring:**\n\u2022 I'll continue watching for optimization opportunities\n\u2022 You'll be notified when rebalancing becomes beneficial\n\u2022 Current allocation is within target ranges\n\n**Alternative Actions:**\n\u2022 \"Change strategy\" - Switch to different allocation model\n\u2022 \"Increase risk tolerance\" - Adjust for higher returns\n\u2022 \"Add new assets\" - Expand portfolio diversity",
+          "intent": "rebalancing",
+          "metadata": {
+            "rebalance_analysis": {
+              "needs_rebalancing": false,
+              "error": "'analysis_type'"
+            },
+            "portfolio_data": {
+              "total_value": 3980.630000000001,
+              "daily_pnl": 0.0,
+              "daily_pnl_pct": 0.0,
+              "total_pnl": 0,
+              "total_pnl_pct": 0,
+              "positions": [
+                {
+                  "symbol": "XRP",
+                  "amount": 378.962,
+                  "value_usd": 1134.27,
+                  "percentage": 28.49473575790766,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "AAVE",
+                  "amount": 3.10732565,
+                  "value_usd": 929.15,
+                  "percentage": 23.341782582154075,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "ADA",
+                  "amount": 1059.01876762,
+                  "value_usd": 911.6,
+                  "percentage": 22.900897596611586,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SOL",
+                  "amount": 2.35085494,
+                  "value_usd": 553.51,
+                  "percentage": 13.905085375932952,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "XRP",
+                  "amount": 68.99511447,
+                  "value_usd": 206.53,
+                  "percentage": 5.188374704506572,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "DOGE",
+                  "amount": 605.21739217,
+                  "value_usd": 159.25,
+                  "percentage": 4.000623016959626,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "KCS",
+                  "amount": 3.25454735,
+                  "value_usd": 51.0,
+                  "percentage": 1.2812042314909948,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "USDC",
+                  "amount": 14.89638597,
+                  "value_usd": 14.9,
+                  "percentage": 0.3743126088081534,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SHIB",
+                  "amount": 691509.74365482,
+                  "value_usd": 9.0,
+                  "percentage": 0.2260948643807638,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                }
+              ],
+              "risk_level": "LOW",
+              "exchanges_connected": 2,
+              "exchanges": [
+                "binance",
+                "kucoin"
+              ],
+              "data_source": "enterprise_optimized_method",
+              "last_updated": "2025-09-15T12:47:38.630125"
+            },
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757940468_9c814748",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 61.98429769842977,
+                "recommendation": "BUY",
+                "reasoning": "### Cryptocurrency Trading Opportunity Analysis\n\n#### 1; In summary, while the portfolio has significant potential for returns, it also carries a high degree of risk due to the concentration in speculative cryptocurrencies; Confidence Score (1-100):** 60\n\n**Reasoning:** The confidence score is moderate due to the lack of technical indicators and market data",
+                "confidence_threshold_met": false,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 65.0,
+                    "reasoning": "### Cryptocurrency Trading Opportunity Analysis\n\n#### 1",
+                    "cost": 0.024120000000000003,
+                    "response_time": 15.886271238327026
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 35.0,
+                    "reasoning": "In summary, while the portfolio has significant potential for returns, it also carries a high degree of risk due to the concentration in speculative cryptocurrencies",
+                    "cost": 0.035835,
+                    "response_time": 17.306561708450317
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 75.0,
+                    "reasoning": "Confidence Score (1-100):** 60\n\n**Reasoning:** The confidence score is moderate due to the lack of technical indicators and market data",
+                    "cost": 0.0021775,
+                    "response_time": 14.18411922454834
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.0621325,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T12:48:05.808471",
+                "opportunity_score": 61.98429769842977,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 6.198429769842977,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T12:48:05.808496"
+            },
+            "needs_rebalancing": false
+          },
+          "analysis": {
+            "shows_strategy_comparison": false,
+            "shows_profit_potential": false,
+            "strategy_count": 0,
+            "has_recommendations": false,
+            "mentions_ai_recommendation": false,
+            "shows_risk_reduction": false,
+            "shows_expected_improvement": false,
+            "response_type": "already_balanced",
+            "mentioned_strategies": []
+          }
+        },
+        {
+          "query": "rebalance using max sharpe strategy",
+          "response_content": "\u2705 **Portfolio is Optimally Balanced**\n\n**Current Status:**\n\u2022 Portfolio Value: $3,978.06\n\u2022 Allocation Variance: < 3% (Excellent)\n\u2022 Risk Level: LOW\n\nYour portfolio is well-balanced according to your current strategy. No rebalancing needed at this time.\n\n**Monitoring:**\n\u2022 I'll continue watching for optimization opportunities\n\u2022 You'll be notified when rebalancing becomes beneficial\n\u2022 Current allocation is within target ranges\n\n**Alternative Actions:**\n\u2022 \"Change strategy\" - Switch to different allocation model\n\u2022 \"Increase risk tolerance\" - Adjust for higher returns\n\u2022 \"Add new assets\" - Expand portfolio diversity",
+          "intent": "rebalancing",
+          "metadata": {
+            "rebalance_analysis": {
+              "needs_rebalancing": false,
+              "error": "'analysis_type'"
+            },
+            "portfolio_data": {
+              "total_value": 3978.0600000000004,
+              "daily_pnl": 0.0,
+              "daily_pnl_pct": 0.0,
+              "total_pnl": 0,
+              "total_pnl_pct": 0,
+              "positions": [
+                {
+                  "symbol": "XRP",
+                  "amount": 378.962,
+                  "value_usd": 1133.89,
+                  "percentage": 28.50359220323474,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "AAVE",
+                  "amount": 3.10732565,
+                  "value_usd": 928.51,
+                  "percentage": 23.34077414619186,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "ADA",
+                  "amount": 1059.01876762,
+                  "value_usd": 911.07,
+                  "percentage": 22.90236949668934,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SOL",
+                  "amount": 2.35085494,
+                  "value_usd": 552.8,
+                  "percentage": 13.896220770928542,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "XRP",
+                  "amount": 68.99511447,
+                  "value_usd": 206.43,
+                  "percentage": 5.189212832385635,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "DOGE",
+                  "amount": 605.21739217,
+                  "value_usd": 159.06,
+                  "percentage": 3.998431396208202,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "KCS",
+                  "amount": 3.25454735,
+                  "value_usd": 51.0,
+                  "percentage": 1.282031945219529,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "USDC",
+                  "amount": 14.89638597,
+                  "value_usd": 14.9,
+                  "percentage": 0.37455443105433295,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SHIB",
+                  "amount": 691509.74365482,
+                  "value_usd": 8.99,
+                  "percentage": 0.2259895526965405,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                }
+              ],
+              "risk_level": "LOW",
+              "exchanges_connected": 2,
+              "exchanges": [
+                "binance",
+                "kucoin"
+              ],
+              "data_source": "enterprise_optimized_method",
+              "last_updated": "2025-09-15T12:48:31.134877"
+            },
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757940520_f324c90c",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 66.46583766979793,
+                "recommendation": "BUY",
+                "reasoning": "Given the provided portfolio data and the request to rebalance using the max sharpe strategy, let's dive into the analysis covering the requested aspects; My overall confidence in this assessment is only 35% due to the significant data limitations; ## Cryptocurrency Trading Opportunity Analysis\n\n**Date:** 2025-09-15\n\n**User Request:** Rebalance using max Sharpe strategy",
+                "confidence_threshold_met": false,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 75.0,
+                    "reasoning": "Given the provided portfolio data and the request to rebalance using the max sharpe strategy, let's dive into the analysis covering the requested aspects",
+                    "cost": 0.023590000000000003,
+                    "response_time": 19.827892065048218
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 35.0,
+                    "reasoning": "My overall confidence in this assessment is only 35% due to the significant data limitations",
+                    "cost": 0.037965,
+                    "response_time": 22.813483715057373
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 75.0,
+                    "reasoning": "## Cryptocurrency Trading Opportunity Analysis\n\n**Date:** 2025-09-15\n\n**User Request:** Rebalance using max Sharpe strategy",
+                    "cost": 0.0022825000000000002,
+                    "response_time": 15.474833488464355
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.0638375,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T12:49:03.234338",
+                "opportunity_score": 66.46583766979793,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 6.646583766979793,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T12:49:03.234365"
+            },
+            "needs_rebalancing": false
+          },
+          "analysis": {
+            "shows_strategy_comparison": false,
+            "shows_profit_potential": false,
+            "strategy_count": 0,
+            "has_recommendations": false,
+            "mentions_ai_recommendation": false,
+            "shows_risk_reduction": false,
+            "shows_expected_improvement": false,
+            "response_type": "already_balanced",
+            "mentioned_strategies": []
+          }
+        },
+        {
+          "query": "rebalance using min variance strategy",
+          "response_content": "\u2705 **Portfolio is Optimally Balanced**\n\n**Current Status:**\n\u2022 Portfolio Value: $3,974.33\n\u2022 Allocation Variance: < 3% (Excellent)\n\u2022 Risk Level: LOW\n\nYour portfolio is well-balanced according to your current strategy. No rebalancing needed at this time.\n\n**Monitoring:**\n\u2022 I'll continue watching for optimization opportunities\n\u2022 You'll be notified when rebalancing becomes beneficial\n\u2022 Current allocation is within target ranges\n\n**Alternative Actions:**\n\u2022 \"Change strategy\" - Switch to different allocation model\n\u2022 \"Increase risk tolerance\" - Adjust for higher returns\n\u2022 \"Add new assets\" - Expand portfolio diversity",
+          "intent": "rebalancing",
+          "metadata": {
+            "rebalance_analysis": {
+              "needs_rebalancing": false,
+              "error": "'analysis_type'"
+            },
+            "portfolio_data": {
+              "total_value": 3974.330000000001,
+              "daily_pnl": 0.0,
+              "daily_pnl_pct": 0.0,
+              "total_pnl": 0,
+              "total_pnl_pct": 0,
+              "positions": [
+                {
+                  "symbol": "XRP",
+                  "amount": 378.962,
+                  "value_usd": 1133.25,
+                  "percentage": 28.514240136073244,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "AAVE",
+                  "amount": 3.10732565,
+                  "value_usd": 927.8,
+                  "percentage": 23.344815352524822,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "ADA",
+                  "amount": 1059.01876762,
+                  "value_usd": 910.01,
+                  "percentage": 22.897192734372833,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SOL",
+                  "amount": 2.35085494,
+                  "value_usd": 551.72,
+                  "percentage": 13.882088301676005,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "XRP",
+                  "amount": 68.99511447,
+                  "value_usd": 206.42,
+                  "percentage": 5.193831413093526,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "DOGE",
+                  "amount": 605.21739217,
+                  "value_usd": 158.86,
+                  "percentage": 3.997151721170612,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "KCS",
+                  "amount": 3.25454735,
+                  "value_usd": 51.0,
+                  "percentage": 1.2832351616498878,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "USDC",
+                  "amount": 14.89638597,
+                  "value_usd": 14.9,
+                  "percentage": 0.37490595899183,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SHIB",
+                  "amount": 691509.74365482,
+                  "value_usd": 8.97,
+                  "percentage": 0.22569841960783324,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                }
+              ],
+              "risk_level": "LOW",
+              "exchanges_connected": 2,
+              "exchanges": [
+                "binance",
+                "kucoin"
+              ],
+              "data_source": "enterprise_optimized_method",
+              "last_updated": "2025-09-15T12:49:28.420460"
+            },
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757940577_871023df",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 71.65028852196765,
+                "recommendation": "BUY",
+                "reasoning": "- **AAVE** and **DOGE**, while potentially offering higher rewards, come with increased risks due to their volatility; Here is my analysis of the cryptocurrency portfolio rebalancing opportunity:\n\nTechnical Indicators and Momentum:\nThe portfolio is heavily weighted towards XRP (33; However, the portfolio includes SHIB, which can experience slippage due to its large circulating supply and concentrated holdings",
+                "confidence_threshold_met": false,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 75.0,
+                    "reasoning": "- **AAVE** and **DOGE**, while potentially offering higher rewards, come with increased risks due to their volatility",
+                    "cost": 0.02363,
+                    "response_time": 15.006412267684937
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 65.0,
+                    "reasoning": "Here is my analysis of the cryptocurrency portfolio rebalancing opportunity:\n\nTechnical Indicators and Momentum:\nThe portfolio is heavily weighted towards XRP (33",
+                    "cost": 0.036135,
+                    "response_time": 19.74550199508667
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 75.0,
+                    "reasoning": "However, the portfolio includes SHIB, which can experience slippage due to its large circulating supply and concentrated holdings",
+                    "cost": 0.0022875,
+                    "response_time": 15.127412796020508
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.0620525,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T12:49:57.603773",
+                "opportunity_score": 71.65028852196765,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 7.165028852196765,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T12:49:57.603796"
+            },
+            "needs_rebalancing": false
+          },
+          "analysis": {
+            "shows_strategy_comparison": false,
+            "shows_profit_potential": false,
+            "strategy_count": 0,
+            "has_recommendations": false,
+            "mentions_ai_recommendation": false,
+            "shows_risk_reduction": false,
+            "shows_expected_improvement": false,
+            "response_type": "already_balanced",
+            "mentioned_strategies": []
+          }
+        },
+        {
+          "query": "rebalance using kelly criterion strategy",
+          "response_content": "\u2705 **Portfolio is Optimally Balanced**\n\n**Current Status:**\n\u2022 Portfolio Value: $3,971.71\n\u2022 Allocation Variance: < 3% (Excellent)\n\u2022 Risk Level: LOW\n\nYour portfolio is well-balanced according to your current strategy. No rebalancing needed at this time.\n\n**Monitoring:**\n\u2022 I'll continue watching for optimization opportunities\n\u2022 You'll be notified when rebalancing becomes beneficial\n\u2022 Current allocation is within target ranges\n\n**Alternative Actions:**\n\u2022 \"Change strategy\" - Switch to different allocation model\n\u2022 \"Increase risk tolerance\" - Adjust for higher returns\n\u2022 \"Add new assets\" - Expand portfolio diversity",
+          "intent": "rebalancing",
+          "metadata": {
+            "rebalance_analysis": {
+              "needs_rebalancing": false,
+              "error": "'analysis_type'"
+            },
+            "portfolio_data": {
+              "total_value": 3971.710000000001,
+              "daily_pnl": 0.0,
+              "daily_pnl_pct": 0.0,
+              "total_pnl": 0,
+              "total_pnl_pct": 0,
+              "positions": [
+                {
+                  "symbol": "XRP",
+                  "amount": 378.962,
+                  "value_usd": 1132.64,
+                  "percentage": 28.517691372230093,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "AAVE",
+                  "amount": 3.10732565,
+                  "value_usd": 927.1,
+                  "percentage": 23.3425904711069,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "ADA",
+                  "amount": 1059.01876762,
+                  "value_usd": 908.85,
+                  "percentage": 22.883090658683532,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SOL",
+                  "amount": 2.35085494,
+                  "value_usd": 551.63,
+                  "percentage": 13.88897980970413,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "XRP",
+                  "amount": 68.99511447,
+                  "value_usd": 206.19,
+                  "percentage": 5.191466647867038,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "DOGE",
+                  "amount": 605.21739217,
+                  "value_usd": 159.04,
+                  "percentage": 4.004320557140375,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "KCS",
+                  "amount": 3.25454735,
+                  "value_usd": 51.0,
+                  "percentage": 1.2840816675940587,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "USDC",
+                  "amount": 14.89638597,
+                  "value_usd": 14.9,
+                  "percentage": 0.375153271512774,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SHIB",
+                  "amount": 691509.74365482,
+                  "value_usd": 8.97,
+                  "percentage": 0.22584730506507272,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                }
+              ],
+              "risk_level": "LOW",
+              "exchanges_connected": 2,
+              "exchanges": [
+                "binance",
+                "kucoin"
+              ],
+              "data_source": "enterprise_optimized_method",
+              "last_updated": "2025-09-15T12:50:23.301898"
+            },
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757940632_ed5a9080",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 61.98429769842977,
+                "recommendation": "BUY",
+                "reasoning": "Market Timing Considerations\n\nCryptocurrency markets operate 24/7, making market timing a challenge due to constant price fluctuations. - **Execution Risks**: Trading on different exchanges (Binance and Kucoin) introduces execution risk due to potential delays in order fulfillment, differences in liquidity, and possible technical issues with exchange platforms; Risk/Reward Assessment \nThe portfolio risk level is rated as \"LOW\", likely due to the diversification across 9 different crypto assets and 2 exchanges; **Issue:** The rebalance analysis failed due to a missing 'analysis_type'",
+                "confidence_threshold_met": false,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 65.0,
+                    "reasoning": "Market Timing Considerations\n\nCryptocurrency markets operate 24/7, making market timing a challenge due to constant price fluctuations. - **Execution Risks**: Trading on different exchanges (Binance and Kucoin) introduces execution risk due to potential delays in order fulfillment, differences in liquidity, and possible technical issues with exchange platforms",
+                    "cost": 0.02423,
+                    "response_time": 18.695189952850342
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 35.0,
+                    "reasoning": "Risk/Reward Assessment \nThe portfolio risk level is rated as \"LOW\", likely due to the diversification across 9 different crypto assets and 2 exchanges",
+                    "cost": 0.037155,
+                    "response_time": 20.732946395874023
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 75.0,
+                    "reasoning": "**Issue:** The rebalance analysis failed due to a missing 'analysis_type'",
+                    "cost": 0.0022375000000000003,
+                    "response_time": 14.254033088684082
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.0636225,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T12:50:53.233139",
+                "opportunity_score": 61.98429769842977,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 6.198429769842977,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T12:50:53.233159"
+            },
+            "needs_rebalancing": false
+          },
+          "analysis": {
+            "shows_strategy_comparison": false,
+            "shows_profit_potential": false,
+            "strategy_count": 0,
+            "has_recommendations": false,
+            "mentions_ai_recommendation": false,
+            "shows_risk_reduction": false,
+            "shows_expected_improvement": false,
+            "response_type": "already_balanced",
+            "mentioned_strategies": []
+          }
+        },
+        {
+          "query": "rebalance using adaptive strategy",
+          "response_content": "\u2705 **Portfolio is Optimally Balanced**\n\n**Current Status:**\n\u2022 Portfolio Value: $3,980.54\n\u2022 Allocation Variance: < 3% (Excellent)\n\u2022 Risk Level: LOW\n\nYour portfolio is well-balanced according to your current strategy. No rebalancing needed at this time.\n\n**Monitoring:**\n\u2022 I'll continue watching for optimization opportunities\n\u2022 You'll be notified when rebalancing becomes beneficial\n\u2022 Current allocation is within target ranges\n\n**Alternative Actions:**\n\u2022 \"Change strategy\" - Switch to different allocation model\n\u2022 \"Increase risk tolerance\" - Adjust for higher returns\n\u2022 \"Add new assets\" - Expand portfolio diversity",
+          "intent": "rebalancing",
+          "metadata": {
+            "rebalance_analysis": {
+              "needs_rebalancing": false,
+              "error": "'analysis_type'"
+            },
+            "portfolio_data": {
+              "total_value": 3980.540000000001,
+              "daily_pnl": 0.0,
+              "daily_pnl_pct": 0.0,
+              "total_pnl": 0,
+              "total_pnl_pct": 0,
+              "positions": [
+                {
+                  "symbol": "XRP",
+                  "amount": 378.962,
+                  "value_usd": 1135.71,
+                  "percentage": 28.53155602003748,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "AAVE",
+                  "amount": 3.10732565,
+                  "value_usd": 928.93,
+                  "percentage": 23.3367834514915,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "ADA",
+                  "amount": 1059.01876762,
+                  "value_usd": 910.65,
+                  "percentage": 22.877549277233737,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SOL",
+                  "amount": 2.35085494,
+                  "value_usd": 552.83,
+                  "percentage": 13.88831666055359,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "XRP",
+                  "amount": 68.99511447,
+                  "value_usd": 206.8,
+                  "percentage": 5.195275012937942,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "DOGE",
+                  "amount": 605.21739217,
+                  "value_usd": 159.32,
+                  "percentage": 4.002472026408476,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "KCS",
+                  "amount": 3.25454735,
+                  "value_usd": 51.0,
+                  "percentage": 1.2812331995156432,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "USDC",
+                  "amount": 14.89638597,
+                  "value_usd": 14.9,
+                  "percentage": 0.37432107201535464,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SHIB",
+                  "amount": 691509.74365482,
+                  "value_usd": 8.99,
+                  "percentage": 0.22584875418913009,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                }
+              ],
+              "risk_level": "LOW",
+              "exchanges_connected": 2,
+              "exchanges": [
+                "binance",
+                "kucoin"
+              ],
+              "data_source": "enterprise_optimized_method",
+              "last_updated": "2025-09-15T12:51:18.735818"
+            },
+            "ai_analysis": {
+              "success": true,
+              "function": "analyze_opportunity",
+              "request_id": "AICS_1757940688_a916244a",
+              "opportunity_analysis": {
+                "success": true,
+                "consensus_score": 73.24161746685976,
+                "recommendation": "HOLD",
+                "reasoning": "Market Timing Considerations\n\nCryptocurrency markets operate 24/7, making market timing a challenge due to constant price fluctuations. - **Execution Risks**: Trading on two exchanges (Binance and Kucoin) introduces execution risk due to potential differences in liquidity and trading fees; Risk/Reward Assessment:\nThe portfolio risk level is classified as \"LOW\", likely due to the diversification across 9 different crypto assets and 2 exchanges; ## Cryptocurrency Trading Opportunity Analysis\n\n**Date:** 2025-09-15\n\n**User Request:** Rebalance using adaptive strategy",
+                "confidence_threshold_met": false,
+                "model_responses": [
+                  {
+                    "provider": "gpt4",
+                    "confidence": 75.0,
+                    "reasoning": "Market Timing Considerations\n\nCryptocurrency markets operate 24/7, making market timing a challenge due to constant price fluctuations. - **Execution Risks**: Trading on two exchanges (Binance and Kucoin) introduces execution risk due to potential differences in liquidity and trading fees",
+                    "cost": 0.023930000000000003,
+                    "response_time": 14.690775871276855
+                  },
+                  {
+                    "provider": "claude",
+                    "confidence": 70.0,
+                    "reasoning": "Risk/Reward Assessment:\nThe portfolio risk level is classified as \"LOW\", likely due to the diversification across 9 different crypto assets and 2 exchanges",
+                    "cost": 0.037155,
+                    "response_time": 19.623106479644775
+                  },
+                  {
+                    "provider": "gemini",
+                    "confidence": 75.0,
+                    "reasoning": "## Cryptocurrency Trading Opportunity Analysis\n\n**Date:** 2025-09-15\n\n**User Request:** Rebalance using adaptive strategy",
+                    "cost": 0.00219,
+                    "response_time": 14.130666732788086
+                  }
+                ],
+                "cost_summary": {
+                  "total_cost": 0.063275,
+                  "models_used": 3
+                },
+                "timestamp": "2025-09-15T12:51:48.320355",
+                "opportunity_score": 73.24161746685976,
+                "execution_priority": "MEDIUM",
+                "suggested_allocation": 7.324161746685976,
+                "time_horizon": "MEDIUM_TERM"
+              },
+              "timestamp": "2025-09-15T12:51:48.320373"
+            },
+            "needs_rebalancing": false
+          },
+          "analysis": {
+            "shows_strategy_comparison": false,
+            "shows_profit_potential": false,
+            "strategy_count": 0,
+            "has_recommendations": false,
+            "mentions_ai_recommendation": false,
+            "shows_risk_reduction": false,
+            "shows_expected_improvement": false,
+            "response_type": "already_balanced",
+            "mentioned_strategies": []
+          }
+        },
+        {
+          "query": "show me all rebalancing strategies with profit potential",
+          "response_content": "\ud83d\udcb0 **Your Portfolio Summary**\n\n**Current Balance:**\n\u2022 Total Portfolio Value: $3,980.71\n\u2022 Available Cash: $0.00\n\u2022 Today's P&L: $0.00 (+0.00%)\n\u2022 Overall P&L: $0.00 (+0.00%)\n\n**Risk Assessment:**\n\u2022 Risk Level: Medium\n\u2022 Active Positions: 9\n\n**Top 5 Holdings:**\n1. XRP (binance): $1,135.67 (28.5%)   Amount: 378.9620\n2. AAVE (kucoin): $929.14 (23.3%)   Amount: 3.1073\n3. ADA (binance): $910.54 (22.9%)   Amount: 1,059.0188\n4. SOL (kucoin): $552.87 (13.9%)   Amount: 2.3509\n5. XRP (kucoin): $206.87 (5.2%)   Amount: 68.9951\n\n**Quick Actions:**\n\u2022 Ask \"Show me more details\" for full analysis\n\u2022 Ask \"What should I buy?\" for recommendations\n\u2022 Ask \"How risky is my portfolio?\" for risk analysis\n\nYour portfolio is connected and showing live data from your exchanges!",
+          "intent": "portfolio_analysis",
+          "metadata": {
+            "portfolio_summary": {
+              "total_value": 3980.7100000000005,
+              "daily_pnl": 0.0,
+              "daily_pnl_pct": 0.0,
+              "total_pnl": 0,
+              "total_pnl_pct": 0,
+              "positions": [
+                {
+                  "symbol": "XRP",
+                  "amount": 378.962,
+                  "value_usd": 1135.67,
+                  "percentage": 28.529332706979403,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "AAVE",
+                  "amount": 3.10732565,
+                  "value_usd": 929.14,
+                  "percentage": 23.341062272810625,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "ADA",
+                  "amount": 1059.01876762,
+                  "value_usd": 910.54,
+                  "percentage": 22.873808943630657,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SOL",
+                  "amount": 2.35085494,
+                  "value_usd": 552.87,
+                  "percentage": 13.888728392673666,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "XRP",
+                  "amount": 68.99511447,
+                  "value_usd": 206.87,
+                  "percentage": 5.196811624057014,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "DOGE",
+                  "amount": 605.21739217,
+                  "value_usd": 159.32,
+                  "percentage": 4.002301097040477,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "KCS",
+                  "amount": 3.25454735,
+                  "value_usd": 51.0,
+                  "percentage": 1.2811784832354025,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "USDC",
+                  "amount": 14.89638597,
+                  "value_usd": 14.9,
+                  "percentage": 0.3743050862785784,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SHIB",
+                  "amount": 691509.74365482,
+                  "value_usd": 8.99,
+                  "percentage": 0.22583910910365235,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                }
+              ],
+              "risk_level": "LOW",
+              "exchanges_connected": 2,
+              "exchanges": [
+                "binance",
+                "kucoin"
+              ],
+              "data_source": "enterprise_optimized_method",
+              "last_updated": "2025-09-15T12:52:13.398077"
+            },
+            "risk_metrics": {
+              "overall_risk": "Medium",
+              "var_24h": 0,
+              "sharpe_ratio": 0,
+              "max_drawdown": 0
+            },
+            "ai_analysis": {
+              "success": true,
+              "analysis": "Portfolio data successfully retrieved. For detailed AI analysis, use the full analysis feature.",
+              "confidence": 0.8,
+              "recommendations": []
+            },
+            "actionable_items": [
+              "rebalance",
+              "risk_analysis",
+              "opportunities",
+              "stop_losses"
+            ]
+          },
+          "analysis": {
+            "shows_strategy_comparison": false,
+            "shows_profit_potential": false,
+            "strategy_count": 0,
+            "has_recommendations": true,
+            "mentions_ai_recommendation": true,
+            "shows_risk_reduction": false,
+            "shows_expected_improvement": false,
+            "response_type": "portfolio_display",
+            "mentioned_strategies": []
+          }
+        },
+        {
+          "query": "what's the best rebalancing strategy for maximum profit",
+          "response_content": "\ud83d\udcb0 **Your Portfolio Summary**\n\n**Current Balance:**\n\u2022 Total Portfolio Value: $3,979.34\n\u2022 Available Cash: $0.00\n\u2022 Today's P&L: $0.00 (+0.00%)\n\u2022 Overall P&L: $0.00 (+0.00%)\n\n**Risk Assessment:**\n\u2022 Risk Level: Medium\n\u2022 Active Positions: 9\n\n**Top 5 Holdings:**\n1. XRP (binance): $1,135.33 (28.5%)   Amount: 378.9620\n2. AAVE (kucoin): $928.87 (23.3%)   Amount: 3.1073\n3. ADA (binance): $910.33 (22.9%)   Amount: 1,059.0188\n4. SOL (kucoin): $552.47 (13.9%)   Amount: 2.3509\n5. XRP (kucoin): $206.76 (5.2%)   Amount: 68.9951\n\n**Quick Actions:**\n\u2022 Ask \"Show me more details\" for full analysis\n\u2022 Ask \"What should I buy?\" for recommendations\n\u2022 Ask \"How risky is my portfolio?\" for risk analysis\n\nYour portfolio is connected and showing live data from your exchanges!",
+          "intent": "portfolio_analysis",
+          "metadata": {
+            "portfolio_summary": {
+              "total_value": 3979.34,
+              "daily_pnl": 0.0,
+              "daily_pnl_pct": 0.0,
+              "total_pnl": 0,
+              "total_pnl_pct": 0,
+              "positions": [
+                {
+                  "symbol": "XRP",
+                  "amount": 378.962,
+                  "value_usd": 1135.33,
+                  "percentage": 28.530610603768462,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "AAVE",
+                  "amount": 3.10732565,
+                  "value_usd": 928.87,
+                  "percentage": 23.342313046887174,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "ADA",
+                  "amount": 1059.01876762,
+                  "value_usd": 910.33,
+                  "percentage": 22.876406640297134,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SOL",
+                  "amount": 2.35085494,
+                  "value_usd": 552.47,
+                  "percentage": 13.883458060884468,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "XRP",
+                  "amount": 68.99511447,
+                  "value_usd": 206.76,
+                  "percentage": 5.195836495499253,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "DOGE",
+                  "amount": 605.21739217,
+                  "value_usd": 159.29,
+                  "percentage": 4.002925108183769,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "KCS",
+                  "amount": 3.25454735,
+                  "value_usd": 51.0,
+                  "percentage": 1.2816195650535014,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "USDC",
+                  "amount": 14.89638597,
+                  "value_usd": 14.9,
+                  "percentage": 0.37443395135876806,
+                  "exchange": "binance",
+                  "change_24h": 0
+                },
+                {
+                  "symbol": "SHIB",
+                  "amount": 691509.74365482,
+                  "value_usd": 8.99,
+                  "percentage": 0.22591686058492114,
+                  "exchange": "kucoin",
+                  "change_24h": 0
+                }
+              ],
+              "risk_level": "LOW",
+              "exchanges_connected": 2,
+              "exchanges": [
+                "binance",
+                "kucoin"
+              ],
+              "data_source": "enterprise_optimized_method",
+              "last_updated": "2025-09-15T12:52:44.327312"
+            },
+            "risk_metrics": {
+              "overall_risk": "Medium",
+              "var_24h": 0,
+              "sharpe_ratio": 0,
+              "max_drawdown": 0
+            },
+            "ai_analysis": {
+              "success": true,
+              "analysis": "Portfolio data successfully retrieved. For detailed AI analysis, use the full analysis feature.",
+              "confidence": 0.8,
+              "recommendations": []
+            },
+            "actionable_items": [
+              "rebalance",
+              "risk_analysis",
+              "opportunities",
+              "stop_losses"
+            ]
+          },
+          "analysis": {
+            "shows_strategy_comparison": false,
+            "shows_profit_potential": false,
+            "strategy_count": 0,
+            "has_recommendations": true,
+            "mentions_ai_recommendation": true,
+            "shows_risk_reduction": false,
+            "shows_expected_improvement": false,
+            "response_type": "portfolio_display",
+            "mentioned_strategies": []
+          }
+        }
+      ],
+      "summary": {
+        "total_tests": 9,
+        "successful_tests": 9,
+        "shows_multiple_strategies": 0,
+        "shows_profit_potential": 0,
+        "has_recommendations": 3,
+        "response_types": [
+          "portfolio_display",
+          "already_balanced",
+          "already_balanced",
+          "already_balanced",
+          "already_balanced",
+          "already_balanced",
+          "already_balanced",
+          "portfolio_display",
+          "portfolio_display"
+        ]
+      }
+    },
+    "portfolio_consistency": {
+      "test": "portfolio_consistency",
+      "results": [
+        {
+          "request_number": 1,
+          "content": "\ud83d\udcb0 **Your Portfolio Summary**\n\n**Current Balance:**\n\u2022 Total Portfolio Value: $3,979.11\n\u2022 Available Cash: $0.00\n\u2022 Today's P&L: $0.00 (+0.00%)\n\u2022 Overall P&L: $0.00 (+0.00%)\n\n**Risk Assessment:**\n\u2022 Risk Level: Medium\n\u2022 Active Positions: 9\n\n**Top 5 Holdings:**\n1. XRP (binance): $1,135.14 (28.5%)   Amount: 378.9620\n2. AAVE (kucoin): $928.95 (23.3%)   Amount: 3.1073\n3. ADA (binance): $910.33 (22.9%)   Amount: 1,059.0188\n4. SOL (kucoin): $552.43 (13.9%)   Amount: 2.3509\n5. XRP (kucoin): $206.71 (5.2%)   Amount: 68.9951\n\n**Quick Actions:**\n\u2022 Ask \"Show me more details\" for full analysis\n\u2022 Ask \"What should I buy?\" for recommendations\n\u2022 Ask \"How risky is my portfolio?\" for risk analysis\n\nYour portfolio is connected and showing live data from your exchanges!",
+          "portfolio_metadata": {
+            "total_value": 3979.110000000001,
+            "daily_pnl": 0.0,
+            "daily_pnl_pct": 0.0,
+            "total_pnl": 0,
+            "total_pnl_pct": 0,
+            "positions": [
+              {
+                "symbol": "XRP",
+                "amount": 378.962,
+                "value_usd": 1135.14,
+                "percentage": 28.52748478931218,
+                "exchange": "binance",
+                "change_24h": 0
+              },
+              {
+                "symbol": "AAVE",
+                "amount": 3.10732565,
+                "value_usd": 928.95,
+                "percentage": 23.345672776073037,
+                "exchange": "kucoin",
+                "change_24h": 0
+              },
+              {
+                "symbol": "ADA",
+                "amount": 1059.01876762,
+                "value_usd": 910.33,
+                "percentage": 22.87772893938594,
+                "exchange": "binance",
+                "change_24h": 0
+              },
+              {
+                "symbol": "SOL",
+                "amount": 2.35085494,
+                "value_usd": 552.43,
+                "percentage": 13.883255300808466,
+                "exchange": "kucoin",
+                "change_24h": 0
+              },
+              {
+                "symbol": "XRP",
+                "amount": 68.99511447,
+                "value_usd": 206.71,
+                "percentage": 5.194880262169177,
+                "exchange": "kucoin",
+                "change_24h": 0
+              },
+              {
+                "symbol": "DOGE",
+                "amount": 605.21739217,
+                "value_usd": 159.28,
+                "percentage": 4.002905172262138,
+                "exchange": "binance",
+                "change_24h": 0
+              },
+              {
+                "symbol": "KCS",
+                "amount": 3.25454735,
+                "value_usd": 50.99,
+                "percentage": 1.2814423325819086,
+                "exchange": "kucoin",
+                "change_24h": 0
+              },
+              {
+                "symbol": "USDC",
+                "amount": 14.89638597,
+                "value_usd": 14.9,
+                "percentage": 0.3744555943414481,
+                "exchange": "binance",
+                "change_24h": 0
+              },
+              {
+                "symbol": "SHIB",
+                "amount": 691509.74365482,
+                "value_usd": 8.98,
+                "percentage": 0.22567860652256405,
+                "exchange": "kucoin",
+                "change_24h": 0
+              }
+            ],
+            "risk_level": "LOW",
+            "exchanges_connected": 2,
+            "exchanges": [
+              "binance",
+              "kucoin"
+            ],
+            "data_source": "enterprise_optimized_method",
+            "last_updated": "2025-09-15T12:53:15.084544"
+          },
+          "analysis": {
+            "total_value": 3979.110000000001,
+            "position_count": 9,
+            "symbols": [
+              "XRP",
+              "AAVE",
+              "ADA",
+              "SOL",
+              "XRP",
+              "DOGE",
+              "KCS",
+              "USDC",
+              "SHIB"
+            ],
+            "exchanges": [
+              "binance",
+              "kucoin"
+            ],
+            "has_duplicates": true,
+            "value_range": {
+              "max": 1135.14,
+              "min": 8.98
+            }
+          }
+        },
+        {
+          "request_number": 2,
+          "content": "\ud83d\udcb0 **Your Portfolio Summary**\n\n**Current Balance:**\n\u2022 Total Portfolio Value: $3,977.43\n\u2022 Available Cash: $0.00\n\u2022 Today's P&L: $0.00 (+0.00%)\n\u2022 Overall P&L: $0.00 (+0.00%)\n\n**Risk Assessment:**\n\u2022 Risk Level: Medium\n\u2022 Active Positions: 9\n\n**Top 5 Holdings:**\n1. XRP (binance): $1,134.65 (28.5%)   Amount: 378.9620\n2. AAVE (kucoin): $928.55 (23.3%)   Amount: 3.1073\n3. ADA (binance): $909.80 (22.9%)   Amount: 1,059.0188\n4. SOL (kucoin): $552.36 (13.9%)   Amount: 2.3509\n5. XRP (kucoin): $206.64 (5.2%)   Amount: 68.9951\n\n**Quick Actions:**\n\u2022 Ask \"Show me more details\" for full analysis\n\u2022 Ask \"What should I buy?\" for recommendations\n\u2022 Ask \"How risky is my portfolio?\" for risk analysis\n\nYour portfolio is connected and showing live data from your exchanges!",
+          "portfolio_metadata": {
+            "total_value": 3977.4299999999994,
+            "daily_pnl": 0.0,
+            "daily_pnl_pct": 0.0,
+            "total_pnl": 0,
+            "total_pnl_pct": 0,
+            "positions": [
+              {
+                "symbol": "XRP",
+                "amount": 378.962,
+                "value_usd": 1134.65,
+                "percentage": 28.527214809562967,
+                "exchange": "binance",
+                "change_24h": 0
+              },
+              {
+                "symbol": "AAVE",
+                "amount": 3.10732565,
+                "value_usd": 928.55,
+                "percentage": 23.345476853143868,
+                "exchange": "kucoin",
+                "change_24h": 0
+              },
+              {
+                "symbol": "ADA",
+                "amount": 1059.01876762,
+                "value_usd": 909.8,
+                "percentage": 22.874066922610833,
+                "exchange": "binance",
+                "change_24h": 0
+              },
+              {
+                "symbol": "SOL",
+                "amount": 2.35085494,
+                "value_usd": 552.36,
+                "percentage": 13.887359425558717,
+                "exchange": "kucoin",
+                "change_24h": 0
+              },
+              {
+                "symbol": "XRP",
+                "amount": 68.99511447,
+                "value_usd": 206.64,
+                "percentage": 5.195314562418447,
+                "exchange": "kucoin",
+                "change_24h": 0
+              },
+              {
+                "symbol": "DOGE",
+                "amount": 605.21739217,
+                "value_usd": 159.14,
+                "percentage": 4.001076071734764,
+                "exchange": "binance",
+                "change_24h": 0
+              },
+              {
+                "symbol": "KCS",
+                "amount": 3.25454735,
+                "value_usd": 50.99,
+                "percentage": 1.2819835924202314,
+                "exchange": "kucoin",
+                "change_24h": 0
+              },
+              {
+                "symbol": "USDC",
+                "amount": 14.89638597,
+                "value_usd": 14.9,
+                "percentage": 0.37461375813025,
+                "exchange": "binance",
+                "change_24h": 0
+              },
+              {
+                "symbol": "SHIB",
+                "amount": 691509.74365482,
+                "value_usd": 8.99,
+                "percentage": 0.22602534802623808,
+                "exchange": "kucoin",
+                "change_24h": 0
+              }
+            ],
+            "risk_level": "LOW",
+            "exchanges_connected": 2,
+            "exchanges": [
+              "binance",
+              "kucoin"
+            ],
+            "data_source": "enterprise_optimized_method",
+            "last_updated": "2025-09-15T12:53:43.746317"
+          },
+          "analysis": {
+            "total_value": 3977.4299999999994,
+            "position_count": 9,
+            "symbols": [
+              "XRP",
+              "AAVE",
+              "ADA",
+              "SOL",
+              "XRP",
+              "DOGE",
+              "KCS",
+              "USDC",
+              "SHIB"
+            ],
+            "exchanges": [
+              "binance",
+              "kucoin"
+            ],
+            "has_duplicates": true,
+            "value_range": {
+              "max": 1134.65,
+              "min": 8.99
+            }
+          }
+        },
+        {
+          "request_number": 3,
+          "content": "\ud83d\udcb0 **Your Portfolio Summary**\n\n**Current Balance:**\n\u2022 Total Portfolio Value: $3,975.53\n\u2022 Available Cash: $0.00\n\u2022 Today's P&L: $0.00 (+0.00%)\n\u2022 Overall P&L: $0.00 (+0.00%)\n\n**Risk Assessment:**\n\u2022 Risk Level: Medium\n\u2022 Active Positions: 9\n\n**Top 5 Holdings:**\n1. XRP (binance): $1,134.23 (28.5%)   Amount: 378.9620\n2. AAVE (kucoin): $927.87 (23.3%)   Amount: 3.1073\n3. ADA (binance): $909.38 (22.9%)   Amount: 1,059.0188\n4. SOL (kucoin): $552.12 (13.9%)   Amount: 2.3509\n5. XRP (kucoin): $206.54 (5.2%)   Amount: 68.9951\n\n**Quick Actions:**\n\u2022 Ask \"Show me more details\" for full analysis\n\u2022 Ask \"What should I buy?\" for recommendations\n\u2022 Ask \"How risky is my portfolio?\" for risk analysis\n\nYour portfolio is connected and showing live data from your exchanges!",
+          "portfolio_metadata": {
+            "total_value": 3975.5300000000007,
+            "daily_pnl": 0.0,
+            "daily_pnl_pct": 0.0,
+            "total_pnl": 0,
+            "total_pnl_pct": 0,
+            "positions": [
+              {
+                "symbol": "XRP",
+                "amount": 378.962,
+                "value_usd": 1134.23,
+                "percentage": 28.530284012446135,
+                "exchange": "binance",
+                "change_24h": 0
+              },
+              {
+                "symbol": "AAVE",
+                "amount": 3.10732565,
+                "value_usd": 927.87,
+                "percentage": 23.339529572157673,
+                "exchange": "kucoin",
+                "change_24h": 0
+              },
+              {
+                "symbol": "ADA",
+                "amount": 1059.01876762,
+                "value_usd": 909.38,
+                "percentage": 22.87443435214927,
+                "exchange": "binance",
+                "change_24h": 0
+              },
+              {
+                "symbol": "SOL",
+                "amount": 2.35085494,
+                "value_usd": 552.12,
+                "percentage": 13.887959592809008,
+                "exchange": "kucoin",
+                "change_24h": 0
+              },
+              {
+                "symbol": "XRP",
+                "amount": 68.99511447,
+                "value_usd": 206.54,
+                "percentage": 5.195282138482163,
+                "exchange": "kucoin",
+                "change_24h": 0
+              },
+              {
+                "symbol": "DOGE",
+                "amount": 605.21739217,
+                "value_usd": 159.12,
+                "percentage": 4.002485203230764,
+                "exchange": "binance",
+                "change_24h": 0
+              },
+              {
+                "symbol": "KCS",
+                "amount": 3.25454735,
+                "value_usd": 50.99,
+                "percentage": 1.2825962827597828,
+                "exchange": "kucoin",
+                "change_24h": 0
+              },
+              {
+                "symbol": "USDC",
+                "amount": 14.89638597,
+                "value_usd": 14.9,
+                "percentage": 0.37479279492294104,
+                "exchange": "binance",
+                "change_24h": 0
+              },
+              {
+                "symbol": "SHIB",
+                "amount": 691509.74365482,
+                "value_usd": 8.98,
+                "percentage": 0.2258818321079202,
+                "exchange": "kucoin",
+                "change_24h": 0
+              }
+            ],
+            "risk_level": "LOW",
+            "exchanges_connected": 2,
+            "exchanges": [
+              "binance",
+              "kucoin"
+            ],
+            "data_source": "enterprise_optimized_method",
+            "last_updated": "2025-09-15T12:54:13.127365"
+          },
+          "analysis": {
+            "total_value": 3975.5300000000007,
+            "position_count": 9,
+            "symbols": [
+              "XRP",
+              "AAVE",
+              "ADA",
+              "SOL",
+              "XRP",
+              "DOGE",
+              "KCS",
+              "USDC",
+              "SHIB"
+            ],
+            "exchanges": [
+              "binance",
+              "kucoin"
+            ],
+            "has_duplicates": true,
+            "value_range": {
+              "max": 1134.23,
+              "min": 8.98
+            }
+          }
+        }
+      ],
+      "consistency_analysis": {
+        "consistent_position_count": true,
+        "position_count_range": [
+          9,
+          9
+        ],
+        "total_value_variance": 3.580000000000382,
+        "symbols_consistent": true
+      }
+    }
+  },
+  "issues_identified": [
+    "No opportunities found in any test",
+    "Strategies not shown in opportunity discovery",
+    "Multiple strategies not displayed in manual rebalancing",
+    "Profit potential not shown for strategies"
+  ]
+}

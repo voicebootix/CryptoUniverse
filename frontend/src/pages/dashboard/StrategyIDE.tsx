@@ -226,29 +226,68 @@ const StrategyIDE: React.FC = () => {
           monaco.editor.setModelMarkers(model, 'strategy-validation', markers);
         }
       }
+
+      // Add console output for validation
+      const errors = result.errors || [];
+      const warnings = result.warnings || [];
+      const consoleMsg = result.is_valid
+        ? `✅ Code validation passed!`
+        : `❌ Validation failed: ${errors.length} errors, ${warnings.length} warnings`;
+
+      setConsoleOutput(prev => [...prev, consoleMsg]);
+
+      if (!result.is_valid && errors.length > 0) {
+        setConsoleOutput(prev => [
+          ...prev,
+          ...errors.slice(0, 3).map(e => `  • Line ${e.line}: ${e.message}`)
+        ]);
+      }
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Validation failed');
+      const errorMsg = error.response?.data?.detail || 'Validation failed';
+      toast.error(errorMsg);
+      setConsoleOutput(prev => [...prev, `❌ Validation error: ${errorMsg}`]);
     }
   });
 
   // Run backtest mutation
   const runBacktestMutation = useMutation({
-    mutationFn: async (data: { code: string; metadata: StrategyMetadata; period_days: number }) => {
+    mutationFn: async (data: { code: string; symbol?: string; start_date?: string; end_date?: string; initial_capital?: number }) => {
+      // Calculate date range from period_days or use defaults
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(endDate.getDate() - 90); // Default 90 days
+
       const response = await apiClient.post('/strategies/backtest', {
         code: data.code,
-        metadata: data.metadata,
-        period_days: data.period_days,
-        initial_capital: data.metadata.required_capital
+        symbol: data.symbol || 'BTC/USDT',
+        start_date: data.start_date || startDate.toISOString().split('T')[0],
+        end_date: data.end_date || endDate.toISOString().split('T')[0],
+        initial_capital: data.initial_capital || 10000,
+        parameters: {}
       });
-      return response.data as BacktestResult;
+      return response.data.backtest_result as BacktestResult;
     },
     onSuccess: (result) => {
       setBacktestResult(result);
-      toast.success('Backtest completed successfully');
+      setConsoleOutput(prev => [
+        ...prev,
+        `✅ Backtest completed: ${result.total_return}% return, Sharpe: ${result.sharpe_ratio}`,
+        `📊 Trades: ${result.total_trades}, Win Rate: ${result.win_rate}%`
+      ]);
+      toast.success('Backtest completed successfully!');
+      setShowConsole(true);
+      setIsRunningBacktest(false);
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Backtest failed');
+      setIsRunningBacktest(false);
+      const errorMsg = error.response?.data?.detail || 'Backtest failed';
+      toast.error(errorMsg);
+      setConsoleOutput(prev => [
+        ...prev,
+        `❌ Backtest failed: ${errorMsg}`
+      ]);
+      setShowConsole(true);
     }
   });
 
@@ -353,8 +392,19 @@ const StrategyIDE: React.FC = () => {
       return;
     }
     setIsRunningBacktest(true);
-    runBacktestMutation.mutate({ code, metadata, period_days: periodDays });
-    setIsRunningBacktest(false);
+
+    // Calculate date range
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - periodDays);
+
+    runBacktestMutation.mutate({
+      code,
+      symbol: 'BTC/USDT',
+      start_date: startDate.toISOString().split('T')[0],
+      end_date: endDate.toISOString().split('T')[0],
+      initial_capital: metadata.required_capital || 10000
+    });
   };
 
   const loadTemplate = (templateId: string) => {
