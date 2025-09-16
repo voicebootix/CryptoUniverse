@@ -258,6 +258,8 @@ async def discover_opportunities(
             user_id=discovery_result["user_id"],
             opportunities=opportunity_responses,
             total_opportunities=len(opportunity_responses),
+            signal_analysis=discovery_result.get("signal_analysis"),
+            threshold_transparency=discovery_result.get("threshold_transparency"),
             user_profile=discovery_result.get("user_profile", {}),
             strategy_performance=discovery_result.get("strategy_performance", {}),
             asset_discovery=discovery_result.get("asset_discovery", {}),
