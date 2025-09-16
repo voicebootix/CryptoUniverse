@@ -7,6 +7,7 @@ for trading strategies to optimize performance through experimentation.
 
 import uuid
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from enum import Enum
@@ -21,6 +22,17 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+# Demo mode feature flag - set via environment variable
+# In production, this should be False and use database-backed storage
+DEMO_MODE = os.getenv("AB_TESTING_DEMO_MODE", "true").lower() == "true"
+
+if DEMO_MODE:
+    logger.warning(
+        "ab_testing.demo_mode_enabled",
+        message="A/B Testing is running in DEMO MODE with in-memory storage. "
+                "This is UNSAFE for production multi-worker deployments!"
+    )
 
 # Enums for validation
 class SuccessMetric(str, Enum):
@@ -134,20 +146,43 @@ class ABTestListResponse(BaseModel):
     page: int
     page_size: int
 
-# DEMO MODE ONLY: In-memory storage (replace with database models later)
-# TODO: Replace with SQLAlchemy-backed repository/service layer for production
-# TODO: This is unsafe for concurrent/multi-worker deployments
-_demo_mode_lock = asyncio.Lock()
-ab_tests_storage: Dict[str, Dict] = {}
-ab_test_metrics_cache: Dict = {
-    "total_tests": 0,
-    "running_tests": 0,
-    "completed_tests": 0,
-    "successful_optimizations": 0,
-    "avg_improvement": 0.0,
-    "total_participants": 0,
-    "last_updated": datetime.now(timezone.utc)
-}
+# In-memory storage - ONLY for demo mode
+# TODO: PRODUCTION IMPLEMENTATION REQUIRED
+# TODO: Replace with SQLAlchemy-backed repository/service layer using app/models/ab_testing.py
+# TODO: Implement proper repository pattern with database transactions
+# TODO: Add database migrations for A/B testing tables
+# TODO: This current in-memory approach is UNSAFE for concurrent/multi-worker deployments
+# TODO: Use database-backed storage with proper connection pooling and async operations
+if DEMO_MODE:
+    # Thread-safe lock for demo mode operations
+    _demo_mode_lock = asyncio.Lock()
+
+    # DEMO STORAGE: In-memory dictionaries (NOT for production!)
+    ab_tests_storage: Dict[str, Dict] = {}
+    ab_test_metrics_cache: Dict = {
+        "total_tests": 0,
+        "running_tests": 0,
+        "completed_tests": 0,
+        "successful_optimizations": 0,
+        "avg_improvement": 0.0,
+        "total_participants": 0,
+        "last_updated": datetime.now(timezone.utc)
+    }
+
+    logger.info(
+        "ab_testing.demo_storage_initialized",
+        message="Demo mode storage initialized - use AB_TESTING_DEMO_MODE=false for production"
+    )
+else:
+    # Production mode - storage should use database-backed repository pattern
+    _demo_mode_lock = None
+    ab_tests_storage = None
+    ab_test_metrics_cache = None
+
+    logger.info(
+        "ab_testing.production_mode",
+        message="Production mode enabled - database-backed storage required"
+    )
 
 # Metric direction mapping for proper winner selection
 METRIC_DIRECTIONS = {
@@ -188,8 +223,32 @@ def calculate_statistical_significance(p_value: float, confidence_level: float) 
     else:
         return "not_significant"
 
+async def _check_demo_mode():
+    """Ensure demo mode is enabled for in-memory operations."""
+    if not DEMO_MODE:
+        logger.error(
+            "ab_testing.production_mode_not_implemented",
+            message="A/B Testing API called in production mode without database implementation"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail={
+                "error": "A/B Testing production mode not implemented",
+                "message": "This feature requires database-backed storage in production mode.",
+                "demo_mode": "Set AB_TESTING_DEMO_MODE=true environment variable for demo functionality",
+                "implementation_needed": [
+                    "Database repository layer implementation",
+                    "SQLAlchemy model integration",
+                    "Proper connection pooling",
+                    "Database migrations"
+                ],
+                "current_status": "Demo mode only - unsafe for multi-worker deployments"
+            }
+        )
+
 async def update_metrics_cache():
     """Update the metrics cache based on current tests. Thread-safe for demo mode."""
+    await _check_demo_mode()
     global ab_test_metrics_cache
 
     async with _demo_mode_lock:
@@ -223,6 +282,7 @@ async def update_metrics_cache():
 async def get_ab_testing_metrics(current_user: User = Depends(get_current_user)):
     """Get A/B testing overview metrics."""
     try:
+        await _check_demo_mode()  # Ensure demo mode for in-memory operations
         logger.info("ab_testing.get_metrics", user_id=current_user.id)
 
         await update_metrics_cache()
@@ -245,6 +305,7 @@ async def get_ab_tests(
 ):
     """Get list of A/B tests for the current user."""
     try:
+        await _check_demo_mode()  # Ensure demo mode for in-memory operations
         logger.info("ab_testing.get_tests", user_id=current_user.id, status_filter=status_filter)
 
         # Filter tests by user and status (thread-safe read)
@@ -301,6 +362,7 @@ async def create_ab_test(
 ):
     """Create a new A/B test."""
     try:
+        await _check_demo_mode()  # Ensure demo mode for in-memory operations
         logger.info("ab_testing.create_test", user_id=current_user.id, test_name=test_data.name)
 
         # Validate variants allocation
@@ -406,6 +468,7 @@ async def start_ab_test(
 ):
     """Start an A/B test."""
     try:
+        await _check_demo_mode()  # Ensure demo mode for in-memory operations
         logger.info("ab_testing.start_test", test_id=test_id, user_id=current_user.id)
 
         # Get test
@@ -472,6 +535,7 @@ async def pause_ab_test(
 ):
     """Pause a running A/B test."""
     try:
+        await _check_demo_mode()  # Ensure demo mode for in-memory operations
         logger.info("ab_testing.pause_test", test_id=test_id, user_id=current_user.id)
 
         # Get test
@@ -531,6 +595,7 @@ async def stop_ab_test(
 ):
     """Stop an A/B test and finalize results."""
     try:
+        await _check_demo_mode()  # Ensure demo mode for in-memory operations
         logger.info("ab_testing.stop_test", test_id=test_id, user_id=current_user.id)
 
         # Get test
@@ -621,6 +686,7 @@ async def get_ab_test(
 ):
     """Get details of a specific A/B test."""
     try:
+        await _check_demo_mode()  # Ensure demo mode for in-memory operations
         logger.info("ab_testing.get_test", test_id=test_id, user_id=current_user.id)
 
         # Get test
@@ -661,6 +727,7 @@ async def delete_ab_test(
 ):
     """Delete an A/B test (only if in draft status)."""
     try:
+        await _check_demo_mode()  # Ensure demo mode for in-memory operations
         logger.info("ab_testing.delete_test", test_id=test_id, user_id=current_user.id)
 
         # Get test
