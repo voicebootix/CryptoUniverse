@@ -188,17 +188,19 @@ const ABTestingLab: React.FC = () => {
         const response = await apiClient.get('/ab-testing/metrics');
         return response.data as ABTestMetrics;
       } catch (error: any) {
-        // If endpoint doesn't exist (405), provide mock data
-        if (getHttpStatus(error) === 405) {
-          console.log('A/B testing metrics endpoint not implemented, using mock data');
-          return {
-            totalTests: 0,
-            activeTests: 0,
-            completedTests: 0,
-            avgConversionImprovement: 0,
-            totalRevenue: 0,
-            conversionRate: 0
-          } as ABTestMetrics;
+        // If endpoint doesn't exist or is not implemented, provide mock data
+        const status = getHttpStatus(error);
+        if (status === 405 || status === 404 || status === 501) {
+          console.log(`A/B testing metrics endpoint not implemented (${status}), using mock data`);
+          const mockMetrics: ABTestMetrics = {
+            total_tests: 0,
+            running_tests: 0,
+            completed_tests: 0,
+            successful_optimizations: 0,
+            avg_improvement: 0,
+            total_participants: 0
+          };
+          return mockMetrics;
         }
         throw error;
       }
@@ -216,10 +218,11 @@ const ABTestingLab: React.FC = () => {
         });
         return response.data.tests as ABTest[];
       } catch (error: any) {
-        // If endpoint doesn't exist (405), provide empty test list
-        if (getHttpStatus(error) === 405) {
-          console.log('A/B testing tests endpoint not implemented, using empty data');
-          return [] as ABTest[];
+        // If endpoint doesn't exist or is not implemented, provide empty test list
+        const status = getHttpStatus(error);
+        if (status === 405 || status === 404 || status === 501) {
+          console.log(`A/B testing tests endpoint not implemented (${status}), using empty data`);
+          return [];
         }
         throw error;
       }
@@ -343,7 +346,8 @@ const ABTestingLab: React.FC = () => {
                        testsStatus === 401 ||
                        metricsStatus === 500 ||
                        testsStatus === 500;
-    const isNotImplemented = metricsStatus === 405 || testsStatus === 405;
+    const isNotImplemented = [405, 404, 501].includes(metricsStatus) ||
+                          [405, 404, 501].includes(testsStatus);
 
     return (
       <div className="p-6">
