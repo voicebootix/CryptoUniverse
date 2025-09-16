@@ -29,7 +29,7 @@ from app.api.v1.endpoints.auth import get_current_user, require_role
 from app.models.user import User, UserRole
 from app.models.trading import TradingStrategy, Trade, Position, StrategyType
 from app.models.exchange import ExchangeAccount, ExchangeStatus
-from app.models.credit import CreditAccount, CreditTransaction
+from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.core.redis import get_redis_client
 from app.models.strategy_submission import (
     StrategySubmission, StrategyStatus, PricingModel,
@@ -269,18 +269,57 @@ async def execute_strategy(
                     detail="No active exchange accounts found. Connect an exchange first."
                 )
         
-        # Check credits for real trading
-        credits_required = 1  # Base cost for strategy execution
-        if not request.simulation_mode:
+        # Check if user owns this strategy (already purchased)
+        strategy_id = f"ai_{request.function}"
+        
+        # Get user's owned strategies (robust ownership check)
+        from app.services.strategy_marketplace_service import strategy_marketplace_service
+        user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(str(current_user.id))
+        
+        # Defensive extraction of owned strategies
+        owned_strategy_ids = []
+        if user_portfolio.get("success") and user_portfolio.get("active_strategies"):
+            owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio["active_strategies"] if s.get("strategy_id")]
+        
+        user_owns_strategy = strategy_id in owned_strategy_ids
+        
+        # SAFETY: If portfolio service fails, assume user owns free strategies to prevent charging
+        if not user_portfolio.get("success") and strategy_id in ["ai_risk_management", "ai_portfolio_optimization", "ai_spot_momentum_strategy"]:
+            logger.warning("Portfolio service failed, assuming ownership of free strategy", 
+                          user_id=str(current_user.id),
+                          strategy_id=strategy_id)
+            user_owns_strategy = True
+        
+        logger.info("Strategy ownership check", 
+                   user_id=str(current_user.id),
+                   strategy_id=strategy_id,
+                   user_owns_strategy=user_owns_strategy,
+                   owned_strategies=owned_strategy_ids,
+                   portfolio_success=user_portfolio.get("success", False))
+        
+        # EXPLICIT: Owned strategies require 0 credits, non-owned require 1 credit
+        credits_required = 0 if user_owns_strategy else 1
+        
+        logger.info("Credit requirement determined", 
+                   user_id=str(current_user.id),
+                   strategy_id=strategy_id,
+                   credits_required=credits_required,
+                   ownership_basis=user_owns_strategy)
+        
+        # Initialize credit_account variable for later use
+        credit_account = None
+        
+        if not request.simulation_mode and credits_required > 0:
             from sqlalchemy import select
-            credit_stmt = select(CreditAccount).where(CreditAccount.user_id == current_user.id)
+            # Use row-level locking to prevent concurrent credit overspending
+            credit_stmt = select(CreditAccount).where(CreditAccount.user_id == current_user.id).with_for_update()
             credit_result = await db.execute(credit_stmt)
             credit_account = credit_result.scalar_one_or_none()
             
             if not credit_account or credit_account.available_credits < credits_required:
                 raise HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                    detail=f"Insufficient credits. Required: {credits_required}, Available: {credit_account.available_credits if credit_account else 0}"
+                    detail=f"Strategy not owned. Purchase access first or insufficient credits. Required: {credits_required}, Available: {credit_account.available_credits if credit_account else 0}"
                 )
         
         # Execute strategy using your TradingStrategiesService
@@ -298,23 +337,29 @@ async def execute_strategy(
                 detail=f"Strategy execution failed: {execution_result.get('error', 'Unknown error')}"
             )
         
-        # Deduct credits for real execution
+        # Deduct credits ONLY for non-owned strategies with atomic transaction
         credits_used = 0
-        if not request.simulation_mode and execution_result.get("success"):
-            credit_account.available_credits -= credits_required
-            credit_account.total_used_credits += credits_required
-            credits_used = credits_required
-            
-            # Record credit transaction
-            credit_tx = CreditTransaction(
-                user_id=current_user.id,
-                amount=-credits_required,
-                transaction_type="strategy_execution",
-                description=f"Strategy: {request.function} on {request.symbol}",
-                reference_id=execution_result.get("execution_id")
-            )
-            db.add(credit_tx)
-            await db.commit()
+        if not request.simulation_mode and execution_result.get("success") and credits_required > 0:
+            async with db.begin():
+                credit_account.available_credits -= credits_required
+                credit_account.used_credits += credits_required
+                credits_used = credits_required
+                
+                # Record credit transaction with correct model fields
+                credit_tx = CreditTransaction(
+                    account_id=credit_account.id,
+                    amount=-credits_required,
+                    transaction_type=CreditTransactionType.USAGE,
+                    description=f"Strategy execution: {request.function} on {request.symbol}",
+                    balance_before=credit_account.available_credits + credits_required,
+                    balance_after=credit_account.available_credits,
+                    source="api"
+                )
+                db.add(credit_tx)
+        elif user_owns_strategy:
+            logger.info("Strategy executed without credit consumption (owned strategy)", 
+                       user_id=str(current_user.id),
+                       strategy_id=strategy_id)
         
         # If strategy generated trades, execute them
         if execution_result.get("trade_signals"):
