@@ -77,6 +77,8 @@ class OpportunityDiscoveryResponse(BaseModel):
     user_id: str
     opportunities: List[OpportunityResponse]
     total_opportunities: int
+    signal_analysis: Optional[Dict[str, Any]] = None
+    threshold_transparency: Optional[Dict[str, Any]] = None
     user_profile: Dict[str, Any]
     strategy_performance: Dict[str, Any]
     asset_discovery: Dict[str, Any]
