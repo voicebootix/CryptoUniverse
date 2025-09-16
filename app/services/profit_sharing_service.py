@@ -302,6 +302,9 @@ class ProfitSharingService(LoggerMixin):
     ) -> Dict[str, Any]:
         """Process profit sharing payment and credit allocation."""
         try:
+            # Ensure pricing is loaded before using credit_to_profit_ratio
+            await self.ensure_pricing_loaded()
+            
             platform_fee = profit_sharing_data["platform_fee"]
             credits_earned = profit_sharing_data["credits_earned"]
             
