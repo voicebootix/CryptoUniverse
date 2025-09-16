@@ -1,4 +1,4 @@
-THIS SHOULD BE A LINTER ERROR"""
+"""
 Conversational AI Chat Endpoints
 
 Provides streaming conversational AI interface to ALL platform features:
