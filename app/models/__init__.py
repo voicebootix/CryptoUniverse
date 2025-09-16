@@ -47,6 +47,13 @@ from app.models.telegram_integration import (
     UserTelegramConnection,
     TelegramMessage,
 )
+from app.models.ab_testing import (
+    ABTest,
+    ABTestVariant,
+    ABTestResult,
+    ABTestParticipant,
+    ABTestMetric,
+)
 
 __all__ = [
     "Base",
@@ -109,4 +116,10 @@ __all__ = [
     # Telegram models
     "UserTelegramConnection",
     "TelegramMessage",
+    # A/B Testing models
+    "ABTest",
+    "ABTestVariant",
+    "ABTestResult",
+    "ABTestParticipant",
+    "ABTestMetric",
 ]
