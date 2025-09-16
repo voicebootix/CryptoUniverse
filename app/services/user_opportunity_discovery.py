@@ -643,7 +643,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     signals = pairs_result["trading_signals"]
                     
                     # More lenient threshold for pairs trading
-                    if signals.get("signal_strength", 0) > 5.0:  # Adjusted for 1-10 scale
+                    if signals.get("signal_strength", 0) > 3.0:  # Lowered threshold for pairs trading
                         opportunity = OpportunityResult(
                             strategy_id="ai_pairs_trading",
                             strategy_name="AI Pairs Trading",
@@ -726,9 +726,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    signal_strength=signal_strength,
                                    signal_confidence=signal_confidence,
                                    signal_action=signal_action,
-                                   qualifies_threshold=signal_strength > 6.0)
+                                   qualifies_threshold=signal_strength > 4.0)
                     
-                    if signal_strength > 6.0:  # Strong momentum signals (scale 1-10)
+                    if signal_strength > 4.0:  # Adjusted threshold for momentum signals (scale 1-10)
                         self.logger.info(f"🚀 CREATING OPPORTUNITY FOR QUALIFYING SIGNAL",
                                        scan_id=scan_id,
                                        symbol=symbol,
@@ -817,7 +817,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     signals = reversion_result["signals"]
                     
                     # Look for oversold/overbought conditions
-                    if abs(float(signals.get("deviation_score", 0))) > 2.0:  # 2+ standard deviations
+                    if abs(float(signals.get("deviation_score", 0))) > 1.5:  # 2+ standard deviations
                         opportunity = OpportunityResult(
                             strategy_id="ai_spot_mean_reversion",
                             strategy_name="AI Mean Reversion",
@@ -873,7 +873,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 if breakout_result.get("success") and breakout_result.get("breakout_signals"):
                     signals = breakout_result["breakout_signals"]
                     
-                    if signals.get("breakout_probability", 0) > 0.75:  # High probability breakouts
+                    if signals.get("breakout_probability", 0) > 0.6:  # High probability breakouts
                         opportunity = OpportunityResult(
                             strategy_id="ai_spot_breakout_strategy",
                             strategy_name="AI Breakout Trading",
