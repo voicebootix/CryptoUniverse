@@ -47,7 +47,7 @@ router = APIRouter()
 
 # Rate limiting utility
 async def check_rate_limit(key: str, limit: int, window: int, user_id: str):
-    """Simple rate limiting utility."""
+    """Simple rate limiting utility with burst protection."""
     try:
         redis = await get_redis_client()
         if not redis:
@@ -56,10 +56,11 @@ async def check_rate_limit(key: str, limit: int, window: int, user_id: str):
         current_time = int(time.time())
         rate_key = f"rate_limit:{key}:{user_id}"
 
-        # Use Redis sliding window
+        # Use Redis sliding window with unique members to prevent burst undercounting
         pipe = redis.pipeline()
         pipe.zremrangebyscore(rate_key, 0, current_time - window)
-        pipe.zadd(rate_key, {str(current_time): current_time})
+        # Use a unique member per hit to avoid collapsing multiple requests within the same second
+        pipe.zadd(rate_key, {f"{current_time}:{uuid.uuid4()}": current_time})
         pipe.zcard(rate_key)
         pipe.expire(rate_key, window)
         results = await pipe.execute()
@@ -309,19 +310,6 @@ async def execute_strategy(
         # Initialize credit_account variable for later use
         credit_account = None
         
-        if not request.simulation_mode and credits_required > 0:
-            from sqlalchemy import select
-            # Use row-level locking to prevent concurrent credit overspending
-            credit_stmt = select(CreditAccount).where(CreditAccount.user_id == current_user.id).with_for_update()
-            credit_result = await db.execute(credit_stmt)
-            credit_account = credit_result.scalar_one_or_none()
-            
-            if not credit_account or credit_account.available_credits < credits_required:
-                raise HTTPException(
-                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                    detail=f"Strategy not owned. Purchase access first or insufficient credits. Required: {credits_required}, Available: {credit_account.available_credits if credit_account else 0}"
-                )
-        
         # Execute strategy using your TradingStrategiesService
         execution_result = await trading_strategies_service.execute_strategy(
             function=request.function,
@@ -341,9 +329,25 @@ async def execute_strategy(
         credits_used = 0
         if not request.simulation_mode and execution_result.get("success") and credits_required > 0:
             async with db.begin():
+                # Re-acquire credit account with row lock inside transaction to prevent race conditions
+                from sqlalchemy import select
+                credit_stmt = select(CreditAccount).where(CreditAccount.user_id == current_user.id).with_for_update()
+                credit_result = await db.execute(credit_stmt)
+                credit_account = credit_result.scalar_one_or_none()
+                
+                # Re-check credit availability inside locked transaction
+                if not credit_account or credit_account.available_credits < credits_required:
+                    raise HTTPException(
+                        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                        detail=f"Insufficient credits after execution. Required: {credits_required}, Available: {credit_account.available_credits if credit_account else 0}"
+                    )
+                
+                # Perform atomic credit deduction
+                balance_before = credit_account.available_credits
                 credit_account.available_credits -= credits_required
                 credit_account.used_credits += credits_required
                 credits_used = credits_required
+                balance_after = credit_account.available_credits
                 
                 # Record credit transaction with correct model fields
                 credit_tx = CreditTransaction(
@@ -351,8 +355,8 @@ async def execute_strategy(
                     amount=-credits_required,
                     transaction_type=CreditTransactionType.USAGE,
                     description=f"Strategy execution: {request.function} on {request.symbol}",
-                    balance_before=credit_account.available_credits + credits_required,
-                    balance_after=credit_account.available_credits,
+                    balance_before=balance_before,
+                    balance_after=balance_after,
                     source="api"
                 )
                 db.add(credit_tx)
