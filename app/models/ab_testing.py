@@ -99,7 +99,7 @@ class ABTestVariant(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
-    test = relationship("ABTest", back_populates="variants")
+    test = relationship("ABTest", back_populates="variants", foreign_keys=[test_id])
     results = relationship("ABTestResult", back_populates="variant", cascade="all, delete-orphan")
 
     def __repr__(self):
