@@ -219,7 +219,7 @@ const StrategyIDE: React.FC = () => {
         const response = await apiClient.post('/strategies/validate', { code });
         console.log('✅ Validation response received:', response.data);
         return response.data.validation_result as ValidationResult;
-      } catch (error) {
+      } catch (error: any) {
         console.error('❌ Validation request failed');
         // Sanitized error logging - no sensitive data
         if (error.response) {
@@ -317,7 +317,7 @@ const StrategyIDE: React.FC = () => {
         const response = await apiClient.post('/strategies/backtest', requestData);
         console.log('✅ Backtest response received:', response.data);
         return response.data.backtest_result as BacktestResult;
-      } catch (error) {
+      } catch (error: any) {
         console.error('❌ Backtest request failed');
         // Sanitized error logging - no sensitive data
         if (error.response) {
@@ -461,8 +461,8 @@ const StrategyIDE: React.FC = () => {
     setIsValidating(true);
     try {
       await validateStrategyMutation.mutateAsync(targetCode);
-    } catch (error) {
-      console.error('❌ validateCode error:', error);
+    } catch (error: any) {
+      console.error('❌ validateCode error:', error.message || 'Unknown error');
     } finally {
       setIsValidating(false);
     }
