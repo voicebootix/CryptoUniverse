@@ -8,12 +8,13 @@ import subprocess
 import json
 import time
 import sys
+import os
 
 
-def run_curl_command(command):
+def run_curl_command(command_parts):
     """Run a curl command and return the result."""
     try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
+        result = subprocess.run(command_parts, capture_output=True, text=True)
         return result.returncode, result.stdout, result.stderr
     except Exception as e:
         return -1, "", str(e)
@@ -24,12 +25,23 @@ def test_unified_chat():
     print("🧪 TESTING UNIFIED CHAT ON LIVE SYSTEM")
     print("=" * 50)
     
+    # Get credentials from environment
+    test_email = os.environ.get("TEST_EMAIL")
+    test_password = os.environ.get("TEST_PASSWORD")
+    
+    if not test_email or not test_password:
+        print("❌ ERROR: Missing test credentials")
+        print("Please set TEST_EMAIL and TEST_PASSWORD environment variables")
+        return False
+    
     # Step 1: Login
     print("\n1️⃣ Logging in...")
-    login_cmd = '''curl -s -X POST https://cryptouniverse.onrender.com/api/v1/auth/login \
-        -H "Content-Type: application/json" \
-        -d '{"email": "admin@cryptouniverse.com", "password": "AdminPass123!"}'
-    '''
+    login_cmd = [
+        "curl", "-s", "-X", "POST", 
+        "https://cryptouniverse.onrender.com/api/v1/auth/login",
+        "-H", "Content-Type: application/json",
+        "-d", json.dumps({"email": test_email, "password": test_password})
+    ]
     
     code, stdout, stderr = run_curl_command(login_cmd)
     if code != 0:
@@ -55,11 +67,13 @@ def test_unified_chat():
     print("\n2️⃣ Testing unified chat endpoint...")
     start_time = time.time()
     
-    chat_cmd = f'''curl -s -X POST https://cryptouniverse.onrender.com/api/v1/chat/message \
-        -H "Authorization: Bearer {token}" \
-        -H "Content-Type: application/json" \
-        -d '{{"message": "What is my portfolio balance?"}}'
-    '''
+    chat_cmd = [
+        "curl", "-s", "-X", "POST",
+        "https://cryptouniverse.onrender.com/api/v1/chat/message",
+        "-H", f"Authorization: Bearer {token}",
+        "-H", "Content-Type: application/json",
+        "-d", json.dumps({"message": "What is my portfolio balance?"})
+    ]
     
     code, stdout, stderr = run_curl_command(chat_cmd)
     elapsed = time.time() - start_time
@@ -101,11 +115,13 @@ def test_unified_chat():
     modes = ["live_trading", "paper_trading", "analysis"]
     
     for mode in modes:
-        cmd = f'''curl -s -X POST https://cryptouniverse.onrender.com/api/v1/chat/message \
-            -H "Authorization: Bearer {token}" \
-            -H "Content-Type: application/json" \
-            -d '{{"message": "Test message", "conversation_mode": "{mode}"}}'
-        '''
+        cmd = [
+            "curl", "-s", "-X", "POST",
+            "https://cryptouniverse.onrender.com/api/v1/chat/message",
+            "-H", f"Authorization: Bearer {token}",
+            "-H", "Content-Type: application/json",
+            "-d", json.dumps({"message": "Test message", "conversation_mode": mode})
+        ]
         
         code, stdout, stderr = run_curl_command(cmd)
         if code == 0:
@@ -126,9 +142,11 @@ def test_unified_chat():
     
     # Step 4: Test capabilities endpoint
     print("\n4️⃣ Testing capabilities endpoint...")
-    cap_cmd = f'''curl -s -X GET https://cryptouniverse.onrender.com/api/v1/chat/capabilities \
-        -H "Authorization: Bearer {token}"
-    '''
+    cap_cmd = [
+        "curl", "-s", "-X", "GET",
+        "https://cryptouniverse.onrender.com/api/v1/chat/capabilities",
+        "-H", f"Authorization: Bearer {token}"
+    ]
     
     code, stdout, stderr = run_curl_command(cap_cmd)
     if code == 0:
@@ -151,9 +169,11 @@ def test_unified_chat():
     
     # Step 5: Test status endpoint
     print("\n5️⃣ Testing status endpoint...")
-    status_cmd = f'''curl -s -X GET https://cryptouniverse.onrender.com/api/v1/chat/status \
-        -H "Authorization: Bearer {token}"
-    '''
+    status_cmd = [
+        "curl", "-s", "-X", "GET",
+        "https://cryptouniverse.onrender.com/api/v1/chat/status",
+        "-H", f"Authorization: Bearer {token}"
+    ]
     
     code, stdout, stderr = run_curl_command(status_cmd)
     if code == 0:
@@ -173,11 +193,13 @@ def test_unified_chat():
     
     # Step 6: Test backwards compatibility
     print("\n6️⃣ Testing backwards compatibility...")
-    compat_cmd = f'''curl -s -X POST https://cryptouniverse.onrender.com/api/v1/conversational-chat/conversational \
-        -H "Authorization: Bearer {token}" \
-        -H "Content-Type: application/json" \
-        -d '{{"message": "Test backwards compatibility"}}'
-    '''
+    compat_cmd = [
+        "curl", "-s", "-X", "POST",
+        "https://cryptouniverse.onrender.com/api/v1/conversational-chat/conversational",
+        "-H", f"Authorization: Bearer {token}",
+        "-H", "Content-Type: application/json",
+        "-d", json.dumps({"message": "Test backwards compatibility"})
+    ]
     
     code, stdout, stderr = run_curl_command(compat_cmd)
     if code == 0:

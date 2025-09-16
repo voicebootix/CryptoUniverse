@@ -7,13 +7,19 @@ Validates all features are preserved and working correctly
 import asyncio
 import json
 import time
+import os
+import sys
 from datetime import datetime
 from typing import Dict, Any
 
 # Test configuration
 API_BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
-TEST_EMAIL = "admin@cryptouniverse.com"
-TEST_PASSWORD = "AdminPass123!"
+TEST_EMAIL = os.environ.get("TEST_EMAIL", "test@cryptouniverse.com")
+TEST_PASSWORD = os.environ.get("TEST_PASSWORD")
+
+if not TEST_PASSWORD:
+    print("ERROR: TEST_PASSWORD environment variable must be set")
+    sys.exit(1)
 
 
 class UnifiedChatTester:
@@ -35,13 +41,13 @@ class UnifiedChatTester:
                 json={"email": TEST_EMAIL, "password": TEST_PASSWORD}
             )
             
-            if response.status_code == 200:
+            if response.status == 200:
                 data = response.json()
                 self.token = data["access_token"]
                 print("✅ Login successful")
                 return True
             else:
-                print(f"❌ Login failed: {response.status_code}")
+                print(f"❌ Login failed: {response.status}")
                 return False
     
     async def test_basic_chat(self):
@@ -70,7 +76,7 @@ class UnifiedChatTester:
                 
                 elapsed_time = time.time() - start_time
                 
-                if response.status_code == 200:
+                if response.status == 200:
                     data = response.json()
                     if data.get("success"):
                         print(f"✅ '{message}' - Response in {elapsed_time:.2f}s")
@@ -83,7 +89,7 @@ class UnifiedChatTester:
                         print(f"❌ '{message}' - Failed: {data.get('error')}")
                         self.failed_tests += 1
                 else:
-                    print(f"❌ '{message}' - HTTP {response.status_code}")
+                    print(f"❌ '{message}' - HTTP {response.status}")
                     self.failed_tests += 1
     
     async def test_streaming_chat(self):
@@ -103,11 +109,11 @@ class UnifiedChatTester:
                 }
             )
             
-            if response.status_code == 200:
+            if response.status == 200:
                 print("✅ Streaming endpoint accessible")
                 self.passed_tests += 1
             else:
-                print(f"❌ Streaming failed: HTTP {response.status_code}")
+                print(f"❌ Streaming failed: HTTP {response.status}")
                 self.failed_tests += 1
     
     async def test_conversation_modes(self):
@@ -135,7 +141,7 @@ class UnifiedChatTester:
                     }
                 )
                 
-                if response.status_code == 200:
+                if response.status == 200:
                     data = response.json()
                     if data.get("success"):
                         print(f"✅ {mode} mode - Working")
@@ -144,7 +150,7 @@ class UnifiedChatTester:
                         print(f"❌ {mode} mode - Failed")
                         self.failed_tests += 1
                 else:
-                    print(f"❌ {mode} mode - HTTP {response.status_code}")
+                    print(f"❌ {mode} mode - HTTP {response.status}")
                     self.failed_tests += 1
     
     async def test_credit_validation(self):
@@ -164,13 +170,13 @@ class UnifiedChatTester:
             }
         )
         
-        if response.status_code == 200:
+        if response.status == 200:
             data = response.json()
             # Should either succeed or show credit requirement
             print("✅ Credit validation working")
             self.passed_tests += 1
         else:
-            print(f"❌ Credit validation failed: HTTP {response.status_code}")
+            print(f"❌ Credit validation failed: HTTP {response.status}")
             self.failed_tests += 1
     
     async def test_paper_trading_no_credits(self):
@@ -189,7 +195,7 @@ class UnifiedChatTester:
             }
         )
         
-        if response.status_code == 200:
+        if response.status == 200:
             data = response.json()
             if data.get("success"):
                 print("✅ Paper trading works without credits")
@@ -198,7 +204,7 @@ class UnifiedChatTester:
                 print(f"❌ Paper trading failed: {data.get('error')}")
                 self.failed_tests += 1
         else:
-            print(f"❌ Paper trading HTTP {response.status_code}")
+            print(f"❌ Paper trading HTTP {response.status}")
             self.failed_tests += 1
     
     async def test_real_data_integration(self):
@@ -214,7 +220,7 @@ class UnifiedChatTester:
             json={"message": "What is my exact portfolio balance?"}
         )
         
-        if response.status_code == 200:
+        if response.status == 200:
             data = response.json()
             if data.get("success"):
                 content = data.get("content", "")
@@ -232,7 +238,7 @@ class UnifiedChatTester:
                     print("❌ No real data found in response")
                     self.failed_tests += 1
         else:
-            print(f"❌ Real data test failed: HTTP {response.status_code}")
+            print(f"❌ Real data test failed: HTTP {response.status}")
             self.failed_tests += 1
     
     async def test_capabilities_endpoint(self):
@@ -247,7 +253,7 @@ class UnifiedChatTester:
             headers=headers
         )
         
-        if response.status_code == 200:
+        if response.status == 200:
             data = response.json()
             if data.get("success"):
                 caps = data.get("capabilities", {})
@@ -262,7 +268,7 @@ class UnifiedChatTester:
                 print("❌ Capabilities failed")
                 self.failed_tests += 1
         else:
-            print(f"❌ Capabilities HTTP {response.status_code}")
+            print(f"❌ Capabilities HTTP {response.status}")
             self.failed_tests += 1
     
     async def test_service_status(self):
@@ -277,7 +283,7 @@ class UnifiedChatTester:
             headers=headers
         )
         
-        if response.status_code == 200:
+        if response.status == 200:
             data = response.json()
             if data.get("success"):
                 status = data.get("service_status", {})
@@ -289,7 +295,7 @@ class UnifiedChatTester:
                 print(f"❌ Status check failed: {data.get('error')}")
                 self.failed_tests += 1
         else:
-            print(f"❌ Status HTTP {response.status_code}")
+            print(f"❌ Status HTTP {response.status}")
             self.failed_tests += 1
     
     async def run_all_tests(self):

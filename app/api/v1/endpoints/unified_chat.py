@@ -12,9 +12,12 @@ import uuid
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Query
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
+from urllib.parse import parse_qs
+import time
+from collections import defaultdict
 
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
@@ -164,9 +167,11 @@ async def send_message(
 
 
 # Streaming Chat Endpoint
-@router.post("/stream")
+@router.get("/stream")
 async def stream_message(
-    request: UnifiedChatRequest,
+    message: str = Query(..., description="The user's message"),
+    session_id: Optional[str] = Query(None, description="Session ID for conversation continuity"),
+    conversation_mode: str = Query("live_trading", description="Conversation mode"),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -178,19 +183,22 @@ async def stream_message(
     try:
         # Validate conversation mode
         try:
-            conversation_mode = ConversationMode(request.conversation_mode.lower())
+            validated_mode = ConversationMode(conversation_mode.lower())
         except ValueError:
-            conversation_mode = ConversationMode.LIVE_TRADING
+            validated_mode = ConversationMode.LIVE_TRADING
         
         async def generate():
             """Generate SSE stream."""
             try:
+                # Generate session ID if not provided
+                actual_session_id = session_id or str(uuid.uuid4())
+                
                 async for chunk in unified_chat_service.process_message(
-                    message=request.message,
+                    message=message,
                     user_id=str(current_user.id),
-                    session_id=request.session_id,
+                    session_id=actual_session_id,
                     interface=InterfaceType.WEB_CHAT,
-                    conversation_mode=conversation_mode,
+                    conversation_mode=validated_mode,
                     stream=True
                 ):
                     # Format as SSE
@@ -301,22 +309,27 @@ async def create_new_session(
     try:
         session_id = str(uuid.uuid4())
         
+        # Log session creation for the user
+        logger.info(
+            "New chat session created",
+            session_id=session_id,
+            user_id=str(current_user.id)
+        )
+        
         return {
             "success": True,
             "session_id": session_id,
             "message": "New chat session created",
+            "user_id": str(current_user.id),
             "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
-        logger.error("Failed to create chat session", error=str(e))
-        return {
-            "success": False,
-            "session_id": None,
-            "message": "Failed to create session",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        logger.error("Failed to create chat session", error=str(e), user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create session"
+        ) from e
 
 
 # Platform Capabilities
@@ -474,12 +487,14 @@ async def get_chat_status(
         
     except Exception as e:
         logger.error("Failed to get chat status", error=str(e))
-        return {
-            "success": False,
-            "error": str(e),
-            "service_status": "error",
-            "timestamp": datetime.utcnow().isoformat()
-        }
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error": str(e),
+                "service_status": "error",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
 
 
 # WebSocket Endpoint - Unified streaming chat
@@ -501,16 +516,18 @@ async def chat_websocket(
     """
     user_id = None
     
+    # Simple rate limiting for failed auth attempts
+    client_host = websocket.client.host if hasattr(websocket, 'client') else "unknown"
+    
     try:
         # Authenticate via token (from query params or headers)
         if not token:
-            # Try query params
-            query_params = getattr(websocket, 'scope', {}).get('query_string', b'').decode()
-            if 'token=' in query_params:
-                for param in query_params.split('&'):
-                    if param.startswith('token='):
-                        token = param.split('=', 1)[1]
-                        break
+            # Try query params with proper URL decoding
+            scope = getattr(websocket, 'scope', {})
+            query_string = scope.get('query_string', b'')
+            if query_string:
+                params = parse_qs(query_string.decode('utf-8'))
+                token = params.get('token', [None])[0]
         
         # Authenticate
         if token:
@@ -520,13 +537,15 @@ async def chat_websocket(
                 payload = verify_access_token(token)
                 if payload and payload.get("sub"):
                     user_id = payload["sub"]
-                    logger.info("WebSocket authenticated", user_id=user_id)
+                    logger.info("WebSocket authenticated", user_id=user_id, client=client_host)
             except JWTError as e:
-                logger.warning("WebSocket authentication failed", error=str(e))
+                logger.warning("WebSocket authentication failed", error=str(e), client=client_host)
+            except Exception as e:
+                logger.error("WebSocket auth error", error=str(e), client=client_host)
         
         # Require authentication
         if not user_id:
-            logger.warning("WebSocket rejected: Authentication required")
+            logger.warning("WebSocket rejected: Authentication required", client=client_host)
             await websocket.close(code=1008, reason="Authentication required")
             return
         
@@ -556,9 +575,26 @@ async def chat_websocket(
             ]
         }))
         
+        # Rate limiting setup
+        MAX_MESSAGE_LENGTH = 4096
+        RATE_LIMIT_MESSAGES = 30  # messages per minute
+        RATE_LIMIT_WINDOW = 60    # seconds
+        
+        message_timestamps = []
+        
         while True:
             # Receive message
             data = await websocket.receive_text()
+            
+            # Validate message size
+            if len(data) > MAX_MESSAGE_LENGTH * 2:  # Allow some overhead for JSON
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "error": f"Message too long. Maximum {MAX_MESSAGE_LENGTH} characters allowed.",
+                    "code": "MESSAGE_TOO_LONG",
+                    "timestamp": datetime.utcnow().isoformat()
+                }))
+                continue
             
             try:
                 message_data = json.loads(data)
@@ -572,6 +608,32 @@ async def chat_websocket(
             
             if message_data.get("type") == "chat_message":
                 user_message = message_data.get("message", "")
+                
+                # Check message length
+                if len(user_message) > MAX_MESSAGE_LENGTH:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "error": f"Message too long. Maximum {MAX_MESSAGE_LENGTH} characters allowed.",
+                        "code": "MESSAGE_TOO_LONG",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }))
+                    continue
+                
+                # Rate limiting check
+                current_time = time.time()
+                message_timestamps = [t for t in message_timestamps if current_time - t < RATE_LIMIT_WINDOW]
+                
+                if len(message_timestamps) >= RATE_LIMIT_MESSAGES:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "error": f"Rate limit exceeded. Maximum {RATE_LIMIT_MESSAGES} messages per minute.",
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }))
+                    continue
+                
+                message_timestamps.append(current_time)
+                
                 conversation_mode = ConversationMode(
                     message_data.get("conversation_mode", "live_trading").lower()
                 )
