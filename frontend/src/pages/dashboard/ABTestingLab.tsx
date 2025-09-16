@@ -346,8 +346,8 @@ const ABTestingLab: React.FC = () => {
                        testsStatus === 401 ||
                        metricsStatus === 500 ||
                        testsStatus === 500;
-    const isNotImplemented = [405, 404, 501].includes(metricsStatus) ||
-                          [405, 404, 501].includes(testsStatus);
+    const isNotImplemented = (metricsStatus && [405, 404, 501].includes(metricsStatus)) ||
+                          (testsStatus && [405, 404, 501].includes(testsStatus));
 
     return (
       <div className="p-6">
