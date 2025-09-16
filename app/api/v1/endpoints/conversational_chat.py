@@ -103,7 +103,14 @@ async def conversational_chat(
         )
         
         # Get conversational AI orchestrator
-        orchestrator = await get_conversational_ai_orchestrator(unified_ai_manager)
+        try:
+            orchestrator = await get_conversational_ai_orchestrator(unified_ai_manager)
+        except Exception as e:
+            logger.error("Failed to initialize conversational AI orchestrator", error=str(e))
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Conversational AI service temporarily unavailable"
+            )
         
         # Process conversation and collect streaming responses
         response_chunks = []
@@ -240,31 +247,62 @@ async def conversational_chat_stream(
         }))
         
         # Get conversational AI orchestrator
-        orchestrator = await get_conversational_ai_orchestrator(unified_ai_manager)
+        try:
+            orchestrator = await get_conversational_ai_orchestrator(unified_ai_manager)
+        except Exception as e:
+            logger.error("Failed to initialize conversational AI orchestrator for WebSocket", error=str(e))
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": "Conversational AI service temporarily unavailable",
+                "timestamp": datetime.utcnow().isoformat()
+            }))
+            await websocket.close(code=1011, reason="Service unavailable")
+            return
         
         while True:
             # Receive message from client
             data = await websocket.receive_text()
-            message_data = json.loads(data)
+            
+            try:
+                message_data = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": "Invalid JSON format",
+                    "timestamp": datetime.utcnow().isoformat()
+                }))
+                continue
             
             if message_data.get("type") == "conversational_message":
                 user_message = message_data.get("message", "")
-                conversation_mode = ConversationMode(
-                    message_data.get("conversation_mode", "live_trading")
-                )
+                
+                try:
+                    conversation_mode = ConversationMode(
+                        message_data.get("conversation_mode", "live_trading")
+                    )
+                except ValueError:
+                    conversation_mode = ConversationMode.LIVE_TRADING
                 
                 if user_message.strip():
                     # Stream response in real-time
-                    async for response_chunk in orchestrator.process_conversation(
-                        user_message=user_message,
-                        session_id=session_id,
-                        user_id=user_id,
-                        conversation_mode=conversation_mode
-                    ):
+                    try:
+                        async for response_chunk in orchestrator.process_conversation(
+                            user_message=user_message,
+                            session_id=session_id,
+                            user_id=user_id,
+                            conversation_mode=conversation_mode
+                        ):
+                            await websocket.send_text(json.dumps({
+                                "type": "conversational_response",
+                                "session_id": session_id,
+                                "chunk": response_chunk,
+                                "timestamp": datetime.utcnow().isoformat()
+                            }))
+                    except Exception as e:
+                        logger.error("Conversation processing error", error=str(e))
                         await websocket.send_text(json.dumps({
-                            "type": "conversational_response",
-                            "session_id": session_id,
-                            "chunk": response_chunk,
+                            "type": "error",
+                            "message": f"Error processing conversation: {str(e)}",
                             "timestamp": datetime.utcnow().isoformat()
                         }))
             

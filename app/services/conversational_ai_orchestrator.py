@@ -43,7 +43,7 @@ from app.services.telegram_core import TelegramCommanderService
 from app.services.chat_memory import ChatMemoryService
 from app.services.user_opportunity_discovery import user_opportunity_discovery
 from app.services.user_onboarding_service import user_onboarding_service
-from app.services.profit_sharing_service import profit_sharing_service
+# Profit sharing service will be imported dynamically when needed
 from app.services.websocket import manager as websocket_manager
 
 # Models
@@ -141,7 +141,7 @@ class ConversationalAIOrchestrator(LoggerMixin):
         self.memory_service = ChatMemoryService()
         self.opportunity_discovery = user_opportunity_discovery
         self.onboarding_service = user_onboarding_service
-        self.profit_sharing = profit_sharing_service
+        self.profit_sharing = None  # Will be imported dynamically when needed
         
         # Conversational AI components
         self.redis = None
@@ -150,11 +150,8 @@ class ConversationalAIOrchestrator(LoggerMixin):
         # Personality engine for different trading modes
         self.personalities = self._initialize_personalities()
         
-        # Conversation analysis engine
-        self.conversation_analyzer = ConversationAnalyzer()
-        
-        # Streaming response engine
-        self.streaming_responder = StreamingResponder()
+        # Conversation analysis engine (implemented inline)
+        # No separate analyzer needed - analysis is done inline
         
         self.logger.info("🧠 Conversational AI Orchestrator initialized with ALL platform features")
     
@@ -167,6 +164,17 @@ class ConversationalAIOrchestrator(LoggerMixin):
                 self.redis = None
             self._redis_initialized = True
         return self.redis
+    
+    async def _get_profit_sharing_service(self):
+        """Get profit sharing service dynamically."""
+        if self.profit_sharing is None:
+            try:
+                from app.services.profit_sharing_service import profit_sharing_service
+                self.profit_sharing = profit_sharing_service
+            except ImportError:
+                self.logger.warning("Profit sharing service not available")
+                self.profit_sharing = None
+        return self.profit_sharing
     
     def _initialize_personalities(self) -> Dict[TradingMode, Dict[str, Any]]:
         """Initialize AI personalities based on existing trading modes."""
@@ -870,14 +878,7 @@ class ConversationalAIOrchestrator(LoggerMixin):
             }
 
 
-class ConversationAnalyzer:
-    """Analyzes conversations for intent and requirements."""
-    pass
-
-
-class StreamingResponder:
-    """Handles streaming response generation."""
-    pass
+# Helper classes removed - functionality implemented inline in main orchestrator
 
 
 # Global service instance
@@ -890,8 +891,15 @@ async def get_conversational_ai_orchestrator(
     """Get or create conversational AI orchestrator instance."""
     global conversational_ai_orchestrator
     
-    if conversational_ai_orchestrator is None:
-        conversational_ai_orchestrator = ConversationalAIOrchestrator(unified_ai_manager)
-        await conversational_ai_orchestrator._ensure_redis()
-    
-    return conversational_ai_orchestrator
+    try:
+        if conversational_ai_orchestrator is None:
+            conversational_ai_orchestrator = ConversationalAIOrchestrator(unified_ai_manager)
+            await conversational_ai_orchestrator._ensure_redis()
+        
+        return conversational_ai_orchestrator
+    except Exception as e:
+        logger.error("Failed to initialize conversational AI orchestrator", error=str(e))
+        # Create a new instance if the global one fails
+        orchestrator = ConversationalAIOrchestrator(unified_ai_manager)
+        await orchestrator._ensure_redis()
+        return orchestrator
