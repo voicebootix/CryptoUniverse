@@ -203,10 +203,40 @@ const StrategyIDE: React.FC = () => {
   // Validate strategy mutation
   const validateStrategyMutation = useMutation({
     mutationFn: async (code: string) => {
-      const response = await apiClient.post('/strategies/validate', { code });
-      return response.data.validation_result as ValidationResult;
+      // Create secure hash of code for logging (no code content exposed)
+      const encoder = new TextEncoder();
+      const data = encoder.encode(code);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+      console.log('🔍 Starting validation request...', {
+        codeLength: code.length,
+        codeHash: hashHex.substring(0, 16), // First 16 chars of hash
+        hasContent: code.trim().length > 0
+      });
+      try {
+        const response = await apiClient.post('/strategies/validate', { code });
+        console.log('✅ Validation response received:', response.data);
+        return response.data.validation_result as ValidationResult;
+      } catch (error) {
+        console.error('❌ Validation request failed');
+        // Sanitized error logging - no sensitive data
+        if (error.response) {
+          console.error('Response error:', {
+            status: error.response.status,
+            message: error.response.data?.message || 'Server error'
+          });
+        } else if (error.request) {
+          console.error('Request failed to send');
+        } else {
+          console.error('Setup error:', error.message);
+        }
+        throw error;
+      }
     },
     onSuccess: (result) => {
+      console.log('✅ Validation successful:', result);
       setValidationResult(result);
       
       // Update Monaco editor markers
@@ -253,20 +283,55 @@ const StrategyIDE: React.FC = () => {
   // Run backtest mutation
   const runBacktestMutation = useMutation({
     mutationFn: async (data: { code: string; symbol?: string; start_date?: string; end_date?: string; initial_capital?: number }) => {
+      // Add authentication check before starting
+      const { useAuthStore } = await import('@/store/authStore');
+      const { isAuthenticated, tokens } = useAuthStore.getState();
+
+      console.log('🔐 Backtest auth check:', { isAuthenticated, hasToken: !!tokens?.access_token });
+
+      if (!isAuthenticated || !tokens?.access_token) {
+        console.error('❌ Not authenticated for backtest');
+        toast.error('Please login to use Strategy IDE');
+        throw new Error('Authentication required');
+      }
+
+      console.log('🚀 Starting backtest request...');
+
       // Calculate date range from period_days or use defaults
       const endDate = new Date();
       const startDate = new Date();
       startDate.setDate(endDate.getDate() - 90); // Default 90 days
 
-      const response = await apiClient.post('/strategies/backtest', {
+      const requestData = {
         code: data.code,
         symbol: data.symbol || 'BTC/USDT',
         start_date: data.start_date || startDate.toISOString().split('T')[0],
         end_date: data.end_date || endDate.toISOString().split('T')[0],
         initial_capital: data.initial_capital || 10000,
         parameters: {}
-      });
-      return response.data.backtest_result as BacktestResult;
+      };
+
+      console.log('📊 Backtest request payload:', requestData);
+
+      try {
+        const response = await apiClient.post('/strategies/backtest', requestData);
+        console.log('✅ Backtest response received:', response.data);
+        return response.data.backtest_result as BacktestResult;
+      } catch (error) {
+        console.error('❌ Backtest request failed');
+        // Sanitized error logging - no sensitive data
+        if (error.response) {
+          console.error('Response error:', {
+            status: error.response.status,
+            message: error.response.data?.message || 'Server error'
+          });
+        } else if (error.request) {
+          console.error('Request failed to send');
+        } else {
+          console.error('Setup error:', error.message);
+        }
+        throw error;
+      }
     },
     onSuccess: (result) => {
       setBacktestResult(result);
@@ -373,10 +438,31 @@ const StrategyIDE: React.FC = () => {
 
   const validateCode = async (codeToValidate?: string) => {
     const targetCode = codeToValidate || code;
-    if (!targetCode.trim()) return;
+    console.log('🎯 validateCode called:', { hasCode: !!targetCode.trim() });
+
+    if (!targetCode.trim()) {
+      console.warn('⚠️ No code to validate');
+      return;
+    }
+
+    // Add authentication check
+    const { useAuthStore } = await import('@/store/authStore');
+    const { isAuthenticated, tokens } = useAuthStore.getState();
+
+    console.log('🔐 Auth state:', { isAuthenticated, hasToken: !!tokens?.access_token });
+
+    if (!isAuthenticated || !tokens?.access_token) {
+      console.error('❌ Not authenticated');
+      toast.error('Please login to use Strategy IDE');
+      setConsoleOutput(prev => [...prev, '❌ Authentication required to validate code']);
+      return;
+    }
+
     setIsValidating(true);
     try {
       await validateStrategyMutation.mutateAsync(targetCode);
+    } catch (error) {
+      console.error('❌ validateCode error:', error);
     } finally {
       setIsValidating(false);
     }
