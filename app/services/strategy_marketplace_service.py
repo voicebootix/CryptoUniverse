@@ -975,24 +975,38 @@ class StrategyMarketplaceService(LoggerMixin):
             raise  # Re-raise to ensure purchase_strategy_access knows it failed
     
     async def get_user_strategy_portfolio(self, user_id: str) -> Dict[str, Any]:
-        """Get user's purchased/active strategies with timeout protection."""
+        """Get user's purchased/active strategies with enterprise reliability."""
         import asyncio
         
+        # Add method-level timeout for entire operation
         try:
-            # Add timeout protection to prevent 55+ second hangs
-            return await asyncio.wait_for(self._get_user_strategy_portfolio_internal(user_id), timeout=10.0)
+            async with asyncio.timeout(5.0):  # 5 second timeout for entire method
+                return await self._get_user_strategy_portfolio_impl(user_id)
         except asyncio.TimeoutError:
-            self.logger.error("❌ Strategy portfolio retrieval timed out", user_id=user_id)
-            return {"success": False, "error": "Portfolio retrieval timeout"}
+            self.logger.error("❌ Portfolio fetch timeout", user_id=user_id)
+            # Return degraded state to prevent credit deductions for free strategies
+            return {
+                "success": False,
+                "degraded": True,
+                "active_strategies": [],
+                "total_strategies": 0,
+                "total_monthly_cost": 0,
+                "error": "timeout",
+                "cached": False
+            }
         except Exception as e:
             self.logger.error("Failed to get user strategy portfolio", error=str(e))
             return {"success": False, "error": str(e)}
     
-    async def _get_user_strategy_portfolio_internal(self, user_id: str) -> Dict[str, Any]:
-        """Internal method for strategy portfolio retrieval."""
+    async def _get_user_strategy_portfolio_impl(self, user_id: str) -> Dict[str, Any]:
+        """Actual implementation with enterprise resource management."""
+        
+        redis = None
+        
         try:
+            # Get Redis with timeout for connection
             from app.core.redis import get_redis_client
-            redis = await get_redis_client()
+            redis = await asyncio.wait_for(get_redis_client(), timeout=2.0)
             
             if not redis:
                 self.logger.warning("Redis unavailable for strategy portfolio retrieval")
@@ -1005,7 +1019,11 @@ class StrategyMarketplaceService(LoggerMixin):
                            redis_key=redis_key,
                            redis_available=bool(redis))
             
-            active_strategies = await self._safe_redis_operation(redis.smembers, redis_key)
+            # Get strategies with timeout to prevent hanging
+            active_strategies = await asyncio.wait_for(
+                self._safe_redis_operation(redis.smembers, redis_key),
+                timeout=3.0
+            )
             if active_strategies is None:
                 active_strategies = set()  # Fallback to empty set if Redis fails
             raw_strategies = list(active_strategies)  # Store raw for debugging
@@ -1063,9 +1081,19 @@ class StrategyMarketplaceService(LoggerMixin):
                 "estimated_monthly_return": sum(s["performance"].get("avg_return", 0) for s in strategy_portfolio)
             }
             
+        except asyncio.TimeoutError:
+            self.logger.error("❌ Redis operation timeout", user_id=user_id)
+            raise  # Re-raise to be caught by outer timeout handler
+            
         except Exception as e:
             self.logger.error("Failed to get user strategy portfolio", error=str(e))
             return {"success": False, "error": str(e)}
+            
+        finally:
+            # Redis connection is managed by the connection manager
+            # Do not close the shared client - just clear the reference
+            if redis:
+                redis = None
     
     async def _recover_missing_strategies(self, user_id: str, redis) -> bool:
         """Lightweight Redis-only strategy recovery mechanism."""
