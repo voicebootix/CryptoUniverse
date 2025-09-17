@@ -1242,8 +1242,16 @@ class TradingStrategiesService(LoggerMixin):
                 current_price = 50000  # Fallback
             
             # Extract options-specific parameters with real data
-            expiry_date = "2024-12-27"  # Would be from parameters in production
-            strike_price = current_price * 1.05  # 5% OTM based on real price
+            from datetime import datetime, timedelta
+            # Use 30 days from now as default expiry
+            expiry_days = parameters.get("expiry_days", 30)
+            expiry_date = (datetime.utcnow() + timedelta(days=expiry_days)).strftime("%Y-%m-%d")
+            
+            # Use rounded strike prices for realistic contracts
+            strike_multiplier = parameters.get("strike_multiplier", 1.05)  # 5% OTM default
+            raw_strike = current_price * strike_multiplier
+            # Round to nearest 100 for crypto, nearest 5 for others
+            strike_price = round(raw_strike / 100) * 100 if current_price > 1000 else round(raw_strike / 5) * 5
             
             return await self.derivatives_engine.options_trade(
                 strategy_enum, symbol, parameters, expiry_date, strike_price, user_id
@@ -1261,9 +1269,16 @@ class TradingStrategiesService(LoggerMixin):
                 return {"success": False, "error": f"Price lookup failed: {str(e)}"}
             
             # Define legs for complex strategy with REAL market-based strikes
+            from datetime import datetime, timedelta
+            expiry_days = parameters.get("expiry_days", 30)
+            expiry_date = (datetime.utcnow() + timedelta(days=expiry_days)).strftime("%Y-%m-%d")
+            
+            # Round strikes to realistic values
+            strike_base = round(current_price / 100) * 100 if current_price > 1000 else round(current_price / 5) * 5
+            
             legs = [
-                {"action": "BUY", "strike": current_price, "expiry": "2024-12-27", "option_type": "CALL"},
-                {"action": "SELL", "strike": current_price * 1.1, "expiry": "2024-12-27", "option_type": "CALL"}
+                {"action": "BUY", "strike": strike_base, "expiry": expiry_date, "option_type": "CALL"},
+                {"action": "SELL", "strike": strike_base * 1.1, "expiry": expiry_date, "option_type": "CALL"}
             ]
             
             # Set default strategy type if not provided

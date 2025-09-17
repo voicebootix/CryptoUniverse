@@ -1178,7 +1178,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         if "risk_type" in recommendation:
                             # This is a mitigation strategy
                             urgency = recommendation.get("urgency", 0.8)
-                            if urgency > 0.6:
+                            if urgency > 0.3:  # Lowered threshold for more opportunities
                                 opportunity = OpportunityResult(
                                     strategy_id="ai_risk_management",
                                     strategy_name="AI Risk Management - Mitigation",
@@ -1203,7 +1203,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 opportunities.append(opportunity)
                         else:
                             # This is a hedge recommendation
-                            if recommendation.get("urgency_score", 0) > 0.6:  # Medium+ urgency
+                            if recommendation.get("urgency_score", 0) > 0.3:  # Lowered for more opportunities
                                 opportunity = OpportunityResult(
                                     strategy_id="ai_risk_management",
                                     strategy_name="AI Risk Management - Hedge",
@@ -1274,7 +1274,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 if rebalancing_recommendations:
                     for rebal in rebalancing_recommendations:
-                        if rebal.get("improvement_potential", 0) > 0.1:  # 10%+ improvement
+                        if rebal.get("improvement_potential", 0) > 0.05:  # 5%+ improvement for more opportunities
                             opportunity = OpportunityResult(
                                 strategy_id="ai_portfolio_optimization",
                                 strategy_name="AI Portfolio Optimization",
@@ -1632,7 +1632,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Also check for edge/expected value as signal
             expected_edge = risk_analysis.get("expected_edge", 0) or option_details.get("expected_profit_pct", 0)
             
-            if signal_strength > 3.0 or expected_edge > 5.0:
+            if signal_strength > 3.0 or expected_edge > 2.0:  # Lower edge threshold for more opportunities
                 return OpportunityResult(
                     strategy_id="ai_options_trade",
                     strategy_name=f"AI Options Trading ({signal.get('strategy_type', 'Iron Condor')})",
