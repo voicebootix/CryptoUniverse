@@ -951,7 +951,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 symbol=symbol,
                                 exchange="binance",
                                 profit_potential_usd=float(risk_mgmt.get("take_profit") or 100),
-                                confidence_score=float(signal_confidence) * 10 if signal_confidence else signal_strength * 10,
+                                confidence_score=float(signal_confidence) if signal_confidence else signal_strength * 10,
                                 risk_level=self._signal_to_risk_level(signal_strength),
                                 required_capital_usd=1000.0,
                                 estimated_timeframe="4-24h",
