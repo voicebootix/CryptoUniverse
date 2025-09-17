@@ -17,6 +17,7 @@ Date: 2025-09-12
 import asyncio
 import json
 import time
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
@@ -79,6 +80,19 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     def __init__(self):
         super().__init__()
         self.redis: Optional[Any] = None
+        
+        # ENTERPRISE CACHING LAYER - Phase 1 Performance Fix
+        self._portfolio_cache = {}  # {user_id: {'data': portfolio, 'expires': timestamp}}
+        self._cache_ttl = 300  # 5 minutes
+        
+        # CIRCUIT BREAKER for external calls
+        self._circuit_breaker = {
+            'failures': 0,
+            'last_failure': 0,
+            'is_open': False,
+            'threshold': 3,
+            'timeout': 60
+        }
         self.opportunity_cache = {}
         
         # Strategy scanning methods mapping
@@ -138,6 +152,62 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self.logger.error("Failed to initialize User Opportunity Discovery", error=str(e))
             raise
     
+    async def _get_user_portfolio_cached(self, user_id: str) -> Dict[str, Any]:
+        """Get user portfolio with enterprise caching and circuit breaker pattern."""
+        
+        # Check cache first
+        cached = self._portfolio_cache.get(user_id)
+        if cached and cached['expires'] > time.time():
+            self.logger.debug("🎯 Portfolio cache hit", user_id=user_id)
+            return cached['data']
+        
+        # Check circuit breaker
+        if self._circuit_breaker['is_open']:
+            if time.time() - self._circuit_breaker['last_failure'] < self._circuit_breaker['timeout']:
+                self.logger.warning("⚡ Circuit breaker open, returning cached or default", user_id=user_id)
+                return cached['data'] if cached else {'success': True, 'active_strategies': []}
+            else:
+                # Reset circuit breaker
+                self._circuit_breaker['is_open'] = False
+                self._circuit_breaker['failures'] = 0
+        
+        try:
+            # Fetch with hard timeout to prevent 55+ second hangs
+            portfolio_result = await asyncio.wait_for(
+                strategy_marketplace_service.get_user_strategy_portfolio(user_id), 
+                timeout=5.0
+            )
+            
+            # Cache successful result
+            self._portfolio_cache[user_id] = {
+                'data': portfolio_result,
+                'expires': time.time() + self._cache_ttl
+            }
+            
+            # Reset circuit breaker on success
+            self._circuit_breaker['failures'] = 0
+            
+            self.logger.debug("✅ Portfolio fetched and cached", user_id=user_id)
+            return portfolio_result
+            
+        except (asyncio.TimeoutError, Exception) as e:
+            self.logger.error("❌ Portfolio fetch failed", user_id=user_id, error=str(e))
+            
+            # Increment circuit breaker
+            self._circuit_breaker['failures'] += 1
+            self._circuit_breaker['last_failure'] = time.time()
+            
+            if self._circuit_breaker['failures'] >= self._circuit_breaker['threshold']:
+                self._circuit_breaker['is_open'] = True
+                self.logger.warning("🔥 Circuit breaker opened due to repeated failures")
+            
+            # Return cached data if available, otherwise empty
+            if cached:
+                self.logger.info("🔄 Returning stale cache due to fetch failure", user_id=user_id)
+                return cached['data']
+            
+            return {'success': True, 'active_strategies': [], 'error': 'temporary_failure'}
+    
     async def discover_opportunities_for_user(
         self,
         user_id: str,
@@ -152,6 +222,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         
         discovery_start_time = time.time()
         scan_id = f"user_discovery_{user_id}_{int(time.time())}"
+        
+        # ENTERPRISE PERFORMANCE METRICS
+        metrics = {
+            'scan_id': scan_id,
+            'start_time': discovery_start_time,
+            'portfolio_fetch_time': 0,
+            'asset_discovery_time': 0,
+            'strategy_scan_times': {},
+            'total_strategies': 0,
+            'total_opportunities': 0,
+            'cache_hits': 0,
+            'cache_misses': 0,
+            'timeouts': 0,
+            'errors': []
+        }
         
         self.logger.info("🔍 ENTERPRISE User Opportunity Discovery Starting",
                         scan_id=scan_id,
@@ -178,10 +263,37 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    opportunities_count=len(cached_opportunities.get("opportunities", [])))
                     return cached_opportunities
             
-            # STEP 3: Get user's active strategy portfolio
-            portfolio_result = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+            # STEP 3: Get user's active strategy portfolio WITH CACHING (Performance Fix)
+            portfolio_start = time.time()
+            portfolio_result = await self._get_user_portfolio_cached(user_id)
+            metrics['portfolio_fetch_time'] = time.time() - portfolio_start
+            
+            # Track cache hits/misses
+            if 'error' in portfolio_result and portfolio_result['error'] == 'temporary_failure':
+                metrics['timeouts'] += 1
+            
+            # Check if cache was hit (response time < 0.1s indicates cache hit)
+            if metrics['portfolio_fetch_time'] < 0.1:
+                metrics['cache_hits'] += 1
+            else:
+                metrics['cache_misses'] += 1
+            
+            # CRITICAL DEBUG: Log detailed portfolio information
+            self.logger.info("🔍 STRATEGY PORTFOLIO DEBUG",
+                           scan_id=scan_id,
+                           user_id=user_id,
+                           portfolio_success=portfolio_result.get("success"),
+                           portfolio_keys=list(portfolio_result.keys()),
+                           active_strategies_count=len(portfolio_result.get("active_strategies", [])),
+                           total_strategies=portfolio_result.get("total_strategies", 0),
+                           active_strategies_list=[s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])],
+                           portfolio_error=portfolio_result.get("error"))
             
             if not portfolio_result.get("success") or not portfolio_result.get("active_strategies"):
+                self.logger.warning("❌ NO STRATEGIES FOUND IN PORTFOLIO",
+                                  scan_id=scan_id,
+                                  user_id=user_id,
+                                  portfolio_result=portfolio_result)
                 return await self._handle_no_strategies_user(user_id, scan_id)
             
             active_strategies = portfolio_result["active_strategies"]
@@ -213,7 +325,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             async def scan_strategy_with_semaphore(strategy_info):
                 async with strategy_semaphore:
                     return await self._scan_strategy_opportunities(
-                        strategy_info, discovered_assets, user_profile, scan_id
+                        strategy_info, discovered_assets, user_profile, scan_id, portfolio_result
                     )
             
             # Run all strategy scans concurrently
@@ -282,11 +394,50 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             strategy_recommendations = []
             if include_strategy_recommendations:
                 strategy_recommendations = await self._generate_strategy_recommendations(
-                    user_id, user_profile, len(ranked_opportunities)
+                    user_id, user_profile, len(ranked_opportunities), portfolio_result
                 )
             
-            # STEP 8: Build comprehensive response
+            # STEP 8: Build comprehensive response with metrics
             execution_time = (time.time() - discovery_start_time) * 1000
+            metrics['total_time'] = execution_time
+            metrics['total_strategies'] = len(active_strategies)
+            metrics['total_opportunities'] = len(ranked_opportunities)
+            
+            # Calculate signal statistics for transparency
+            signal_stats = {
+                "total_signals_analyzed": 0,
+                "signals_by_strength": {
+                    "very_strong (>6.0)": 0,
+                    "strong (4.5-6.0)": 0,
+                    "moderate (3.0-4.5)": 0,
+                    "weak (<3.0)": 0
+                },
+                "threshold_analysis": {
+                    "original_threshold": 6.0,
+                    "opportunities_above_original": 0,
+                    "opportunities_shown": len(ranked_opportunities),
+                    "additional_opportunities_revealed": 0
+                }
+            }
+            
+            # Count opportunities by signal strength
+            for opp in ranked_opportunities:
+                signal_strength = opp.metadata.get("signal_strength", 0)
+                signal_stats["total_signals_analyzed"] += 1
+                
+                if signal_strength > 6.0:
+                    signal_stats["signals_by_strength"]["very_strong (>6.0)"] += 1
+                    signal_stats["threshold_analysis"]["opportunities_above_original"] += 1
+                elif signal_strength > 4.5:
+                    signal_stats["signals_by_strength"]["strong (4.5-6.0)"] += 1
+                elif signal_strength > 3.0:
+                    signal_stats["signals_by_strength"]["moderate (3.0-4.5)"] += 1
+                else:
+                    signal_stats["signals_by_strength"]["weak (<3.0)"] += 1
+            
+            signal_stats["threshold_analysis"]["additional_opportunities_revealed"] = (
+                len(ranked_opportunities) - signal_stats["threshold_analysis"]["opportunities_above_original"]
+            )
             
             result = {
                 "success": True,
@@ -294,6 +445,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 "user_id": user_id,
                 "opportunities": [self._serialize_opportunity(opp) for opp in ranked_opportunities],
                 "total_opportunities": len(ranked_opportunities),
+                "signal_analysis": signal_stats,
+                "threshold_transparency": {
+                    "message": f"Found {len(ranked_opportunities)} total opportunities. "
+                              f"{signal_stats['threshold_analysis']['opportunities_above_original']} meet our highest standards (>6.0), "
+                              f"but we're showing all {len(ranked_opportunities)} to give you full market visibility.",
+                    "recommendation": "Focus on HIGH confidence opportunities for best results"
+                },
                 "user_profile": {
                     "active_strategies": user_profile.active_strategy_count,
                     "user_tier": user_profile.user_tier,
@@ -308,11 +466,37 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 },
                 "strategy_recommendations": strategy_recommendations,
                 "execution_time_ms": execution_time,
-                "last_updated": datetime.utcnow().isoformat()
+                "last_updated": datetime.utcnow().isoformat(),
+                "performance_metrics": {
+                    "portfolio_fetch_time_ms": metrics['portfolio_fetch_time'] * 1000,
+                    "cache_hit_rate": metrics['cache_hits'] / max(1, metrics['cache_hits'] + metrics['cache_misses']),
+                    "total_timeouts": metrics['timeouts'],
+                    "total_errors": len(metrics['errors'])
+                }
             }
             
+            # ENTERPRISE MONITORING: Log comprehensive metrics
+            self.logger.info("📊 OPPORTUNITY DISCOVERY METRICS",
+                           scan_id=scan_id,
+                           user_id=user_id,
+                           total_time_ms=execution_time,
+                           portfolio_fetch_time_ms=metrics['portfolio_fetch_time'] * 1000,
+                           total_opportunities=metrics['total_opportunities'],
+                           cache_hit_rate=metrics['cache_hits'] / max(1, metrics['cache_hits'] + metrics['cache_misses']),
+                           timeouts=metrics['timeouts'],
+                           errors=len(metrics['errors']))
+            
+            # PERFORMANCE ALERTING: Alert if performance degraded
+            if execution_time > 10000:  # >10 seconds
+                self.logger.warning("🚨 OPPORTUNITY DISCOVERY PERFORMANCE DEGRADED",
+                                  scan_id=scan_id,
+                                  user_id=user_id,
+                                  total_time_ms=execution_time,
+                                  portfolio_fetch_time_ms=metrics['portfolio_fetch_time'] * 1000,
+                                  alert_threshold="10s")
+            
             # STEP 9: Cache results
-            await self._cache_opportunities(user_id, result, user_profile)
+            await self._cache_opportunities(user_id, final_response, user_profile)
             
             self.logger.info("✅ ENTERPRISE User Opportunity Discovery Completed",
                            scan_id=scan_id,
@@ -321,7 +505,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                            strategies_used=user_profile.active_strategy_count,
                            execution_time_ms=execution_time)
             
-            return result
+            return final_response
             
         except Exception as e:
             execution_time = (time.time() - discovery_start_time) * 1000
@@ -424,7 +608,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         strategy_info: Dict[str, Any],
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
-        scan_id: str
+        scan_id: str,
+        portfolio_result: Dict[str, Any]  # NEW PARAMETER - eliminates N+1 query
     ) -> Dict[str, Any]:
         """Scan opportunities for a specific strategy."""
         
@@ -449,10 +634,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                   strategy_func=strategy_func, scan_id=scan_id)
                 return {"strategy_id": strategy_id, "opportunities": []}
             
-            # Run the strategy-specific scanner
+            # Run the strategy-specific scanner with portfolio data
             scanner_method = self.strategy_scanners[strategy_func]
             opportunities = await scanner_method(
-                discovered_assets, user_profile, scan_id
+                discovered_assets, user_profile, scan_id, portfolio_result
             )
             
             self.logger.info("✅ Strategy scan completed",
@@ -483,7 +668,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self,
         discovered_assets: Dict[str, List[Any]], 
         user_profile: UserOpportunityProfile,
-        scan_id: str
+        scan_id: str,
+        portfolio_result: Dict[str, Any]
     ) -> List[OpportunityResult]:
         """Scan funding rate arbitrage opportunities using REAL trading strategies service."""
         
@@ -495,9 +681,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             symbols_str = ",".join(top_symbols)
             
             # Call REAL funding arbitrage strategy using UNIFIED approach (same as rebalancing)
-            # Check if user owns this strategy first
+            # Check if user owns this strategy first (using passed portfolio)
             strategy_id = "ai_funding_arbitrage"
-            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_profile.user_id)
+            user_portfolio = portfolio_result
             owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
             
             if strategy_id not in owned_strategy_ids:
@@ -558,7 +744,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self,
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile, 
-        scan_id: str
+        scan_id: str,
+        portfolio_result: Dict[str, Any]
     ) -> List[OpportunityResult]:
         """Scan statistical arbitrage opportunities using REAL trading strategies service."""
         
@@ -618,7 +805,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self,
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
-        scan_id: str
+        scan_id: str,
+        portfolio_result: Dict[str, Any]
     ) -> List[OpportunityResult]:
         """Scan pairs trading opportunities using REAL trading strategies service."""
         
@@ -641,23 +829,37 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 if pairs_result.get("success") and pairs_result.get("trading_signals"):
                     signals = pairs_result["trading_signals"]
+                    signal_strength = signals.get("signal_strength", 0)
                     
-                    # More lenient threshold for pairs trading
-                    if signals.get("signal_strength", 0) > 5.0:  # Adjusted for 1-10 scale
+                    # Track ALL signals for transparency
+                    self.logger.info(f"🎯 PAIRS TRADING SIGNAL ANALYSIS",
+                                   scan_id=scan_id,
+                                   symbol=pair_str,
+                                   signal_strength=signal_strength,
+                                   qualifies_threshold=signal_strength > 5.0)
+                    
+                    # Create opportunity for ALL signals above 3.0 but mark quality
+                    if signal_strength > 3.0:  # Capture more opportunities
+                        quality_tier = "high" if signal_strength > 5.0 else "medium" if signal_strength > 4.0 else "low"
+                        
                         opportunity = OpportunityResult(
                             strategy_id="ai_pairs_trading",
-                            strategy_name="AI Pairs Trading",
+                            strategy_name=f"AI Pairs Trading ({quality_tier.upper()} confidence)",
                             opportunity_type="pairs_trading",
                             symbol=pair_str,
                             exchange="binance",
                             profit_potential_usd=float(signals.get("expected_profit", 0)),
-                            confidence_score=float(signals.get("signal_strength", 0.7)),
-                            risk_level=signals.get("risk_level", "medium"),
+                            confidence_score=float(signal_strength) * 10,
+                            risk_level=self._signal_to_risk_level(signal_strength),
                             required_capital_usd=float(signals.get("required_capital", 10000)),
                             estimated_timeframe=signals.get("timeframe", "72h"),
                             entry_price=signals.get("entry_price"),
                             exit_price=signals.get("exit_price"),
                             metadata={
+                                "signal_strength": signal_strength,
+                                "quality_tier": quality_tier,
+                                "meets_original_threshold": signal_strength > 5.0,
+                                "recommendation": "STRONG BUY" if signal_strength > 5.0 else "CONSIDER" if signal_strength > 4.0 else "MONITOR",
                                 "correlation": pairs_result.get("correlation_analysis", {}).get("correlation", 0),
                                 "spread_z_score": signals.get("spread_z_score", 0),
                                 "signal_type": signals.get("signal_type", ""),
@@ -677,7 +879,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self,
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
-        scan_id: str
+        scan_id: str,
+        portfolio_result: Dict[str, Any]
     ) -> List[OpportunityResult]:
         """Scan spot momentum opportunities using REAL trading strategies service."""
         
@@ -686,7 +889,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             # Check if user owns spot momentum strategy (should be free strategy)
             strategy_id = "ai_spot_momentum_strategy"
-            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_profile.user_id)
+            user_portfolio = portfolio_result
             owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
             
             if strategy_id not in owned_strategy_ids:
@@ -698,6 +901,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             momentum_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=30)
             
             for symbol in momentum_symbols:
+                try:
                 # User owns strategy - execute using unified approach
                 momentum_result = await trading_strategies_service.execute_strategy(
                     function="spot_momentum_strategy",
@@ -706,83 +910,65 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     user_id=user_profile.user_id,
                     simulation_mode=True  # Use simulation mode for opportunity scanning
                 )
-                
-                if momentum_result.get("success"):
-                    # CRITICAL FIX: Extract signal from correct nesting level
-                    execution_result = momentum_result.get("execution_result", {})
-                    signals = execution_result.get("signal")
                     
-                    if not signals:
-                        continue  # Skip if no signal data
-                    
-                    # CRITICAL DEBUG: Log all signal analysis
-                    signal_strength = signals.get("strength", 0)
-                    signal_confidence = signals.get("confidence", 0)
-                    signal_action = signals.get("action", "HOLD")
-                    
-                    self.logger.info(f"🎯 MOMENTUM SIGNAL ANALYSIS",
-                                   scan_id=scan_id,
-                                   symbol=symbol,
-                                   signal_strength=signal_strength,
-                                   signal_confidence=signal_confidence,
-                                   signal_action=signal_action,
-                                   qualifies_threshold=signal_strength > 6.0)
-                    
-                    if signal_strength > 6.0:  # Strong momentum signals (scale 1-10)
-                        self.logger.info(f"🚀 CREATING OPPORTUNITY FOR QUALIFYING SIGNAL",
+                    if momentum_result.get("success"):
+                        # CRITICAL FIX: Extract signal from correct nesting level
+                        execution_result = momentum_result.get("execution_result", {})
+                        signals = execution_result.get("signal")
+                        
+                        if not signals:
+                            continue  # Skip if no signal data
+                        
+                        # Track ALL signals for transparency
+                        signal_strength = signals.get("strength", 0)
+                        signal_confidence = signals.get("confidence", 0)
+                        signal_action = signals.get("action", "HOLD")
+                        
+                        self.logger.info(f"🎯 MOMENTUM SIGNAL ANALYSIS",
                                        scan_id=scan_id,
                                        symbol=symbol,
-                                       signal_strength=signal_strength)
+                                       signal_strength=signal_strength,
+                                       signal_confidence=signal_confidence,
+                                       signal_action=signal_action,
+                                       qualifies_threshold=signal_strength > 6.0)
                         
-                        try:
-                            # Get indicators from the full response (these are at root level)
+                        # Create opportunity for ALL signals above 3.0 but mark quality
+                        if signal_strength > 3.0:  # Capture more opportunities
+                            quality_tier = "high" if signal_strength > 6.0 else "medium" if signal_strength > 4.5 else "low"
+                            
                             execution_data = momentum_result.get("execution_result", {})
                             indicators = execution_data.get("indicators", {}) or momentum_result.get("indicators", {})
                             risk_mgmt = execution_data.get("risk_management", {}) or momentum_result.get("risk_management", {})
                             
                             opportunity = OpportunityResult(
                                 strategy_id="ai_spot_momentum_strategy",
-                                strategy_name="AI Spot Momentum",
+                                strategy_name=f"AI Spot Momentum ({quality_tier.upper()} confidence)",
                                 opportunity_type="spot_momentum",
                                 symbol=symbol,
                                 exchange="binance",
-                                profit_potential_usd=float(risk_mgmt.get("take_profit", 100)),  # Default $100 profit target
-                                confidence_score=float(signals.get("confidence", 70)) / 100,  # Convert to 0-1 scale
-                                risk_level="medium",
-                                required_capital_usd=float(risk_mgmt.get("position_size", 1000)),
-                                estimated_timeframe="4-12h",
-                                entry_price=None,  # Will be filled by execution service
-                                exit_price=None,   # Will be calculated based on profit target
+                                profit_potential_usd=float(risk_mgmt.get("take_profit", 100)),
+                                confidence_score=float(signal_confidence) * 10 if signal_confidence else signal_strength * 10,
+                                risk_level=self._signal_to_risk_level(signal_strength),
+                                required_capital_usd=1000.0,
+                                estimated_timeframe="4-24h",
+                                entry_price=float(indicators.get("price", {}).get("current", 0)) if indicators.get("price") else None,
+                                exit_price=float(risk_mgmt.get("take_profit_price", 0)) if risk_mgmt.get("take_profit_price") else None,
                                 metadata={
-                                    "momentum_score": indicators.get("momentum_score", 0),
-                                    "rsi": indicators.get("rsi", 0),
-                                    "macd_trend": indicators.get("macd_trend", "NEUTRAL"),
-                                    "signal_strength": signals.get("strength", 0),
-                                    "stop_loss": risk_mgmt.get("stop_loss", 0)
+                                    "signal_strength": signal_strength,
+                                    "signal_confidence": signal_confidence,
+                                    "signal_action": signal_action,
+                                    "quality_tier": quality_tier,
+                                    "meets_original_threshold": signal_strength > 6.0,
+                                    "recommendation": "STRONG BUY" if signal_strength > 6.0 else "CONSIDER" if signal_strength > 4.5 else "MONITOR"
                                 },
                                 discovered_at=datetime.utcnow()
                             )
                             opportunities.append(opportunity)
                             
-                            self.logger.info(f"✅ OPPORTUNITY CREATED SUCCESSFULLY",
-                                           scan_id=scan_id,
-                                           symbol=symbol,
-                                           opportunity_id=opportunity.strategy_id,
-                                           opportunities_count=len(opportunities))
-                        
-                        except Exception as opp_creation_error:
-                            self.logger.error(f"🚨 OPPORTUNITY CREATION FAILED",
-                                            scan_id=scan_id,
-                                            symbol=symbol,
-                                            signal_strength=signal_strength,
-                                            error=str(opp_creation_error),
-                                            exc_info=True)
-                    else:
-                        self.logger.info(f"❌ Signal below threshold",
-                                       scan_id=scan_id,
-                                       symbol=symbol,
-                                       signal_strength=signal_strength,
-                                       threshold=6.0)
+                except Exception as symbol_error:
+                    self.logger.warning(f"Failed to process symbol {symbol}", 
+                                      scan_id=scan_id, error=str(symbol_error))
+                    continue
                         
         except Exception as e:
             self.logger.error("Spot momentum scan failed",
@@ -794,7 +980,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self,
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
-        scan_id: str
+        scan_id: str,
+        portfolio_result: Dict[str, Any]
     ) -> List[OpportunityResult]:
         """Scan spot mean reversion opportunities using REAL trading strategies service."""
         
@@ -815,24 +1002,39 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 if reversion_result.get("success") and reversion_result.get("signals"):
                     signals = reversion_result["signals"]
+                    deviation_score = abs(float(signals.get("deviation_score", 0)))
                     
-                    # Look for oversold/overbought conditions
-                    if abs(float(signals.get("deviation_score", 0))) > 2.0:  # 2+ standard deviations
+                    # Track ALL signals for transparency
+                    self.logger.info(f"🎯 MEAN REVERSION SIGNAL ANALYSIS",
+                                   scan_id=scan_id,
+                                   symbol=symbol,
+                                   deviation_score=deviation_score,
+                                   qualifies_threshold=deviation_score > 2.0)
+                    
+                    # Create opportunity for ALL signals above 1.0 but mark quality
+                    if deviation_score > 1.0:  # Capture more opportunities
+                        quality_tier = "high" if deviation_score > 2.0 else "medium" if deviation_score > 1.5 else "low"
+                        signal_strength = min(deviation_score * 2, 10)  # Convert to 1-10 scale
+                        
                         opportunity = OpportunityResult(
                             strategy_id="ai_spot_mean_reversion",
-                            strategy_name="AI Mean Reversion",
+                            strategy_name=f"AI Mean Reversion ({quality_tier.upper()} confidence)",
                             opportunity_type="mean_reversion",
                             symbol=symbol,
                             exchange="binance",
                             profit_potential_usd=float(signals.get("reversion_target", 0)),
-                            confidence_score=float(signals.get("confidence", 0.75)),
-                            risk_level="medium",
+                            confidence_score=float(signals.get("confidence", 0.75)) * 100,
+                            risk_level=self._signal_to_risk_level(signal_strength),
                             required_capital_usd=float(signals.get("min_capital", 2000)),
                             estimated_timeframe="6-24h", 
                             entry_price=signals.get("entry_price"),
                             exit_price=signals.get("mean_price"),
                             metadata={
+                                "signal_strength": signal_strength,
                                 "deviation_score": signals.get("deviation_score", 0),
+                                "quality_tier": quality_tier,
+                                "meets_original_threshold": deviation_score > 2.0,
+                                "recommendation": "STRONG BUY" if deviation_score > 2.0 else "CONSIDER" if deviation_score > 1.5 else "MONITOR",
                                 "rsi": signals.get("rsi", 0),
                                 "bollinger_position": signals.get("bollinger_position", 0),
                                 "mean_price": signals.get("mean_price", 0)
@@ -851,7 +1053,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self,
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
-        scan_id: str
+        scan_id: str,
+        portfolio_result: Dict[str, Any]
     ) -> List[OpportunityResult]:
         """Scan spot breakout opportunities using REAL trading strategies service."""
         
@@ -872,22 +1075,39 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 if breakout_result.get("success") and breakout_result.get("breakout_signals"):
                     signals = breakout_result["breakout_signals"]
+                    breakout_probability = signals.get("breakout_probability", 0)
                     
-                    if signals.get("breakout_probability", 0) > 0.75:  # High probability breakouts
+                    # Track ALL signals for transparency
+                    self.logger.info(f"🎯 BREAKOUT SIGNAL ANALYSIS",
+                                   scan_id=scan_id,
+                                   symbol=symbol,
+                                   breakout_probability=breakout_probability,
+                                   qualifies_threshold=breakout_probability > 0.75)
+                    
+                    # Create opportunity for ALL signals above 0.5 but mark quality
+                    if breakout_probability > 0.5:  # Capture more opportunities
+                        quality_tier = "high" if breakout_probability > 0.75 else "medium" if breakout_probability > 0.65 else "low"
+                        signal_strength = breakout_probability * 10  # Convert to 1-10 scale
+                        
                         opportunity = OpportunityResult(
                             strategy_id="ai_spot_breakout_strategy",
-                            strategy_name="AI Breakout Trading",
+                            strategy_name=f"AI Breakout Trading ({quality_tier.upper()} confidence)",
                             opportunity_type="breakout",
                             symbol=symbol,
                             exchange="binance",
                             profit_potential_usd=float(signals.get("profit_potential", 0)),
-                            confidence_score=float(signals.get("breakout_probability", 0.8)),
-                            risk_level="medium_high",
+                            confidence_score=float(breakout_probability) * 100,
+                            risk_level=self._signal_to_risk_level(signal_strength),
                             required_capital_usd=float(signals.get("min_capital", 3000)),
                             estimated_timeframe="2-8h",
                             entry_price=signals.get("breakout_price"),
                             exit_price=signals.get("target_price"),
                             metadata={
+                                "signal_strength": signal_strength,
+                                "breakout_probability": breakout_probability,
+                                "quality_tier": quality_tier,
+                                "meets_original_threshold": breakout_probability > 0.75,
+                                "recommendation": "STRONG BUY" if breakout_probability > 0.75 else "CONSIDER" if breakout_probability > 0.65 else "MONITOR",
                                 "support_level": signals.get("support_level", 0),
                                 "resistance_level": signals.get("resistance_level", 0),
                                 "volume_surge": signals.get("volume_surge", 0),
@@ -911,7 +1131,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self,
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
-        scan_id: str
+        scan_id: str,
+        portfolio_result: Dict[str, Any]
     ) -> List[OpportunityResult]:
         """Risk management focuses on portfolio protection opportunities."""
         
@@ -920,7 +1141,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             # Check if user owns risk management strategy (should be free strategy)
             strategy_id = "ai_risk_management"
-            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_profile.user_id)
+            user_portfolio = portfolio_result
             owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
             
             if strategy_id not in owned_strategy_ids:
@@ -976,7 +1197,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self,
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile, 
-        scan_id: str
+        scan_id: str,
+        portfolio_result: Dict[str, Any]
     ) -> List[OpportunityResult]:
         """Portfolio optimization identifies rebalancing opportunities."""
         
@@ -985,7 +1207,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             # Check if user owns portfolio optimization strategy (should be free strategy)
             strategy_id = "ai_portfolio_optimization"
-            user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_profile.user_id)
+            user_portfolio = portfolio_result
             owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
             
             if strategy_id not in owned_strategy_ids:
@@ -1040,32 +1262,445 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     # Placeholder implementations for remaining strategies
     # These would follow the same pattern, calling real trading strategy methods
     
-    async def _scan_scalping_opportunities(self, discovered_assets, user_profile, scan_id):
-        """Scalping strategy scanner - placeholder for real implementation."""
-        # Would call trading_strategies_service.scalping_strategy()
-        return []
+    async def _scan_scalping_opportunities(
+        self, 
+        discovered_assets: Dict[str, List[Any]], 
+        user_profile: UserOpportunityProfile, 
+        scan_id: str, 
+        portfolio_result: Dict[str, Any]
+    ) -> List[OpportunityResult]:
+        """Enterprise scalping scanner for high-frequency opportunities."""
+        
+        opportunities = []
+        
+        try:
+            # Check if user owns scalping strategy
+            strategy_id = "ai_scalping_strategy"
+            owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
+            
+            if strategy_id not in owned_strategy_ids:
+                self.logger.info("User doesn't own scalping strategy, skipping", 
+                               user_id=user_profile.user_id, scan_id=scan_id)
+                return opportunities
+            
+            # Get highest volume symbols for scalping (need liquidity)
+            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=8)
+            
+            for symbol in symbols:
+                try:
+                    # Call trading strategies service for scalping analysis
+                    scalp_result = await trading_strategies_service.execute_strategy(
+                        function="scalping_strategy",
+                        strategy_type="momentum_scalp",
+                        symbol=f"{symbol}/USDT",
+                        parameters={
+                            "timeframe": "1m",
+                            "profit_target": 0.005,  # 0.5% profit target
+                            "stop_loss": 0.002,      # 0.2% stop loss
+                            "min_volume_surge": 2.0,  # 2x volume surge
+                            "rsi_threshold": 70
+                        },
+                        user_id=user_profile.user_id,
+                        simulation_mode=True
+                    )
+                    
+                    if scalp_result.get("success"):
+                        signal = scalp_result.get("signal", {})
+                        momentum = signal.get("momentum_score", 0)
+                        
+                        if momentum > 3.0:
+                            opportunities.append(OpportunityResult(
+                                strategy_id="ai_scalping_strategy",
+                                strategy_name=f"AI Scalping ({signal.get('direction', 'Long')})",
+                                opportunity_type="scalping",
+                                symbol=symbol,
+                                exchange=scalp_result.get("exchange", "binance"),
+                                profit_potential_usd=float(signal.get("profit_potential", 25)),
+                                confidence_score=float(momentum) * 10,
+                                risk_level="medium",  # Scalping is medium risk due to frequency
+                                required_capital_usd=float(signal.get("required_capital", 1000)),
+                                estimated_timeframe="5m",  # Quick scalp
+                                entry_price=signal.get("entry_price"),
+                                exit_price=signal.get("target_price"),
+                                metadata={
+                                    "momentum_score": momentum,
+                                    "direction": signal.get("direction", "long"),
+                                    "volume_surge": signal.get("volume_surge", 1),
+                                    "rsi": signal.get("rsi", 50),
+                                    "profit_target_pct": 0.5,
+                                    "stop_loss_pct": 0.2,
+                                    "expected_duration_min": signal.get("duration_min", 5)
+                                },
+                                discovered_at=datetime.utcnow()
+                            ))
+                            
+                except Exception as e:
+                    self.logger.debug(f"Scalping analysis failed for {symbol}", error=str(e))
+                    continue
+            
+            self.logger.info(f"✅ Scalping scanner found {len(opportunities)} opportunities", 
+                           scan_id=scan_id, strategy_id=strategy_id)
+            
+        except Exception as e:
+            self.logger.error("Scalping scan failed", scan_id=scan_id, error=str(e))
+        
+        return opportunities
     
-    async def _scan_market_making_opportunities(self, discovered_assets, user_profile, scan_id):
-        """Market making strategy scanner - placeholder for real implementation."""  
-        # Would call trading_strategies_service.market_making()
-        return []
+    async def _scan_market_making_opportunities(
+        self, 
+        discovered_assets: Dict[str, List[Any]], 
+        user_profile: UserOpportunityProfile, 
+        scan_id: str, 
+        portfolio_result: Dict[str, Any]
+    ) -> List[OpportunityResult]:
+        """Enterprise market making scanner with spread analysis."""
+        
+        opportunities = []
+        
+        try:
+            # Check if user owns market making strategy
+            strategy_id = "ai_market_making"
+            owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
+            
+            if strategy_id not in owned_strategy_ids:
+                self.logger.info("User doesn't own market making strategy, skipping", 
+                               user_id=user_profile.user_id, scan_id=scan_id)
+                return opportunities
+            
+            # Get highly liquid symbols for market making
+            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=10)
+            
+            for symbol in symbols:
+                try:
+                    # Call trading strategies service for market making analysis
+                    mm_result = await trading_strategies_service.execute_strategy(
+                        function="market_making",
+                        strategy_type="dual_side",
+                        symbol=f"{symbol}/USDT",
+                        parameters={
+                            "spread_target": 0.002,  # 0.2% spread
+                            "order_amount": 1000,     # $1000 per order
+                            "max_position": 10000,   # Max $10k position
+                            "rebalance_threshold": 0.1
+                        },
+                        user_id=user_profile.user_id,
+                        simulation_mode=True
+                    )
+                    
+                    if mm_result.get("success"):
+                        signal = mm_result.get("signal", {})
+                        spread = signal.get("current_spread", 0)
+                        
+                        if spread > 0.001:  # 0.1% minimum spread
+                            opportunities.append(OpportunityResult(
+                                strategy_id="ai_market_making",
+                                strategy_name=f"AI Market Making ({symbol})",
+                                opportunity_type="market_making",
+                                symbol=symbol,
+                                exchange=mm_result.get("exchange", "binance"),
+                                profit_potential_usd=float(signal.get("daily_profit_est", 50)),
+                                confidence_score=min(100, float(spread * 10000)),  # Spread-based confidence
+                                risk_level="low",  # Market making is generally low risk
+                                required_capital_usd=float(signal.get("required_capital", 5000)),
+                                estimated_timeframe="24h",
+                                entry_price=signal.get("bid_price"),
+                                exit_price=signal.get("ask_price"),
+                                metadata={
+                                    "current_spread": spread,
+                                    "target_spread": 0.002,
+                                    "volume_24h": signal.get("volume_24h", 0),
+                                    "liquidity_score": signal.get("liquidity_score", 0),
+                                    "order_book_depth": signal.get("order_book_depth", {}),
+                                    "estimated_fills_per_hour": signal.get("fills_per_hour", 0)
+                                },
+                                discovered_at=datetime.utcnow()
+                            ))
+                            
+                except Exception as e:
+                    self.logger.debug(f"Market making analysis failed for {symbol}", error=str(e))
+                    continue
+            
+            self.logger.info(f"✅ Market making scanner found {len(opportunities)} opportunities", 
+                           scan_id=scan_id, strategy_id=strategy_id)
+            
+        except Exception as e:
+            self.logger.error("Market making scan failed", scan_id=scan_id, error=str(e))
+        
+        return opportunities
     
-    async def _scan_futures_trading_opportunities(self, discovered_assets, user_profile, scan_id):
-        """Futures trading strategy scanner - placeholder for real implementation."""
-        # Would call trading_strategies_service.futures_trade()
-        return []
+    async def _scan_futures_trading_opportunities(
+        self, 
+        discovered_assets: Dict[str, List[Any]], 
+        user_profile: UserOpportunityProfile, 
+        scan_id: str, 
+        portfolio_result: Dict[str, Any]
+    ) -> List[OpportunityResult]:
+        """Enterprise futures trading scanner with leverage analysis."""
+        
+        opportunities = []
+        
+        try:
+            # Check if user owns futures trading strategy
+            strategy_id = "ai_futures_trade"
+            owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
+            
+            if strategy_id not in owned_strategy_ids:
+                self.logger.info("User doesn't own futures trading strategy, skipping", 
+                               user_id=user_profile.user_id, scan_id=scan_id)
+                return opportunities
+            
+            # Get top volume symbols for futures analysis
+            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
+            
+            # Process symbols in parallel
+            tasks = [
+                self._analyze_futures_opportunity(symbol, user_profile.user_id, scan_id)
+                for symbol in symbols
+            ]
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for result in results:
+                if isinstance(result, Exception):
+                    self.logger.warning("Futures analysis failed", scan_id=scan_id, error=str(result))
+                    continue
+                
+                if result and result.confidence_score > 30:  # 3.0 signal strength * 10
+                    opportunities.append(result)
+            
+            self.logger.info(f"✅ Futures scanner found {len(opportunities)} opportunities", 
+                           scan_id=scan_id, strategy_id=strategy_id)
+            
+        except Exception as e:
+            self.logger.error("Futures trading scan failed", scan_id=scan_id, error=str(e))
+        
+        return opportunities
     
-    async def _scan_options_trading_opportunities(self, discovered_assets, user_profile, scan_id):
-        """Options trading strategy scanner - placeholder for real implementation."""
-        # Would call trading_strategies_service.options_trade()
-        return []
+    async def _scan_options_trading_opportunities(
+        self, 
+        discovered_assets: Dict[str, List[Any]], 
+        user_profile: UserOpportunityProfile, 
+        scan_id: str, 
+        portfolio_result: Dict[str, Any]
+    ) -> List[OpportunityResult]:
+        """Enterprise options trading scanner with Greeks analysis."""
+        
+        opportunities = []
+        
+        try:
+            # Check if user owns options trading strategy
+            strategy_id = "ai_options_trade"
+            owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
+            
+            if strategy_id not in owned_strategy_ids:
+                self.logger.info("User doesn't own options trading strategy, skipping", 
+                               user_id=user_profile.user_id, scan_id=scan_id)
+                return opportunities
+            
+            # Get top volume symbols for options analysis
+            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=15)
+            
+            # Process in parallel batches for efficiency
+            batch_size = 5
+            for i in range(0, len(symbols), batch_size):
+                batch = symbols[i:i+batch_size]
+                
+                # Use asyncio.gather for parallel execution
+                tasks = [
+                    self._analyze_options_opportunity(symbol, user_profile.user_id, scan_id)
+                    for symbol in batch
+                ]
+                
+                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                for result in batch_results:
+                    if isinstance(result, Exception):
+                        self.logger.warning("Options analysis failed", scan_id=scan_id, error=str(result))
+                        continue
+                    
+                    if result and result.confidence_score > 30:  # 3.0 signal strength * 10
+                        opportunities.append(result)
+            
+            self.logger.info(f"✅ Options scanner found {len(opportunities)} opportunities", 
+                           scan_id=scan_id, strategy_id=strategy_id)
+            
+        except Exception as e:
+            self.logger.error("Options trading scan failed", scan_id=scan_id, error=str(e))
+        
+        return opportunities
     
-    async def _scan_hedge_opportunities(self, discovered_assets, user_profile, scan_id):
+    async def _analyze_options_opportunity(self, symbol: str, user_id: str, scan_id: str) -> Optional[OpportunityResult]:
+        """Analyze single symbol for options opportunity with Greeks."""
+        
+        try:
+            # Call trading strategies service for options analysis
+            options_result = await trading_strategies_service.execute_strategy(
+                function="options_trade",
+                strategy_type="iron_condor",  # Most profitable options strategy
+                symbol=f"{symbol}/USDT",
+                parameters={
+                    "timeframe": "1d",
+                    "calculate_greeks": True,
+                    "min_volume": 1000000,
+                    "expiry_days": 30
+                },
+                user_id=user_id,
+                simulation_mode=True
+            )
+            
+            if not options_result.get("success"):
+                return None
+            
+            signal = options_result.get("signal", {})
+            greeks = options_result.get("greeks", {})
+            
+            signal_strength = signal.get("strength", 0)
+            if signal_strength > 3.0:
+                return OpportunityResult(
+                    strategy_id="ai_options_trade",
+                    strategy_name=f"AI Options Trading ({signal.get('strategy_type', 'Iron Condor')})",
+                    opportunity_type="options",
+                    symbol=symbol,
+                    exchange=options_result.get("exchange", "binance"),
+                    profit_potential_usd=float(signal.get("max_profit", 500)),
+                    confidence_score=float(signal_strength) * 10,  # Convert to 0-100 scale
+                    risk_level=self._calculate_options_risk(greeks),
+                    required_capital_usd=float(signal.get("required_capital", 5000)),
+                    estimated_timeframe=f"{signal.get('days_to_expiry', 30)}d",
+                    entry_price=signal.get("entry_price"),
+                    exit_price=signal.get("target_price"),
+                    metadata={
+                        "signal_strength": signal_strength,
+                        "strategy_type": signal.get("strategy_type", "iron_condor"),
+                        "strike_prices": signal.get("strikes", {}),
+                        "expiry": signal.get("expiry"),
+                        "greeks": {
+                            "delta": greeks.get("delta", 0),
+                            "gamma": greeks.get("gamma", 0),
+                            "theta": greeks.get("theta", 0),
+                            "vega": greeks.get("vega", 0),
+                            "iv": greeks.get("implied_volatility", 0)
+                        },
+                        "breakeven_points": signal.get("breakeven_points", []),
+                        "max_profit": signal.get("max_profit", 0),
+                        "max_loss": signal.get("max_loss", 0),
+                        "probability_of_profit": signal.get("probability_of_profit", 0)
+                    },
+                    discovered_at=datetime.utcnow()
+                )
+            
+            return None
+            
+        except Exception as e:
+            self.logger.debug(f"Options analysis failed for {symbol}", error=str(e), scan_id=scan_id)
+            return None
+    
+    def _calculate_options_risk(self, greeks: Dict[str, float]) -> str:
+        """Calculate risk level based on Greeks."""
+        
+        # Sophisticated risk calculation based on Greeks
+        delta_risk = abs(greeks.get("delta", 0))
+        gamma_risk = abs(greeks.get("gamma", 0)) * 10  # Gamma is more sensitive
+        vega_risk = abs(greeks.get("vega", 0)) * 5
+        
+        total_risk = delta_risk + gamma_risk + vega_risk
+        
+        if total_risk < 0.3:
+            return "low"
+        elif total_risk < 0.6:
+            return "medium"
+        elif total_risk < 0.9:
+            return "high"
+        else:
+            return "very_high"
+    
+    async def _analyze_futures_opportunity(self, symbol: str, user_id: str, scan_id: str) -> Optional[OpportunityResult]:
+        """Analyze single symbol for futures opportunity with leverage calculation."""
+        
+        try:
+            # Call trading strategies service for futures analysis
+            futures_result = await trading_strategies_service.execute_strategy(
+                function="futures_trade",
+                strategy_type="trend_following",  # Popular futures strategy
+                symbol=f"{symbol}/USDT",
+                parameters={
+                    "timeframe": "1h",
+                    "leverage": 10,  # 10x leverage
+                    "min_volume": 5000000,
+                    "stop_loss_pct": 2.0,
+                    "take_profit_pct": 6.0
+                },
+                user_id=user_id,
+                simulation_mode=True
+            )
+            
+            if not futures_result.get("success"):
+                return None
+            
+            signal = futures_result.get("signal", {})
+            
+            signal_strength = signal.get("strength", 0)
+            if signal_strength > 3.0:
+                leverage = signal.get("leverage", 10)
+                base_profit = signal.get("profit_potential", 100)
+                
+                return OpportunityResult(
+                    strategy_id="ai_futures_trade",
+                    strategy_name=f"AI Futures Trading ({signal.get('direction', 'Long')} {leverage}x)",
+                    opportunity_type="futures",
+                    symbol=symbol,
+                    exchange=futures_result.get("exchange", "binance"),
+                    profit_potential_usd=float(base_profit * leverage),
+                    confidence_score=float(signal_strength) * 10,
+                    risk_level=self._calculate_futures_risk(leverage, signal.get("volatility", 0.1)),
+                    required_capital_usd=float(signal.get("required_margin", 1000)),
+                    estimated_timeframe=signal.get("timeframe", "6h"),
+                    entry_price=signal.get("entry_price"),
+                    exit_price=signal.get("target_price"),
+                    metadata={
+                        "signal_strength": signal_strength,
+                        "direction": signal.get("direction", "long"),
+                        "leverage": leverage,
+                        "funding_rate": signal.get("funding_rate", 0),
+                        "liquidation_price": signal.get("liquidation_price"),
+                        "stop_loss": signal.get("stop_loss"),
+                        "take_profit": signal.get("take_profit"),
+                        "volatility": signal.get("volatility", 0),
+                        "volume_24h": signal.get("volume_24h", 0)
+                    },
+                    discovered_at=datetime.utcnow()
+                )
+            
+            return None
+            
+        except Exception as e:
+            self.logger.debug(f"Futures analysis failed for {symbol}", error=str(e), scan_id=scan_id)
+            return None
+    
+    def _calculate_futures_risk(self, leverage: float, volatility: float) -> str:
+        """Calculate risk level based on leverage and volatility."""
+        
+        # Risk increases with leverage and volatility
+        leverage_risk = leverage / 100  # Normalize leverage (10x = 0.1)
+        volatility_risk = volatility * 10  # Amplify volatility impact
+        
+        total_risk = leverage_risk + volatility_risk
+        
+        if total_risk < 0.3:
+            return "low"
+        elif total_risk < 0.6:
+            return "medium" 
+        elif total_risk < 1.0:
+            return "high"
+        else:
+            return "very_high"
+    
+    async def _scan_hedge_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Hedge position strategy scanner - placeholder for real implementation."""
         # Would call trading_strategies_service.hedge_position()
         return []
     
-    async def _scan_complex_strategy_opportunities(self, discovered_assets, user_profile, scan_id):
+    async def _scan_complex_strategy_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Complex strategy scanner - placeholder for real implementation."""
         # Would call trading_strategies_service.complex_strategy()
         return []
@@ -1073,6 +1708,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     # ================================================================================
     # UTILITY METHODS
     # ================================================================================
+    
+    def _signal_to_risk_level(self, signal_strength: float) -> str:
+        """Convert signal strength to risk level for transparency."""
+        if signal_strength > 7.0:
+            return "low"
+        elif signal_strength > 5.0:
+            return "medium"
+        elif signal_strength > 3.0:
+            return "medium_high"
+        else:
+            return "high"
     
     def _get_top_symbols_by_volume(self, discovered_assets: Dict[str, List[Any]], limit: int = 20) -> List[str]:
         """Get top symbols by volume across all tiers."""
@@ -1158,7 +1804,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self,
         user_id: str,
         user_profile: UserOpportunityProfile,
-        current_opportunities_count: int
+        current_opportunities_count: int,
+        portfolio_result: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """Generate strategy purchase recommendations to increase opportunities."""
         
@@ -1175,8 +1822,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 )
                 
                 if marketplace_result.get("success"):
-                    # Get user's current strategies
-                    user_portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+                    # Use passed portfolio result instead of N+1 query
+                    user_portfolio = portfolio_result
                     current_strategy_ids = set()
                     
                     if user_portfolio.get("success"):

@@ -184,8 +184,26 @@ const ABTestingLab: React.FC = () => {
   const { data: metrics, isLoading: metricsLoading, error: metricsError } = useQuery({
     queryKey: ['ab-testing-metrics'],
     queryFn: async () => {
-      const response = await apiClient.get('/ab-testing/metrics');
-      return response.data as ABTestMetrics;
+      try {
+        const response = await apiClient.get('/ab-testing/metrics');
+        return response.data as ABTestMetrics;
+      } catch (error: any) {
+        // If endpoint doesn't exist or is not implemented, provide mock data
+        const status = getHttpStatus(error);
+        if (status === 405 || status === 404 || status === 501) {
+          console.log(`A/B testing metrics endpoint not implemented (${status}), using mock data`);
+          const mockMetrics: ABTestMetrics = {
+            total_tests: 0,
+            running_tests: 0,
+            completed_tests: 0,
+            successful_optimizations: 0,
+            avg_improvement: 0,
+            total_participants: 0
+          };
+          return mockMetrics;
+        }
+        throw error;
+      }
     },
     refetchInterval: 60000
   });
@@ -194,10 +212,20 @@ const ABTestingLab: React.FC = () => {
   const { data: tests, isLoading: testsLoading, error: testsError } = useQuery({
     queryKey: ['ab-tests', filterStatus],
     queryFn: async () => {
-      const response = await apiClient.get('/ab-testing/tests', {
-        params: { status: filterStatus !== 'all' ? filterStatus : undefined }
-      });
-      return response.data.tests as ABTest[];
+      try {
+        const response = await apiClient.get('/ab-testing/tests', {
+          params: { status: filterStatus !== 'all' ? filterStatus : undefined }
+        });
+        return response.data.tests as ABTest[];
+      } catch (error: any) {
+        // If endpoint doesn't exist or is not implemented, provide empty test list
+        const status = getHttpStatus(error);
+        if (status === 405 || status === 404 || status === 501) {
+          console.log(`A/B testing tests endpoint not implemented (${status}), using empty data`);
+          return [];
+        }
+        throw error;
+      }
     },
     refetchInterval: 30000
   });
@@ -311,13 +339,15 @@ const ABTestingLab: React.FC = () => {
   };
 
   if (metricsError || testsError) {
-    // Check if this is an authentication error (type-safe)
+    // Check if this is an authentication or implementation error (type-safe)
     const metricsStatus = getHttpStatus(metricsError);
     const testsStatus = getHttpStatus(testsError);
     const isAuthError = metricsStatus === 401 ||
                        testsStatus === 401 ||
                        metricsStatus === 500 ||
                        testsStatus === 500;
+    const isNotImplemented = (metricsStatus && [405, 404, 501].includes(metricsStatus)) ||
+                          (testsStatus && [405, 404, 501].includes(testsStatus));
 
     return (
       <div className="p-6">
@@ -328,6 +358,8 @@ const ABTestingLab: React.FC = () => {
             <p className="text-muted-foreground mb-4">
               {isAuthError
                 ? "Authentication service is currently unavailable. Please try again later or contact support."
+                : isNotImplemented
+                ? "A/B Testing endpoints are not yet implemented. This feature is coming soon!"
                 : "Unable to fetch AB testing information. Please try again."
               }
             </p>

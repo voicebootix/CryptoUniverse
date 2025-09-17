@@ -525,16 +525,17 @@ class CryptoPaymentService(LoggerMixin):
                     credit_account.available_credits += credit_amount
                     credit_account.total_purchased_credits += credit_amount
                     
-                    # Update transaction status
+                    # Update transaction status - use stripe_payment_intent_id field instead
                     tx_stmt = select(CreditTransaction).where(
-                        CreditTransaction.reference_id == payment_id
+                        CreditTransaction.stripe_payment_intent_id == payment_id
                     )
                     tx_result = await db.execute(tx_stmt)
                     transaction = tx_result.scalar_one_or_none()
                     
                     if transaction:
-                        transaction.status = "completed"
-                        transaction.processed_at = datetime.utcnow()
+                        # Note: CreditTransaction doesn't have status or processed_at fields
+                        # Just log the completion
+                        self.logger.info("Payment processed successfully", payment_id=payment_id)
                     
                     await db.commit()
                     
