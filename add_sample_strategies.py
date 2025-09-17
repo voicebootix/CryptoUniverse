@@ -25,15 +25,15 @@ async def add_sample_strategies_to_admin():
     try:
         # Get database session
         async with AsyncSessionLocal() as db:
-            # Find admin user
-            result = await db.execute(select(User).where(User.username == "admin"))
+            # Find admin user by email
+            result = await db.execute(select(User).where(User.email == "admin@cryptouniverse.com"))
             admin_user = result.scalar_one_or_none()
 
             if not admin_user:
                 print("ERROR: Admin user not found in database")
                 return
 
-            print(f"SUCCESS: Found admin user: {admin_user.username} (ID: {admin_user.id})")
+            print(f"SUCCESS: Found admin user: {admin_user.email} (ID: {admin_user.id})")
 
             # Get strategy marketplace service
             strategy_service = StrategyMarketplaceService()
@@ -87,13 +87,13 @@ async def add_sample_strategies_to_admin():
             # Get Redis client
             redis = await get_redis_client()
             if not redis:
-                print("❌ Redis not available")
+                print("ERROR: Redis not available")
                 return
 
             user_id = str(admin_user.id)
 
             # Add strategies to user's portfolio
-            print(f"\n📈 Adding {len(sample_strategies)} sample strategies...")
+            print(f"\nAdding {len(sample_strategies)} sample strategies...")
 
             for strategy in sample_strategies:
                 strategy_id = strategy["strategy_id"]
@@ -137,7 +137,7 @@ async def add_sample_strategies_to_admin():
                 for key, value in strategy_data.items():
                     await redis.hset(strategy_key, key, str(value))
 
-                print(f"✅ Added strategy: {strategy['name']} ({strategy_id})")
+                print(f"SUCCESS: Added strategy: {strategy['name']} ({strategy_id})")
 
             # Add portfolio summary data
             portfolio_summary = {
@@ -158,28 +158,29 @@ async def add_sample_strategies_to_admin():
             for key, value in portfolio_summary.items():
                 await redis.hset(summary_key, key, str(value))
 
-            print(f"\n✅ Portfolio Summary Added:")
-            print(f"   • Total Strategies: {portfolio_summary['total_strategies']}")
-            print(f"   • Active Strategies: {portfolio_summary['active_strategies']}")
-            print(f"   • Total P&L: ${portfolio_summary['total_pnl_usd']:,.2f}")
-            print(f"   • Monthly Cost: {portfolio_summary['monthly_credit_cost']} credits")
+            print(f"\nPortfolio Summary Added:")
+            print(f"   - Total Strategies: {portfolio_summary['total_strategies']}")
+            print(f"   - Active Strategies: {portfolio_summary['active_strategies']}")
+            print(f"   - Total P&L: ${portfolio_summary['total_pnl_usd']:,.2f}")
+            print(f"   - Monthly Cost: {portfolio_summary['monthly_credit_cost']} credits")
 
             # Test the API endpoint
-            print(f"\n🧪 Testing strategy portfolio retrieval...")
+            print(f"\nTesting strategy portfolio retrieval...")
             portfolio_result = await strategy_service.get_user_strategy_portfolio(user_id)
 
-            if portfolio_result.get("success", False):
-                print(f"✅ API Test Successful!")
-                print(f"   • Strategies Found: {len(portfolio_result.get('active_strategies', []))}")
+            if portfolio_result.get("summary"):
+                print(f"SUCCESS: API Test Successful!")
+                print(f"   - Strategies Found: {len(portfolio_result.get('strategies', []))}")
+                print(f"   - Summary Found: {portfolio_result.get('summary', {}).get('total_strategies', 0)} strategies")
             else:
-                print(f"❌ API Test Failed: {portfolio_result.get('error', 'Unknown error')}")
+                print(f"ERROR: API Test Failed: {portfolio_result.get('error', 'Unknown error')}")
 
-            print(f"\n🎉 Sample strategies added successfully!")
-            print(f"💡 Now visit: https://cryptouniverse-frontend.onrender.com/dashboard/my-strategies")
-            print(f"🔄 The dashboard should show real data instead of 0 values")
+            print(f"\nSample strategies added successfully!")
+            print(f"Now visit: https://cryptouniverse-frontend.onrender.com/dashboard/my-strategies")
+            print(f"The dashboard should show real data instead of 0 values")
 
     except Exception as e:
-        print(f"❌ Error adding sample strategies: {str(e)}")
+        print(f"ERROR: Error adding sample strategies: {str(e)}")
         import traceback
         traceback.print_exc()
 
