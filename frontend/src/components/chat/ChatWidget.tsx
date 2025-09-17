@@ -60,8 +60,10 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (messagesEndRef.current && isWidgetOpen && !isWidgetMinimized) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isWidgetOpen, isWidgetMinimized]);
 
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
@@ -101,9 +103,9 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
             initial={{ opacity: 0, scale: 0.8, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.8, y: 20 }}
-            className={`fixed bottom-20 right-6 z-50 ${className}`}
+            className={`fixed bottom-20 right-4 z-50 max-w-[calc(100vw-2rem)] ${className}`}
           >
-            <Card className={`w-80 ${isWidgetMinimized ? 'h-14' : 'h-96'} transition-all duration-300 shadow-lg border bg-card/95 backdrop-blur-sm border-border/50 overflow-hidden`}>
+            <Card className={`w-80 max-w-[calc(100vw-2rem)] sm:w-80 w-[calc(100vw-2rem)] ${isWidgetMinimized ? 'h-14' : 'h-[500px] max-h-[80vh]'} transition-all duration-300 shadow-lg border bg-card/95 backdrop-blur-sm border-border/50 overflow-hidden`}>
               {/* Header */}
               <CardHeader className="flex flex-row items-center justify-between space-y-0 py-3 px-4">
                 <div className="flex items-center gap-2">
@@ -137,11 +139,11 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
 
               {/* Chat Content */}
               {!isWidgetMinimized && (
-                <CardContent className="flex flex-col p-0 h-full overflow-hidden">
+                <CardContent className="flex flex-col p-0 h-[calc(100%-56px)] overflow-hidden">
                   <div className="flex flex-col h-full">
                   {/* Messages */}
-                  <ScrollArea className="flex-1 px-4 min-h-0 max-h-full overflow-y-auto">
-                    <div className="space-y-3 py-2">
+                  <ScrollArea className="flex-1 px-4 h-[calc(100%-60px)] overflow-y-auto" style={{ scrollBehavior: 'smooth' }}>
+                    <div className="space-y-3 py-2 min-h-full">
                       {messages.map((message) => (
                         <div
                           key={message.id}
@@ -154,13 +156,13 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
                           )}
                           
                           <div
-                            className={`max-w-[85%] rounded-lg px-3 py-2 text-xs shadow-sm break-words ${
+                            className={`max-w-[85%] min-w-0 rounded-lg px-3 py-2 text-xs shadow-sm break-words word-break: break-word ${
                               message.type === 'user'
                                 ? 'bg-primary text-primary-foreground border border-primary/20'
                                 : 'bg-muted/90 backdrop-blur-sm'
                             }`}
                           >
-                            <div className="break-words whitespace-pre-wrap">{message.content}</div>
+                            <div className="break-all whitespace-pre-wrap hyphens-auto" style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{message.content}</div>
                             <div className="flex items-center justify-between mt-1 gap-2">
                               <span className="text-xs opacity-70">
                                 {new Date(message.timestamp).toLocaleTimeString()}
@@ -205,7 +207,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
                   </ScrollArea>
 
                   {/* Input */}
-                  <div className="p-3 border-t bg-background/90 backdrop-blur-sm">
+                  <div className="p-3 border-t bg-background/90 backdrop-blur-sm shrink-0">
                     <div className="flex gap-2">
                       <Input
                         value={inputValue}
@@ -213,7 +215,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
                         onKeyPress={handleKeyPress}
                         placeholder="Type your message here..."
                         disabled={isLoading}
-                        className="text-xs bg-background border-border/60 focus:border-primary/50 placeholder:text-muted-foreground/70"
+                        className="flex-1 text-xs bg-background border-border/60 focus:border-primary/50 placeholder:text-muted-foreground/70 min-w-0"
                       />
                       <Button
                         onClick={sendMessage}
@@ -238,7 +240,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="fixed bottom-6 right-6 z-50"
+          className="fixed bottom-6 right-4 z-50"
         >
           <Button
             onClick={handleToggleWidget}
