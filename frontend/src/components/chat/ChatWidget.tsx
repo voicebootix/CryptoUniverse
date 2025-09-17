@@ -138,6 +138,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
               {/* Chat Content */}
               {!isWidgetMinimized && (
                 <CardContent className="flex flex-col p-0 h-full overflow-hidden">
+                  <div className="flex flex-col h-full">
                   {/* Messages */}
                   <ScrollArea className="flex-1 px-4 min-h-0 max-h-full overflow-y-auto">
                     <div className="space-y-3 py-2">
@@ -204,25 +205,26 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
                   </ScrollArea>
 
                   {/* Input */}
-                  <div className="p-3 border-t">
+                  <div className="p-3 border-t bg-background/90 backdrop-blur-sm">
                     <div className="flex gap-2">
                       <Input
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
                         onKeyPress={handleKeyPress}
-                        placeholder="Ask about your portfolio..."
+                        placeholder="Type your message here..."
                         disabled={isLoading}
-                        className="text-xs"
+                        className="text-xs bg-background border-border/60 focus:border-primary/50 placeholder:text-muted-foreground/70"
                       />
                       <Button
                         onClick={sendMessage}
                         disabled={!inputValue.trim() || isLoading}
                         size="sm"
-                        className="px-2"
+                        className="px-3 py-2 bg-primary hover:bg-primary/90 text-primary-foreground"
                       >
                         <Send className="h-3 w-3" />
                       </Button>
                     </div>
+                  </div>
                   </div>
                 </CardContent>
               )}
