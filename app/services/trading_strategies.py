@@ -1243,12 +1243,18 @@ class TradingStrategiesService(LoggerMixin):
             
             # Extract options-specific parameters with real data
             from datetime import datetime, timedelta
-            # Use 30 days from now as default expiry
-            expiry_days = parameters.get("expiry_days", 30)
-            expiry_date = (datetime.utcnow() + timedelta(days=expiry_days)).strftime("%Y-%m-%d")
             
-            # Use rounded strike prices for realistic contracts
-            strike_multiplier = parameters.get("strike_multiplier", 1.05)  # 5% OTM default
+            # Handle both dict and object parameters
+            if isinstance(parameters, dict):
+                expiry_days = parameters.get("expiry_days", 30)
+                strike_multiplier = parameters.get("strike_multiplier", 1.05)
+            else:
+                # It's a StrategyParameters object or similar
+                expiry_days = getattr(parameters, "expiry_days", 30)
+                strike_multiplier = getattr(parameters, "strike_multiplier", 1.05)
+                
+            # Use 30 days from now as default expiry
+            expiry_date = (datetime.utcnow() + timedelta(days=expiry_days)).strftime("%Y-%m-%d")
             raw_strike = current_price * strike_multiplier
             # Round to nearest 100 for crypto, nearest 5 for others
             strike_price = round(raw_strike / 100) * 100 if current_price > 1000 else round(raw_strike / 5) * 5
@@ -1270,7 +1276,13 @@ class TradingStrategiesService(LoggerMixin):
             
             # Define legs for complex strategy with REAL market-based strikes
             from datetime import datetime, timedelta
-            expiry_days = parameters.get("expiry_days", 30)
+            
+            # Handle both dict and object parameters
+            if isinstance(parameters, dict):
+                expiry_days = parameters.get("expiry_days", 30)
+            else:
+                expiry_days = getattr(parameters, "expiry_days", 30)
+                
             expiry_date = (datetime.utcnow() + timedelta(days=expiry_days)).strftime("%Y-%m-%d")
             
             # Round strikes to realistic values
@@ -3709,6 +3721,7 @@ class TradingStrategiesService(LoggerMixin):
                     "strategy": "POSITION_SIZE_REDUCTION",
                     "action": f"Reduce overall position sizes - current 1-day VaR: {risk_result['portfolio_risk_metrics']['portfolio_var_1d_pct']:.1f}%",
                     "priority": "HIGH",
+                    "urgency": 0.8,  # High urgency for excessive VaR
                     "expected_risk_reduction": 30
                 })
             
@@ -3719,6 +3732,7 @@ class TradingStrategiesService(LoggerMixin):
                     "strategy": "EXCHANGE_DIVERSIFICATION",
                     "action": f"Diversify across more exchanges - {max_exchange_exposure*100:.1f}% on single exchange",
                     "priority": "MEDIUM",
+                    "urgency": 0.6,  # Medium urgency
                     "expected_risk_reduction": 20
                 })
             
@@ -3729,6 +3743,7 @@ class TradingStrategiesService(LoggerMixin):
                     "strategy": "LEVERAGE_REDUCTION",
                     "action": f"Reduce high-leverage positions - {risk_result['risk_concentration']['high_leverage_exposure_pct']:.1f}% in high-leverage",
                     "priority": "HIGH",
+                    "urgency": 0.9,  # Very high urgency for leverage risk
                     "expected_risk_reduction": 40
                 })
             
@@ -3739,6 +3754,7 @@ class TradingStrategiesService(LoggerMixin):
                     "strategy": "DIVERSIFICATION",
                     "action": "Add uncorrelated assets to portfolio",
                     "priority": "MEDIUM",
+                    "urgency": 0.5,  # Medium urgency
                     "expected_risk_reduction": 25
                 })
             
@@ -3749,6 +3765,7 @@ class TradingStrategiesService(LoggerMixin):
                     "strategy": "PORTFOLIO_HEDGING",
                     "action": "Implement portfolio-level hedging (index shorts, volatility longs)",
                     "priority": "MEDIUM",
+                    "urgency": 0.7,  # High urgency for directional risk
                     "expected_risk_reduction": 35
                 })
             
