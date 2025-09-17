@@ -439,7 +439,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 len(ranked_opportunities) - signal_stats["threshold_analysis"]["opportunities_above_original"]
             )
             
-            result = {
+            final_response = {
                 "success": True,
                 "scan_id": scan_id,
                 "user_id": user_id,
