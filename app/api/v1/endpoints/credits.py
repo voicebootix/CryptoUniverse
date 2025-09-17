@@ -140,22 +140,32 @@ async def get_credit_balance(
     )
     
     try:
+        logger.info("Getting credit balance", user_id=str(current_user.id), user_email=current_user.email)
+
         # Get credit account
         stmt = select(CreditAccount).where(CreditAccount.user_id == current_user.id)
         result = await db.execute(stmt)
         credit_account = result.scalar_one_or_none()
-        
+
         if not credit_account:
-            # Create credit account if doesn't exist
+            logger.info("No credit account found, creating new one", user_id=str(current_user.id))
+            # Create credit account if doesn't exist - give admin 900 credits by default
+            initial_credits = 900 if current_user.email == "admin@cryptouniverse.com" else 0
             credit_account = CreditAccount(
                 user_id=current_user.id,
-                available_credits=0,
-                total_credits=0,
+                available_credits=initial_credits,
+                total_credits=initial_credits,
                 used_credits=0
             )
             db.add(credit_account)
             await db.commit()
             await db.refresh(credit_account)
+            logger.info("Created credit account", user_id=str(current_user.id), initial_credits=initial_credits)
+        else:
+            logger.info("Found credit account",
+                       user_id=str(current_user.id),
+                       available_credits=credit_account.available_credits,
+                       total_credits=credit_account.total_credits)
         
         # Calculate profit potential using domain model method
         from app.services.profit_sharing_service import profit_sharing_service
