@@ -120,9 +120,9 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
             initial={{ opacity: 0, scale: 0.8, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.8, y: 20 }}
-            className={`fixed bottom-20 right-4 z-50 max-w-[calc(100vw-2rem)] ${className}`}
+            className={`fixed bottom-20 right-4 z-[60] max-w-[calc(100vw-2rem)] ${className}`}
           >
-            <Card className={`w-80 max-w-[calc(100vw-2rem)] sm:w-80 w-[calc(100vw-2rem)] ${isWidgetMinimized ? 'h-14' : 'h-[500px] max-h-[80vh]'} transition-all duration-300 shadow-lg border bg-card/95 backdrop-blur-sm border-border/50 overflow-hidden`}>
+            <Card className={`w-80 max-w-[calc(100vw-2rem)] sm:w-80 w-[calc(100vw-2rem)] ${isWidgetMinimized ? 'h-14' : 'h-[500px] max-h-[80vh]'} transition-all duration-300 shadow-lg border bg-card backdrop-blur-md border-border/50 overflow-hidden`}>
               {/* Header */}
               <CardHeader className="flex flex-row items-center justify-between space-y-0 py-3 px-4">
                 <div className="flex items-center gap-2">
@@ -224,7 +224,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
                   </ScrollArea>
 
                   {/* Input */}
-                  <div className="p-3 border-t bg-background/90 backdrop-blur-sm shrink-0">
+                  <div className="p-3 border-t bg-background backdrop-blur-md shrink-0">
                     <div className="flex gap-2">
                       <Input
                         value={inputValue}
@@ -257,7 +257,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
         <motion.div
           initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="fixed bottom-6 right-4 z-50"
+          className="fixed bottom-6 right-4 z-[60]"
         >
           <Button
             onClick={handleToggleWidget}
