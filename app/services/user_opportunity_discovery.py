@@ -933,7 +933,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                        qualifies_threshold=signal_strength > 6.0)
                         
                         # Create opportunity for ALL signals above 3.0 but mark quality
-                        if signal_strength > 3.0:  # Capture more opportunities
+                        if signal_strength >= 2.5:  # More inclusive threshold for opportunities
                             quality_tier = "high" if signal_strength > 6.0 else "medium" if signal_strength > 4.5 else "low"
                             
                             execution_data = momentum_result.get("execution_result", {})
