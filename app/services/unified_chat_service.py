@@ -847,8 +847,8 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
             
             if opportunities:
                 opp_text = "\n".join([
-                    f"- {o['symbol']}: {o['strategy']} ({o['confidence']:.1f}% confidence, "
-                    f"{o['potential_return']:+.1f}% potential)"
+                    f"- {o.get('symbol', 'N/A')}: {o.get('strategy_name', o.get('strategy', 'Unknown'))} ({o.get('confidence_score', o.get('confidence', 0)):.1f}% confidence, "
+                    f"{o.get('profit_potential_percentage', o.get('potential_return', 0)):+.1f}% potential)"
                     for o in opportunities[:5]
                 ])
             else:
