@@ -1161,35 +1161,71 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             )
             
             if hedge_result.get("success"):
-                # CRITICAL FIX: Extract hedge recommendations from correct nesting level
+                # ENTERPRISE FIX: Extract mitigation strategies from risk management response
+                risk_analysis = hedge_result.get("risk_management_analysis", {})
+                mitigation_strategies = risk_analysis.get("mitigation_strategies", [])
+                
+                # Also check for hedge_recommendations in case of hedge_position function
                 execution_result = hedge_result.get("execution_result", {})
                 hedge_recommendations = execution_result.get("hedge_recommendations", []) or hedge_result.get("hedge_recommendations", [])
                 
-                if hedge_recommendations:
-                    for hedge in hedge_recommendations:
-                        if hedge.get("urgency_score", 0) > 0.6:  # Medium+ urgency
-                            opportunity = OpportunityResult(
-                                strategy_id="ai_risk_management",
-                                strategy_name="AI Risk Management",
-                                opportunity_type="risk_hedge",
-                                symbol=hedge.get("hedge_instrument", ""),
-                                exchange="binance",
-                                profit_potential_usd=0,  # Risk management protects rather than profits
-                                confidence_score=float(hedge.get("effectiveness") or 0.8),
-                                risk_level="low",
-                                required_capital_usd=float(hedge.get("hedge_cost") or 500),
-                                estimated_timeframe="ongoing",
-                                entry_price=None,
-                                exit_price=None,
-                                metadata={
-                                    "hedge_type": hedge.get("hedge_type", ""),
-                                    "risk_reduction": hedge.get("risk_reduction_percentage", 0),
-                                    "urgency": hedge.get("urgency_score", 0),
-                                    "portfolio_protection": True
-                                },
-                                discovered_at=datetime.utcnow()
-                            )
-                            opportunities.append(opportunity)
+                # Combine both sources
+                all_recommendations = mitigation_strategies + hedge_recommendations
+                
+                if all_recommendations:
+                    for recommendation in all_recommendations:
+                        # Handle mitigation strategies format
+                        if "risk_type" in recommendation:
+                            # This is a mitigation strategy
+                            urgency = recommendation.get("urgency", 0.8)
+                            if urgency > 0.6:
+                                opportunity = OpportunityResult(
+                                    strategy_id="ai_risk_management",
+                                    strategy_name="AI Risk Management - Mitigation",
+                                    opportunity_type="risk_mitigation",
+                                    symbol=recommendation.get("recommendation", "Portfolio"),
+                                    exchange="multiple",
+                                    profit_potential_usd=0,  # Risk management protects rather than profits
+                                    confidence_score=urgency * 100,
+                                    risk_level="low",
+                                    required_capital_usd=float(recommendation.get("cost_estimate", 100)),
+                                    estimated_timeframe="immediate",
+                                    entry_price=None,
+                                    exit_price=None,
+                                    metadata={
+                                        "risk_type": recommendation.get("risk_type", ""),
+                                        "strategy": recommendation.get("strategy", ""),
+                                        "rationale": recommendation.get("rationale", ""),
+                                        "portfolio_protection": True
+                                    },
+                                    discovered_at=datetime.utcnow()
+                                )
+                                opportunities.append(opportunity)
+                        else:
+                            # This is a hedge recommendation
+                            if recommendation.get("urgency_score", 0) > 0.6:  # Medium+ urgency
+                                opportunity = OpportunityResult(
+                                    strategy_id="ai_risk_management",
+                                    strategy_name="AI Risk Management - Hedge",
+                                    opportunity_type="risk_hedge",
+                                    symbol=recommendation.get("hedge_instrument", ""),
+                                    exchange="binance",
+                                    profit_potential_usd=0,  # Risk management protects rather than profits
+                                    confidence_score=float(recommendation.get("effectiveness", 0.8) * 100),
+                                    risk_level="low",
+                                    required_capital_usd=float(recommendation.get("hedge_cost") or 500),
+                                    estimated_timeframe="ongoing",
+                                    entry_price=None,
+                                    exit_price=None,
+                                    metadata={
+                                        "hedge_type": recommendation.get("hedge_type", ""),
+                                        "risk_reduction": recommendation.get("risk_reduction_percentage", 0),
+                                        "urgency": recommendation.get("urgency_score", 0),
+                                        "portfolio_protection": True
+                                    },
+                                    discovered_at=datetime.utcnow()
+                                )
+                                opportunities.append(opportunity)
                         
         except Exception as e:
             self.logger.error("Risk management scan failed", 
@@ -1227,9 +1263,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             )
             
             if optimization_result.get("success"):
-                # CRITICAL FIX: Extract rebalancing recommendations from correct nesting level
+                # ENTERPRISE FIX: Extract rebalancing recommendations from both possible locations
                 execution_result = optimization_result.get("execution_result", {})
-                rebalancing_recommendations = execution_result.get("rebalancing_recommendations", [])
+                
+                # Check both top-level and nested locations
+                rebalancing_recommendations = (
+                    execution_result.get("rebalancing_recommendations", []) or
+                    optimization_result.get("rebalancing_recommendations", [])
+                )
                 
                 if rebalancing_recommendations:
                     for rebal in rebalancing_recommendations:
@@ -1555,11 +1596,43 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             if not options_result.get("success"):
                 return None
             
-            signal = options_result.get("signal", {})
-            greeks = options_result.get("greeks", {})
+            # ENTERPRISE FIX: Handle both signal-based and greeks-based responses
+            execution_result = options_result.get("execution_result", {})
             
-            signal_strength = signal.get("strength", 0)
-            if signal_strength > 3.0:
+            # Check for signal in multiple locations
+            signal = (
+                options_result.get("signal", {}) or
+                execution_result.get("signal", {})
+            )
+            
+            # Extract Greeks and option details
+            greeks = (
+                options_result.get("greeks", {}) or
+                execution_result.get("greeks", {}) or
+                options_result.get("option_greeks", {})
+            )
+            
+            option_details = (
+                execution_result.get("option_details", {}) or
+                options_result.get("option_details", {})
+            )
+            
+            risk_analysis = (
+                execution_result.get("risk_analysis", {}) or
+                options_result.get("risk_analysis", {})
+            )
+            
+            # Calculate signal strength from various sources
+            signal_strength = (
+                signal.get("strength", 0) or
+                risk_analysis.get("profit_probability", 0) * 10 or
+                (greeks.get("delta", 0) * greeks.get("gamma", 0) * 100) if greeks else 0
+            )
+            
+            # Also check for edge/expected value as signal
+            expected_edge = risk_analysis.get("expected_edge", 0) or option_details.get("expected_profit_pct", 0)
+            
+            if signal_strength > 3.0 or expected_edge > 5.0:
                 return OpportunityResult(
                     strategy_id="ai_options_trade",
                     strategy_name=f"AI Options Trading ({signal.get('strategy_type', 'Iron Condor')})",
@@ -1575,9 +1648,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     exit_price=signal.get("target_price"),
                     metadata={
                         "signal_strength": signal_strength,
-                        "strategy_type": signal.get("strategy_type", "iron_condor"),
-                        "strike_prices": signal.get("strikes", {}),
-                        "expiry": signal.get("expiry"),
+                        "strategy_type": signal.get("strategy_type") or option_details.get("strategy", "iron_condor"),
+                        "strike_prices": signal.get("strikes", {}) or option_details.get("strikes", {}),
+                        "expiry": signal.get("expiry") or option_details.get("expiry_date"),
                         "greeks": {
                             "delta": greeks.get("delta", 0),
                             "gamma": greeks.get("gamma", 0),
@@ -1585,10 +1658,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             "vega": greeks.get("vega", 0),
                             "iv": greeks.get("implied_volatility", 0)
                         },
-                        "breakeven_points": signal.get("breakeven_points", []),
-                        "max_profit": signal.get("max_profit", 0),
-                        "max_loss": signal.get("max_loss", 0),
-                        "probability_of_profit": signal.get("probability_of_profit", 0)
+                        "breakeven_points": signal.get("breakeven_points", []) or risk_analysis.get("breakeven_points", []),
+                        "max_profit": signal.get("max_profit", 0) or risk_analysis.get("max_profit", 0),
+                        "max_loss": signal.get("max_loss", 0) or risk_analysis.get("max_loss", 0),
+                        "probability_of_profit": signal.get("probability_of_profit", 0) or risk_analysis.get("profit_probability", 0),
+                        "expected_edge": expected_edge,
+                        "option_details": option_details
                     },
                     discovered_at=datetime.utcnow()
                 )
