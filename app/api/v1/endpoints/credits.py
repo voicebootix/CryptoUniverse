@@ -186,14 +186,14 @@ async def get_credit_balance(
         needs_more_credits = remaining_potential <= 0
         
         return CreditBalanceResponse(
-            available_credits=credit_account.available_credits,
-            total_credits=credit_account.total_credits,
-            used_credits=credit_account.used_credits,
-            profit_potential=profit_potential,
-            profit_earned_to_date=profit_earned,
-            remaining_potential=remaining_potential,
-            utilization_percentage=utilization_pct,
-            needs_more_credits=needs_more_credits
+            available_credits=int(credit_account.available_credits or 0),
+            total_credits=int(credit_account.total_credits or 0),
+            used_credits=int(credit_account.used_credits or 0),
+            profit_potential=max(Decimal("0"), profit_potential),
+            profit_earned_to_date=max(Decimal("0"), profit_earned),
+            remaining_potential=max(Decimal("0"), remaining_potential),
+            utilization_percentage=max(0.0, min(100.0, utilization_pct)),
+            needs_more_credits=bool(needs_more_credits)
         )
         
     except Exception as e:
