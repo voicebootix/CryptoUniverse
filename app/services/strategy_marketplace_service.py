@@ -984,9 +984,10 @@ class StrategyMarketplaceService(LoggerMixin):
                 return await self._get_user_strategy_portfolio_impl(user_id)
         except asyncio.TimeoutError:
             self.logger.error("❌ Portfolio fetch timeout", user_id=user_id)
-            # Return minimal valid response to prevent cascading failures
+            # Return degraded state to prevent credit deductions for free strategies
             return {
-                "success": True,
+                "success": False,
+                "degraded": True,
                 "active_strategies": [],
                 "total_strategies": 0,
                 "total_monthly_cost": 0,
@@ -1089,12 +1090,10 @@ class StrategyMarketplaceService(LoggerMixin):
             return {"success": False, "error": str(e)}
             
         finally:
-            # Ensure Redis connection is properly closed
+            # Redis connection is managed by the connection manager
+            # Do not close the shared client - just clear the reference
             if redis:
-                try:
-                    await redis.close()
-                except Exception as e:
-                    self.logger.debug("Redis close failed", error=str(e))
+                redis = None
     
     async def _recover_missing_strategies(self, user_id: str, redis) -> bool:
         """Lightweight Redis-only strategy recovery mechanism."""

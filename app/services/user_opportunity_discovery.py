@@ -910,28 +910,28 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     user_id=user_profile.user_id,
                     simulation_mode=True  # Use simulation mode for opportunity scanning
                 )
-                
-                if momentum_result.get("success"):
-                    # CRITICAL FIX: Extract signal from correct nesting level
-                    execution_result = momentum_result.get("execution_result", {})
-                    signals = execution_result.get("signal")
                     
-                    if not signals:
-                        continue  # Skip if no signal data
-                    
+                    if momentum_result.get("success"):
+                        # CRITICAL FIX: Extract signal from correct nesting level
+                        execution_result = momentum_result.get("execution_result", {})
+                        signals = execution_result.get("signal")
+                        
+                        if not signals:
+                            continue  # Skip if no signal data
+                        
                         # Track ALL signals for transparency
-                    signal_strength = signals.get("strength", 0)
-                    signal_confidence = signals.get("confidence", 0)
-                    signal_action = signals.get("action", "HOLD")
-                    
-                    self.logger.info(f"🎯 MOMENTUM SIGNAL ANALYSIS",
-                                   scan_id=scan_id,
-                                   symbol=symbol,
-                                   signal_strength=signal_strength,
-                                   signal_confidence=signal_confidence,
-                                   signal_action=signal_action,
-                                   qualifies_threshold=signal_strength > 6.0)
-                    
+                        signal_strength = signals.get("strength", 0)
+                        signal_confidence = signals.get("confidence", 0)
+                        signal_action = signals.get("action", "HOLD")
+                        
+                        self.logger.info(f"🎯 MOMENTUM SIGNAL ANALYSIS",
+                                       scan_id=scan_id,
+                                       symbol=symbol,
+                                       signal_strength=signal_strength,
+                                       signal_confidence=signal_confidence,
+                                       signal_action=signal_action,
+                                       qualifies_threshold=signal_strength > 6.0)
+                        
                         # Create opportunity for ALL signals above 3.0 but mark quality
                         if signal_strength > 3.0:  # Capture more opportunities
                             quality_tier = "high" if signal_strength > 6.0 else "medium" if signal_strength > 4.5 else "low"
@@ -1275,7 +1275,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         
         try:
             # Check if user owns scalping strategy
-            strategy_id = "ai_scalping"
+            strategy_id = "ai_scalping_strategy"
             owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
             
             if strategy_id not in owned_strategy_ids:
@@ -1310,7 +1310,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         
                         if momentum > 3.0:
                             opportunities.append(OpportunityResult(
-                                strategy_id="ai_scalping",
+                                strategy_id="ai_scalping_strategy",
                                 strategy_name=f"AI Scalping ({signal.get('direction', 'Long')})",
                                 opportunity_type="scalping",
                                 symbol=symbol,
