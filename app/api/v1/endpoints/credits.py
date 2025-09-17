@@ -637,7 +637,7 @@ async def _process_confirmed_payment(
                 
                 # Check transaction with row lock
                 tx_stmt = select(CreditTransaction).where(
-                    CreditTransaction.reference_id == payment_id
+                    CreditTransaction.stripe_payment_intent_id == payment_id
                 ).with_for_update()
                 
                 tx_result = await db_session.execute(tx_stmt)
