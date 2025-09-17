@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageSquare,
@@ -49,6 +49,23 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
   
   const [inputValue, setInputValue] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Memoized sorted messages to prevent state mutation during render
+  const sortedMessages = useMemo(() => {
+    return [...messages].sort((a, b) => {
+      // Primary: Compare timestamps numerically
+      const aTime = new Date(a.timestamp).getTime();
+      const bTime = new Date(b.timestamp).getTime();
+      if (aTime !== bTime) return aTime - bTime;
+
+      // Tie-breaker 1: User messages come before others
+      if (a.type === 'user' && b.type !== 'user') return -1;
+      if (b.type === 'user' && a.type !== 'user') return 1;
+
+      // Tie-breaker 2: Compare by id string
+      return a.id.localeCompare(b.id);
+    });
+  }, [messages]);
 
   // Initialize session when widget opens
   useEffect(() => {
@@ -144,7 +161,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
                   {/* Messages */}
                   <ScrollArea className="flex-1 px-4 h-[calc(100%-60px)] overflow-y-auto" style={{ scrollBehavior: 'smooth' }}>
                     <div className="space-y-3 py-2 min-h-full">
-                      {messages.map((message) => (
+                      {sortedMessages.map((message) => (
                         <div
                           key={message.id}
                           className={`flex gap-2 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}

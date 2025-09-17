@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import {
@@ -58,6 +58,23 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Memoized sorted messages to prevent state mutation during render
+  const sortedMessages = useMemo(() => {
+    return [...messages].sort((a, b) => {
+      // Primary: Compare timestamps
+      const aTime = new Date(a.timestamp).getTime();
+      const bTime = new Date(b.timestamp).getTime();
+      if (aTime !== bTime) return aTime - bTime;
+
+      // Tie-breaker 1: User messages come before others
+      if (a.type === 'user' && b.type !== 'user') return -1;
+      if (b.type === 'user' && a.type !== 'user') return 1;
+
+      // Tie-breaker 2: Compare by id string
+      return a.id.localeCompare(b.id);
+    });
+  }, [messages]);
   const [isConnected, setIsConnected] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   
@@ -416,7 +433,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         <ScrollArea className="flex-1 px-6">
           <div className="space-y-4 py-4">
             <AnimatePresence>
-              {messages.map((message) => (
+              {sortedMessages.map((message) => (
                 <motion.div
                   key={message.id}
                   initial={{ opacity: 0, y: 20 }}

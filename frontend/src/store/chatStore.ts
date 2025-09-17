@@ -76,7 +76,9 @@ export const useChatStore = create<ChatState>()(
       setSessionId: (sessionId) => set({ sessionId }),
       
       addMessage: (message) => set((state) => ({
-        messages: [...state.messages, message],
+        messages: [...state.messages, message].sort((a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        ),
         unreadCount: state.isWidgetMinimized || !state.isWidgetOpen ? state.unreadCount + 1 : state.unreadCount
       })),
       
@@ -102,25 +104,28 @@ export const useChatStore = create<ChatState>()(
       // Chat Actions
       sendMessage: async (content: string) => {
         const { sessionId, messages, currentMode } = get();
-        
-        // Add user message immediately
+
+        // Add user message immediately with unique timestamp
+        const userTimestamp = new Date();
         const userMessage: ChatMessage = {
           id: `user-${Date.now()}`,
           content,
           type: 'user',
-          timestamp: new Date().toISOString(),
+          timestamp: userTimestamp.toISOString(),
           mode: currentMode
         };
-        
+
         set((state) => ({
-          messages: [...state.messages, userMessage],
+          messages: [...state.messages, userMessage].sort((a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          ),
           isLoading: true
         }));
-        
+
         try {
           // Import API client dynamically to avoid circular dependencies
           const { apiClient } = await import('@/lib/api/client');
-          
+
           // Create session if needed
           let currentSessionId = sessionId;
           if (!currentSessionId) {
@@ -130,14 +135,17 @@ export const useChatStore = create<ChatState>()(
               set({ sessionId: currentSessionId });
             }
           }
-          
+
+          // Get latest messages including the just-added user message for AI context
+          const latestMessages = get().messages;
+
           // Send message through enhanced chat endpoint (now uses unified AI manager)
           const response = await apiClient.post('/chat/message', {
             message: content,
             session_id: currentSessionId,
             mode: currentMode,
             context: {
-              previous_messages: messages.slice(-5), // Last 5 messages for context
+              previous_messages: latestMessages.slice(-5), // Last 5 messages including user message
               current_tab: window.location.pathname,
               platform: 'web',
               conversation_continuity: true
@@ -145,26 +153,30 @@ export const useChatStore = create<ChatState>()(
           });
           
           if (response.data.success) {
+            // Clamp AI timestamp to ensure it's at least userTimestamp + 100ms (handles server clock skew)
+            const serverTimestamp = new Date(response.data.timestamp || 0).getTime();
+            const minAiTimestamp = userTimestamp.getTime() + 100;
+            const aiTimestamp = new Date(Math.max(serverTimestamp, minAiTimestamp));
+
             const assistantMessage: ChatMessage = {
-              id: response.data.message_id || `ai-${Date.now()}`,
+              id: response.data.message_id || `ai-${Date.now() + 1}`,
               content: response.data.content,
               type: 'assistant',
-              timestamp: response.data.timestamp || new Date().toISOString(),
+              timestamp: aiTimestamp.toISOString(),
               mode: currentMode,
+              confidence: response.data.confidence, // Move confidence to top level for UI access
               metadata: {
                 ...response.data.metadata,
-                confidence: response.data.confidence,
                 intent: response.data.intent,
                 requires_approval: response.data.requires_approval,
                 decision_id: response.data.decision_id,
                 ai_analysis: response.data.ai_analysis
               }
             };
-            
-            set((state) => ({
-              messages: [...state.messages, assistantMessage],
-              isLoading: false
-            }));
+
+            // Use addMessage to handle unread count and timestamp ordering
+            get().addMessage(assistantMessage);
+            set({ isLoading: false });
             
             // Handle approval requests
             if (response.data.requires_approval && response.data.decision_id) {
@@ -189,14 +201,13 @@ export const useChatStore = create<ChatState>()(
             id: `error-${Date.now()}`,
             content: "I'm having trouble connecting right now. Please try again in a moment.",
             type: 'assistant',
-            timestamp: new Date().toISOString(),
+            timestamp: new Date(userTimestamp.getTime() + 200).toISOString(), // Ensure error comes after user message
             mode: currentMode
           };
-          
-          set((state) => ({
-            messages: [...state.messages, errorMessage],
-            isLoading: false
-          }));
+
+          // Use addMessage to handle unread count and timestamp ordering
+          get().addMessage(errorMessage);
+          set({ isLoading: false });
         }
       },
       
@@ -223,8 +234,10 @@ export const useChatStore = create<ChatState>()(
                 interface_type: currentMode
               }
             };
-            
-            set({ messages: [welcomeMessage] });
+
+            // Initialize with welcome message
+            set({ messages: [] });
+            get().addMessage(welcomeMessage);
           }
         } catch (error) {
           console.error('Failed to initialize session:', error);
@@ -238,8 +251,10 @@ export const useChatStore = create<ChatState>()(
             timestamp: new Date().toISOString(),
             mode: currentMode
           };
-          
-          set({ messages: [welcomeMessage] });
+
+          // Initialize with fallback welcome message
+          set({ messages: [] });
+          get().addMessage(welcomeMessage);
         }
       },
       
@@ -276,10 +291,9 @@ export const useChatStore = create<ChatState>()(
               }
             };
             
-            set((state) => ({
-              messages: [...state.messages, executionMessage],
-              pendingDecision: null
-            }));
+            // Use addMessage to handle unread count and timestamp ordering
+            get().addMessage(executionMessage);
+            set({ pendingDecision: null });
           }
         } catch (error) {
           console.error('Failed to approve decision:', error);
@@ -291,9 +305,8 @@ export const useChatStore = create<ChatState>()(
             timestamp: new Date().toISOString()
           };
           
-          set((state) => ({
-            messages: [...state.messages, errorMessage]
-          }));
+          // Use addMessage to handle unread count and timestamp ordering
+          get().addMessage(errorMessage);
         }
       },
       
