@@ -1274,8 +1274,13 @@ class StrategyMarketplaceService(LoggerMixin):
             }
 
             return {
+                "success": True,
+                "active_strategies": transformed_strategies,
                 "summary": portfolio_summary,
-                "strategies": transformed_strategies
+                "strategies": transformed_strategies,
+                "total_strategies": len(strategy_portfolio),
+                "total_monthly_cost": total_monthly_cost,
+                "cached": False
             }
             
         except asyncio.TimeoutError:
