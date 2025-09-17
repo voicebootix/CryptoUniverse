@@ -902,8 +902,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             
             for symbol in momentum_symbols:
                 try:
-                # User owns strategy - execute using unified approach
-                momentum_result = await trading_strategies_service.execute_strategy(
+                    # User owns strategy - execute using unified approach
+                    momentum_result = await trading_strategies_service.execute_strategy(
                     function="spot_momentum_strategy",
                     symbol=f"{symbol}/USDT",
                     parameters={"timeframe": "4h"},
