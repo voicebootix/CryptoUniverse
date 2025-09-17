@@ -121,11 +121,11 @@ export const useChatStore = create<ChatState>()(
           ),
           isLoading: true
         }));
-        
+
         try {
           // Import API client dynamically to avoid circular dependencies
           const { apiClient } = await import('@/lib/api/client');
-          
+
           // Create session if needed
           let currentSessionId = sessionId;
           if (!currentSessionId) {
@@ -135,14 +135,17 @@ export const useChatStore = create<ChatState>()(
               set({ sessionId: currentSessionId });
             }
           }
-          
+
+          // Get latest messages including the just-added user message for AI context
+          const latestMessages = get().messages;
+
           // Send message through enhanced chat endpoint (now uses unified AI manager)
           const response = await apiClient.post('/chat/message', {
             message: content,
             session_id: currentSessionId,
             mode: currentMode,
             context: {
-              previous_messages: messages.slice(-5), // Last 5 messages for context
+              previous_messages: latestMessages.slice(-5), // Last 5 messages including user message
               current_tab: window.location.pathname,
               platform: 'web',
               conversation_continuity: true
@@ -171,12 +174,9 @@ export const useChatStore = create<ChatState>()(
               }
             };
 
-            set((state) => ({
-              messages: [...state.messages, assistantMessage].sort((a, b) =>
-                new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-              ),
-              isLoading: false
-            }));
+            // Use addMessage to handle unread count and timestamp ordering
+            get().addMessage(assistantMessage);
+            set({ isLoading: false });
             
             // Handle approval requests
             if (response.data.requires_approval && response.data.decision_id) {
@@ -205,12 +205,9 @@ export const useChatStore = create<ChatState>()(
             mode: currentMode
           };
 
-          set((state) => ({
-            messages: [...state.messages, errorMessage].sort((a, b) =>
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-            ),
-            isLoading: false
-          }));
+          // Use addMessage to handle unread count and timestamp ordering
+          get().addMessage(errorMessage);
+          set({ isLoading: false });
         }
       },
       
@@ -237,8 +234,10 @@ export const useChatStore = create<ChatState>()(
                 interface_type: currentMode
               }
             };
-            
-            set({ messages: [welcomeMessage] });
+
+            // Initialize with welcome message
+            set({ messages: [] });
+            get().addMessage(welcomeMessage);
           }
         } catch (error) {
           console.error('Failed to initialize session:', error);
@@ -252,8 +251,10 @@ export const useChatStore = create<ChatState>()(
             timestamp: new Date().toISOString(),
             mode: currentMode
           };
-          
-          set({ messages: [welcomeMessage] });
+
+          // Initialize with fallback welcome message
+          set({ messages: [] });
+          get().addMessage(welcomeMessage);
         }
       },
       
@@ -290,12 +291,9 @@ export const useChatStore = create<ChatState>()(
               }
             };
             
-            set((state) => ({
-              messages: [...state.messages, executionMessage].sort((a, b) =>
-                new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-              ),
-              pendingDecision: null
-            }));
+            // Use addMessage to handle unread count and timestamp ordering
+            get().addMessage(executionMessage);
+            set({ pendingDecision: null });
           }
         } catch (error) {
           console.error('Failed to approve decision:', error);
@@ -307,11 +305,8 @@ export const useChatStore = create<ChatState>()(
             timestamp: new Date().toISOString()
           };
           
-          set((state) => ({
-            messages: [...state.messages, errorMessage].sort((a, b) =>
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-            )
-          }));
+          // Use addMessage to handle unread count and timestamp ordering
+          get().addMessage(errorMessage);
         }
       },
       
