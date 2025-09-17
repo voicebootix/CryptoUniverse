@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageSquare,
@@ -48,6 +48,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
   } = useChatStore();
   
   const [inputValue, setInputValue] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Initialize session when widget opens
   useEffect(() => {
@@ -56,6 +57,11 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
       initializeSession();
     }
   }, [isWidgetOpen]);
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
@@ -133,7 +139,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
               {!isWidgetMinimized && (
                 <CardContent className="flex flex-col p-0">
                   {/* Messages */}
-                  <ScrollArea className="flex-1 px-4 max-h-[calc(50vh-8rem)]">
+                  <ScrollArea className="flex-1 px-4 h-64 overflow-y-auto">
                     <div className="space-y-3 py-2">
                       {messages.map((message) => (
                         <div
@@ -191,6 +197,9 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
                           </div>
                         </div>
                       )}
+
+                      {/* Scroll anchor */}
+                      <div ref={messagesEndRef} />
                     </div>
                   </ScrollArea>
 
