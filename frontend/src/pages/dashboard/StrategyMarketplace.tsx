@@ -308,7 +308,7 @@ const StrategyMarketplace: React.FC = () => {
             <div className="text-right">
               <div className="text-sm text-muted-foreground">Available Credits</div>
               <div className="text-lg font-bold text-green-500">
-                {formatNumber(userCredits.available_credits)}
+                {formatNumber(userCredits.available_credits ?? 0)}
               </div>
             </div>
           )}

@@ -77,10 +77,23 @@ export const useCredits = () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       const response = await apiClient.get('/credits/balance');
-      setBalance(response.data);
-      
+
+      // Normalize response data to handle null/undefined values
+      const balanceData = {
+        available_credits: Number(response.data?.available_credits) || 0,
+        total_purchased_credits: Number(response.data?.total_credits) || 0,
+        total_used_credits: Number(response.data?.used_credits) || 0,
+        profit_potential: Number(response.data?.profit_potential) || 0,
+        profit_earned_to_date: Number(response.data?.profit_earned_to_date) || 0,
+        remaining_potential: Number(response.data?.remaining_potential) || 0,
+        utilization_percentage: Number(response.data?.utilization_percentage) || 0,
+        needs_more_credits: Boolean(response.data?.needs_more_credits) || false
+      };
+
+      setBalance(balanceData);
+
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || 'Failed to fetch credit balance';
       setError(errorMsg);
@@ -88,6 +101,18 @@ export const useCredits = () => {
         title: "Error",
         description: "Failed to load credit balance",
         variant: "destructive",
+      });
+
+      // Set fallback balance on error
+      setBalance({
+        available_credits: 0,
+        total_purchased_credits: 0,
+        total_used_credits: 0,
+        profit_potential: 0,
+        profit_earned_to_date: 0,
+        remaining_potential: 0,
+        utilization_percentage: 0,
+        needs_more_credits: false
       });
     } finally {
       setLoading(false);
