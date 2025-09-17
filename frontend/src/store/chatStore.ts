@@ -150,10 +150,10 @@ export const useChatStore = create<ChatState>()(
           });
           
           if (response.data.success) {
-            // Ensure AI message timestamp is after user message
-            const aiTimestamp = response.data.timestamp
-              ? new Date(response.data.timestamp)
-              : new Date(userTimestamp.getTime() + 100); // Add 100ms delay
+            // Clamp AI timestamp to ensure it's at least userTimestamp + 100ms (handles server clock skew)
+            const serverTimestamp = new Date(response.data.timestamp || 0).getTime();
+            const minAiTimestamp = userTimestamp.getTime() + 100;
+            const aiTimestamp = new Date(Math.max(serverTimestamp, minAiTimestamp));
 
             const assistantMessage: ChatMessage = {
               id: response.data.message_id || `ai-${Date.now() + 1}`,
@@ -161,9 +161,9 @@ export const useChatStore = create<ChatState>()(
               type: 'assistant',
               timestamp: aiTimestamp.toISOString(),
               mode: currentMode,
+              confidence: response.data.confidence, // Move confidence to top level for UI access
               metadata: {
                 ...response.data.metadata,
-                confidence: response.data.confidence,
                 intent: response.data.intent,
                 requires_approval: response.data.requires_approval,
                 decision_id: response.data.decision_id,
