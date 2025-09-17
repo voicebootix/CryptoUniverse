@@ -912,11 +912,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 )
                     
                     if momentum_result.get("success"):
-                        # CRITICAL FIX: Extract signal from correct nesting level
-                        execution_result = momentum_result.get("execution_result", {})
-                        signals = execution_result.get("signal")
+                        # CRITICAL FIX: Extract signal from correct location (top level, not inside execution_result)
+                        signals = momentum_result.get("signal") or momentum_result.get("execution_result", {}).get("signal")
                         
                         if not signals:
+                            self.logger.warning("No signal data found in momentum result",
+                                              scan_id=scan_id,
+                                              symbol=symbol,
+                                              has_top_level_signal="signal" in momentum_result,
+                                              has_execution_result="execution_result" in momentum_result)
                             continue  # Skip if no signal data
                         
                         # Track ALL signals for transparency
