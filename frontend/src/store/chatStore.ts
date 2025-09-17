@@ -76,7 +76,9 @@ export const useChatStore = create<ChatState>()(
       setSessionId: (sessionId) => set({ sessionId }),
       
       addMessage: (message) => set((state) => ({
-        messages: [...state.messages, message],
+        messages: [...state.messages, message].sort((a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        ),
         unreadCount: state.isWidgetMinimized || !state.isWidgetOpen ? state.unreadCount + 1 : state.unreadCount
       })),
       
@@ -102,18 +104,21 @@ export const useChatStore = create<ChatState>()(
       // Chat Actions
       sendMessage: async (content: string) => {
         const { sessionId, messages, currentMode } = get();
-        
-        // Add user message immediately
+
+        // Add user message immediately with unique timestamp
+        const userTimestamp = new Date();
         const userMessage: ChatMessage = {
           id: `user-${Date.now()}`,
           content,
           type: 'user',
-          timestamp: new Date().toISOString(),
+          timestamp: userTimestamp.toISOString(),
           mode: currentMode
         };
-        
+
         set((state) => ({
-          messages: [...state.messages, userMessage],
+          messages: [...state.messages, userMessage].sort((a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          ),
           isLoading: true
         }));
         
@@ -145,11 +150,16 @@ export const useChatStore = create<ChatState>()(
           });
           
           if (response.data.success) {
+            // Ensure AI message timestamp is after user message
+            const aiTimestamp = response.data.timestamp
+              ? new Date(response.data.timestamp)
+              : new Date(userTimestamp.getTime() + 100); // Add 100ms delay
+
             const assistantMessage: ChatMessage = {
-              id: response.data.message_id || `ai-${Date.now()}`,
+              id: response.data.message_id || `ai-${Date.now() + 1}`,
               content: response.data.content,
               type: 'assistant',
-              timestamp: response.data.timestamp || new Date().toISOString(),
+              timestamp: aiTimestamp.toISOString(),
               mode: currentMode,
               metadata: {
                 ...response.data.metadata,
@@ -160,9 +170,11 @@ export const useChatStore = create<ChatState>()(
                 ai_analysis: response.data.ai_analysis
               }
             };
-            
+
             set((state) => ({
-              messages: [...state.messages, assistantMessage],
+              messages: [...state.messages, assistantMessage].sort((a, b) =>
+                new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+              ),
               isLoading: false
             }));
             
@@ -189,12 +201,14 @@ export const useChatStore = create<ChatState>()(
             id: `error-${Date.now()}`,
             content: "I'm having trouble connecting right now. Please try again in a moment.",
             type: 'assistant',
-            timestamp: new Date().toISOString(),
+            timestamp: new Date(userTimestamp.getTime() + 200).toISOString(), // Ensure error comes after user message
             mode: currentMode
           };
-          
+
           set((state) => ({
-            messages: [...state.messages, errorMessage],
+            messages: [...state.messages, errorMessage].sort((a, b) =>
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+            ),
             isLoading: false
           }));
         }
@@ -277,7 +291,9 @@ export const useChatStore = create<ChatState>()(
             };
             
             set((state) => ({
-              messages: [...state.messages, executionMessage],
+              messages: [...state.messages, executionMessage].sort((a, b) =>
+                new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+              ),
               pendingDecision: null
             }));
           }
@@ -292,7 +308,9 @@ export const useChatStore = create<ChatState>()(
           };
           
           set((state) => ({
-            messages: [...state.messages, errorMessage]
+            messages: [...state.messages, errorMessage].sort((a, b) =>
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+            )
           }));
         }
       },

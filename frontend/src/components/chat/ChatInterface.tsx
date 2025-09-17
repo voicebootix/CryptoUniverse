@@ -416,7 +416,9 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         <ScrollArea className="flex-1 px-6">
           <div className="space-y-4 py-4">
             <AnimatePresence>
-              {messages.map((message) => (
+              {messages
+                .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+                .map((message) => (
                 <motion.div
                   key={message.id}
                   initial={{ opacity: 0, y: 20 }}

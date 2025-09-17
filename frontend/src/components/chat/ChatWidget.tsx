@@ -144,7 +144,9 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ className = '' }) => {
                   {/* Messages */}
                   <ScrollArea className="flex-1 px-4 h-[calc(100%-60px)] overflow-y-auto" style={{ scrollBehavior: 'smooth' }}>
                     <div className="space-y-3 py-2 min-h-full">
-                      {messages.map((message) => (
+                      {messages
+                        .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+                        .map((message) => (
                         <div
                           key={message.id}
                           className={`flex gap-2 ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
