@@ -63,8 +63,8 @@ class LegacyMarketData(Base):
 
     # Composite indexes for performance
     __table_args__ = (
-        Index('idx_market_data_symbol_timestamp', 'symbol', 'timestamp'),
-        Index('idx_market_data_exchange_timestamp', 'exchange', 'timestamp'),
+        Index('idx_legacy_market_data_symbol_timestamp', 'symbol', 'timestamp'),
+        Index('idx_legacy_market_data_exchange_timestamp', 'exchange', 'timestamp'),
     )
 
 
