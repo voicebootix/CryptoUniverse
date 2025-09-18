@@ -22,7 +22,6 @@ from sqlalchemy import (
     String,
     Text,
     Index,
-    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -249,14 +248,12 @@ class CreditTransaction(Base):
     account = relationship("CreditAccount", back_populates="transactions")
     credit_pack = relationship("CreditPack", back_populates="transactions")
     
-    # Indexes and Constraints
+    # Indexes (unique constraint handled by migration-created partial index)
     __table_args__ = (
         Index("idx_transaction_type_created", "transaction_type", "created_at"),
         Index("idx_transaction_account_type", "account_id", "transaction_type"),
         Index("idx_transaction_trade", "trade_id"),
         Index("idx_transaction_expires", "expires_at"),
-        # Composite unique constraint for provider + reference_id (only when both are not null)
-        UniqueConstraint("provider", "reference_id", name="uq_credit_transaction_provider_reference"),
     )
     
     def __repr__(self) -> str:

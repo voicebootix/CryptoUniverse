@@ -81,12 +81,12 @@ def upgrade():
                 for ref_id, count in duplicates:
                     print(f"  Deduplicating reference_id: {ref_id} (found {count} times)")
 
-                    # For duplicates, set provider to distinguish them
+                    # For duplicates, set provider to distinguish them (only for rows with NULL provider)
                     bind.execute(text("""
                         WITH numbered_transactions AS (
                             SELECT id, ROW_NUMBER() OVER (ORDER BY created_at) as rn
                             FROM credit_transactions
-                            WHERE reference_id = :ref_id
+                            WHERE reference_id = :ref_id AND provider IS NULL
                         )
                         UPDATE credit_transactions
                         SET provider = CASE
@@ -94,7 +94,7 @@ def upgrade():
                             ELSE 'legacy_dup_' || nt.rn::text
                         END
                         FROM numbered_transactions nt
-                        WHERE credit_transactions.id = nt.id
+                        WHERE credit_transactions.id = nt.id AND credit_transactions.provider IS NULL
                     """), ref_id=ref_id)
 
                 print("✅ Duplicates handled successfully")
@@ -118,21 +118,21 @@ def upgrade():
                 for ref_id, count in duplicates:
                     print(f"  Handling reference_id: {ref_id}")
 
-                    # Get all transactions with this reference_id
+                    # Get all transactions with this reference_id (only those with NULL provider)
                     transactions = bind.execute(text("""
                         SELECT id FROM credit_transactions
-                        WHERE reference_id = ?
+                        WHERE reference_id = :ref_id AND provider IS NULL
                         ORDER BY created_at
-                    """), (ref_id,)).fetchall()
+                    """), {"ref_id": ref_id}).fetchall()
 
                     # Update each transaction with a unique provider
                     for i, (tx_id,) in enumerate(transactions):
                         provider = 'legacy' if i == 0 else f'legacy_dup_{i+1}'
                         bind.execute(text("""
                             UPDATE credit_transactions
-                            SET provider = ?
-                            WHERE id = ?
-                        """), (provider, tx_id))
+                            SET provider = :provider
+                            WHERE id = :tx_id AND provider IS NULL
+                        """), {"provider": provider, "tx_id": tx_id})
 
                 print("✅ SQLite duplicates handled successfully")
             else:
@@ -155,48 +155,51 @@ def upgrade():
     print("Creating composite unique constraint...")
 
     try:
-        # Check if constraint already exists
-        constraint_exists = False
+        # Check if index already exists
+        index_exists = False
 
         if engine_name == 'postgresql':
             result = bind.execute(text("""
-                SELECT constraint_name
-                FROM information_schema.table_constraints
-                WHERE table_name='credit_transactions'
-                AND constraint_name='uq_credit_transaction_provider_reference'
+                SELECT indexname FROM pg_indexes
+                WHERE tablename='credit_transactions'
+                AND indexname='uq_credit_transaction_provider_reference'
             """))
-            constraint_exists = result.fetchone() is not None
+            index_exists = result.fetchone() is not None
         else:  # SQLite
-            # SQLite doesn't have easy constraint introspection, try to create and catch error
-            pass
+            result = bind.execute(text("""
+                SELECT name FROM sqlite_master
+                WHERE type='index'
+                AND name='uq_credit_transaction_provider_reference'
+            """))
+            index_exists = result.fetchone() is not None
 
-        if not constraint_exists:
+        if not index_exists:
             # Create partial unique index that allows NULLs
             if engine_name == 'postgresql':
-                # PostgreSQL supports partial indexes
-                bind.execute(text("""
-                    CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_credit_transaction_provider_reference
-                    ON credit_transactions (provider, reference_id)
-                    WHERE provider IS NOT NULL AND reference_id IS NOT NULL
-                """))
+                # PostgreSQL supports partial indexes - use CONCURRENTLY outside transaction
+                with op.get_context().autocommit_block():
+                    op.create_index(
+                        'uq_credit_transaction_provider_reference',
+                        'credit_transactions',
+                        ['provider', 'reference_id'],
+                        unique=True,
+                        postgresql_concurrently=True,
+                        postgresql_where=sa.text("provider IS NOT NULL AND reference_id IS NOT NULL")
+                    )
                 print("✅ PostgreSQL partial unique index created")
 
             else:  # SQLite
                 # SQLite also supports partial indexes
-                try:
-                    bind.execute(text("""
-                        CREATE UNIQUE INDEX uq_credit_transaction_provider_reference
-                        ON credit_transactions (provider, reference_id)
-                        WHERE provider IS NOT NULL AND reference_id IS NOT NULL
-                    """))
-                    print("✅ SQLite partial unique index created")
-                except Exception as e:
-                    if "already exists" in str(e).lower():
-                        print("✅ Unique index already exists")
-                    else:
-                        raise
+                op.create_index(
+                    'uq_credit_transaction_provider_reference',
+                    'credit_transactions',
+                    ['provider', 'reference_id'],
+                    unique=True,
+                    sqlite_where=sa.text("provider IS NOT NULL AND reference_id IS NOT NULL")
+                )
+                print("✅ SQLite partial unique index created")
         else:
-            print("✅ Unique constraint already exists")
+            print("✅ Unique index already exists")
 
     except Exception as e:
         print(f"⚠️ Error creating unique constraint: {e}")
@@ -216,9 +219,19 @@ def downgrade():
     # Remove unique constraint/index
     try:
         if engine_name == 'postgresql':
-            bind.execute(text("DROP INDEX CONCURRENTLY IF EXISTS uq_credit_transaction_provider_reference"))
+            # Use CONCURRENTLY outside transaction for PostgreSQL
+            with op.get_context().autocommit_block():
+                op.drop_index(
+                    'uq_credit_transaction_provider_reference',
+                    table_name='credit_transactions',
+                    postgresql_concurrently=True
+                )
         else:  # SQLite
-            bind.execute(text("DROP INDEX IF EXISTS uq_credit_transaction_provider_reference"))
+            # Regular drop for SQLite
+            op.drop_index(
+                'uq_credit_transaction_provider_reference',
+                table_name='credit_transactions'
+            )
         print("✅ Unique constraint/index dropped")
     except Exception as e:
         print(f"⚠️ Error dropping constraint: {e}")

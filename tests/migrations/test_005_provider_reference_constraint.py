@@ -16,6 +16,8 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import text, inspect
 import tempfile
 import os
+import uuid
+import datetime
 
 
 @pytest.fixture
@@ -111,15 +113,23 @@ class TestProviderReferenceConstraintMigration:
         # (This would be data with reference_id but no provider)
 
         # Insert raw data simulating pre-migration state
+        tx_id = uuid.uuid4()
+        now = datetime.datetime.utcnow()
+
         await async_db_session.execute(text("""
             INSERT INTO credit_transactions (
                 id, account_id, transaction_type, amount, description,
                 balance_before, balance_after, reference_id, source, created_at, processed_at
             ) VALUES (
-                gen_random_uuid(), :account_id, 'purchase', 100, 'Pre-migration test',
-                1000, 1100, 'pre_migration_ref', 'test', NOW(), NOW()
+                :tx_id, :account_id, 'purchase', 100, 'Pre-migration test',
+                1000, 1100, 'pre_migration_ref', 'test', :created_at, :processed_at
             )
-        """), {"account_id": test_credit_account.id})
+        """), {
+            "tx_id": tx_id,
+            "account_id": test_credit_account.id,
+            "created_at": now,
+            "processed_at": now
+        })
 
         await async_db_session.commit()
 
@@ -186,28 +196,44 @@ class TestProviderReferenceConstraintMigration:
         """Test that the constraint is properly enforced after migration."""
 
         # Create a transaction with provider and reference_id
+        tx1_id = uuid.uuid4()
+        now = datetime.datetime.utcnow()
+
         await async_db_session.execute(text("""
             INSERT INTO credit_transactions (
                 id, account_id, transaction_type, amount, description,
                 balance_before, balance_after, provider, reference_id, source, created_at, processed_at
             ) VALUES (
-                gen_random_uuid(), :account_id, 'purchase', 100, 'Constraint test 1',
-                1000, 1100, 'test_provider', 'constraint_ref', 'test', NOW(), NOW()
+                :tx_id, :account_id, 'purchase', 100, 'Constraint test 1',
+                1000, 1100, 'test_provider', 'constraint_ref', 'test', :created_at, :processed_at
             )
-        """), {"account_id": test_credit_account.id})
+        """), {
+            "tx_id": tx1_id,
+            "account_id": test_credit_account.id,
+            "created_at": now,
+            "processed_at": now
+        })
         await async_db_session.commit()
 
         # Try to create duplicate - should fail
         with pytest.raises(Exception) as exc_info:
+            tx2_id = uuid.uuid4()
+            now2 = datetime.datetime.utcnow()
+
             await async_db_session.execute(text("""
                 INSERT INTO credit_transactions (
                     id, account_id, transaction_type, amount, description,
                     balance_before, balance_after, provider, reference_id, source, created_at, processed_at
                 ) VALUES (
-                    gen_random_uuid(), :account_id, 'purchase', 200, 'Constraint test 2',
-                    1100, 1300, 'test_provider', 'constraint_ref', 'test', NOW(), NOW()
+                    :tx_id, :account_id, 'purchase', 200, 'Constraint test 2',
+                    1100, 1300, 'test_provider', 'constraint_ref', 'test', :created_at, :processed_at
                 )
-            """), {"account_id": test_credit_account.id})
+            """), {
+                "tx_id": tx2_id,
+                "account_id": test_credit_account.id,
+                "created_at": now2,
+                "processed_at": now2
+            })
             await async_db_session.commit()
 
         # Should be a constraint violation
