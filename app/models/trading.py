@@ -144,10 +144,10 @@ class TradingStrategy(Base):
     confidence_threshold = Column(Numeric(5, 2), default=70.0, nullable=False)
     consensus_required = Column(Boolean, default=True, nullable=False)
 
-    # Strategy IDE fields - Using column_property placeholders for missing database columns
-    strategy_code = column_property(literal(None).cast(Text))  # User's custom strategy code
-    category = column_property(literal(None).cast(String(50)))  # Strategy category
-    meta_data = column_property(literal('{}').cast(JSON))  # Additional metadata (mapped as 'metadata' in DB)
+    # Strategy IDE fields - READ-ONLY placeholders; remove after migration
+    strategy_code = column_property(literal(None).cast(Text))  # READ-ONLY placeholder; remove after migration
+    category = column_property(literal(None).cast(String(50)))  # READ-ONLY placeholder; remove after migration
+    meta_data = column_property(literal(None).cast(JSON))  # READ-ONLY placeholder; remove after migration
 
     # API compatibility property
     @property
