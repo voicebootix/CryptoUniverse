@@ -247,10 +247,12 @@ class RealPerformanceTracker(LoggerMixin):
         if len(returns) == 0:
             return 0
 
-        cumulative = np.cumprod(1 + returns / 100)
+        # Returns are already fractions (pnl/notional), don't divide by 100 again
+        cumulative = np.cumprod(1 + returns)
         running_max = np.maximum.accumulate(cumulative)
         drawdown = (cumulative - running_max) / running_max
 
+        # Return as percentage (multiply by 100)
         return float(np.min(drawdown) * 100) if len(drawdown) > 0 else 0
 
     def _calculate_profit_factor(self, wins: np.ndarray, losses: np.ndarray) -> float:

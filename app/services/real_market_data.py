@@ -314,9 +314,18 @@ class RealMarketDataService(LoggerMixin):
             # Fallback to price-based synthetic order book
             price_data = await self.get_real_price(symbol, exchange)
             if price_data.get('price', 0) > 0:
-                return self._generate_synthetic_orderbook(price_data['price'])
+                return self._generate_synthetic_orderbook(price_data['price'], symbol, exchange, limit)
 
-            return {'bids': [], 'asks': [], 'error': str(e)}
+            # Return consistent structure even on complete failure
+            return {
+                'symbol': symbol,
+                'bids': [],
+                'asks': [],
+                'timestamp': datetime.utcnow().timestamp() * 1000,
+                'exchange': exchange,
+                'source': 'fallback_empty',
+                'error': str(e)
+            }
 
     async def get_aggregated_price(
         self,
@@ -439,31 +448,47 @@ class RealMarketDataService(LoggerMixin):
 
         return symbol
 
-    def _generate_synthetic_orderbook(self, mid_price: float) -> Dict[str, Any]:
+    def _generate_synthetic_orderbook(
+        self,
+        mid_price: float,
+        symbol: str,
+        exchange: str,
+        limit: int = 20
+    ) -> Dict[str, Any]:
         """
         Generate realistic order book when real data unavailable.
 
-        Creates a synthetic order book with realistic spread and depth.
+        Creates a synthetic order book with realistic spread and depth,
+        matching the exact structure of the primary path.
+
+        Args:
+            mid_price: Middle price for synthetic book
+            symbol: Trading pair symbol
+            exchange: Exchange name
+            limit: Number of levels to generate
         """
         bids = []
         asks = []
 
-        # Generate bids (buy orders)
-        for i in range(20):
+        # Generate bids (buy orders) up to requested limit
+        for i in range(limit):
             price_level = mid_price * (1 - 0.0001 * (i + 1))  # 0.01% steps
-            volume = np.random.exponential(1000) * (20 - i) / 20  # Decreasing volume
-            bids.append([price_level, volume])
+            volume = np.random.exponential(1000) * (limit - i) / limit  # Decreasing volume
+            bids.append([float(price_level), float(volume)])
 
-        # Generate asks (sell orders)
-        for i in range(20):
+        # Generate asks (sell orders) up to requested limit
+        for i in range(limit):
             price_level = mid_price * (1 + 0.0001 * (i + 1))  # 0.01% steps
-            volume = np.random.exponential(1000) * (20 - i) / 20  # Decreasing volume
-            asks.append([price_level, volume])
+            volume = np.random.exponential(1000) * (limit - i) / limit  # Decreasing volume
+            asks.append([float(price_level), float(volume)])
 
+        # Return exact same structure as primary path
         return {
+            'symbol': symbol,
             'bids': bids,
             'asks': asks,
             'timestamp': datetime.utcnow().timestamp() * 1000,
+            'exchange': exchange,
             'source': 'synthetic_orderbook'
         }
 
