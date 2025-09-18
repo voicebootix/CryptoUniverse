@@ -391,14 +391,23 @@ async def toggle_simulation_mode(
     )
     
     try:
-        # Update user's simulation mode
-        # Note: This would be stored in user settings/preferences
+        # Update user's simulation mode in database
+        current_user.simulation_mode = request.enable
+        current_user.simulation_balance = int(request.virtual_balance)
+
+        if request.reset_portfolio:
+            current_user.last_simulation_reset = datetime.utcnow()
+
+        # Commit the changes to database
+        await db.commit()
+        await db.refresh(current_user)
+
         simulation_config = {
-            "enabled": request.enable,
-            "virtual_balance": float(request.virtual_balance),
+            "enabled": current_user.simulation_mode,
+            "virtual_balance": float(current_user.simulation_balance),
             "reset_portfolio": request.reset_portfolio
         }
-        
+
         if request.enable:
             # Set up simulation environment
             if request.reset_portfolio:
