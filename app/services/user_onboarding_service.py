@@ -132,6 +132,7 @@ class UserOnboardingService(LoggerMixin):
                         "success": True,
                         "message": "User already onboarded",
                         "onboarding_id": onboarding_id,
+                        "user_id": user_id,
                         "skipped": True
                     }
                 

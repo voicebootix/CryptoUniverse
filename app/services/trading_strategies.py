@@ -1242,8 +1242,22 @@ class TradingStrategiesService(LoggerMixin):
                 current_price = 50000  # Fallback
             
             # Extract options-specific parameters with real data
-            expiry_date = "2024-12-27"  # Would be from parameters in production
-            strike_price = current_price * 1.05  # 5% OTM based on real price
+            from datetime import datetime, timedelta
+            
+            # Handle both dict and object parameters
+            if isinstance(parameters, dict):
+                expiry_days = parameters.get("expiry_days", 30)
+                strike_multiplier = parameters.get("strike_multiplier", 1.05)
+            else:
+                # It's a StrategyParameters object or similar
+                expiry_days = getattr(parameters, "expiry_days", 30)
+                strike_multiplier = getattr(parameters, "strike_multiplier", 1.05)
+                
+            # Use 30 days from now as default expiry
+            expiry_date = (datetime.utcnow() + timedelta(days=expiry_days)).strftime("%Y-%m-%d")
+            raw_strike = current_price * strike_multiplier
+            # Round to nearest 100 for crypto, nearest 5 for others
+            strike_price = round(raw_strike / 100) * 100 if current_price > 1000 else round(raw_strike / 5) * 5
             
             return await self.derivatives_engine.options_trade(
                 strategy_enum, symbol, parameters, expiry_date, strike_price, user_id
@@ -1261,9 +1275,22 @@ class TradingStrategiesService(LoggerMixin):
                 return {"success": False, "error": f"Price lookup failed: {str(e)}"}
             
             # Define legs for complex strategy with REAL market-based strikes
+            from datetime import datetime, timedelta
+            
+            # Handle both dict and object parameters
+            if isinstance(parameters, dict):
+                expiry_days = parameters.get("expiry_days", 30)
+            else:
+                expiry_days = getattr(parameters, "expiry_days", 30)
+                
+            expiry_date = (datetime.utcnow() + timedelta(days=expiry_days)).strftime("%Y-%m-%d")
+            
+            # Round strikes to realistic values
+            strike_base = round(current_price / 100) * 100 if current_price > 1000 else round(current_price / 5) * 5
+            
             legs = [
-                {"action": "BUY", "strike": current_price, "expiry": "2024-12-27", "option_type": "CALL"},
-                {"action": "SELL", "strike": current_price * 1.1, "expiry": "2024-12-27", "option_type": "CALL"}
+                {"action": "BUY", "strike": strike_base, "expiry": expiry_date, "option_type": "CALL"},
+                {"action": "SELL", "strike": strike_base * 1.1, "expiry": expiry_date, "option_type": "CALL"}
             ]
             
             # Set default strategy type if not provided
@@ -1389,33 +1416,113 @@ class TradingStrategiesService(LoggerMixin):
         """Execute position/risk management functions."""
         
         if function == "portfolio_optimization":
-            # Call the actual position management method with correct parameters
-            pm_result = await self.position_management(
-                action="analyze",
-                symbols=symbol,
-                user_id=user_id
-            )
-            rebalancing_recommendations = []
+            # Import the portfolio risk service
+            from app.services.portfolio_risk_core import portfolio_risk_service
             
-            if pm_result.get("success") and "position_analysis" in pm_result:
-                # Extract rebalancing recommendations from position analysis
-                for pos_data in pm_result["position_analysis"].values():
-                    for rec in pos_data.get("recommendations", []):
-                        if rec.get("type") in ["REBALANCING", "SECTOR_REBALANCING", "DIVERSIFICATION"]:
-                            rebalancing_recommendations.append({
-                                "symbol": symbol,
-                                "action": rec.get("action", ""),
-                                "rationale": rec.get("rationale", ""),
-                                "improvement_potential": 0.15,  # Default 15% improvement
-                                "urgency": rec.get("urgency", "MEDIUM")
-                            })
+            # Define all 6 optimization strategies
+            optimization_strategies = [
+                "risk_parity",
+                "equal_weight", 
+                "max_sharpe",
+                "min_variance",
+                "kelly_criterion",
+                "adaptive"
+            ]
             
-            # Always return enhanced structure even if no recommendations found
+            all_recommendations = []
+            strategy_results = {}
+            
+            # Get current portfolio for context
+            portfolio_result = await portfolio_risk_service.get_portfolio(user_id)
+            current_positions = []
+            if portfolio_result.get("success") and portfolio_result.get("portfolio"):
+                current_positions = portfolio_result["portfolio"].get("positions", [])
+            
+            # Run each optimization strategy
+            for strategy in optimization_strategies:
+                try:
+                    # Call the real optimization engine
+                    opt_result = await portfolio_risk_service.optimize_allocation(
+                        user_id=user_id,
+                        strategy=strategy,
+                        constraints={
+                            "min_position_size": 0.02,  # 2% minimum
+                            "max_position_size": 0.25,  # 25% maximum
+                            "max_positions": 15
+                        }
+                    )
+                    
+                    if opt_result.get("success") and opt_result.get("optimization_result"):
+                        opt_data = opt_result["optimization_result"]
+                        
+                        # Calculate profit potential for this strategy
+                        expected_return = opt_data.get("expected_return", 0)
+                        risk_level = opt_data.get("risk_metrics", {}).get("portfolio_volatility", 0)
+                        sharpe = opt_data.get("expected_sharpe", 0)
+                        
+                        # Store strategy result
+                        strategy_results[strategy] = {
+                            "expected_return": expected_return,
+                            "risk_level": risk_level,
+                            "sharpe_ratio": sharpe,
+                            "weights": opt_data.get("weights", {}),
+                            "rebalancing_needed": opt_data.get("rebalancing_needed", False)
+                        }
+                        
+                        # Create recommendations if rebalancing needed
+                        if opt_data.get("rebalancing_needed"):
+                            suggested_trades = opt_data.get("suggested_trades", [])
+                            for trade in suggested_trades:
+                                all_recommendations.append({
+                                    "strategy": strategy.upper(),
+                                    "symbol": trade.get("symbol", ""),
+                                    "action": trade.get("action", ""),
+                                    "amount": trade.get("amount", 0),
+                                    "rationale": f"{strategy.replace('_', ' ').title()} optimization suggests this trade",
+                                    "improvement_potential": expected_return,
+                                    "risk_reduction": trade.get("risk_reduction", 0),
+                                    "urgency": "HIGH" if abs(trade.get("amount", 0)) > 0.1 else "MEDIUM"
+                                })
+                        
+                except Exception as e:
+                    self.logger.warning(f"Failed to run {strategy} optimization", error=str(e))
+                    strategy_results[strategy] = {
+                        "error": str(e),
+                        "expected_return": 0,
+                        "risk_level": 0
+                    }
+            
+            # If no positions exist, suggest initial allocation
+            if not current_positions and not all_recommendations:
+                # Suggest diversified initial portfolio
+                suggested_assets = ["BTC", "ETH", "BNB", "SOL", "ADA", "MATIC", "DOT", "AVAX"]
+                for asset in suggested_assets[:6]:  # Top 6 assets
+                    all_recommendations.append({
+                        "strategy": "INITIAL_ALLOCATION",
+                        "symbol": f"{asset}/USDT",
+                        "action": "BUY",
+                        "amount": 0.167,  # Equal weight ~16.7% each
+                        "rationale": "Initial portfolio allocation - diversified across major assets",
+                        "improvement_potential": 0.15,  # 15% expected annual return
+                        "risk_reduction": 0.3,  # 30% risk reduction vs single asset
+                        "urgency": "HIGH"
+                    })
+            
+            # Return comprehensive results
             return {
                 "success": True,
                 "function": function,
                 "symbol": symbol,
-                "rebalancing_recommendations": rebalancing_recommendations,
+                "rebalancing_recommendations": all_recommendations,
+                "strategy_analysis": strategy_results,
+                "optimization_summary": {
+                    "strategies_analyzed": len(optimization_strategies),
+                    "recommendations_generated": len(all_recommendations),
+                    "best_strategy": max(strategy_results.items(), 
+                                       key=lambda x: x[1].get("expected_return", 0))[0] if strategy_results else None,
+                    "current_positions": len(current_positions),
+                    "portfolio_value": sum(p.get("market_value", 0) for p in current_positions)
+                },
                 "timestamp": datetime.utcnow().isoformat()
             }
         
@@ -3694,6 +3801,7 @@ class TradingStrategiesService(LoggerMixin):
                     "strategy": "POSITION_SIZE_REDUCTION",
                     "action": f"Reduce overall position sizes - current 1-day VaR: {risk_result['portfolio_risk_metrics']['portfolio_var_1d_pct']:.1f}%",
                     "priority": "HIGH",
+                    "urgency": 0.8,  # High urgency for excessive VaR
                     "expected_risk_reduction": 30
                 })
             
@@ -3704,6 +3812,7 @@ class TradingStrategiesService(LoggerMixin):
                     "strategy": "EXCHANGE_DIVERSIFICATION",
                     "action": f"Diversify across more exchanges - {max_exchange_exposure*100:.1f}% on single exchange",
                     "priority": "MEDIUM",
+                    "urgency": 0.6,  # Medium urgency
                     "expected_risk_reduction": 20
                 })
             
@@ -3714,6 +3823,7 @@ class TradingStrategiesService(LoggerMixin):
                     "strategy": "LEVERAGE_REDUCTION",
                     "action": f"Reduce high-leverage positions - {risk_result['risk_concentration']['high_leverage_exposure_pct']:.1f}% in high-leverage",
                     "priority": "HIGH",
+                    "urgency": 0.9,  # Very high urgency for leverage risk
                     "expected_risk_reduction": 40
                 })
             
@@ -3724,6 +3834,7 @@ class TradingStrategiesService(LoggerMixin):
                     "strategy": "DIVERSIFICATION",
                     "action": "Add uncorrelated assets to portfolio",
                     "priority": "MEDIUM",
+                    "urgency": 0.5,  # Medium urgency
                     "expected_risk_reduction": 25
                 })
             
@@ -3734,6 +3845,7 @@ class TradingStrategiesService(LoggerMixin):
                     "strategy": "PORTFOLIO_HEDGING",
                     "action": "Implement portfolio-level hedging (index shorts, volatility longs)",
                     "priority": "MEDIUM",
+                    "urgency": 0.7,  # High urgency for directional risk
                     "expected_risk_reduction": 35
                 })
             

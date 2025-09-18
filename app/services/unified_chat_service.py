@@ -844,24 +844,76 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
         
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
             opportunities = context_data.get("opportunities", {}).get("opportunities", [])
+            strategy_performance = context_data.get("opportunities", {}).get("strategy_performance", {})
+            user_profile = context_data.get("opportunities", {}).get("user_profile", {})
             
-            if opportunities:
-                opp_text = "\n".join([
-                    f"- {o['symbol']}: {o['strategy']} ({o['confidence']:.1f}% confidence, "
-                    f"{o['potential_return']:+.1f}% potential)"
-                    for o in opportunities[:5]
-                ])
-            else:
-                opp_text = "No opportunities meeting criteria at this moment."
+            # Group opportunities by strategy
+            opportunities_by_strategy = {}
+            for opp in opportunities:
+                strategy = opp.get('strategy_name', 'Unknown')
+                if strategy not in opportunities_by_strategy:
+                    opportunities_by_strategy[strategy] = []
+                opportunities_by_strategy[strategy].append(opp)
             
-            return f"""User asked: "{message}"
+            # Build comprehensive prompt
+            prompt_parts = [f'User asked: "{message}"']
+            prompt_parts.append(f"\nTotal opportunities found: {len(opportunities)}")
+            prompt_parts.append(f"User risk profile: {user_profile.get('risk_profile', 'balanced')}")
+            prompt_parts.append(f"Active strategies: {user_profile.get('active_strategy_count', 0)}")
             
-Current Opportunities (REAL DATA):
-{opp_text}
+            # Strategy performance summary
+            if strategy_performance:
+                prompt_parts.append("\n📊 STRATEGY PERFORMANCE:")
+                for strat, perf in strategy_performance.items():
+                    count = perf.get('count', 0) if isinstance(perf, dict) else perf
+                    prompt_parts.append(f"- {strat}: {count} opportunities")
+            
+            # Detailed opportunities by strategy
+            prompt_parts.append("\n🎯 OPPORTUNITIES BY STRATEGY:")
+            for strategy, opps in opportunities_by_strategy.items():
+                prompt_parts.append(f"\n{strategy} ({len(opps)} opportunities):")
+                for i, opp in enumerate(opps[:3], 1):  # Show top 3 per strategy
+                    symbol = opp.get('symbol', 'N/A')
+                    confidence = opp.get('confidence_score', 0)
+                    profit_usd = opp.get('profit_potential_usd', 0)
+                    metadata = opp.get('metadata', {})
+                    
+                    # Format based on opportunity type
+                    if 'portfolio' in strategy.lower():
+                        if metadata.get('strategy'):
+                            prompt_parts.append(f"  {i}. {metadata['strategy'].replace('_', ' ').title()}")
+                            prompt_parts.append(f"     Expected Return: {metadata.get('expected_annual_return', 0)*100:.1f}%")
+                            prompt_parts.append(f"     Sharpe Ratio: {metadata.get('sharpe_ratio', 0):.2f}")
+                            prompt_parts.append(f"     Risk Level: {metadata.get('risk_level', 0)*100:.1f}%")
+                        else:
+                            prompt_parts.append(f"  {i}. {symbol} - {metadata.get('rebalance_action', 'REBALANCE')}")
+                            prompt_parts.append(f"     Amount: {metadata.get('amount', 0)*100:.1f}% of portfolio")
+                    elif 'risk' in strategy.lower():
+                        prompt_parts.append(f"  {i}. {metadata.get('risk_type', 'Risk Alert')}")
+                        prompt_parts.append(f"     Action: {metadata.get('strategy', 'Mitigation needed')}")
+                        prompt_parts.append(f"     Urgency: {metadata.get('urgency', confidence/100)}")
+                    else:
+                        prompt_parts.append(f"  {i}. {symbol}")
+                        prompt_parts.append(f"     Confidence: {confidence:.1f}%")
+                        prompt_parts.append(f"     Profit Potential: ${profit_usd:,.0f}")
+                        action = metadata.get('signal_action', opp.get('action', 'ANALYZE'))
+                        if action:
+                            prompt_parts.append(f"     Action: {action}")
+            
+            prompt_parts.append(f"""
+            
+INSTRUCTIONS FOR AI MONEY MANAGER:
+1. Present opportunities grouped by strategy type
+2. For portfolio optimization, explain each of the 6 strategies and their expected returns
+3. Highlight the best opportunities based on the user's risk profile ({user_profile.get('risk_profile', 'balanced')})
+4. Provide specific, actionable recommendations
+5. Use actual symbols and values from the data, not generic examples
+6. If portfolio optimization shows multiple strategies, compare them clearly
+7. End with a clear recommendation based on user's profile
 
-Market Conditions: {context_data.get('opportunities', {}).get('market_conditions', 'Normal')}
-
-Provide insights on these real opportunities."""
+Remember: You are the AI Money Manager providing personalized advice based on real analysis.""")
+            
+            return "\n".join(prompt_parts)
         
         # Default prompt for other intents
         return f"""User asked: "{message}"

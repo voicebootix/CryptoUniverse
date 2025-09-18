@@ -843,7 +843,12 @@ async def _process_natural_language(
                 return await _handle_status_command(connection, db)
             elif "autonomous" in detected_intent.lower() or "ai" in detected_intent.lower():
                 return "🤖 To control AI trading, use: `/autonomous start` or `/autonomous stop`"
+            elif any(word in message_text.lower() for word in ["opportunities", "opportunity", "portfolio optimization", "trading opportunities", "recommendations"]):
+                return await _handle_opportunities_command(connection, db)
             else:
+                # Check keywords directly if intent detection failed
+                if any(word in message_text.lower() for word in ["opportunities", "opportunity", "optimize", "rebalance"]):
+                    return await _handle_opportunities_command(connection, db)
                 return f"💬 I understand you're asking about: {detected_intent}\n\nTry using specific commands like `/help` for available options."
         
         return "❓ I didn't understand that. Try `/help` for available commands."
@@ -851,6 +856,67 @@ async def _process_natural_language(
     except Exception as e:
         logger.error("Natural language processing failed", error=str(e))
         return "❓ I didn't understand that. Try `/help` for available commands."
+
+
+async def _handle_opportunities_command(connection: UserTelegramConnection, db: AsyncSession) -> str:
+    """Handle opportunities request via natural language."""
+    try:
+        # Import the opportunity discovery service
+        from app.services.user_opportunity_discovery import user_opportunity_discovery
+        
+        # Discover opportunities
+        opportunities_result = await user_opportunity_discovery.discover_opportunities_for_user(
+            user_id=str(connection.user_id),
+            force_refresh=True,
+            include_strategy_recommendations=True
+        )
+        
+        if not opportunities_result.get("success"):
+            return "❌ Failed to fetch opportunities. Please try again."
+        
+        opportunities = opportunities_result.get("opportunities", [])
+        total_count = opportunities_result.get("total_opportunities", 0)
+        
+        if total_count == 0:
+            return "📊 No trading opportunities found at the moment. Markets are being analyzed continuously."
+        
+        # Group opportunities by strategy
+        by_strategy = {}
+        for opp in opportunities[:10]:  # Limit to top 10 for Telegram
+            strategy = opp.get("strategy_name", "Unknown")
+            if strategy not in by_strategy:
+                by_strategy[strategy] = []
+            by_strategy[strategy].append(opp)
+        
+        # Build response
+        response_parts = [f"🎯 **Found {total_count} Trading Opportunities**\n"]
+        
+        for strategy, opps in by_strategy.items():
+            response_parts.append(f"\n**{strategy}** ({len(opps)} opportunities):")
+            
+            if "portfolio" in strategy.lower():
+                # Special handling for portfolio optimization
+                for opp in opps[:3]:
+                    metadata = opp.get("metadata", {})
+                    if metadata.get("strategy_used"):
+                        response_parts.append(f"• {metadata['strategy_used']}: ${opp.get('profit_potential_usd', 0):,.0f} potential")
+                    else:
+                        response_parts.append(f"• {opp.get('symbol', 'N/A')}: {metadata.get('rebalance_action', 'Rebalance')}")
+            else:
+                # Regular opportunities
+                for opp in opps[:3]:
+                    symbol = opp.get("symbol", "N/A")
+                    confidence = opp.get("confidence_score", 0)
+                    profit = opp.get("profit_potential_usd", 0)
+                    response_parts.append(f"• {symbol}: {confidence:.0f}% confidence, ${profit:,.0f} potential")
+        
+        response_parts.append(f"\n💡 Use `/opportunities` for full details or `/trade <symbol>` to execute.")
+        
+        return "\n".join(response_parts)
+        
+    except Exception as e:
+        logger.error("Failed to handle opportunities command", error=str(e))
+        return "❌ Error fetching opportunities. Please try `/opportunities` command instead."
 
 
 async def _handle_status_command(connection: UserTelegramConnection, db: AsyncSession) -> str:
