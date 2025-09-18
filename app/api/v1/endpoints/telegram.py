@@ -747,7 +747,32 @@ async def _process_authenticated_message(
         if message_text.startswith("/"):
             response = await _process_telegram_command(connection, message_text, db)
         else:
-            response = await _process_natural_language(connection, message_text, db)
+            # Check if we can use the unified chat service
+            try:
+                # Import and use UnifiedChatService directly
+                from app.services.unified_chat_service import UnifiedChatService
+                unified_chat = UnifiedChatService()
+                
+                # Process through unified chat
+                chat_result = await unified_chat.process_message(
+                    message=message_text,
+                    user_id=str(connection.user_id),  # Use actual user_id, not telegram_user_id
+                    session_id=f"telegram_{chat_id}",
+                    interface="telegram",
+                    conversation_mode="live_trading",
+                    stream=False
+                )
+                
+                if chat_result.get("success"):
+                    response = chat_result.get("response", chat_result.get("content", ""))
+                else:
+                    # Fallback to local processing
+                    response = await _process_natural_language(connection, message_text, db)
+                    
+            except Exception as e:
+                logger.error(f"Failed to use UnifiedChat: {e}")
+                # Fallback to local processing
+                response = await _process_natural_language(connection, message_text, db)
         
         # Send response
         if response:
