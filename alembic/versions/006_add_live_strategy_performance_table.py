@@ -32,14 +32,16 @@ def upgrade() -> None:
         sa.Column('winning_trades', sa.Integer(), nullable=False, server_default=sa.text('0')),
         sa.Column('losing_trades', sa.Integer(), nullable=False, server_default=sa.text('0')),
         sa.Column('win_rate', sa.Numeric(5, 2), nullable=False, server_default=sa.text('0')),
-        sa.Column('max_drawdown', sa.Numeric(6, 4), nullable=False, server_default=sa.text('0')),
-        sa.Column('current_drawdown', sa.Numeric(6, 4), nullable=False, server_default=sa.text('0')),
+        sa.Column('max_drawdown', sa.Numeric(7, 4), nullable=False, server_default=sa.text('0')),
+        sa.Column('current_drawdown', sa.Numeric(7, 4), nullable=False, server_default=sa.text('0')),
         sa.Column('allocated_capital', sa.Numeric(20, 8), nullable=False),
         sa.Column('current_value', sa.Numeric(20, 8), nullable=False),
         sa.Column('is_active', sa.Boolean(), nullable=False, server_default=sa.text('true')),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
-        sa.PrimaryKeyConstraint('id')
+        sa.PrimaryKeyConstraint('id'),
+        sa.CheckConstraint('max_drawdown >= 0.0 AND max_drawdown <= 100.0', name='check_max_drawdown_range'),
+        sa.CheckConstraint('current_drawdown >= 0.0 AND current_drawdown <= 100.0', name='check_current_drawdown_range')
     )
 
     # Create indexes for performance

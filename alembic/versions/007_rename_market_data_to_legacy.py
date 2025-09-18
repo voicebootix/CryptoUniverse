@@ -7,6 +7,7 @@ Create Date: 2025-01-18 18:05:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = '007_rename_market_data_to_legacy'
@@ -24,13 +25,15 @@ def upgrade() -> None:
         # Rename table from market_data to legacy_market_data
         op.rename_table('market_data', 'legacy_market_data')
 
-        # Rename indexes to match new table name
-        try:
+        # Rename indexes to match new table name - check existence first
+        conn = op.get_bind()
+        inspector = sa.inspect(conn)
+        existing_indexes = {idx['name'] for idx in inspector.get_indexes('legacy_market_data')}
+
+        if 'idx_market_data_symbol_timestamp' in existing_indexes:
             op.drop_index('idx_market_data_symbol_timestamp', table_name='legacy_market_data')
+        if 'idx_market_data_exchange_timestamp' in existing_indexes:
             op.drop_index('idx_market_data_exchange_timestamp', table_name='legacy_market_data')
-        except:
-            # Indexes might not exist, continue
-            pass
 
         # Create new indexes with proper names
         op.create_index('idx_legacy_market_data_symbol_timestamp', 'legacy_market_data', ['symbol', 'timestamp'])
@@ -38,7 +41,7 @@ def upgrade() -> None:
     else:
         # If market_data doesn't exist, create legacy_market_data directly
         op.create_table('legacy_market_data',
-            sa.Column('id', sa.UUID(as_uuid=True), nullable=False),
+            sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False),
             sa.Column('symbol', sa.String(20), nullable=False),
             sa.Column('exchange', sa.String(50), nullable=False),
             sa.Column('timestamp', sa.DateTime(timezone=True), nullable=False),
@@ -67,11 +70,15 @@ def downgrade() -> None:
     op.drop_index('idx_legacy_market_data_symbol_timestamp', table_name='legacy_market_data')
     op.drop_index('idx_legacy_market_data_exchange_timestamp', table_name='legacy_market_data')
 
-    try:
-        op.drop_index('idx_legacy_market_data_symbol', table_name='legacy_market_data')
-        op.drop_index('idx_legacy_market_data_timestamp', table_name='legacy_market_data')
-    except:
-        pass
+    # Check for additional indexes before dropping
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    if 'legacy_market_data' in inspector.get_table_names():
+        existing_indexes = {idx['name'] for idx in inspector.get_indexes('legacy_market_data')}
+        if 'idx_legacy_market_data_symbol' in existing_indexes:
+            op.drop_index('idx_legacy_market_data_symbol', table_name='legacy_market_data')
+        if 'idx_legacy_market_data_timestamp' in existing_indexes:
+            op.drop_index('idx_legacy_market_data_timestamp', table_name='legacy_market_data')
 
     # Rename table back
     op.rename_table('legacy_market_data', 'market_data')
