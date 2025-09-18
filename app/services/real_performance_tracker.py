@@ -166,12 +166,14 @@ class RealPerformanceTracker(LoggerMixin):
         if len(returns) > 1:
             sharpe_ratio = self._calculate_sharpe_ratio(returns)
             max_drawdown = self._calculate_max_drawdown(returns)
-            profit_factor = self._calculate_profit_factor(winning_trades['pnl'].values,
-                                                         losing_trades['pnl'].values)
         else:
             sharpe_ratio = 0
             max_drawdown = 0
-            profit_factor = 0
+
+        # Profit factor depends on wins/losses, not return series length
+        profit_factor = self._calculate_profit_factor(
+            winning_trades['pnl'].values, losing_trades['pnl'].values
+        )
 
         # Trade analysis
         avg_win = winning_trades['pnl'].mean() if len(winning_trades) > 0 else 0
