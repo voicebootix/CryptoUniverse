@@ -7,7 +7,6 @@ Create Date: 2025-01-18 12:10:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.sql import text
 
 # revision identifiers, used by Alembic.
 revision = 'add_simulation_mode_to_users'
@@ -21,12 +20,12 @@ def upgrade() -> None:
 
     # Add simulation_mode column (default to True for safety)
     op.add_column('users',
-        sa.Column('simulation_mode', sa.Boolean(), nullable=False, server_default='true')
+        sa.Column('simulation_mode', sa.Boolean(), nullable=False, server_default=sa.text('true'))
     )
 
     # Add simulation_balance column with proper precision
     op.add_column('users',
-        sa.Column('simulation_balance', sa.Numeric(precision=12, scale=2), nullable=False, server_default=sa.text('10000.00'))
+        sa.Column('simulation_balance', sa.Numeric(20, 2), nullable=False, server_default=sa.text('10000.00'))
     )
 
     # Add last_simulation_reset column
@@ -41,7 +40,7 @@ def upgrade() -> None:
     connection = op.get_bind()
 
     # Update users with active exchange accounts to live mode
-    connection.execute(text("""
+    connection.execute(sa.text("""
         UPDATE users
         SET simulation_mode = false
         WHERE id IN (
@@ -51,10 +50,6 @@ def upgrade() -> None:
             AND trading_enabled = true
         )
     """))
-
-    print("✅ Added simulation_mode to users table")
-    print("   - New users default to simulation mode for safety")
-    print("   - Users with active exchanges set to live mode")
 
 
 def downgrade() -> None:

@@ -348,16 +348,14 @@ class TestAdvancedTradingScenarios:
         ]
 
         for invalid_order in invalid_orders:
-            with patch.object(trade_service, 'validate_order') as mock_validate:
-                mock_validate.return_value = {"valid": False, "error": "Invalid order parameters"}
+            # Call execute_trade directly to test built-in validation
+            result = await trade_service.execute_trade(
+                invalid_order, "validation_user", True
+            )
 
-                result = await trade_service.execute_trade(
-                    invalid_order, "validation_user", True
-                )
-
-                # Should reject invalid orders
-                assert result["success"] is False
-                assert "error" in result
+            # Should reject invalid orders through built-in validation
+            assert result["success"] is False
+            assert "error" in result
 
 
 if __name__ == "__main__":

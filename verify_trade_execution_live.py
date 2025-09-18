@@ -61,21 +61,18 @@ def validate_environment():
 async def login_and_get_token() -> Optional[str]:
     """Authenticate and get access token."""
     try:
-        # Secure credential loading from environment
-        admin_email = os.getenv('ADMIN_EMAIL')
-        admin_password = os.getenv('ADMIN_PASSWORD')
-
-        if not admin_email or not admin_password:
-            print("ERROR: ADMIN_EMAIL and ADMIN_PASSWORD environment variables must be set")
+        # Use validated global credentials that are loaded with CRYPTOUNIVERSE_ prefix
+        if not ADMIN_EMAIL or not ADMIN_PASSWORD:
+            print("ERROR: CRYPTOUNIVERSE_ADMIN_EMAIL and CRYPTOUNIVERSE_ADMIN_PASSWORD environment variables must be set")
             return None
 
         login_data = {
-            "email": admin_email,
-            "password": admin_password
+            "email": ADMIN_EMAIL,
+            "password": ADMIN_PASSWORD
         }
         print(f"🔐 Authenticating with {BASE_URL}/auth/login")
         response = requests.post(
-            f"{BASE_URL}/auth/login",
+            f"{BASE_URL}/api/v1/auth/login",
             json=login_data,
             timeout=30
         )
@@ -114,7 +111,7 @@ async def verify_trade_execution_service(token: str) -> Dict[str, Any]:
     # Test 1: Service Health Check
     print("\n📊 Testing service health...")
     try:
-        response = requests.get(f"{BASE_URL}/health", headers=headers, timeout=10)
+        response = requests.get(f"{BASE_URL}/api/v1/health/health", headers=headers, timeout=10)
         if response.status_code == 200:
             print("✅ Service health check passed")
             results['health_check'] = True
@@ -128,7 +125,7 @@ async def verify_trade_execution_service(token: str) -> Dict[str, Any]:
     # Test 2: User Portfolio Access
     print("\n💼 Testing portfolio access...")
     try:
-        response = requests.get(f"{BASE_URL}/strategies/my-portfolio", headers=headers, timeout=15)
+        response = requests.get(f"{BASE_URL}/api/v1/trading/balance", headers=headers, timeout=15)
         if response.status_code == 200:
             portfolio = response.json()
             print(f"✅ Portfolio access successful")
@@ -144,7 +141,7 @@ async def verify_trade_execution_service(token: str) -> Dict[str, Any]:
     # Test 3: Market Data Access
     print("\n📈 Testing market data access...")
     try:
-        response = requests.get(f"{BASE_URL}/market/status", headers=headers, timeout=10)
+        response = requests.get(f"{BASE_URL}/api/v1/market/market-health", headers=headers, timeout=10)
         if response.status_code == 200:
             print("✅ Market data access successful")
             results['market_data'] = True
@@ -167,7 +164,7 @@ async def verify_trade_execution_service(token: str) -> Dict[str, Any]:
         }
 
         response = requests.post(
-            f"{BASE_URL}/trades/execute",
+            f"{BASE_URL}/api/v1/paper-trading/execute",
             json=test_trade,
             headers=headers,
             timeout=30
@@ -210,7 +207,7 @@ async def verify_risk_management(token: str) -> Dict[str, Any]:
         }
 
         response = requests.post(
-            f"{BASE_URL}/trades/validate",
+            f"{BASE_URL}/api/v1/ai-consensus/validate-trade",
             json=large_trade,
             headers=headers,
             timeout=15
