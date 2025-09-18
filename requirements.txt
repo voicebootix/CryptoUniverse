@@ -24,6 +24,13 @@ itsdangerous==2.1.2
 pydantic==2.5.1
 pydantic-settings==2.1.0
 
+# Market Data and Trading
+ccxt==4.1.56  # Cryptocurrency exchange trading library
+yfinance==0.2.33  # Yahoo Finance market data
+pandas==2.1.4  # Data manipulation
+numpy==1.26.2  # Numerical computing
+ta==0.11.0  # Technical analysis library
+
 # HTTP client for Flowise integration
 httpx==0.25.2
 aiohttp==3.9.1

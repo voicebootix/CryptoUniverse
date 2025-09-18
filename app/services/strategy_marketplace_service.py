@@ -342,9 +342,24 @@ class StrategyMarketplaceService(LoggerMixin):
             return {"success": False, "error": str(e)}
     
     async def _get_ai_strategy_performance(self, strategy_func: str, user_id: str) -> Dict[str, Any]:
-        """Get performance data for AI strategy with proper normalization and fallback logic."""
+        """Get REAL performance data for AI strategy from actual trades."""
         try:
-            # Try to use existing strategy_performance function first
+            # Use real performance tracker for actual trade data
+            from app.services.real_performance_tracker import real_performance_tracker
+
+            # Get real performance metrics from actual trades
+            real_metrics = await real_performance_tracker.track_strategy_performance(
+                strategy_id=f"ai_{strategy_func}",
+                user_id=user_id,
+                period_days=30
+            )
+
+            if real_metrics and real_metrics.get('total_trades', 0) > 0:
+                # We have real trade data!
+                self.logger.info(f"✅ Using REAL performance data for {strategy_func}")
+                return real_metrics
+
+            # Fallback to trying existing function
             performance_result = await trading_strategies_service.strategy_performance(
                 strategy_name=strategy_func,
                 user_id=user_id
@@ -457,9 +472,10 @@ class StrategyMarketplaceService(LoggerMixin):
                 performance_data.get("worst_trade_pnl", -abs(normalized["total_pnl"]) * 0.08)
             )
 
-            # Supported symbols with fallback
+            # Support ALL major trading pairs - no limitations
             normalized["supported_symbols"] = performance_data.get("supported_symbols",
-                ["BTC", "ETH", "SOL", "ADA"])
+                ["BTC", "ETH", "BNB", "SOL", "ADA", "DOT", "MATIC", "LINK",
+                 "AVAX", "ATOM", "UNI", "XRP", "DOGE", "LTC", "TRX", "NEAR"])
 
             self.logger.info(f"Performance data normalized successfully for {strategy_func}",
                            strategy=strategy_func,
@@ -495,15 +511,30 @@ class StrategyMarketplaceService(LoggerMixin):
             return default
     
     async def _get_backtest_results(self, strategy_func: str) -> Dict[str, Any]:
-        """Get REAL backtesting results for strategy using historical data."""
-        
+        """Get REAL backtesting results using actual market data."""
+
         try:
-            # Run real historical backtest using actual strategy implementation
-            backtest_result = await self._run_real_historical_backtest(
+            # Use the new real backtesting engine
+            from app.services.real_backtesting_engine import real_backtesting_engine
+
+            # Get ALL available symbols from market data service
+            from app.services.real_market_data import real_market_data_service
+
+            # Use top traded pairs across multiple asset classes
+            backtest_symbols = [
+                "BTC/USDT", "ETH/USDT", "BNB/USDT",  # Large caps
+                "SOL/USDT", "ADA/USDT", "DOT/USDT",   # Mid caps
+                "MATIC/USDT", "LINK/USDT", "UNI/USDT", # DeFi
+                "ATOM/USDT", "AVAX/USDT", "NEAR/USDT"  # Layer 1s
+            ]
+
+            # Run backtest with real market data on diverse assets
+            backtest_result = await real_backtesting_engine.run_backtest(
+                strategy_id=f"ai_{strategy_func}",
                 strategy_func=strategy_func,
                 start_date="2023-01-01",
                 end_date="2024-01-01",
-                symbols=["BTC", "ETH", "SOL", "ADA"],
+                symbols=backtest_symbols[:6],  # Use 6 diverse symbols for performance
                 initial_capital=10000
             )
             

@@ -692,18 +692,64 @@ class TradeExecutionService(LoggerMixin):
             }
     
     async def _simulate_order_execution(
-        self, 
+        self,
         trade_request: Dict[str, Any],
         user_id: str
     ) -> Dict[str, Any]:
-        """Simulate order execution - ported from Flowise."""
+        """Simulate order execution using REAL market data and order books."""
+        from app.services.real_market_data import real_market_data_service
         import random
-        
-        fill_rate = 0.95 + (random.random() * 0.05)
-        executed_quantity = trade_request["quantity"] * fill_rate
-        price_slippage = (random.random() - 0.5) * 0.002
-        execution_price = trade_request.get("price", 50000) * (1 + price_slippage)
-        fees = executed_quantity * execution_price * 0.001
+
+        symbol = trade_request.get('symbol', 'BTC/USDT')
+        side = trade_request.get('side', 'buy')
+        quantity = trade_request.get('quantity', 0)
+
+        # Get real order book for accurate simulation
+        orderbook = await real_market_data_service.get_order_book(
+            symbol=symbol,
+            exchange='binance',
+            limit=50
+        )
+
+        # Get real market depth analysis
+        depth_analysis = await real_market_data_service.get_market_depth_analysis(
+            symbol=symbol
+        )
+
+        # Calculate realistic fill based on order book
+        if orderbook and orderbook.get('bids') and orderbook.get('asks'):
+            # Use real order book for execution simulation
+            if side.lower() == 'buy':
+                # Buying - will hit asks
+                available_liquidity = sum(ask[1] for ask in orderbook['asks'][:10])
+                execution_price = orderbook['asks'][0][0] if orderbook['asks'] else trade_request.get('price', 50000)
+            else:
+                # Selling - will hit bids
+                available_liquidity = sum(bid[1] for bid in orderbook['bids'][:10])
+                execution_price = orderbook['bids'][0][0] if orderbook['bids'] else trade_request.get('price', 50000)
+
+            # Calculate realistic fill rate based on available liquidity
+            if quantity <= available_liquidity:
+                fill_rate = 0.98 + (random.random() * 0.02)  # 98-100% fill for liquid orders
+            else:
+                fill_rate = min(0.95, available_liquidity / quantity)  # Partial fill for large orders
+
+            # Apply realistic slippage based on market depth
+            spread_pct = depth_analysis.get('spread_pct', 0.1) if depth_analysis else 0.1
+            price_slippage = spread_pct / 100 * (0.5 + random.random() * 0.5)  # 50-100% of spread
+
+            if side.lower() == 'buy':
+                execution_price *= (1 + price_slippage)  # Pay more when buying
+            else:
+                execution_price *= (1 - price_slippage)  # Receive less when selling
+        else:
+            # Fallback to simple simulation if no orderbook
+            fill_rate = 0.95 + (random.random() * 0.05)
+            price_slippage = (random.random() - 0.5) * 0.002
+            execution_price = trade_request.get('price', 50000) * (1 + price_slippage)
+
+        executed_quantity = quantity * fill_rate
+        fees = executed_quantity * execution_price * 0.001  # 0.1% trading fee
         
         return {
             "success": True,
