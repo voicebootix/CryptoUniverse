@@ -24,8 +24,14 @@ itsdangerous==2.1.2
 pydantic==2.5.1
 pydantic-settings==2.1.0
 
+# Market Data and Trading
+ccxt==4.2.25  # Cryptocurrency exchange trading library - latest version
+yfinance==0.2.33  # Yahoo Finance market data
+pandas==2.1.4  # Data manipulation
+numpy==1.26.2  # Numerical computing
+ta==0.11.0  # Technical analysis library
+
 # HTTP client for Flowise integration
-httpx==0.25.2
 aiohttp==3.9.1
 
 # Background tasks and caching
@@ -59,9 +65,7 @@ setproctitle==1.3.3  # Process naming for monitoring
 # Time and scheduling (celery beat is built into celery package)
 pytz==2023.3
 
-# Financial calculations (Python 3.11 compatible versions)
-numpy==1.24.3
-pandas==2.0.3
+# Financial calculations - using versions defined above
 
 # WebSockets for real-time features
 websockets==12.0
@@ -72,8 +76,7 @@ PyJWT==2.8.0
 cryptography==41.0.7  # Fixed: 41.0.8 not available for Python 3.11
 email-validator==2.1.0
 
-# Crypto trading and exchange APIs
-ccxt==4.2.25
+# Crypto trading and exchange APIs - version defined above
 
 # File operations for logging and debug services
 aiofiles==23.2.1
