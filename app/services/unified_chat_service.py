@@ -802,16 +802,9 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                 "decision_id": decision_id,
                 "metadata": {
                     "personality": personality["name"],
-                    "response_time": response["elapsed_time"],
+                    "response_time": response.get("elapsed_time", 0),
                     "context_data_keys": list(context_data.keys())
                 },
-                "timestamp": datetime.utcnow()
-            }
-        else:
-            return {
-                "success": False,
-                "error": response["error"],
-                "session_id": session.session_id,
                 "timestamp": datetime.utcnow()
             }
     
