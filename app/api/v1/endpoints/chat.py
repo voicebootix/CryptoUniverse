@@ -18,7 +18,8 @@ from pydantic import BaseModel, Field
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.database import get_database
 from app.models.user import User
-from app.services.ai_chat_engine import enhanced_chat_engine as chat_engine, ChatMessageType
+from app.services.unified_chat_service import unified_chat_service as chat_engine
+from app.services.ai_chat_engine import ChatMessageType
 from app.services.chat_integration import chat_integration
 from app.services.unified_ai_manager import unified_ai_manager, InterfaceType
 from app.services.websocket import manager
