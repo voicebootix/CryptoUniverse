@@ -3,3 +3,8 @@
 .env.render.local
 testsprite_tests/.env.test
 __pycache__/
+
+# Backup and conflict files
+*.backup
+*.orig
+*.rej

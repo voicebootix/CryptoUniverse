@@ -34,10 +34,10 @@ class TimeFrame(str, Enum):
     ONE_WEEK = "1w"
 
 
-class MarketData(Base):
-    """Real-time and historical market data (legacy model)."""
+class LegacyMarketData(Base):
+    """Legacy market data model - use MarketDataOHLCV for new implementations."""
 
-    __tablename__ = "market_data"
+    __tablename__ = "legacy_market_data"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     symbol = Column(String(20), nullable=False, index=True)
@@ -63,8 +63,8 @@ class MarketData(Base):
 
     # Composite indexes for performance
     __table_args__ = (
-        Index('idx_market_data_symbol_timestamp', 'symbol', 'timestamp'),
-        Index('idx_market_data_exchange_timestamp', 'exchange', 'timestamp'),
+        Index('idx_legacy_market_data_symbol_timestamp', 'symbol', 'timestamp'),
+        Index('idx_legacy_market_data_exchange_timestamp', 'exchange', 'timestamp'),
     )
 
 
@@ -368,10 +368,10 @@ class BacktestResult(Base):
     )
 
 
-class StrategyPerformance(Base):
-    """Live strategy performance tracking."""
+class LiveStrategyPerformance(Base):
+    """Live strategy performance tracking for market data analysis."""
 
-    __tablename__ = "strategy_performance"
+    __tablename__ = "live_strategy_performance"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     strategy_id = Column(String(100), nullable=False, index=True)
@@ -409,8 +409,8 @@ class StrategyPerformance(Base):
 
     # Indexes for performance
     __table_args__ = (
-        Index('idx_strategy_performance_user_strategy', 'user_id', 'strategy_id'),
-        Index('idx_strategy_performance_active', 'is_active', 'last_updated'),
+        Index('idx_live_strategy_performance_user_strategy', 'user_id', 'strategy_id'),
+        Index('idx_live_strategy_performance_active', 'is_active', 'last_updated'),
     )
 
 
