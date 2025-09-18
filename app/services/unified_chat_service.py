@@ -135,57 +135,20 @@ class UnifiedChatService(LoggerMixin):
         """Initialize with ALL services preserved."""
         # Core AI Services
         self.chat_ai = chat_ai_service  # NEW: For natural conversation
-        
-        # Initialize ai_consensus with error handling
-        try:
-            self.ai_consensus = AIConsensusService()  # KEPT: Only for trade validation
-        except Exception as e:
-            logger.error(f"Failed to initialize AIConsensusService: {e}")
-            self.ai_consensus = None
+        self.ai_consensus = AIConsensusService()  # KEPT: Only for trade validation
         
         # Memory and session management
         self.memory_service = ChatMemoryService()
         self.sessions: Dict[str, ChatSession] = {}
         
-        # ALL service connections preserved - Initialize with error handling
-        try:
-            self.master_controller = MasterSystemController()
-        except Exception as e:
-            logger.error(f"Failed to initialize MasterSystemController: {e}")
-            self.master_controller = None
-            
-        try:
-            self.trade_executor = TradeExecutionService()
-        except Exception as e:
-            logger.error(f"Failed to initialize TradeExecutionService: {e}")
-            self.trade_executor = None
-            
+        # ALL service connections preserved
+        self.master_controller = MasterSystemController()
+        self.trade_executor = TradeExecutionService()
         self.adapters = chat_adapters
-        
-        try:
-            self.telegram_core = TelegramCommanderService()
-        except Exception as e:
-            logger.error(f"Failed to initialize TelegramCommanderService: {e}")
-            self.telegram_core = None
-            
-        try:
-            self.market_analysis = MarketAnalysisService()
-        except Exception as e:
-            logger.error(f"Failed to initialize MarketAnalysisService: {e}")
-            self.market_analysis = None
-            
-        try:
-            self.portfolio_risk = PortfolioRiskService()
-        except Exception as e:
-            logger.error(f"Failed to initialize PortfolioRiskService: {e}")
-            self.portfolio_risk = None
-            
-        try:
-            self.trading_strategies = TradingStrategiesService()
-        except Exception as e:
-            logger.error(f"Failed to initialize TradingStrategiesService: {e}")
-            self.trading_strategies = None
-            
+        self.telegram_core = TelegramCommanderService()
+        self.market_analysis = MarketAnalysisService()
+        self.portfolio_risk = PortfolioRiskService()
+        self.trading_strategies = TradingStrategiesService()
         self.strategy_marketplace = strategy_marketplace_service
         self.paper_trading = paper_trading_engine
         self.opportunity_discovery = user_opportunity_discovery
@@ -303,72 +266,6 @@ class UnifiedChatService(LoggerMixin):
                 "what is", "how does", "assistance", "support"
             ]
         }
-    
-    async def handle_telegram_request(self, chat_id: str, user_id: str, text: str) -> Dict[str, Any]:
-        """Handle Telegram request using unified chat system for consistent experience."""
-        try:
-            # Process message through unified system
-            result = await self.process_message(
-                message=text,
-                user_id=user_id,
-                session_id=f"telegram_{chat_id}",
-                interface=InterfaceType.TELEGRAM,
-                conversation_mode=ConversationMode.LIVE_TRADING,
-                stream=False
-            )
-            
-            # Send response back through Telegram
-            if result.get("success"):
-                # Import here to avoid circular dependency
-                from app.services.telegram_core import TelegramAPIConnector
-                telegram_api = TelegramAPIConnector()
-                
-                # Format response for Telegram
-                response_text = result.get("response", result.get("content", ""))
-                
-                # Send message
-                await telegram_api.send_message(
-                    chat_id=chat_id,
-                    text=response_text,
-                    parse_mode="Markdown"
-                )
-                
-                return {
-                    "success": True,
-                    "response": response_text,
-                    "intent": result.get("intent"),
-                    "metadata": result.get("metadata", {})
-                }
-            else:
-                error_msg = "I'm having trouble processing your request. Please try again."
-                
-                from app.services.telegram_core import TelegramAPIConnector
-                telegram_api = TelegramAPIConnector()
-                await telegram_api.send_message(chat_id, error_msg)
-                
-                return {
-                    "success": False,
-                    "error": result.get("error", "Processing failed")
-                }
-                
-        except Exception as e:
-            self.logger.error("Telegram request handling failed", error=str(e))
-            
-            # Send error message to user
-            try:
-                from app.services.telegram_core import TelegramAPIConnector
-                telegram_api = TelegramAPIConnector()
-                await telegram_api.send_message(
-                    chat_id=chat_id,
-                    text="❌ Sorry, I encountered an error. Please try again or use /help."
-                )
-            except:
-                pass
-                
-            return {
-                "success": False,
-                "error": str(e)
-            }
     
     async def process_message(
         self,
@@ -671,12 +568,7 @@ class UnifiedChatService(LoggerMixin):
         try:
             # Get user's current positions and limits
             portfolio = await self.adapters.get_portfolio_summary(user_id)
-            
-            # Check if portfolio_risk service is available
-            if self.portfolio_risk:
-                risk_limits = await self.portfolio_risk.calculate_position_limits(user_id)
-            else:
-                risk_limits = {"max_position_size": 10000}  # Default limits
+            risk_limits = await self.portfolio_risk.calculate_position_limits(user_id)
             
             return {
                 "within_limits": True,  # Real calculation needed
@@ -705,93 +597,47 @@ class UnifiedChatService(LoggerMixin):
         context_data = {}
         
         # Always get basic portfolio data
-        try:
-            context_data["portfolio"] = await self.adapters.get_portfolio_summary(user_id)
-        except Exception as e:
-            self.logger.error(f"Failed to get portfolio summary: {e}")
-            context_data["portfolio"] = {"total_value": 0, "positions": [], "error": str(e)}
+        context_data["portfolio"] = await self.adapters.get_portfolio_summary(user_id)
         
         # Intent-specific data gathering
         if intent == ChatIntent.PORTFOLIO_ANALYSIS:
             # Get comprehensive portfolio analysis
-            try:
-                context_data["risk_analysis"] = await self.adapters.comprehensive_risk_analysis(user_id)
-                context_data["performance"] = await self._get_performance_metrics(user_id)
-            except Exception as e:
-                self.logger.error(f"Failed to get portfolio analysis: {e}")
-                context_data["risk_analysis"] = {"error": str(e)}
-                context_data["performance"] = {"error": str(e)}
+            context_data["risk_analysis"] = await self.adapters.comprehensive_risk_analysis(user_id)
+            context_data["performance"] = await self._get_performance_metrics(user_id)
             
         elif intent == ChatIntent.TRADE_EXECUTION:
             # Get market data for trade analysis
             entities = intent_analysis.get("entities", {})
             symbol = entities.get("symbol", "BTC")
-            try:
-                context_data["market_data"] = await self.adapters.get_asset_analysis(symbol)
-                context_data["trade_validation"] = await self._prepare_trade_validation(entities, user_id)
-            except Exception as e:
-                self.logger.error(f"Failed to get trade data: {e}")
-                context_data["market_data"] = {"error": str(e)}
-                context_data["trade_validation"] = {"error": str(e)}
+            context_data["market_data"] = await self.adapters.get_asset_analysis(symbol)
+            context_data["trade_validation"] = await self._prepare_trade_validation(entities, user_id)
             
         elif intent == ChatIntent.MARKET_ANALYSIS:
             # Get comprehensive market analysis
-            try:
-                if self.market_analysis:
-                    context_data["market_overview"] = await self.market_analysis.get_market_overview()
-                else:
-                    context_data["market_overview"] = {"error": "Market analysis service not available"}
-                context_data["technical_analysis"] = await self.adapters.get_technical_analysis()
-            except Exception as e:
-                self.logger.error(f"Failed to get market analysis: {e}")
-                context_data["market_overview"] = {"error": str(e)}
-                context_data["technical_analysis"] = {"error": str(e)}
+            context_data["market_overview"] = await self.market_analysis.get_market_overview()
+            context_data["technical_analysis"] = await self.adapters.get_technical_analysis()
             
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
             # Get real opportunities
-            try:
-                context_data["opportunities"] = await self.opportunity_discovery.discover_opportunities_for_user(
-                    user_id=user_id,
-                    force_refresh=False,
-                    include_strategy_recommendations=True
-                )
-            except Exception as e:
-                self.logger.error(f"Failed to get opportunities: {e}")
-                context_data["opportunities"] = {"opportunities": [], "error": str(e)}
+            context_data["opportunities"] = await self.opportunity_discovery.discover_opportunities_for_user(
+                user_id=user_id,
+                force_refresh=False,
+                include_strategy_recommendations=True
+            )
             
         elif intent == ChatIntent.RISK_ASSESSMENT:
             # Get comprehensive risk metrics
-            try:
-                if self.portfolio_risk:
-                    context_data["risk_metrics"] = await self.portfolio_risk.risk_analysis(user_id)
-                else:
-                    context_data["risk_metrics"] = {"error": "Portfolio risk service not available"}
-                context_data["market_risk"] = await self.adapters.get_market_risk_factors(user_id)
-            except Exception as e:
-                self.logger.error(f"Failed to get risk assessment: {e}")
-                context_data["risk_metrics"] = {"error": str(e)}
-                context_data["market_risk"] = {"error": str(e)}
+            context_data["risk_metrics"] = await self.portfolio_risk.risk_analysis(user_id)
+            context_data["market_risk"] = await self.adapters.get_market_risk_factors(user_id)
             
         elif intent == ChatIntent.STRATEGY_RECOMMENDATION:
             # Get strategy recommendations
-            try:
-                if self.trading_strategies:
-                    context_data["active_strategy"] = await self.trading_strategies.get_active_strategy(user_id)
-                else:
-                    context_data["active_strategy"] = {"error": "Trading strategies service not available"}
-                context_data["available_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
-            except Exception as e:
-                self.logger.error(f"Failed to get strategy recommendations: {e}")
-                context_data["active_strategy"] = {"error": str(e)}
-                context_data["available_strategies"] = {"error": str(e)}
+            context_data["active_strategy"] = await self.trading_strategies.get_active_strategy(user_id)
+            context_data["available_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
             
         elif intent == ChatIntent.REBALANCING:
             # Get rebalancing analysis
-            try:
-                context_data["rebalance_analysis"] = await self.adapters.analyze_rebalancing_needs(user_id)
-            except Exception as e:
-                self.logger.error(f"Failed to get rebalancing analysis: {e}")
-                context_data["rebalance_analysis"] = {"error": str(e)}
+            context_data["rebalance_analysis"] = await self.adapters.analyze_rebalancing_needs(user_id)
             
         # Add user context
         context_data["user_config"] = await self._get_user_config(user_id)
@@ -810,19 +656,7 @@ class UnifiedChatService(LoggerMixin):
         Generate complete response using ChatAI with personality.
         """
         intent = intent_analysis["intent"]
-        # Get personality with fallback to BALANCED if not found
-        personality = self.personalities.get(
-            session.trading_mode, 
-            self.personalities.get(TradingMode.BALANCED, {
-                "name": "Assistant",
-                "style": "balanced",
-                "greeting": "Hello! I'm your crypto trading assistant.",
-                "approach": "balanced and thoughtful",
-                "vocabulary": ["balanced", "strategic", "optimized"],
-                "risk_tolerance": "medium",
-                "decision_speed": "measured"
-            })
-        )
+        personality = self.personalities[session.trading_mode]
         
         # Build system message with personality
         system_message = f"""You are {personality['name']}, a {personality['style']} cryptocurrency trading AI assistant.
@@ -849,35 +683,8 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
             temperature=0.7
         )
         
-        if response.get("success") and response.get("content"):
+        if response["success"]:
             content = response["content"]
-        else:
-            # Fallback response if AI service fails
-            self.logger.warning(f"ChatAI returned empty/failed response for intent: {intent}")
-            
-            # Generate appropriate fallback based on intent
-            if intent == ChatIntent.GREETING:
-                content = f"👋 Hello! I'm {personality['name']}, your {personality['style']} crypto assistant. How can I help you today?"
-            elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-                # Format opportunities from context data
-                opp_data = context_data.get("opportunities", {})
-                if opp_data and isinstance(opp_data, dict):
-                    opportunities = opp_data.get("opportunities", [])
-                    if opportunities:
-                        content = self._format_opportunities_fallback(opportunities)
-                    else:
-                        error_msg = opp_data.get("error", "")
-                        if error_msg:
-                            content = f"I encountered an issue while checking opportunities: {error_msg}. Please try again."
-                        else:
-                            content = "No trading opportunities found at the moment. The market might be quiet."
-                else:
-                    content = "I'm having trouble connecting to the opportunity service. Please try again in a moment."
-            elif intent == ChatIntent.PORTFOLIO_ANALYSIS:
-                portfolio = context_data.get("portfolio", {})
-                content = f"Your portfolio value is ${portfolio.get('total_value', 0):,.2f}. Use /portfolio for detailed analysis."
-            else:
-                content = "I understand your request. Let me help you with that. Please use /help to see available commands."
             
             # Handle action requirements
             requires_approval = False
@@ -910,9 +717,16 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                 "decision_id": decision_id,
                 "metadata": {
                     "personality": personality["name"],
-                    "response_time": response.get("elapsed_time", 0),
+                    "response_time": response["elapsed_time"],
                     "context_data_keys": list(context_data.keys())
                 },
+                "timestamp": datetime.utcnow()
+            }
+        else:
+            return {
+                "success": False,
+                "error": response["error"],
+                "session_id": session.session_id,
                 "timestamp": datetime.utcnow()
             }
     
@@ -934,19 +748,7 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
         }
         
         intent = intent_analysis["intent"]
-        # Get personality with fallback to BALANCED if not found
-        personality = self.personalities.get(
-            session.trading_mode,
-            self.personalities.get(TradingMode.BALANCED, {
-                "name": "Assistant",
-                "style": "balanced",
-                "greeting": "Hello! I'm your crypto trading assistant.",
-                "approach": "balanced and thoughtful",
-                "vocabulary": ["balanced", "strategic", "optimized"],
-                "risk_tolerance": "medium",
-                "decision_speed": "measured"
-            })
-        )
+        personality = self.personalities[session.trading_mode]
         
         # Build system message
         system_message = f"""You are {personality['name']}, a {personality['style']} cryptocurrency trading AI assistant.
@@ -1018,7 +820,7 @@ Portfolio Data (REAL):
 - Daily P&L: ${portfolio.get('daily_pnl', 0):,.2f} ({portfolio.get('daily_pnl_pct', 0):.2f}%)
 - Positions: {len(portfolio.get('positions', []))}
 - Risk Level: {risk.get('overall_risk', 'Unknown')}
-- Top Holdings: {', '.join([f"{p.get('symbol', 'N/A')} (${p.get('value_usd', 0):,.2f})" for p in (portfolio.get('positions') or [])[:3]]) if portfolio.get('positions') else 'No positions'}
+- Top Holdings: {', '.join([f"{p['symbol']} (${p['value_usd']:,.2f})" for p in portfolio.get('positions', [])[:3]])}
 
 Provide a comprehensive portfolio analysis using this real data."""
         
@@ -1041,78 +843,25 @@ Portfolio:
 Analyze this trade request and provide recommendations. If viable, explain the 5-phase execution process."""
         
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-            opp_data = context_data.get("opportunities") or {}
-            opportunities = opp_data.get("opportunities", []) if isinstance(opp_data, dict) else []
-            strategy_performance = opp_data.get("strategy_performance", {}) if isinstance(opp_data, dict) else {}
-            user_profile = opp_data.get("user_profile", {}) if isinstance(opp_data, dict) else {}
+            opportunities = context_data.get("opportunities", {}).get("opportunities", [])
             
-            # Group opportunities by strategy
-            opportunities_by_strategy = {}
-            for opp in opportunities:
-                strategy = opp.get('strategy_name', 'Unknown')
-                if strategy not in opportunities_by_strategy:
-                    opportunities_by_strategy[strategy] = []
-                opportunities_by_strategy[strategy].append(opp)
+            if opportunities:
+                opp_text = "\n".join([
+                    f"- {o.get('symbol', 'N/A')}: {o.get('strategy_name', o.get('strategy', 'Unknown'))} ({o.get('confidence_score', o.get('confidence', 0)):.1f}% confidence, "
+                    f"{o.get('profit_potential_percentage', o.get('potential_return', 0)):+.1f}% potential)"
+                    for o in opportunities[:5]
+                ])
+            else:
+                opp_text = "No opportunities meeting criteria at this moment."
             
-            # Build comprehensive prompt
-            prompt_parts = [f'User asked: "{message}"']
-            prompt_parts.append(f"\nTotal opportunities found: {len(opportunities)}")
-            prompt_parts.append(f"User risk profile: {user_profile.get('risk_profile', 'balanced')}")
-            prompt_parts.append(f"Active strategies: {user_profile.get('active_strategy_count', 0)}")
+            return f"""User asked: "{message}"
             
-            # Strategy performance summary
-            if strategy_performance:
-                prompt_parts.append("\n📊 STRATEGY PERFORMANCE:")
-                for strat, perf in strategy_performance.items():
-                    count = perf.get('count', 0) if isinstance(perf, dict) else perf
-                    prompt_parts.append(f"- {strat}: {count} opportunities")
-            
-            # Detailed opportunities by strategy
-            prompt_parts.append("\n🎯 OPPORTUNITIES BY STRATEGY:")
-            for strategy, opps in opportunities_by_strategy.items():
-                prompt_parts.append(f"\n{strategy} ({len(opps)} opportunities):")
-                for i, opp in enumerate(opps[:3], 1):  # Show top 3 per strategy
-                    symbol = opp.get('symbol', 'N/A')
-                    confidence = opp.get('confidence_score', 0)
-                    profit_usd = opp.get('profit_potential_usd', 0)
-                    metadata = opp.get('metadata', {})
-                    
-                    # Format based on opportunity type
-                    if 'portfolio' in strategy.lower():
-                        if metadata.get('strategy'):
-                            prompt_parts.append(f"  {i}. {metadata['strategy'].replace('_', ' ').title()}")
-                            prompt_parts.append(f"     Expected Return: {metadata.get('expected_annual_return', 0)*100:.1f}%")
-                            prompt_parts.append(f"     Sharpe Ratio: {metadata.get('sharpe_ratio', 0):.2f}")
-                            prompt_parts.append(f"     Risk Level: {metadata.get('risk_level', 0)*100:.1f}%")
-                        else:
-                            prompt_parts.append(f"  {i}. {symbol} - {metadata.get('rebalance_action', 'REBALANCE')}")
-                            prompt_parts.append(f"     Amount: {metadata.get('amount', 0)*100:.1f}% of portfolio")
-                    elif 'risk' in strategy.lower():
-                        prompt_parts.append(f"  {i}. {metadata.get('risk_type', 'Risk Alert')}")
-                        prompt_parts.append(f"     Action: {metadata.get('strategy', 'Mitigation needed')}")
-                        prompt_parts.append(f"     Urgency: {metadata.get('urgency', confidence/100)}")
-                    else:
-                        prompt_parts.append(f"  {i}. {symbol}")
-                        prompt_parts.append(f"     Confidence: {confidence:.1f}%")
-                        prompt_parts.append(f"     Profit Potential: ${profit_usd:,.0f}")
-                        action = metadata.get('signal_action', opp.get('action', 'ANALYZE'))
-                        if action:
-                            prompt_parts.append(f"     Action: {action}")
-            
-            prompt_parts.append(f"""
-            
-INSTRUCTIONS FOR AI MONEY MANAGER:
-1. Present opportunities grouped by strategy type
-2. For portfolio optimization, explain each of the 6 strategies and their expected returns
-3. Highlight the best opportunities based on the user's risk profile ({user_profile.get('risk_profile', 'balanced')})
-4. Provide specific, actionable recommendations
-5. Use actual symbols and values from the data, not generic examples
-6. If portfolio optimization shows multiple strategies, compare them clearly
-7. End with a clear recommendation based on user's profile
+Current Opportunities (REAL DATA):
+{opp_text}
 
-Remember: You are the AI Money Manager providing personalized advice based on real analysis.""")
-            
-            return "\n".join(prompt_parts)
+Market Conditions: {context_data.get('opportunities', {}).get('market_conditions', 'Normal')}
+
+Provide insights on these real opportunities."""
         
         # Default prompt for other intents
         return f"""User asked: "{message}"
@@ -1121,30 +870,6 @@ Intent: {intent.value}
 Available Data: {list(context_data.keys())}
 
 Provide a helpful response using the real data available. Never use placeholder data."""
-    
-    def _format_opportunities_fallback(self, opportunities: List[Dict[str, Any]]) -> str:
-        """Format opportunities for fallback response."""
-        if not opportunities:
-            return "No trading opportunities found at the moment."
-        
-        # Group by strategy
-        by_strategy = {}
-        for opp in opportunities[:10]:  # Limit to 10
-            strategy = opp.get("strategy_name", "Unknown")
-            if strategy not in by_strategy:
-                by_strategy[strategy] = []
-            by_strategy[strategy].append(opp)
-        
-        lines = ["🎯 Trading Opportunities Found:\n"]
-        for strategy, opps in by_strategy.items():
-            lines.append(f"\n**{strategy}**:")
-            for opp in opps[:3]:  # Top 3 per strategy
-                symbol = opp.get("symbol", "N/A")
-                confidence = opp.get("confidence_score", 0)
-                profit = opp.get("profit_potential_usd", 0)
-                lines.append(f"• {symbol}: {confidence:.0f}% confidence, ${profit:,.0f} potential")
-        
-        return "\n".join(lines)
     
     async def _get_user_config(self, user_id: str) -> Dict[str, Any]:
         """Get user configuration - REAL data only."""
@@ -1291,14 +1016,7 @@ Provide a helpful response using the real data available. Never use placeholder 
         try:
             # Phase 1: Analysis
             self.logger.info("Phase 1: Trade Analysis", trade=trade_params)
-            if self.market_analysis:
-                analysis = await self.market_analysis.analyze_trade_opportunity(trade_params)
-            else:
-                analysis = {
-                    "recommendation": "HOLD",
-                    "confidence": 0.5,
-                    "reason": "Market analysis service not available"
-                }
+            analysis = await self.market_analysis.analyze_trade_opportunity(trade_params)
             phases_completed.append("analysis")
             
             # Phase 2: AI Consensus (ONLY for trade validation)
