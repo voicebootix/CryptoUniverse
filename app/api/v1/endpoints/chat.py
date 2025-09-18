@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from app.api.v1.endpoints.auth import get_current_user
 from app.core.database import get_database
 from app.models.user import User
-from app.services.ai_chat_engine import enhanced_chat_engine as chat_engine, ChatMessageType
+from app.services.unified_chat_service import unified_chat_service as chat_engine, ChatMessageType
 from app.services.chat_integration import chat_integration
 from app.services.unified_ai_manager import unified_ai_manager, InterfaceType
 from app.services.websocket import manager
@@ -133,9 +133,9 @@ async def send_message(
         logger.info("Calling chat engine process_message")
         
         response = await chat_engine.process_message(
-            session_id=session_id,
-            user_message=request.message,
-            user_id=str(current_user.id)
+            message=request.message,
+            user_id=str(current_user.id),
+            session_id=session_id
         )
         
         logger.info("Chat engine response received", 
