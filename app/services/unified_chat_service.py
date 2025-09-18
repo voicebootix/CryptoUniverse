@@ -685,11 +685,15 @@ class UnifiedChatService(LoggerMixin):
             
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
             # Get real opportunities
-            context_data["opportunities"] = await self.opportunity_discovery.discover_opportunities_for_user(
-                user_id=user_id,
-                force_refresh=False,
-                include_strategy_recommendations=True
-            )
+            try:
+                context_data["opportunities"] = await self.opportunity_discovery.discover_opportunities_for_user(
+                    user_id=user_id,
+                    force_refresh=False,
+                    include_strategy_recommendations=True
+                )
+            except Exception as e:
+                self.logger.error(f"Failed to get opportunities: {e}")
+                context_data["opportunities"] = {"opportunities": [], "error": str(e)}
             
         elif intent == ChatIntent.RISK_ASSESSMENT:
             # Get comprehensive risk metrics
@@ -760,11 +764,19 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                 content = f"👋 Hello! I'm {personality['name']}, your {personality['style']} crypto assistant. How can I help you today?"
             elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
                 # Format opportunities from context data
-                opportunities = context_data.get("opportunities", {}).get("opportunities", [])
-                if opportunities:
-                    content = self._format_opportunities_fallback(opportunities)
+                opp_data = context_data.get("opportunities", {})
+                if opp_data and isinstance(opp_data, dict):
+                    opportunities = opp_data.get("opportunities", [])
+                    if opportunities:
+                        content = self._format_opportunities_fallback(opportunities)
+                    else:
+                        error_msg = opp_data.get("error", "")
+                        if error_msg:
+                            content = f"I encountered an issue while checking opportunities: {error_msg}. Please try again."
+                        else:
+                            content = "No trading opportunities found at the moment. The market might be quiet."
                 else:
-                    content = "I'm checking for trading opportunities. Please try again in a moment."
+                    content = "I'm having trouble connecting to the opportunity service. Please try again in a moment."
             elif intent == ChatIntent.PORTFOLIO_ANALYSIS:
                 portfolio = context_data.get("portfolio", {})
                 content = f"Your portfolio value is ${portfolio.get('total_value', 0):,.2f}. Use /portfolio for detailed analysis."
@@ -898,7 +910,7 @@ Portfolio Data (REAL):
 - Daily P&L: ${portfolio.get('daily_pnl', 0):,.2f} ({portfolio.get('daily_pnl_pct', 0):.2f}%)
 - Positions: {len(portfolio.get('positions', []))}
 - Risk Level: {risk.get('overall_risk', 'Unknown')}
-- Top Holdings: {', '.join([f"{p['symbol']} (${p['value_usd']:,.2f})" for p in portfolio.get('positions', [])[:3]])}
+- Top Holdings: {', '.join([f"{p.get('symbol', 'N/A')} (${p.get('value_usd', 0):,.2f})" for p in (portfolio.get('positions') or [])[:3]]) if portfolio.get('positions') else 'No positions'}
 
 Provide a comprehensive portfolio analysis using this real data."""
         
@@ -921,9 +933,10 @@ Portfolio:
 Analyze this trade request and provide recommendations. If viable, explain the 5-phase execution process."""
         
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-            opportunities = context_data.get("opportunities", {}).get("opportunities", [])
-            strategy_performance = context_data.get("opportunities", {}).get("strategy_performance", {})
-            user_profile = context_data.get("opportunities", {}).get("user_profile", {})
+            opp_data = context_data.get("opportunities") or {}
+            opportunities = opp_data.get("opportunities", []) if isinstance(opp_data, dict) else []
+            strategy_performance = opp_data.get("strategy_performance", {}) if isinstance(opp_data, dict) else {}
+            user_profile = opp_data.get("user_profile", {}) if isinstance(opp_data, dict) else {}
             
             # Group opportunities by strategy
             opportunities_by_strategy = {}
