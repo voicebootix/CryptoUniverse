@@ -5,14 +5,39 @@ Simple script to check and fix admin credits
 
 import requests
 import json
+import os
+import sys
 
-# Configuration
-BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
-ADMIN_EMAIL = "admin@cryptouniverse.com"
-ADMIN_PASSWORD = "AdminPass123!"
+# Load from environment variables
+BASE_URL = os.getenv('BASE_URL')
+ADMIN_EMAIL = os.getenv('ADMIN_EMAIL')
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD')
+
+# Validate required environment variables
+def validate_env_vars():
+    missing_vars = []
+    if not BASE_URL:
+        missing_vars.append('BASE_URL')
+    if not ADMIN_EMAIL:
+        missing_vars.append('ADMIN_EMAIL')
+    if not ADMIN_PASSWORD:
+        missing_vars.append('ADMIN_PASSWORD')
+
+    if missing_vars:
+        print(f"Error: Missing required environment variables: {', '.join(missing_vars)}")
+        print("Please set these variables before running the script.")
+        sys.exit(1)
+
+    # Basic URL validation
+    if not (BASE_URL.startswith('http://') or BASE_URL.startswith('https://')):
+        print(f"Error: BASE_URL must start with http:// or https://")
+        sys.exit(1)
 
 def check_admin_credits():
     """Check admin credit status."""
+
+    # Validate environment variables first
+    validate_env_vars()
 
     print("CHECKING ADMIN CREDITS")
     print("=" * 50)

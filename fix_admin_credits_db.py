@@ -40,7 +40,6 @@ def fix_admin_credits():
                 UPDATE credit_accounts
                 SET total_credits = total_credits + 1000,
                     available_credits = available_credits + 1000,
-                    total_earned_credits = total_earned_credits + 1000,
                     updated_at = ?
                 WHERE user_id = ?
             """, (datetime.utcnow().isoformat(), user_id))
@@ -51,26 +50,33 @@ def fix_admin_credits():
             cursor.execute("""
                 INSERT INTO credit_accounts (
                     id, user_id, total_credits, available_credits,
-                    total_earned_credits, total_spent_credits,
+                    used_credits, expired_credits,
                     created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                account_id, user_id, 1000, 1000, 1000, 0,
+                account_id, user_id, 1000, 1000, 0, 0,
                 datetime.utcnow().isoformat(), datetime.utcnow().isoformat()
             ))
             print("Created new credit account with 1000 credits")
 
         # Add credit transaction record
+        # Get current account balance for transaction record
+        cursor.execute("SELECT available_credits FROM credit_accounts WHERE user_id = ?", (user_id,))
+        balance_result = cursor.fetchone()
+        current_balance = balance_result[0] if balance_result else 0
+
         transaction_id = str(uuid.uuid4())
         cursor.execute("""
             INSERT INTO credit_transactions (
-                id, user_id, transaction_type, amount,
-                description, reference_id, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                id, account_id, transaction_type, amount,
+                description, reference_id, balance_before, balance_after,
+                source, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            transaction_id, user_id, 'EARNED', 1000,
+            transaction_id, account_id, 'bonus', 1000,
             'Admin testing credits', 'admin_local_provision',
-            datetime.utcnow().isoformat()
+            current_balance - 1000, current_balance,
+            'admin_script', 'completed', datetime.utcnow().isoformat()
         ))
         print("Added credit transaction record")
 

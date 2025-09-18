@@ -139,17 +139,24 @@ def upgrade():
                 print("✅ No duplicate reference_ids found")
 
     except Exception as e:
-        print(f"⚠️ Error handling duplicates: {e}")
-        # Set all existing records to 'legacy' provider for safety
-        try:
-            bind.execute(text("""
-                UPDATE credit_transactions
-                SET provider = 'legacy'
-                WHERE provider IS NULL AND reference_id IS NOT NULL
-            """))
-            print("✅ Set all existing records to 'legacy' provider")
-        except Exception as e2:
-            print(f"⚠️ Error setting legacy provider: {e2}")
+        print(f"❌ Error handling duplicates: {e}")
+        print("Migration cannot proceed with duplicate data.")
+        print("Please resolve duplicate (provider, reference_id) pairs manually before retrying.")
+        raise e
+
+    # Pre-check: abort if duplicates remain for non-NULL provider/reference_id pairs
+    dup_pairs = bind.execute(text("""
+        SELECT provider, reference_id, COUNT(*) AS count
+        FROM credit_transactions
+        WHERE provider IS NOT NULL AND reference_id IS NOT NULL
+        GROUP BY provider, reference_id
+        HAVING COUNT(*) > 1
+    """)).fetchall()
+    if dup_pairs:
+        detail = ", ".join(f"({p}, {r}) x{c}" for p, r, c in dup_pairs[:10])
+        raise RuntimeError(
+            f"Cannot create unique index: found {len(dup_pairs)} duplicated (provider, reference_id) pairs. Examples: {detail}"
+        )
 
     # Step 3: Create composite unique constraint
     print("Creating composite unique constraint...")

@@ -61,10 +61,13 @@ async def get_or_create_credit_account(user_id: str, db: AsyncSession, user: Opt
         user_result = await db.execute(user_stmt)
         user = user_result.scalar_one_or_none()
 
-    # Determine initial credits based on user role
+    # Determine initial credits based on user role and feature flags
     initial_credits = 0
     if user and user.role == UserRole.ADMIN:
-        initial_credits = 900
+        # Check if admin auto-grant is enabled via feature flag
+        auto_grant_enabled = getattr(settings, 'auto_grant_admin_credits', False)
+        if auto_grant_enabled:
+            initial_credits = getattr(settings, 'admin_initial_credits', 0)
 
     # Create new account with role-based initial credits
     credit_account = CreditAccount(
