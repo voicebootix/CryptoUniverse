@@ -111,24 +111,25 @@ class RealPerformanceTracker(LoggerMixin):
         """
         # Convert trades to dataframe for easier analysis
         trade_data = []
-        for trade in trades:
+        for t in trades:
+            action = getattr(t.action, "name", str(t.action))
+            status = getattr(t.status, "name", str(t.status))
             trade_data.append({
-                'timestamp': trade.created_at,
-                'symbol': trade.symbol,
-                'side': trade.side,
-                'quantity': float(trade.quantity),
-                'entry_price': float(trade.entry_price),
-                'exit_price': float(trade.exit_price) if trade.exit_price else None,
-                'pnl': float(trade.profit_realized_usd) if trade.profit_realized_usd else 0,
-                'fees': float(trade.fees_paid) if trade.fees_paid else 0,
-                'status': trade.status
+                'timestamp': t.created_at,
+                'symbol': t.symbol,
+                'action': action,
+                'quantity': float(t.executed_quantity or 0),
+                'executed_price': float(t.executed_price or 0),
+                'pnl': float(t.profit_realized_usd or 0),
+                'fees': float(t.fees_paid or 0),
+                'status': status,
             })
 
         df = pd.DataFrame(trade_data)
 
         # Calculate core metrics
         total_trades = len(df)
-        completed_trades = df[df['exit_price'].notna()]
+        completed_trades = df[df['status'] == 'COMPLETED']
 
         if len(completed_trades) == 0:
             # All trades still open
@@ -155,8 +156,13 @@ class RealPerformanceTracker(LoggerMixin):
         total_fees = completed_trades['fees'].sum()
         net_pnl = total_pnl - total_fees
 
-        # Risk metrics
-        returns = completed_trades['pnl'].values
+        # Risk metrics - use returns instead of raw PnL
+        # Approximate returns per trade as pnl divided by notional; fallback if notional unknown
+        import numpy as np
+        notional = (completed_trades['executed_price'] * completed_trades['quantity']).replace(0, np.nan)
+        ret_series = (completed_trades['pnl'] / notional).replace([np.inf, -np.inf], np.nan).dropna()
+        returns = ret_series.values
+
         if len(returns) > 1:
             sharpe_ratio = self._calculate_sharpe_ratio(returns)
             max_drawdown = self._calculate_max_drawdown(returns)
@@ -176,7 +182,7 @@ class RealPerformanceTracker(LoggerMixin):
         # Time analysis
         trade_duration = []
         for _, trade in completed_trades.iterrows():
-            if trade['exit_price']:
+            if trade['status'] == 'COMPLETED':
                 # In real implementation, we'd track entry/exit times
                 trade_duration.append(1)  # Placeholder
 
@@ -279,10 +285,10 @@ class RealPerformanceTracker(LoggerMixin):
                 winning_trades=metrics.get('winning_trades', 0),
                 losing_trades=metrics.get('losing_trades', 0),
                 win_rate=Decimal(str(metrics.get('win_rate', 0))),
-                starting_balance=Decimal('10000'),  # Would get from user account
+                starting_balance=Decimal('10000'),  # TODO: replace with real balance
                 ending_balance=Decimal('10000') + Decimal(str(metrics.get('net_pnl', 0))),
                 total_pnl=Decimal(str(metrics.get('total_pnl', 0))),
-                total_pnl_pct=Decimal(str(metrics.get('total_pnl', 0))) / Decimal('100'),
+                total_pnl_pct=(Decimal(str(metrics.get('total_pnl', 0))) / Decimal('10000')) * Decimal('100'),
                 max_drawdown=Decimal(str(metrics.get('max_drawdown', 0))),
                 sharpe_ratio=Decimal(str(metrics.get('sharpe_ratio', 0))),
                 best_trade_pnl=Decimal(str(metrics.get('best_trade', 0))),

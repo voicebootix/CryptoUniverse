@@ -120,15 +120,37 @@ class RealMarketDataService(LoggerMixin):
                 # Fetch real ticker data
                 ticker = await exchange_obj.fetch_ticker(ccxt_symbol)
 
+                # Safely extract ticker values with fallbacks
+                last_price = ticker.get('last') or ticker.get('close') or 0
+                last_price = float(last_price) if last_price else 0
+
+                bid_val = ticker.get('bid') or last_price or 0
+                bid_price = float(bid_val) if bid_val else 0
+
+                ask_val = ticker.get('ask') or last_price or 0
+                ask_price = float(ask_val) if ask_val else 0
+
+                volume_val = ticker.get('quoteVolume') or ticker.get('baseVolume') or 0
+                volume_24h = float(volume_val) if volume_val else 0
+
+                change_val = ticker.get('percentage') or ticker.get('change') or 0
+                change_24h = float(change_val) if change_val else 0
+
+                high_val = ticker.get('high') or last_price or 0
+                high_24h = float(high_val) if high_val else 0
+
+                low_val = ticker.get('low') or last_price or 0
+                low_24h = float(low_val) if low_val else 0
+
                 price_data = {
                     'symbol': symbol,
-                    'price': float(ticker['last']),
-                    'bid': float(ticker['bid']) if ticker['bid'] else float(ticker['last']),
-                    'ask': float(ticker['ask']) if ticker['ask'] else float(ticker['last']),
-                    'volume_24h': float(ticker['quoteVolume']) if ticker['quoteVolume'] else 0,
-                    'change_24h': float(ticker['percentage']) if ticker['percentage'] else 0,
-                    'high_24h': float(ticker['high']) if ticker['high'] else float(ticker['last']),
-                    'low_24h': float(ticker['low']) if ticker['low'] else float(ticker['last']),
+                    'price': last_price,
+                    'bid': bid_price,
+                    'ask': ask_price,
+                    'volume_24h': volume_24h,
+                    'change_24h': change_24h,
+                    'high_24h': high_24h,
+                    'low_24h': low_24h,
                     'exchange': exch_name,
                     'timestamp': datetime.utcnow().isoformat(),
                     'source': 'real_market_data'
