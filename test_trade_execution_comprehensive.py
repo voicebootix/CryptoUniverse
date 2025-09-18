@@ -16,6 +16,7 @@ import uuid
 
 from app.services.trade_execution import TradeExecutionService
 from app.services.ai_chat_engine_fixes import EnhancedChatEngineService
+from app.api.v1.endpoints.trading import SimulationModeRequest
 
 
 class TestTradeExecutionService:
@@ -220,11 +221,17 @@ class TestEnhancedChatEngineIntegration:
         with patch('app.services.ai_chat_engine_fixes.get_database', return_value=mock_get_database):
             with patch.object(chat_engine, 'trade_executor', mock_executor):
 
-                # Test chat processing
-                result = await chat_engine.process_message(
-                    user_message=message,
-                    user_id=user_id,
-                    session_id="test_session"
+                # Test trade execution with simulation check
+                trade_request = {
+                    "symbol": "BTC/USDT",
+                    "side": "buy",
+                    "quantity": 0.001,
+                    "order_type": "market"
+                }
+
+                result = await chat_engine.execute_trade_with_simulation_check(
+                    trade_request=trade_request,
+                    user_id=user_id
                 )
 
                 # Verify database was accessed correctly
@@ -401,7 +408,7 @@ class TestTradeExecutionSystem:
             mock_sim.return_value = {"success": True, "order_id": "sim_123"}
 
             # Should not raise NameError about order_params
-            result = await trade_service._execute_real_trade_order(trade_request, self.user_id)
+            result = await trade_service._execute_real_order(trade_request, self.user_id)
 
             assert result["success"] is True
             assert "order_params" not in str(result)
@@ -462,7 +469,7 @@ class TestTradeExecutionSystem:
                 "execution_price": 2500.0
             }
 
-            result = await trade_service._execute_real_trade_order(trade_request, self.user_id)
+            result = await trade_service._execute_real_order(trade_request, self.user_id)
 
             # Should fallback to simulation with notice
             assert result["success"] is True
@@ -475,17 +482,18 @@ class TestTradeExecutionSystem:
     async def test_fix_4_chat_respects_user_preference(self):
         """Test Fix #4: Chat engine respects user's simulation preference"""
 
-        chat_engine = EnhancedAIChatEngine()
+        chat_engine = EnhancedChatEngineService()
         await chat_engine._ensure_services()
 
         # Mock user with simulation mode enabled
         mock_user = Mock()
         mock_user.simulation_mode = True
 
-        trade_data = {
+        trade_request = {
             "symbol": "BTC/USDT",
-            "action": "buy",
-            "amount": 0.005
+            "side": "buy",
+            "quantity": 0.005,
+            "order_type": "market"
         }
 
         with patch('app.services.ai_chat_engine_fixes.get_database') as mock_get_db, \
@@ -505,8 +513,11 @@ class TestTradeExecutionSystem:
             # Mock successful execution
             mock_executor.execute_trade = AsyncMock(return_value={"success": True})
 
-            # Execute trade through chat engine
-            result = await chat_engine._execute_trade_with_safety(trade_data, self.user_id)
+            # Execute trade through chat engine public API
+            result = await chat_engine.execute_trade_with_simulation_check(
+                trade_request=trade_request,
+                user_id=self.user_id
+            )
 
             # Verify simulation_mode=True was passed to executor
             mock_executor.execute_trade.assert_called_once()
@@ -586,7 +597,7 @@ class TestTradeExecutionSystem:
                 "fees": 1.125
             }
 
-            result = await trade_service._execute_real_trade_order(trade_request, self.user_id)
+            result = await trade_service._execute_real_order(trade_request, self.user_id)
 
             assert result["success"] is True
             assert result["order_id"] == "live_456"
