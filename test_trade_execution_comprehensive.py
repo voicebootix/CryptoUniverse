@@ -1,5 +1,4 @@
 """
-<<<<<<< HEAD
 Comprehensive trade execution tests with corrected method names and mocking.
 
 Fixes applied:
@@ -15,8 +14,8 @@ from datetime import datetime
 from decimal import Decimal
 import uuid
 
-from app.services.trade_execution_service import TradeExecutionService
-from app.services.ai_chat_engine import AIChatEngine
+from app.services.trade_execution import TradeExecutionService
+from app.services.ai_chat_engine_fixes import EnhancedChatEngineService
 
 
 class TestTradeExecutionService:
@@ -176,13 +175,13 @@ class TestTradeExecutionService:
             assert "error" in result
 
 
-class TestAIChatEngineIntegration:
-    """Test AI chat engine integration with proper database mocking."""
+class TestEnhancedChatEngineIntegration:
+    """Test Enhanced chat engine integration with proper database mocking."""
 
     @pytest.fixture
     def chat_engine(self):
-        """Create AI chat engine instance."""
-        return AIChatEngine()
+        """Create enhanced chat engine instance."""
+        return EnhancedChatEngineService()
 
     @pytest.mark.asyncio
     async def test_chat_engine_with_proper_database_mocking(self, chat_engine):
@@ -191,7 +190,7 @@ class TestAIChatEngineIntegration:
 
         Fixed: Use async generator instead of AsyncMock with __aenter__ for get_database
         """
-        user_id = "chat_test_user"
+        user_id = str(uuid.uuid4())  # Fixed: Use proper UUID string
         message = "Execute a small BTC trade"
 
         # Create mock database session
@@ -217,7 +216,7 @@ class TestAIChatEngineIntegration:
         })
 
         # Apply patches with correct async generator
-        with patch('app.services.ai_chat_engine.get_database', new=fake_get_database):
+        with patch('app.services.ai_chat_engine_fixes.get_database', new=fake_get_database):
             with patch.object(chat_engine, 'trade_executor', mock_executor):
 
                 # Test chat processing
@@ -245,7 +244,7 @@ class TestAIChatEngineIntegration:
             raise Exception("Database connection failed")
             yield  # This will never be reached
 
-        with patch('app.services.ai_chat_engine.get_database', new=failing_get_database):
+        with patch('app.services.ai_chat_engine_fixes.get_database', new=failing_get_database):
             # Test that database errors are handled gracefully
             try:
                 result = await chat_engine.get_user_simulation_mode(user_id)
@@ -280,7 +279,7 @@ class TestAIChatEngineIntegration:
             db_index += 1
             yield current_db
 
-        with patch('app.services.ai_chat_engine.get_database', new=concurrent_get_database):
+        with patch('app.services.ai_chat_engine_fixes.get_database', new=concurrent_get_database):
             # Execute concurrent operations
             tasks = [
                 chat_engine.get_user_simulation_mode(user_id)
@@ -363,22 +362,6 @@ class TestAdvancedTradingScenarios:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
-=======
-Comprehensive Test Suite for Trade Execution System
-Tests all enterprise-level fixes for validated trade execution issues
-"""
-
-import asyncio
-import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-import uuid
-from datetime import datetime
-
-from app.services.trade_execution import TradeExecutionService
-from app.services.ai_chat_engine import EnhancedAIChatEngine
-from app.models.user import User, UserRole
-from app.api.v1.endpoints.trading import toggle_simulation_mode
-from app.core.schemas import SimulationModeRequest
 
 
 class TestTradeExecutionSystem:
@@ -502,7 +485,7 @@ class TestTradeExecutionSystem:
             "amount": 0.005
         }
 
-        with patch('app.services.ai_chat_engine.get_database') as mock_get_db, \
+        with patch('app.services.ai_chat_engine_fixes.get_database') as mock_get_db, \
              patch.object(chat_engine, 'trade_executor') as mock_executor:
 
             # Mock database return
@@ -683,4 +666,3 @@ async def run_comprehensive_tests():
 if __name__ == "__main__":
     success = asyncio.run(run_comprehensive_tests())
     exit(0 if success else 1)
->>>>>>> 74798ab3bb0b22f57424b2a99d41a082a3880f44
