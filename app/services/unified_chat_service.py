@@ -267,6 +267,72 @@ class UnifiedChatService(LoggerMixin):
             ]
         }
     
+    async def handle_telegram_request(self, chat_id: str, user_id: str, text: str) -> Dict[str, Any]:
+        """Handle Telegram request using unified chat system for consistent experience."""
+        try:
+            # Process message through unified system
+            result = await self.process_message(
+                message=text,
+                user_id=user_id,
+                session_id=f"telegram_{chat_id}",
+                interface=InterfaceType.TELEGRAM,
+                conversation_mode=ConversationMode.LIVE_TRADING,
+                stream=False
+            )
+            
+            # Send response back through Telegram
+            if result.get("success"):
+                # Import here to avoid circular dependency
+                from app.services.telegram_core import TelegramAPIConnector
+                telegram_api = TelegramAPIConnector()
+                
+                # Format response for Telegram
+                response_text = result.get("response", result.get("content", ""))
+                
+                # Send message
+                await telegram_api.send_message(
+                    chat_id=chat_id,
+                    text=response_text,
+                    parse_mode="Markdown"
+                )
+                
+                return {
+                    "success": True,
+                    "response": response_text,
+                    "intent": result.get("intent"),
+                    "metadata": result.get("metadata", {})
+                }
+            else:
+                error_msg = "I'm having trouble processing your request. Please try again."
+                
+                from app.services.telegram_core import TelegramAPIConnector
+                telegram_api = TelegramAPIConnector()
+                await telegram_api.send_message(chat_id, error_msg)
+                
+                return {
+                    "success": False,
+                    "error": result.get("error", "Processing failed")
+                }
+                
+        except Exception as e:
+            self.logger.error("Telegram request handling failed", error=str(e))
+            
+            # Send error message to user
+            try:
+                from app.services.telegram_core import TelegramAPIConnector
+                telegram_api = TelegramAPIConnector()
+                await telegram_api.send_message(
+                    chat_id=chat_id,
+                    text="❌ Sorry, I encountered an error. Please try again or use /help."
+                )
+            except:
+                pass
+                
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
     async def process_message(
         self,
         message: str,
