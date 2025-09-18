@@ -97,7 +97,13 @@ class RealPerformanceTracker(LoggerMixin):
                 return metrics
 
         except Exception as e:
-            self.logger.error("Failed to track performance", error=str(e))
+            self.logger.exception(
+                "Failed to track strategy performance",
+                strategy_id=strategy_id,
+                user_id=user_id,
+                period_days=period_days,
+                error=str(e)
+            )
             return self._empty_performance_metrics(strategy_id, "error")
 
     async def _calculate_real_metrics(
@@ -309,7 +315,19 @@ class RealPerformanceTracker(LoggerMixin):
             self.logger.info("✅ Stored performance history", strategy_id=strategy_id)
 
         except Exception as e:
-            self.logger.error("Failed to store performance history", error=str(e))
+            # Rollback the transaction
+            await db.rollback()
+
+            # Log full traceback with context
+            self.logger.exception(
+                "Failed to store performance history",
+                strategy_id=strategy_id,
+                user_id=user_id,
+                error=str(e)
+            )
+
+            # Re-raise to let caller handle the failure
+            raise
 
     def _empty_performance_metrics(self, strategy_id: str, reason: str) -> Dict[str, Any]:
         """Return empty but properly structured metrics."""
