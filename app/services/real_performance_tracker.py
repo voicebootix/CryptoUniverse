@@ -284,7 +284,7 @@ class RealPerformanceTracker(LoggerMixin):
                 total_trades=metrics.get('total_trades', 0),
                 winning_trades=metrics.get('winning_trades', 0),
                 losing_trades=metrics.get('losing_trades', 0),
-                win_rate=Decimal(str(metrics.get('win_rate', 0))),
+                win_rate=(Decimal(str(metrics.get('win_rate', 0))) * Decimal('100')).quantize(Decimal('0.01')),
                 starting_balance=Decimal('10000'),  # TODO: replace with real balance
                 ending_balance=Decimal('10000') + Decimal(str(metrics.get('net_pnl', 0))),
                 total_pnl=Decimal(str(metrics.get('total_pnl', 0))),

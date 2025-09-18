@@ -130,8 +130,17 @@ class RealMarketDataService(LoggerMixin):
                 ask_val = ticker.get('ask') or last_price or 0
                 ask_price = float(ask_val) if ask_val else 0
 
-                volume_val = ticker.get('quoteVolume') or ticker.get('baseVolume') or 0
-                volume_24h = float(volume_val) if volume_val else 0
+                # Always convert to quote volume for consistency
+                quote_volume = ticker.get('quoteVolume')
+                base_volume = ticker.get('baseVolume')
+
+                if quote_volume:
+                    volume_24h = float(quote_volume)
+                elif base_volume and last_price:
+                    # Convert base volume to quote volume
+                    volume_24h = float(base_volume) * last_price
+                else:
+                    volume_24h = 0
 
                 change_val = ticker.get('percentage') or ticker.get('change') or 0
                 change_24h = float(change_val) if change_val else 0
@@ -337,12 +346,13 @@ class RealMarketDataService(LoggerMixin):
         for result in results:
             if isinstance(result, dict) and result.get('price', 0) > 0:
                 prices.append(result['price'])
+                # Use consistent quote volume from get_real_price (converted if needed)
                 volumes.append(result.get('volume_24h', 1))
 
         if not prices:
             return {'error': 'No valid prices found'}
 
-        # Calculate volume-weighted average price
+        # Calculate volume-weighted average price using consistent quote volumes
         total_volume = sum(volumes)
         vwap = sum(p * v for p, v in zip(prices, volumes)) / total_volume if total_volume > 0 else np.mean(prices)
 
