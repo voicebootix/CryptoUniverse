@@ -135,20 +135,57 @@ class UnifiedChatService(LoggerMixin):
         """Initialize with ALL services preserved."""
         # Core AI Services
         self.chat_ai = chat_ai_service  # NEW: For natural conversation
-        self.ai_consensus = AIConsensusService()  # KEPT: Only for trade validation
+        
+        # Initialize ai_consensus with error handling
+        try:
+            self.ai_consensus = AIConsensusService()  # KEPT: Only for trade validation
+        except Exception as e:
+            logger.error(f"Failed to initialize AIConsensusService: {e}")
+            self.ai_consensus = None
         
         # Memory and session management
         self.memory_service = ChatMemoryService()
         self.sessions: Dict[str, ChatSession] = {}
         
-        # ALL service connections preserved
-        self.master_controller = MasterSystemController()
-        self.trade_executor = TradeExecutionService()
+        # ALL service connections preserved - Initialize with error handling
+        try:
+            self.master_controller = MasterSystemController()
+        except Exception as e:
+            logger.error(f"Failed to initialize MasterSystemController: {e}")
+            self.master_controller = None
+            
+        try:
+            self.trade_executor = TradeExecutionService()
+        except Exception as e:
+            logger.error(f"Failed to initialize TradeExecutionService: {e}")
+            self.trade_executor = None
+            
         self.adapters = chat_adapters
-        self.telegram_core = TelegramCommanderService()
-        self.market_analysis = MarketAnalysisService()
-        self.portfolio_risk = PortfolioRiskService()
-        self.trading_strategies = TradingStrategiesService()
+        
+        try:
+            self.telegram_core = TelegramCommanderService()
+        except Exception as e:
+            logger.error(f"Failed to initialize TelegramCommanderService: {e}")
+            self.telegram_core = None
+            
+        try:
+            self.market_analysis = MarketAnalysisService()
+        except Exception as e:
+            logger.error(f"Failed to initialize MarketAnalysisService: {e}")
+            self.market_analysis = None
+            
+        try:
+            self.portfolio_risk = PortfolioRiskService()
+        except Exception as e:
+            logger.error(f"Failed to initialize PortfolioRiskService: {e}")
+            self.portfolio_risk = None
+            
+        try:
+            self.trading_strategies = TradingStrategiesService()
+        except Exception as e:
+            logger.error(f"Failed to initialize TradingStrategiesService: {e}")
+            self.trading_strategies = None
+            
         self.strategy_marketplace = strategy_marketplace_service
         self.paper_trading = paper_trading_engine
         self.opportunity_discovery = user_opportunity_discovery
@@ -634,7 +671,12 @@ class UnifiedChatService(LoggerMixin):
         try:
             # Get user's current positions and limits
             portfolio = await self.adapters.get_portfolio_summary(user_id)
-            risk_limits = await self.portfolio_risk.calculate_position_limits(user_id)
+            
+            # Check if portfolio_risk service is available
+            if self.portfolio_risk:
+                risk_limits = await self.portfolio_risk.calculate_position_limits(user_id)
+            else:
+                risk_limits = {"max_position_size": 10000}  # Default limits
             
             return {
                 "within_limits": True,  # Real calculation needed
@@ -663,25 +705,47 @@ class UnifiedChatService(LoggerMixin):
         context_data = {}
         
         # Always get basic portfolio data
-        context_data["portfolio"] = await self.adapters.get_portfolio_summary(user_id)
+        try:
+            context_data["portfolio"] = await self.adapters.get_portfolio_summary(user_id)
+        except Exception as e:
+            self.logger.error(f"Failed to get portfolio summary: {e}")
+            context_data["portfolio"] = {"total_value": 0, "positions": [], "error": str(e)}
         
         # Intent-specific data gathering
         if intent == ChatIntent.PORTFOLIO_ANALYSIS:
             # Get comprehensive portfolio analysis
-            context_data["risk_analysis"] = await self.adapters.comprehensive_risk_analysis(user_id)
-            context_data["performance"] = await self._get_performance_metrics(user_id)
+            try:
+                context_data["risk_analysis"] = await self.adapters.comprehensive_risk_analysis(user_id)
+                context_data["performance"] = await self._get_performance_metrics(user_id)
+            except Exception as e:
+                self.logger.error(f"Failed to get portfolio analysis: {e}")
+                context_data["risk_analysis"] = {"error": str(e)}
+                context_data["performance"] = {"error": str(e)}
             
         elif intent == ChatIntent.TRADE_EXECUTION:
             # Get market data for trade analysis
             entities = intent_analysis.get("entities", {})
             symbol = entities.get("symbol", "BTC")
-            context_data["market_data"] = await self.adapters.get_asset_analysis(symbol)
-            context_data["trade_validation"] = await self._prepare_trade_validation(entities, user_id)
+            try:
+                context_data["market_data"] = await self.adapters.get_asset_analysis(symbol)
+                context_data["trade_validation"] = await self._prepare_trade_validation(entities, user_id)
+            except Exception as e:
+                self.logger.error(f"Failed to get trade data: {e}")
+                context_data["market_data"] = {"error": str(e)}
+                context_data["trade_validation"] = {"error": str(e)}
             
         elif intent == ChatIntent.MARKET_ANALYSIS:
             # Get comprehensive market analysis
-            context_data["market_overview"] = await self.market_analysis.get_market_overview()
-            context_data["technical_analysis"] = await self.adapters.get_technical_analysis()
+            try:
+                if self.market_analysis:
+                    context_data["market_overview"] = await self.market_analysis.get_market_overview()
+                else:
+                    context_data["market_overview"] = {"error": "Market analysis service not available"}
+                context_data["technical_analysis"] = await self.adapters.get_technical_analysis()
+            except Exception as e:
+                self.logger.error(f"Failed to get market analysis: {e}")
+                context_data["market_overview"] = {"error": str(e)}
+                context_data["technical_analysis"] = {"error": str(e)}
             
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
             # Get real opportunities
@@ -697,17 +761,37 @@ class UnifiedChatService(LoggerMixin):
             
         elif intent == ChatIntent.RISK_ASSESSMENT:
             # Get comprehensive risk metrics
-            context_data["risk_metrics"] = await self.portfolio_risk.risk_analysis(user_id)
-            context_data["market_risk"] = await self.adapters.get_market_risk_factors(user_id)
+            try:
+                if self.portfolio_risk:
+                    context_data["risk_metrics"] = await self.portfolio_risk.risk_analysis(user_id)
+                else:
+                    context_data["risk_metrics"] = {"error": "Portfolio risk service not available"}
+                context_data["market_risk"] = await self.adapters.get_market_risk_factors(user_id)
+            except Exception as e:
+                self.logger.error(f"Failed to get risk assessment: {e}")
+                context_data["risk_metrics"] = {"error": str(e)}
+                context_data["market_risk"] = {"error": str(e)}
             
         elif intent == ChatIntent.STRATEGY_RECOMMENDATION:
             # Get strategy recommendations
-            context_data["active_strategy"] = await self.trading_strategies.get_active_strategy(user_id)
-            context_data["available_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
+            try:
+                if self.trading_strategies:
+                    context_data["active_strategy"] = await self.trading_strategies.get_active_strategy(user_id)
+                else:
+                    context_data["active_strategy"] = {"error": "Trading strategies service not available"}
+                context_data["available_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
+            except Exception as e:
+                self.logger.error(f"Failed to get strategy recommendations: {e}")
+                context_data["active_strategy"] = {"error": str(e)}
+                context_data["available_strategies"] = {"error": str(e)}
             
         elif intent == ChatIntent.REBALANCING:
             # Get rebalancing analysis
-            context_data["rebalance_analysis"] = await self.adapters.analyze_rebalancing_needs(user_id)
+            try:
+                context_data["rebalance_analysis"] = await self.adapters.analyze_rebalancing_needs(user_id)
+            except Exception as e:
+                self.logger.error(f"Failed to get rebalancing analysis: {e}")
+                context_data["rebalance_analysis"] = {"error": str(e)}
             
         # Add user context
         context_data["user_config"] = await self._get_user_config(user_id)
@@ -1183,7 +1267,14 @@ Provide a helpful response using the real data available. Never use placeholder 
         try:
             # Phase 1: Analysis
             self.logger.info("Phase 1: Trade Analysis", trade=trade_params)
-            analysis = await self.market_analysis.analyze_trade_opportunity(trade_params)
+            if self.market_analysis:
+                analysis = await self.market_analysis.analyze_trade_opportunity(trade_params)
+            else:
+                analysis = {
+                    "recommendation": "HOLD",
+                    "confidence": 0.5,
+                    "reason": "Market analysis service not available"
+                }
             phases_completed.append("analysis")
             
             # Phase 2: AI Consensus (ONLY for trade validation)
