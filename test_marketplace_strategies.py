@@ -1,18 +1,21 @@
 """
-<<<<<<< HEAD
 Enhanced marketplace strategy tests with corrected method signatures.
 
 Fixed test implementations addressing code review issues.
+Includes comprehensive testing for both unit tests and marketplace analysis.
 """
 
 import pytest
 import asyncio
+import json
 from unittest.mock import AsyncMock, patch, Mock
 from datetime import datetime
 from decimal import Decimal
 
 from app.services.trade_execution_service import TradeExecutionService
 from app.services.strategy_marketplace_service import StrategyMarketplaceService
+from app.services.strategy_marketplace_service import strategy_marketplace_service
+from app.services.trading_strategies import trading_strategies_service
 
 
 class TestMarketplaceStrategies:
@@ -347,17 +350,7 @@ class TestPerformanceAndScale:
             assert len(successes) + len(failures) == len(results), "All results should be handled"
 
 
-if __name__ == "__main__":
-    # Run tests directly if needed
-    pytest.main([__file__, "-v"])
-=======
-Test marketplace strategies to verify mock vs real data
-"""
-import asyncio
-import json
-from app.services.strategy_marketplace_service import strategy_marketplace_service
-from app.services.trading_strategies import trading_strategies_service
-
+# Marketplace Analysis Function (non-pytest)
 async def test_marketplace_strategies():
     """Test all marketplace strategies for mock vs real data"""
 
@@ -574,6 +567,14 @@ async def test_marketplace_strategies():
         print("   - Data sources are legitimate")
         print("   - Execution paths are production-ready")
 
+
 if __name__ == "__main__":
-    asyncio.run(test_marketplace_strategies())
->>>>>>> 74798ab3bb0b22f57424b2a99d41a082a3880f44
+    # Run pytest tests or marketplace analysis based on arguments
+    import sys
+
+    if "--analyze" in sys.argv:
+        # Run marketplace analysis
+        asyncio.run(test_marketplace_strategies())
+    else:
+        # Run pytest unit tests
+        pytest.main([__file__, "-v"])
