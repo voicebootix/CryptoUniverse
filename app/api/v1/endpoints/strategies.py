@@ -944,7 +944,7 @@ class StrategyTemplate(BaseModel):
     risk_level: str
 
 class StrategyValidationRequest(BaseModel):
-    # code: str  # READ-ONLY placeholder; remove after migration
+    code: Optional[str] = None  # Optional for backward compatibility; functionality disabled until migration
     strategy_name: Optional[str] = None
     parameters: Optional[Dict[str, Any]] = None
 
@@ -957,17 +957,17 @@ class StrategyValidationResult(BaseModel):
 
 class StrategySaveRequest(BaseModel):
     name: str
-    # code: str  # READ-ONLY placeholder; remove after migration
+    code: Optional[str] = None  # Deprecated/ignored server-side; accepted for backward compatibility
     description: Optional[str] = None
-    # category: str = "custom"  # READ-ONLY placeholder; remove after migration
+    category: Optional[str] = None  # Deprecated/ignored server-side; accepted for backward compatibility
     parameters: Dict[str, Any] = Field(default_factory=dict)
     risk_parameters: Optional[Dict[str, Any]] = None
     entry_conditions: Optional[List[Dict[str, Any]]] = None
     exit_conditions: Optional[List[Dict[str, Any]]] = None
-    # metadata: Dict[str, Any] = Field(default_factory=dict)  # READ-ONLY placeholder; remove after migration
+    metadata: Optional[Dict[str, Any]] = None  # Deprecated/ignored server-side; accepted for backward compatibility
 
 class StrategyBacktestRequest(BaseModel):
-    # code: str  # READ-ONLY placeholder; remove after migration
+    code: Optional[str] = None  # Deprecated/ignored server-side; accepted for backward compatibility
     symbol: str = "BTC/USDT"
     start_date: str
     end_date: str
@@ -1198,6 +1198,13 @@ async def validate_strategy_code(
 
     try:
         import ast
+
+        # Check if code is provided
+        if not request.code:
+            raise HTTPException(
+                status_code=422,
+                detail="Strategy code is required for validation but temporarily disabled due to database migration. Please try again later."
+            )
 
         code = request.code
         errors = []
@@ -1594,7 +1601,7 @@ class StrategySubmissionRequest(BaseModel):
     strategy_id: str
     name: str
     description: str
-    # category: str  # READ-ONLY placeholder; remove after migration
+    category: Optional[str] = None  # Deprecated/ignored server-side; accepted for backward compatibility
     risk_level: RiskLevel = RiskLevel.MEDIUM
     expected_return_range: conlist(Decimal, min_length=2, max_length=2)
     required_capital: conint(ge=0)
