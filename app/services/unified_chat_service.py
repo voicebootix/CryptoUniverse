@@ -810,7 +810,19 @@ class UnifiedChatService(LoggerMixin):
         Generate complete response using ChatAI with personality.
         """
         intent = intent_analysis["intent"]
-        personality = self.personalities[session.trading_mode]
+        # Get personality with fallback to BALANCED if not found
+        personality = self.personalities.get(
+            session.trading_mode, 
+            self.personalities.get(TradingMode.BALANCED, {
+                "name": "Assistant",
+                "style": "balanced",
+                "greeting": "Hello! I'm your crypto trading assistant.",
+                "approach": "balanced and thoughtful",
+                "vocabulary": ["balanced", "strategic", "optimized"],
+                "risk_tolerance": "medium",
+                "decision_speed": "measured"
+            })
+        )
         
         # Build system message with personality
         system_message = f"""You are {personality['name']}, a {personality['style']} cryptocurrency trading AI assistant.
@@ -922,7 +934,19 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
         }
         
         intent = intent_analysis["intent"]
-        personality = self.personalities[session.trading_mode]
+        # Get personality with fallback to BALANCED if not found
+        personality = self.personalities.get(
+            session.trading_mode,
+            self.personalities.get(TradingMode.BALANCED, {
+                "name": "Assistant",
+                "style": "balanced",
+                "greeting": "Hello! I'm your crypto trading assistant.",
+                "approach": "balanced and thoughtful",
+                "vocabulary": ["balanced", "strategic", "optimized"],
+                "risk_tolerance": "medium",
+                "decision_speed": "measured"
+            })
+        )
         
         # Build system message
         system_message = f"""You are {personality['name']}, a {personality['style']} cryptocurrency trading AI assistant.
