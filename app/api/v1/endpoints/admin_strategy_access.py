@@ -21,6 +21,7 @@ from app.core.config import get_settings
 from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user, require_role
 from app.models.user import User, UserRole
+from app.models.trading_strategy import TradingStrategy
 from app.core.redis import get_redis_client
 from app.services.strategy_marketplace_service import strategy_marketplace_service
 
@@ -102,20 +103,53 @@ async def grant_admin_full_strategy_access(
                 detail=f"Redis service unavailable: {str(e)}"
             )
 
-        # Step 3: Get all available strategies from marketplace
+        # Step 3: Get all available strategies efficiently (admin bypass)
         try:
-            marketplace_result = await strategy_marketplace_service.get_marketplace_strategies(
-                user_id=target_user_id
+            # Admin fast path - get strategies directly from catalog without expensive operations
+            all_strategies = []
+
+            # Get AI strategies from catalog (fast, no performance calculations)
+            ai_catalog = strategy_marketplace_service.ai_strategy_catalog
+            for strategy_func, config in ai_catalog.items():
+                all_strategies.append({
+                    "strategy_id": f"ai_{strategy_func}",
+                    "name": config["name"],
+                    "category": config["category"],
+                    "monthly_cost": config.get("credit_cost_monthly", 25)
+                })
+
+            # Get community strategies from database (fast query)
+            community_strategies_query = select(
+                TradingStrategy.id,
+                TradingStrategy.name,
+                TradingStrategy.category
+            ).where(
+                TradingStrategy.is_active == True,
+                TradingStrategy.visibility == 'public'
+            ).limit(50)  # Reasonable limit for admin
+
+            community_result = await db.execute(community_strategies_query)
+            community_strategies = community_result.fetchall()
+
+            for strategy in community_strategies:
+                all_strategies.append({
+                    "strategy_id": str(strategy.id),
+                    "name": strategy.name,
+                    "category": strategy.category or "community",
+                    "monthly_cost": 0  # Community strategies are typically free
+                })
+
+            logger.info(
+                "📊 Fast admin strategy list generated",
+                operation_id=operation_id,
+                ai_strategies=len(ai_catalog),
+                community_strategies=len(community_strategies),
+                total_strategies=len(all_strategies)
             )
-
-            if not marketplace_result.get("success"):
-                raise Exception(f"Failed to get marketplace strategies: {marketplace_result.get('error')}")
-
-            all_strategies = marketplace_result.get("strategies", [])
 
         except Exception as e:
             logger.error(
-                "❌ Failed to fetch marketplace strategies",
+                "❌ Failed to fetch strategies efficiently",
                 operation_id=operation_id,
                 error=str(e)
             )
