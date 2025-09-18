@@ -122,10 +122,9 @@ async def grant_admin_full_strategy_access(
             community_strategies_query = select(
                 TradingStrategy.id,
                 TradingStrategy.name,
-                TradingStrategy.category
+                TradingStrategy.strategy_type
             ).where(
-                TradingStrategy.is_active == True,
-                TradingStrategy.visibility == 'public'
+                TradingStrategy.is_active == True
             ).limit(50)  # Reasonable limit for admin
 
             community_result = await db.execute(community_strategies_query)
@@ -135,7 +134,7 @@ async def grant_admin_full_strategy_access(
                 all_strategies.append({
                     "strategy_id": str(strategy.id),
                     "name": strategy.name,
-                    "category": strategy.category or "community",
+                    "category": str(strategy.strategy_type) if strategy.strategy_type else "community",
                     "monthly_cost": 0  # Community strategies are typically free
                 })
 
