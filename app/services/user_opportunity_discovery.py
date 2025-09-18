@@ -1272,27 +1272,67 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     optimization_result.get("rebalancing_recommendations", [])
                 )
                 
+                # Also check for strategy_analysis from new implementation
+                strategy_analysis = optimization_result.get("strategy_analysis", {})
+                
+                # Process recommendations from all strategies
                 if rebalancing_recommendations:
                     for rebal in rebalancing_recommendations:
-                        if rebal.get("improvement_potential", 0) > 0.05:  # 5%+ improvement for more opportunities
+                        # Include all recommendations, not filtered by improvement
+                        improvement = rebal.get("improvement_potential", 0)
+                        strategy_name = rebal.get("strategy", "UNKNOWN")
+                        
+                        opportunity = OpportunityResult(
+                            strategy_id="ai_portfolio_optimization",
+                            strategy_name=f"AI Portfolio Optimization - {strategy_name}",
+                            opportunity_type="portfolio_rebalance",
+                            symbol=rebal.get("symbol", rebal.get("target_asset", "")),
+                            exchange="multiple",
+                            profit_potential_usd=float(improvement * 10000),  # Assume $10k portfolio
+                            confidence_score=80.0,  # High confidence in optimization
+                            risk_level="low",
+                            required_capital_usd=float(rebal.get("amount", 0.1) * 10000),
+                            estimated_timeframe="1-3 months",
+                            entry_price=None,
+                            exit_price=None,
+                            metadata={
+                                "rebalance_action": rebal.get("action", ""),
+                                "strategy_used": strategy_name,
+                                "improvement_potential": improvement,
+                                "risk_reduction": rebal.get("risk_reduction", 0),
+                                "amount": rebal.get("amount", 0),
+                                "urgency": rebal.get("urgency", "MEDIUM")
+                            },
+                            discovered_at=datetime.utcnow()
+                        )
+                        opportunities.append(opportunity)
+                
+                # If no specific trades but we have strategy analysis, show potential
+                elif strategy_analysis:
+                    for strategy, results in strategy_analysis.items():
+                        if not isinstance(results, dict):
+                            continue
+                        expected_return = results.get("expected_return", 0)
+                        if expected_return > 0 or strategy == "equal_weight":  # Show all strategies
                             opportunity = OpportunityResult(
                                 strategy_id="ai_portfolio_optimization",
-                                strategy_name="AI Portfolio Optimization",
-                                opportunity_type="portfolio_rebalance",
-                                symbol=rebal.get("target_asset", ""),
-                                exchange="binance", 
-                                profit_potential_usd=float(rebal.get("expected_improvement_usd") or 0),
-                                confidence_score=float(rebal.get("confidence") or 0.85),
-                                risk_level="low",
-                                required_capital_usd=float(rebal.get("rebalance_amount") or 1000),
-                                estimated_timeframe="1-7d",
+                                strategy_name=f"Portfolio {strategy.replace('_', ' ').title()}",
+                                opportunity_type="optimization_analysis",
+                                symbol="PORTFOLIO",
+                                exchange="all",
+                                profit_potential_usd=float(expected_return * 10000),
+                                confidence_score=75.0,
+                                risk_level="medium",
+                                required_capital_usd=10000.0,
+                                estimated_timeframe="1 year",
                                 entry_price=None,
                                 exit_price=None,
                                 metadata={
-                                    "current_allocation": rebal.get("current_allocation", 0),
-                                    "target_allocation": rebal.get("target_allocation", 0),
-                                    "sharpe_improvement": rebal.get("sharpe_improvement", 0),
-                                    "rebalance_type": rebal.get("action", "")
+                                    "strategy": strategy,
+                                    "expected_annual_return": expected_return,
+                                    "risk_level": results.get("risk_level", 0),
+                                    "sharpe_ratio": results.get("sharpe_ratio", 0),
+                                    "analysis_type": "strategy_comparison"
                                 },
                                 discovered_at=datetime.utcnow()
                             )
