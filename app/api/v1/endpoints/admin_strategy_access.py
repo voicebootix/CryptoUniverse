@@ -21,7 +21,7 @@ from app.core.config import get_settings
 from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user, require_role
 from app.models.user import User, UserRole
-from app.models.trading_strategy import TradingStrategy
+from app.models.trading import TradingStrategy
 from app.core.redis import get_redis_client
 from app.services.strategy_marketplace_service import strategy_marketplace_service
 
