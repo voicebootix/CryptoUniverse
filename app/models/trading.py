@@ -22,7 +22,9 @@ from sqlalchemy import (
     String,
     Text,
     Index,
+    literal,
 )
+from sqlalchemy.orm import column_property
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -142,10 +144,16 @@ class TradingStrategy(Base):
     confidence_threshold = Column(Numeric(5, 2), default=70.0, nullable=False)
     consensus_required = Column(Boolean, default=True, nullable=False)
 
-    # Strategy IDE fields - TEMPORARILY DISABLED due to missing database columns
-    # strategy_code = Column(Text, nullable=True)  # User's custom strategy code
-    # category = Column(String(50), nullable=True)  # Strategy category
-    # meta_data = Column('metadata', JSON, default=dict, nullable=False)  # Additional metadata
+    # Strategy IDE fields - Using column_property placeholders for missing database columns
+    strategy_code = column_property(literal(None).cast(Text))  # User's custom strategy code
+    category = column_property(literal(None).cast(String(50)))  # Strategy category
+    meta_data = column_property(literal('{}').cast(JSON))  # Additional metadata (mapped as 'metadata' in DB)
+
+    # API compatibility property
+    @property
+    def metadata(self):
+        """Alias for meta_data to maintain API compatibility."""
+        return self.meta_data or {}
     
     # Timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)
