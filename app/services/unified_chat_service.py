@@ -749,8 +749,27 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
             temperature=0.7
         )
         
-        if response["success"]:
+        if response.get("success") and response.get("content"):
             content = response["content"]
+        else:
+            # Fallback response if AI service fails
+            self.logger.warning(f"ChatAI returned empty/failed response for intent: {intent}")
+            
+            # Generate appropriate fallback based on intent
+            if intent == ChatIntent.GREETING:
+                content = f"👋 Hello! I'm {personality['name']}, your {personality['style']} crypto assistant. How can I help you today?"
+            elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
+                # Format opportunities from context data
+                opportunities = context_data.get("opportunities", {}).get("opportunities", [])
+                if opportunities:
+                    content = self._format_opportunities_fallback(opportunities)
+                else:
+                    content = "I'm checking for trading opportunities. Please try again in a moment."
+            elif intent == ChatIntent.PORTFOLIO_ANALYSIS:
+                portfolio = context_data.get("portfolio", {})
+                content = f"Your portfolio value is ${portfolio.get('total_value', 0):,.2f}. Use /portfolio for detailed analysis."
+            else:
+                content = "I understand your request. Let me help you with that. Please use /help to see available commands."
             
             # Handle action requirements
             requires_approval = False
@@ -988,6 +1007,30 @@ Intent: {intent.value}
 Available Data: {list(context_data.keys())}
 
 Provide a helpful response using the real data available. Never use placeholder data."""
+    
+    def _format_opportunities_fallback(self, opportunities: List[Dict[str, Any]]) -> str:
+        """Format opportunities for fallback response."""
+        if not opportunities:
+            return "No trading opportunities found at the moment."
+        
+        # Group by strategy
+        by_strategy = {}
+        for opp in opportunities[:10]:  # Limit to 10
+            strategy = opp.get("strategy_name", "Unknown")
+            if strategy not in by_strategy:
+                by_strategy[strategy] = []
+            by_strategy[strategy].append(opp)
+        
+        lines = ["🎯 Trading Opportunities Found:\n"]
+        for strategy, opps in by_strategy.items():
+            lines.append(f"\n**{strategy}**:")
+            for opp in opps[:3]:  # Top 3 per strategy
+                symbol = opp.get("symbol", "N/A")
+                confidence = opp.get("confidence_score", 0)
+                profit = opp.get("profit_potential_usd", 0)
+                lines.append(f"• {symbol}: {confidence:.0f}% confidence, ${profit:,.0f} potential")
+        
+        return "\n".join(lines)
     
     async def _get_user_config(self, user_id: str) -> Dict[str, Any]:
         """Get user configuration - REAL data only."""

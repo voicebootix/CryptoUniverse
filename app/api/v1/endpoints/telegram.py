@@ -32,6 +32,7 @@ from app.models.telegram_integration import UserTelegramConnection, TelegramMess
 from app.services.telegram_core import TelegramCommanderService as TelegramService
 from app.services.telegram_commander import MessageType
 from app.services.rate_limit import rate_limiter
+from app.services.unified_chat_service import InterfaceType, ConversationMode
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -747,7 +748,35 @@ async def _process_authenticated_message(
         if message_text.startswith("/"):
             response = await _process_telegram_command(connection, message_text, db)
         else:
-            response = await _process_natural_language(connection, message_text, db)
+            # Try UnifiedChatService first
+            try:
+                from app.services.unified_chat_service import unified_chat_service
+                
+                # Process through unified chat (singleton instance)
+                chat_result = await unified_chat_service.process_message(
+                    message=message_text,
+                    user_id=str(connection.user_id),
+                    session_id=f"telegram_{chat_id}",
+                    interface=InterfaceType.TELEGRAM,
+                    conversation_mode=ConversationMode.LIVE_TRADING,
+                    stream=False
+                )
+                
+                if chat_result.get("success"):
+                    response = chat_result.get("content", chat_result.get("response", ""))
+                    
+                    # If we got an empty response, fall back
+                    if not response:
+                        logger.warning("UnifiedChat returned empty response")
+                        response = await _process_natural_language(connection, message_text, db)
+                else:
+                    logger.warning(f"UnifiedChat failed: {chat_result.get('error')}")
+                    response = await _process_natural_language(connection, message_text, db)
+                    
+            except Exception as e:
+                logger.error(f"Failed to use UnifiedChat: {e}", exc_info=True)
+                # Fallback to simple processing
+                response = await _process_natural_language(connection, message_text, db)
         
         # Send response
         if response:
