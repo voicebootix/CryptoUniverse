@@ -125,7 +125,7 @@ def create_refresh_token(
     
     token = jwt.encode(
         payload,
-        settings.REFRESH_TOKEN_SECRET,
+        settings.REFRESH_TOKEN_SECRET or settings.SECRET_KEY,
         algorithm=ALGORITHM
     )
     
@@ -167,24 +167,40 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def verify_token(
-    token: str, 
-    secret_key: str, 
+def verify_token(token: str) -> Dict[str, Any]:
+    """
+    Verify an access token (default function for auth compatibility).
+
+    Args:
+        token: The access token to verify
+
+    Returns:
+        Dict containing the decoded token payload
+
+    Raises:
+        JWTError: If token is invalid
+    """
+    return verify_access_token(token)
+
+
+def verify_token_with_key(
+    token: str,
+    secret_key: str,
     token_type: Optional[str] = None,
     leeway_seconds: int = TOKEN_LEEWAY
 ) -> Dict[str, Any]:
     """
     Verify a JWT token with enhanced security.
-    
+
     Args:
         token: The JWT token to verify
         secret_key: The secret key to verify the token with
         token_type: Expected token type ('access' or 'refresh')
         leeway_seconds: Leeway in seconds for clock skew
-        
+
     Returns:
         Dict containing the decoded token payload
-        
+
     Raises:
         JWTError: If token is invalid
     """
@@ -200,19 +216,19 @@ def verify_token(
                 "leeway": leeway_seconds
             }
         )
-        
+
         # Verify token type if specified
         if token_type and payload.get("type") != token_type:
             raise JWTError(f"Invalid token type: expected {token_type}")
-            
+
         # Verify required claims
         required_claims = ["sub", "exp", "iat", "jti"]
         for claim in required_claims:
             if claim not in payload:
                 raise JWTError(f"Missing required claim: {claim}")
-                
+
         return payload
-        
+
     except jwt.ExpiredSignatureError as e:
         raise JWTError("Token has expired") from e
     except jwt.JWTClaimsError as e:
@@ -224,17 +240,17 @@ def verify_token(
 def verify_access_token(token: str) -> Dict[str, Any]:
     """
     Verify an access token.
-    
+
     Args:
         token: The access token to verify
-        
+
     Returns:
         Dict containing the decoded token payload
-        
+
     Raises:
         JWTError: If token is invalid
     """
-    return verify_token(
+    return verify_token_with_key(
         token=token,
         secret_key=settings.SECRET_KEY,
         token_type=TOKEN_TYPE_ACCESS
@@ -244,19 +260,19 @@ def verify_access_token(token: str) -> Dict[str, Any]:
 def verify_refresh_token(token: str) -> Dict[str, Any]:
     """
     Verify a refresh token.
-    
+
     Args:
         token: The refresh token to verify
-        
+
     Returns:
         Dict containing the decoded token payload
-        
+
     Raises:
         JWTError: If token is invalid
     """
-    return verify_token(
+    return verify_token_with_key(
         token=token,
-        secret_key=settings.REFRESH_TOKEN_SECRET,
+        secret_key=settings.REFRESH_TOKEN_SECRET or settings.SECRET_KEY,
         token_type=TOKEN_TYPE_REFRESH
     )
 
@@ -315,18 +331,3 @@ def decode_token(token: str) -> Optional[TokenPayload]:
         return None
 
 
-def verify_refresh_token(token: str) -> Optional[Dict[str, Any]]:
-    """
-    Verify a refresh token and return its payload if valid.
-    """
-    try:
-        payload = jwt.decode(
-            token,
-            settings.REFRESH_TOKEN_SECRET,
-            algorithms=[ALGORITHM]
-        )
-        if payload.get("type") != "refresh":
-            return None
-        return payload
-    except JWTError:
-        return None
