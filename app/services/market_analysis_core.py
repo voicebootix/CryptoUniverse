@@ -159,64 +159,6 @@ class DynamicExchangeManager(LoggerMixin):
         return health_report
 
 
-class DynamicExchangeManager(LoggerMixin):
-    """Dynamic Exchange Manager - handles multi-exchange connectivity."""
-    
-    def __init__(self):
-        self.exchange_configs = {
-            "kraken": ExchangeConfigurations.KRAKEN,   # Priority 1: Confirmed working
-            "kucoin": ExchangeConfigurations.KUCOIN,   # Priority 2: Confirmed working  
-            "binance": ExchangeConfigurations.BINANCE  # Priority 3: Now uses binance.us
-        }
-        self.rate_limiters = {}
-        self.circuit_breakers = {}
-        
-        # Initialize rate limiters for each exchange
-        for exchange in self.exchange_configs:
-            self.rate_limiters[exchange] = {
-                "requests": 0,
-                "window_start": time.time(),
-                "max_requests": self.exchange_configs[exchange]["rate_limit"]
-            }
-            self.circuit_breakers[exchange] = {
-                "state": "CLOSED",
-                "failure_count": 0,
-                "last_failure": None,
-                "success_count": 0
-            }
-    
-    async def fetch_from_exchange(
-        self, 
-        exchange: str, 
-        endpoint: str, 
-        params: Optional[Dict] = None
-    ) -> Dict[str, Any]:
-        """Fetch data from specific exchange with rate limiting."""
-        config = self.exchange_configs[exchange]
-        url = config["base_url"] + endpoint
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status != 200:
-                    raise Exception(f"{exchange} API error: {response.status}")
-                return await response.json()
-    
-    async def get_exchange_health(self) -> Dict[str, Any]:
-        """Get health status of all exchanges."""
-        health_report = {}
-        
-        for exchange in self.exchange_configs:
-            breaker = self.circuit_breakers[exchange]
-            health_report[exchange] = {
-                "circuit_breaker_state": breaker["state"],
-                "failure_count": breaker["failure_count"],
-                "success_count": breaker["success_count"],
-                "health_status": "HEALTHY" if breaker["state"] == "CLOSED" else "DEGRADED"
-            }
-        
-        return health_report
-
-
 class MarketAnalysisService(LoggerMixin):
     """
     COMPLETE Market Analysis Service - MIGRATED FROM FLOWISE
@@ -799,25 +741,31 @@ class MarketAnalysisService(LoggerMixin):
             return await self._fallback_technical_analysis(symbol, timeframe)
     
     async def _get_historical_price_data(self, symbol: str, timeframe: str, periods: int = 100) -> List[Dict]:
-        """Get historical price data for technical analysis using working APIs."""
+        """Get historical price data using REAL market data service."""
         try:
-            # Use working exchange APIs instead of broken market_data_feeds
-            current_price = 0
-            
-            # Try to get current price from working exchanges
-            for exchange in ["kraken", "kucoin", "binance"]:
-                try:
-                    price_info = await self._get_symbol_price(exchange, symbol)
-                    if price_info and price_info.get("price", 0) > 0:
-                        current_price = float(price_info["price"])
-                        break
-                except Exception:
-                    continue
-            
-            if current_price <= 0:
+            # Use the new real market data service
+            from app.services.real_market_data import real_market_data_service
+
+            # Fetch real OHLCV data from exchanges
+            ohlcv_data = await real_market_data_service.get_historical_ohlcv(
+                symbol=symbol,
+                timeframe=timeframe,
+                limit=periods,
+                exchange='auto'
+            )
+
+            if ohlcv_data:
+                self.logger.info(f"✅ Fetched {len(ohlcv_data)} real candles for {symbol}")
+                return ohlcv_data
+
+            # Fallback to fetching current price if no historical data
+            current_price_data = await real_market_data_service.get_real_price(symbol)
+            if not current_price_data or current_price_data.get('price', 0) <= 0:
                 return []
             
-            # Generate REALISTIC price history with market patterns
+            # Only use synthetic data as last resort fallback
+            self.logger.warning(f"⚠️ Using synthetic fallback for {symbol}")
+            current_price = current_price_data['price']
             price_data = []
             base_price = current_price
             

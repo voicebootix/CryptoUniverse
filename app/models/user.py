@@ -94,6 +94,11 @@ class User(Base):
     kyc_verified_at = Column(DateTime, nullable=True)
     kyc_data = Column(JSON, nullable=True)
     
+    # Trading preferences
+    simulation_mode = Column(Boolean, default=True, nullable=False)  # Default to simulation for safety
+    simulation_balance = Column(Integer, default=10000, nullable=False)  # Virtual balance in USD
+    last_simulation_reset = Column(DateTime, nullable=True)
+
     # Referral system
     referral_code = Column(String(20), unique=True, nullable=True, index=True)
     referred_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)

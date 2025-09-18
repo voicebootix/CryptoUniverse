@@ -15,6 +15,7 @@ import uuid
 import re
 
 import structlog
+from sqlalchemy import select
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
 from app.services.websocket import manager
@@ -1862,11 +1863,37 @@ Rebalancing can still proceed but with reduced features.""",
         base_delay = 2  # seconds
         
         try:
+            # Get user's simulation preference from database
+            simulation_mode = False  # Default to live mode if can't determine
+            try:
+                from app.core.database import get_database
+                from app.models.user import User
+
+                async for db in get_database():
+                    result = await db.execute(
+                        select(User).where(User.id == user_id)
+                    )
+                    user = result.scalar_one_or_none()
+                    if user:
+                        simulation_mode = user.simulation_mode
+                        self.logger.info(
+                            "User simulation preference retrieved",
+                            user_id=user_id,
+                            simulation_mode=simulation_mode
+                        )
+                    break
+            except Exception as e:
+                self.logger.warning(
+                    "Failed to get user simulation preference, defaulting to live mode",
+                    error=str(e),
+                    user_id=user_id
+                )
+
             # Pre-execution validation
             symbol = trade.get("symbol", "").upper().strip()
             action = trade.get("action", "").lower().strip()
             amount = float(trade.get("amount", 0))
-            
+
             if not all([symbol, action in ["buy", "sell"], amount > 0]):
                 return {
                     "success": False,
@@ -1885,12 +1912,12 @@ Rebalancing can still proceed but with reduced features.""",
                 "safety_checks": True
             }
             
-            # Execute trade with timeout using correct signature
+            # Execute trade with timeout using correct signature, respecting user's preference
             execution_result = await asyncio.wait_for(
                 self.trade_executor.execute_trade(
-                    trade_request=trade_request, 
-                    user_id=user_id, 
-                    simulation_mode=False  # Real trades for rebalancing
+                    trade_request=trade_request,
+                    user_id=user_id,
+                    simulation_mode=simulation_mode  # Respect user's simulation preference
                 ),
                 timeout=30.0  # 30 second timeout per trade
             )
