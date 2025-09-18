@@ -11,6 +11,7 @@ import os
 import sys
 import json
 import requests
+import re
 from datetime import datetime
 from typing import Optional, Dict, Any
 from urllib.parse import urljoin
@@ -31,7 +32,22 @@ SIMULATION_MODE = os.getenv('FORCE_SIMULATION_MODE', 'true').lower() == 'true'
 
 def api_url(path: str) -> str:
     """Robust URL joining that handles BASE_URL with or without /api/v1."""
-    return urljoin(BASE_URL.rstrip('/') + '/', path.lstrip('/'))
+    # Normalize BASE_URL
+    base = BASE_URL.rstrip('/')
+
+    # Check if BASE_URL already contains /api or /api/vN
+    has_api = '/api' in base
+
+    # If BASE_URL already has /api, remove leading api/vN from path to avoid duplication
+    if has_api:
+        # Remove leading /api, /api/v1, /api/v2, etc. from path
+        clean_path = re.sub(r'^/?api(?:/v[0-9]+)?/?', '', path)
+        clean_path = clean_path.lstrip('/')
+    else:
+        clean_path = path.lstrip('/')
+
+    # Join with urljoin
+    return urljoin(base + '/', clean_path)
 
 
 async def http_get(url: str, headers: Optional[Dict] = None, timeout: int = 30) -> requests.Response:

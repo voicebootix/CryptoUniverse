@@ -238,8 +238,9 @@ class TestEnhancedChatEngineIntegration:
                 mock_db.execute.assert_called()
 
                 # Verify response contains trade execution results
-                assert "content" in result
-                assert result["success"] is True
+                assert "result" in result
+                assert "content" in result["result"]
+                assert result["result"]["success"] is True
 
     @pytest.mark.asyncio
     async def test_database_error_handling_with_async_context(self, chat_engine):
@@ -602,7 +603,8 @@ class TestTradeExecutionSystem:
 
             print("[OK] Fix #6: Complete live mode flow works")
 
-    def test_fix_7_error_handling_and_logging(self):
+    @pytest.mark.asyncio
+    async def test_fix_7_error_handling_and_logging(self):
         """Test Fix #7: Proper error handling and logging"""
 
         trade_service = TradeExecutionService()
@@ -633,7 +635,8 @@ class TestTradeExecutionSystem:
         except Exception as e:
             pytest.fail(f"Error handling failed: {str(e)}")
 
-    def test_all_fixes_integration(self):
+    @pytest.mark.asyncio
+    async def test_all_fixes_integration(self):
         """Test that all fixes work together"""
 
         print("\n=== ENTERPRISE TRADE EXECUTION TEST SUITE ===")
@@ -666,8 +669,8 @@ async def run_comprehensive_tests():
         await test_suite.test_fix_4_chat_respects_user_preference()
         await test_suite.test_fix_5_complete_flow_simulation_mode()
         await test_suite.test_fix_6_complete_flow_live_mode()
-        test_suite.test_fix_7_error_handling_and_logging()
-        test_suite.test_all_fixes_integration()
+        await test_suite.test_fix_7_error_handling_and_logging()
+        await test_suite.test_all_fixes_integration()
 
         print("\n[ENTERPRISE READY] All trade execution fixes validated!")
         return True
