@@ -335,18 +335,7 @@ class MessageRouter(LoggerMixin):
         self.telegram_api = telegram_api
         self.user_sessions = {}
         self.conversation_contexts = {}
-        self.unified_manager = None  # Will be connected to UnifiedChatService
-        self._initialize_unified_chat()
-    
-    def _initialize_unified_chat(self):
-        """Initialize connection to unified chat service."""
-        try:
-            from app.services.unified_chat_service import UnifiedChatService
-            self.unified_manager = UnifiedChatService()
-            self.logger.info("✅ Connected to UnifiedChatService for consistent AI experience")
-        except Exception as e:
-            self.logger.warning(f"Could not initialize UnifiedChatService: {e}")
-            self.unified_manager = None
+        self.unified_manager = None  # Placeholder for future unified integration
     
     async def process_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Process incoming Telegram message."""

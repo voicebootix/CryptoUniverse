@@ -747,32 +747,7 @@ async def _process_authenticated_message(
         if message_text.startswith("/"):
             response = await _process_telegram_command(connection, message_text, db)
         else:
-            # Check if we can use the unified chat service
-            try:
-                # Import and use UnifiedChatService directly
-                from app.services.unified_chat_service import UnifiedChatService
-                unified_chat = UnifiedChatService()
-                
-                # Process through unified chat
-                chat_result = await unified_chat.process_message(
-                    message=message_text,
-                    user_id=str(connection.user_id),  # Use actual user_id, not telegram_user_id
-                    session_id=f"telegram_{chat_id}",
-                    interface="telegram",
-                    conversation_mode="live_trading",
-                    stream=False
-                )
-                
-                if chat_result.get("success"):
-                    response = chat_result.get("response", chat_result.get("content", ""))
-                else:
-                    # Fallback to local processing
-                    response = await _process_natural_language(connection, message_text, db)
-                    
-            except Exception as e:
-                logger.error(f"Failed to use UnifiedChat: {e}")
-                # Fallback to local processing
-                response = await _process_natural_language(connection, message_text, db)
+            response = await _process_natural_language(connection, message_text, db)
         
         # Send response
         if response:
@@ -840,47 +815,58 @@ async def _process_natural_language(
     message_text: str,
     db: AsyncSession
 ) -> Optional[str]:
-    """Process natural language message using AI."""
+    """Process natural language message using simple keyword matching."""
     try:
-        # Use your AI consensus service for natural language processing
-        from app.services.ai_consensus_core import ai_consensus_service
+        # Convert to lowercase for matching
+        text_lower = message_text.lower()
         
-        # Analyze intent
-        intent_analysis = await ai_consensus_service.analyze_opportunity(
-            analysis_request=f"Analyze this trading-related message and extract intent: '{message_text}'",
-            confidence_threshold=70.0,
-            user_id=str(connection.user_id)
-        )
+        # Simple greeting responses
+        if any(word in text_lower for word in ["hi", "hello", "hey", "good morning", "good evening"]):
+            return "👋 Hello! I'm your CryptoUniverse AI assistant. How can I help you today?\n\nYou can ask about:\n• Trading opportunities\n• Portfolio balance\n• Market analysis\n• Buy/sell crypto\n\nOr use `/help` for all commands."
         
-        if intent_analysis.get("success"):
-            # Extract intent and generate appropriate response
-            analysis_data = intent_analysis.get("analysis_result", {})
-            detected_intent = analysis_data.get("intent", "unknown")
-            
-            # Route based on detected intent
-            if "balance" in detected_intent.lower():
-                return await _handle_balance_command(connection, db)
-            elif "buy" in detected_intent.lower() or "purchase" in detected_intent.lower():
-                return "💡 To buy crypto, use: `/buy BTC 100` (symbol and amount in USD)"
-            elif "sell" in detected_intent.lower():
-                return "💡 To sell crypto, use: `/sell BTC 100` (symbol and amount in USD)"
-            elif "status" in detected_intent.lower() or "how" in detected_intent.lower():
-                return await _handle_status_command(connection, db)
-            elif "autonomous" in detected_intent.lower() or "ai" in detected_intent.lower():
-                return "🤖 To control AI trading, use: `/autonomous start` or `/autonomous stop`"
-            elif any(word in message_text.lower() for word in ["opportunities", "opportunity", "portfolio optimization", "trading opportunities", "recommendations"]):
-                return await _handle_opportunities_command(connection, db)
-            else:
-                # Check keywords directly if intent detection failed
-                if any(word in message_text.lower() for word in ["opportunities", "opportunity", "optimize", "rebalance"]):
-                    return await _handle_opportunities_command(connection, db)
-                return f"💬 I understand you're asking about: {detected_intent}\n\nTry using specific commands like `/help` for available options."
+        # Check for specific keywords
+        if any(word in text_lower for word in ["opportunities", "opportunity", "recommendations", "suggest"]):
+            return await _handle_opportunities_command(connection, db)
         
-        return "❓ I didn't understand that. Try `/help` for available commands."
+        if any(word in text_lower for word in ["balance", "portfolio", "worth", "value"]):
+            return await _handle_balance_command(connection, db)
+        
+        if any(word in text_lower for word in ["buy", "purchase"]):
+            return "💡 To buy crypto, use: `/buy BTC 100` (symbol and amount in USD)\n\nExample: `/buy ETH 500` to buy $500 worth of Ethereum."
+        
+        if any(word in text_lower for word in ["sell", "liquidate"]):
+            return "💡 To sell crypto, use: `/sell BTC 100` (symbol and amount in USD)\n\nExample: `/sell BTC 1000` to sell $1000 worth of Bitcoin."
+        
+        if any(word in text_lower for word in ["status", "how am i doing", "performance"]):
+            return await _handle_status_command(connection, db)
+        
+        if any(word in text_lower for word in ["help", "what can you do", "commands"]):
+            return await _handle_help_command(connection.telegram_chat_id, connection.user_id, [])
+        
+        if any(word in text_lower for word in ["ai", "autonomous", "auto trade"]):
+            return "🤖 To control AI trading:\n• `/autonomous start` - Enable AI trading\n• `/autonomous stop` - Disable AI trading\n• `/autonomous status` - Check AI status"
+        
+        if any(word in text_lower for word in ["market", "analysis", "trend"]):
+            return "📊 For market analysis, try:\n• `/market BTC` - Analyze specific asset\n• `/opportunities` - Find trading opportunities\n• `/alerts` - Set price alerts"
+        
+        # Default response with suggestions
+        return """🤔 I'm not sure what you're asking about. Here are some things you can try:
+
+📊 **Trading & Analysis:**
+• "Show me opportunities" - Find trading opportunities
+• "What's my balance?" - Check portfolio value
+• "How do I buy Bitcoin?" - Get trading help
+
+💬 **Or use commands:**
+• `/opportunities` - Trading opportunities
+• `/portfolio` - Portfolio overview
+• `/help` - All available commands
+
+What would you like to do?"""
         
     except Exception as e:
         logger.error("Natural language processing failed", error=str(e))
-        return "❓ I didn't understand that. Try `/help` for available commands."
+        return "❌ Sorry, I encountered an error. Please try again or use `/help` for available commands."
 
 
 async def _handle_opportunities_command(connection: UserTelegramConnection, db: AsyncSession) -> str:
