@@ -73,21 +73,67 @@ def fix_admin_credits():
             ))
             print("Created new credit account with 1000 credits")
 
-        # Add credit transaction record using the account_id
-        transaction_id = str(uuid.uuid4())
-        cursor.execute("""
-            INSERT INTO credit_transactions (
-                id, account_id, transaction_type, amount,
-                description, reference_id, balance_before, balance_after,
-                source, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            transaction_id, account_id, 'bonus', 1000,
-            'Admin testing credits', 'admin_local_provision',
-            balance_before, balance_after,
-            'admin_script', 'completed', datetime.utcnow().isoformat()
-        ))
-        print("Added credit transaction record")
+        # Add credit transaction record using the account_id (idempotent)
+        # Create stable reference_id for idempotency
+        reference_id = f"admin_grant:{account_id}"
+
+        # Check if provider column exists in schema
+        cursor.execute("PRAGMA table_info(credit_transactions)")
+        columns = [row[1] for row in cursor.fetchall()]
+        has_provider_column = 'provider' in columns
+
+        if has_provider_column:
+            # Check if transaction already exists with new schema
+            cursor.execute("""
+                SELECT id FROM credit_transactions
+                WHERE provider = ? AND reference_id = ?
+            """, ('local', reference_id))
+            existing_transaction = cursor.fetchone()
+
+            if existing_transaction:
+                print(f"Credit transaction already exists (ID: {existing_transaction[0]}) - skipping")
+            else:
+                # Insert with provider column
+                transaction_id = str(uuid.uuid4())
+                cursor.execute("""
+                    INSERT INTO credit_transactions (
+                        id, account_id, transaction_type, amount,
+                        description, reference_id, balance_before, balance_after,
+                        source, status, provider, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    transaction_id, account_id, 'bonus', 1000,
+                    'Admin testing credits', reference_id,
+                    balance_before, balance_after,
+                    'admin_script', 'completed', 'local', datetime.utcnow().isoformat()
+                ))
+                print("Added credit transaction record with provider")
+        else:
+            # Fallback for older schema without provider column
+            cursor.execute("""
+                SELECT id FROM credit_transactions
+                WHERE reference_id = ?
+            """, (reference_id,))
+            existing_transaction = cursor.fetchone()
+
+            if existing_transaction:
+                print(f"Credit transaction already exists (ID: {existing_transaction[0]}) - skipping")
+            else:
+                # Insert without provider column
+                transaction_id = str(uuid.uuid4())
+                cursor.execute("""
+                    INSERT INTO credit_transactions (
+                        id, account_id, transaction_type, amount,
+                        description, reference_id, balance_before, balance_after,
+                        source, status, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    transaction_id, account_id, 'bonus', 1000,
+                    'Admin testing credits', reference_id,
+                    balance_before, balance_after,
+                    'admin_script', 'completed', datetime.utcnow().isoformat()
+                ))
+                print("Added credit transaction record (legacy schema)")
 
         # Commit changes
         conn.commit()

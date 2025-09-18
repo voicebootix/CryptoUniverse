@@ -10,9 +10,6 @@ import requests
 import json
 from datetime import datetime
 
-# Add the app directory to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 def run_ab_testing_endpoints():
     """Test A/B testing API endpoints against running backend."""
 
@@ -123,6 +120,9 @@ def run_ab_testing_endpoints():
     return all_tests_passed
 
 if __name__ == "__main__":
+    # Only modify sys.path when running directly (not during pytest collection)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
     success = run_ab_testing_endpoints()
     if success:
         print("\n[SUCCESS] Test completed successfully!")
