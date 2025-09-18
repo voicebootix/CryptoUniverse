@@ -1416,8 +1416,8 @@ class TradingStrategiesService(LoggerMixin):
         """Execute position/risk management functions."""
         
         if function == "portfolio_optimization":
-            # Import the optimization function directly
-            from app.services.portfolio_risk_core import optimize_allocation, get_portfolio
+            # Import the portfolio risk service
+            from app.services.portfolio_risk_core import portfolio_risk_service
             
             # Define all 6 optimization strategies
             optimization_strategies = [
@@ -1433,7 +1433,7 @@ class TradingStrategiesService(LoggerMixin):
             strategy_results = {}
             
             # Get current portfolio for context
-            portfolio_result = await get_portfolio(user_id)
+            portfolio_result = await portfolio_risk_service.get_portfolio(user_id)
             current_positions = []
             if portfolio_result.get("success") and portfolio_result.get("portfolio"):
                 current_positions = portfolio_result["portfolio"].get("positions", [])
@@ -1442,7 +1442,7 @@ class TradingStrategiesService(LoggerMixin):
             for strategy in optimization_strategies:
                 try:
                     # Call the real optimization engine
-                    opt_result = await optimize_allocation(
+                    opt_result = await portfolio_risk_service.optimize_allocation(
                         user_id=user_id,
                         strategy=strategy,
                         constraints={
