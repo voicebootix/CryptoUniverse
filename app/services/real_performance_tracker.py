@@ -258,7 +258,7 @@ class RealPerformanceTracker(LoggerMixin):
     def _calculate_profit_factor(self, wins: np.ndarray, losses: np.ndarray) -> float:
         """Calculate profit factor (gross wins / gross losses)."""
         total_wins = np.sum(wins) if len(wins) > 0 else 0
-        total_losses = abs(np.sum(losses)) if len(losses) > 0 else 1
+        total_losses = abs(np.sum(losses)) if len(losses) > 0 else 0
 
         if total_losses == 0:
             return float('inf') if total_wins > 0 else 0
