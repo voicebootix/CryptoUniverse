@@ -13,6 +13,7 @@ def fix_admin_credits():
     print("FIXING ADMIN CREDITS IN LOCAL DATABASE")
     print("=" * 50)
 
+    conn = None
     try:
         # Connect to local database
         conn = sqlite3.connect('cryptouniverse.db')
@@ -29,29 +30,42 @@ def fix_admin_credits():
         user_id, email, role = admin_user
         print(f"Found admin user: {email} (ID: {user_id}, Role: {role})")
 
-        # Check if credit account exists
-        cursor.execute("SELECT * FROM credit_accounts WHERE user_id = ?", (user_id,))
-        credit_account = cursor.fetchone()
+        # Get existing credit account info (ID and current balances) upfront
+        cursor.execute("""
+            SELECT id, total_credits, available_credits, used_credits, expired_credits
+            FROM credit_accounts WHERE user_id = ?
+        """, (user_id,))
+        account_info = cursor.fetchone()
 
-        if credit_account:
-            print("Credit account already exists")
+        if account_info:
+            # Account exists - get current values
+            account_id, prev_total, prev_available, prev_used, prev_expired = account_info
+            print(f"Credit account already exists (ID: {account_id})")
+
+            # Calculate new balances
+            new_total = prev_total + 1000
+            new_available = prev_available + 1000
+            balance_before = prev_available
+            balance_after = new_available
+
             # Update existing account
             cursor.execute("""
                 UPDATE credit_accounts
-                SET total_credits = total_credits + 1000,
-                    available_credits = available_credits + 1000,
-                    updated_at = ?
-                WHERE user_id = ?
-            """, (datetime.utcnow().isoformat(), user_id))
-            print("Added 1000 credits to existing account")
+                SET total_credits = ?, available_credits = ?, updated_at = ?
+                WHERE id = ?
+            """, (new_total, new_available, datetime.utcnow().isoformat(), account_id))
+            print(f"Added 1000 credits to existing account (Total: {new_total}, Available: {new_available})")
+
         else:
             # Create new credit account
             account_id = str(uuid.uuid4())
+            balance_before = 0
+            balance_after = 1000
+
             cursor.execute("""
                 INSERT INTO credit_accounts (
                     id, user_id, total_credits, available_credits,
-                    used_credits, expired_credits,
-                    created_at, updated_at
+                    used_credits, expired_credits, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 account_id, user_id, 1000, 1000, 0, 0,
@@ -59,12 +73,7 @@ def fix_admin_credits():
             ))
             print("Created new credit account with 1000 credits")
 
-        # Add credit transaction record
-        # Get current account balance for transaction record
-        cursor.execute("SELECT available_credits FROM credit_accounts WHERE user_id = ?", (user_id,))
-        balance_result = cursor.fetchone()
-        current_balance = balance_result[0] if balance_result else 0
-
+        # Add credit transaction record using the account_id
         transaction_id = str(uuid.uuid4())
         cursor.execute("""
             INSERT INTO credit_transactions (
@@ -75,7 +84,7 @@ def fix_admin_credits():
         """, (
             transaction_id, account_id, 'bonus', 1000,
             'Admin testing credits', 'admin_local_provision',
-            current_balance - 1000, current_balance,
+            balance_before, balance_after,
             'admin_script', 'completed', datetime.utcnow().isoformat()
         ))
         print("Added credit transaction record")
@@ -83,30 +92,35 @@ def fix_admin_credits():
         # Commit changes
         conn.commit()
 
-        # Verify the fix
+        # Verify the fix using correct column names
         cursor.execute("""
-            SELECT total_credits, available_credits, total_earned_credits
+            SELECT total_credits, available_credits, used_credits, expired_credits
             FROM credit_accounts WHERE user_id = ?
         """, (user_id,))
 
         credits_info = cursor.fetchone()
         if credits_info:
-            total, available, earned = credits_info
+            total, available, used, expired = credits_info
             print(f"\nCREDIT ACCOUNT VERIFICATION:")
             print(f"Total credits: {total}")
             print(f"Available credits: {available}")
-            print(f"Total earned: {earned}")
+            print(f"Used credits: {used}")
+            print(f"Expired credits: {expired}")
             print("\nSUCCESS: Admin credits fixed!")
 
-        conn.close()
         return True
 
     except sqlite3.Error as e:
         print(f"Database error: {e}")
+        if conn:
+            conn.rollback()
         return False
     except Exception as e:
         print(f"Error: {e}")
         return False
+    finally:
+        if conn:
+            conn.close()
 
 def check_database_structure():
     """Check database tables to understand structure."""

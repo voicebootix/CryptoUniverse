@@ -13,13 +13,16 @@ from datetime import datetime
 # Add the app directory to the path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-def test_ab_testing_endpoints():
+def run_ab_testing_endpoints():
     """Test A/B testing API endpoints against running backend."""
 
     base_url = "http://localhost:8000/api/v1"
 
     print("[TEST] Testing A/B Testing API Endpoints")
     print("=" * 50)
+
+    # Track overall success
+    all_tests_passed = True
 
     # Test health endpoint first
     try:
@@ -56,8 +59,10 @@ def test_ab_testing_endpoints():
             print("[OK] A/B Testing metrics endpoint exists (requires authentication)")
         else:
             print(f"[ERROR] Metrics endpoint failed: {response.status_code} - {response.text}")
+            all_tests_passed = False
     except Exception as e:
         print(f"[ERROR] Metrics endpoint error: {e}")
+        all_tests_passed = False
 
     # Test A/B testing tests list endpoint
     print("\n3. Testing A/B Tests List Endpoint...")
@@ -77,8 +82,10 @@ def test_ab_testing_endpoints():
             print("[OK] A/B Tests list endpoint exists (requires authentication)")
         else:
             print(f"[ERROR] Tests list endpoint failed: {response.status_code} - {response.text}")
+            all_tests_passed = False
     except Exception as e:
         print(f"[ERROR] Tests list endpoint error: {e}")
+        all_tests_passed = False
 
     print("\n4. Testing Frontend API Client...")
     frontend_url = "http://localhost:3000"
@@ -113,10 +120,10 @@ def test_ab_testing_endpoints():
     print("- DELETE /api/v1/ab-testing/tests/{id}")
 
     print("\nFrontend should now work without errors!")
-    return True
+    return all_tests_passed
 
 if __name__ == "__main__":
-    success = test_ab_testing_endpoints()
+    success = run_ab_testing_endpoints()
     if success:
         print("\n[SUCCESS] Test completed successfully!")
     else:
