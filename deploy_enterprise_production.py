@@ -23,10 +23,16 @@ def print_section(title):
     print("=" * 80 + "\n")
 
 def run_command(cmd, description):
-    """Run shell command with error handling."""
+    """
+    Run command with error handling.
+
+    Args:
+        cmd: List of command arguments (e.g., ['pip', 'install', 'ccxt==4.1.56'])
+        description: Description of what the command does
+    """
     print(f"🔄 {description}...")
     try:
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode == 0:
             print(f"✅ {description} - SUCCESS")
             return True
@@ -144,14 +150,14 @@ def main():
 
     # Step 1: Install dependencies
     print_section("INSTALLING DEPENDENCIES")
-    if not run_command("pip install ccxt==4.1.56", "Installing CCXT"):
+    if not run_command(["pip", "install", "ccxt==4.1.56"], "Installing CCXT"):
         success = False
-    if not run_command("pip install pandas numpy ta", "Installing data libraries"):
+    if not run_command(["pip", "install", "pandas", "numpy", "ta"], "Installing data libraries"):
         success = False
 
     # Step 2: Run database migrations
     print_section("RUNNING DATABASE MIGRATIONS")
-    if not run_command("alembic upgrade head", "Applying database migrations"):
+    if not run_command(["alembic", "upgrade", "head"], "Applying database migrations"):
         print("⚠️ Migration failed - may already be applied")
 
     # Step 3: Verify services

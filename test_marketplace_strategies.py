@@ -521,13 +521,17 @@ async def test_marketplace_strategies():
     from app.services.trade_execution import trade_execution_service
 
     print("\n🔍 Testing simulation mode execution...")
+
+    # Create trade request dict as expected by function signature
+    trade_request = {
+        "symbol": "BTC",
+        "side": "buy",
+        "quantity": 0.01,
+        "order_type": "market"
+    }
+
     trade_result = await trade_execution_service.execute_trade(
-        user_id=user_id,
-        symbol="BTC",
-        side="buy",
-        quantity=0.01,
-        order_type="market",
-        simulation_mode=True
+        trade_request, user_id, True  # trade_request, user_id, simulation_mode
     )
 
     if trade_result.get("success"):

@@ -120,15 +120,46 @@ class RealMarketDataService(LoggerMixin):
                 # Fetch real ticker data
                 ticker = await exchange_obj.fetch_ticker(ccxt_symbol)
 
+                # Safely extract ticker values with fallbacks
+                last_price = ticker.get('last') or ticker.get('close') or 0
+                last_price = float(last_price) if last_price else 0
+
+                bid_val = ticker.get('bid') or last_price or 0
+                bid_price = float(bid_val) if bid_val else 0
+
+                ask_val = ticker.get('ask') or last_price or 0
+                ask_price = float(ask_val) if ask_val else 0
+
+                # Always convert to quote volume for consistency
+                quote_volume = ticker.get('quoteVolume')
+                base_volume = ticker.get('baseVolume')
+
+                if quote_volume:
+                    volume_24h = float(quote_volume)
+                elif base_volume and last_price:
+                    # Convert base volume to quote volume
+                    volume_24h = float(base_volume) * last_price
+                else:
+                    volume_24h = 0
+
+                change_val = ticker.get('percentage') or ticker.get('change') or 0
+                change_24h = float(change_val) if change_val else 0
+
+                high_val = ticker.get('high') or last_price or 0
+                high_24h = float(high_val) if high_val else 0
+
+                low_val = ticker.get('low') or last_price or 0
+                low_24h = float(low_val) if low_val else 0
+
                 price_data = {
                     'symbol': symbol,
-                    'price': float(ticker['last']),
-                    'bid': float(ticker['bid']) if ticker['bid'] else float(ticker['last']),
-                    'ask': float(ticker['ask']) if ticker['ask'] else float(ticker['last']),
-                    'volume_24h': float(ticker['quoteVolume']) if ticker['quoteVolume'] else 0,
-                    'change_24h': float(ticker['percentage']) if ticker['percentage'] else 0,
-                    'high_24h': float(ticker['high']) if ticker['high'] else float(ticker['last']),
-                    'low_24h': float(ticker['low']) if ticker['low'] else float(ticker['last']),
+                    'price': last_price,
+                    'bid': bid_price,
+                    'ask': ask_price,
+                    'volume_24h': volume_24h,
+                    'change_24h': change_24h,
+                    'high_24h': high_24h,
+                    'low_24h': low_24h,
                     'exchange': exch_name,
                     'timestamp': datetime.utcnow().isoformat(),
                     'source': 'real_market_data'
@@ -283,9 +314,18 @@ class RealMarketDataService(LoggerMixin):
             # Fallback to price-based synthetic order book
             price_data = await self.get_real_price(symbol, exchange)
             if price_data.get('price', 0) > 0:
-                return self._generate_synthetic_orderbook(price_data['price'])
+                return self._generate_synthetic_orderbook(price_data['price'], symbol, exchange, limit)
 
-            return {'bids': [], 'asks': [], 'error': str(e)}
+            # Return consistent structure even on complete failure
+            return {
+                'symbol': symbol,
+                'bids': [],
+                'asks': [],
+                'timestamp': datetime.utcnow().timestamp() * 1000,
+                'exchange': exchange,
+                'source': 'fallback_empty',
+                'error': str(e)
+            }
 
     async def get_aggregated_price(
         self,
@@ -315,12 +355,13 @@ class RealMarketDataService(LoggerMixin):
         for result in results:
             if isinstance(result, dict) and result.get('price', 0) > 0:
                 prices.append(result['price'])
+                # Use consistent quote volume from get_real_price (converted if needed)
                 volumes.append(result.get('volume_24h', 1))
 
         if not prices:
             return {'error': 'No valid prices found'}
 
-        # Calculate volume-weighted average price
+        # Calculate volume-weighted average price using consistent quote volumes
         total_volume = sum(volumes)
         vwap = sum(p * v for p, v in zip(prices, volumes)) / total_volume if total_volume > 0 else np.mean(prices)
 
@@ -407,31 +448,47 @@ class RealMarketDataService(LoggerMixin):
 
         return symbol
 
-    def _generate_synthetic_orderbook(self, mid_price: float) -> Dict[str, Any]:
+    def _generate_synthetic_orderbook(
+        self,
+        mid_price: float,
+        symbol: str,
+        exchange: str,
+        limit: int = 20
+    ) -> Dict[str, Any]:
         """
         Generate realistic order book when real data unavailable.
 
-        Creates a synthetic order book with realistic spread and depth.
+        Creates a synthetic order book with realistic spread and depth,
+        matching the exact structure of the primary path.
+
+        Args:
+            mid_price: Middle price for synthetic book
+            symbol: Trading pair symbol
+            exchange: Exchange name
+            limit: Number of levels to generate
         """
         bids = []
         asks = []
 
-        # Generate bids (buy orders)
-        for i in range(20):
+        # Generate bids (buy orders) up to requested limit
+        for i in range(limit):
             price_level = mid_price * (1 - 0.0001 * (i + 1))  # 0.01% steps
-            volume = np.random.exponential(1000) * (20 - i) / 20  # Decreasing volume
-            bids.append([price_level, volume])
+            volume = np.random.exponential(1000) * (limit - i) / limit  # Decreasing volume
+            bids.append([float(price_level), float(volume)])
 
-        # Generate asks (sell orders)
-        for i in range(20):
+        # Generate asks (sell orders) up to requested limit
+        for i in range(limit):
             price_level = mid_price * (1 + 0.0001 * (i + 1))  # 0.01% steps
-            volume = np.random.exponential(1000) * (20 - i) / 20  # Decreasing volume
-            asks.append([price_level, volume])
+            volume = np.random.exponential(1000) * (limit - i) / limit  # Decreasing volume
+            asks.append([float(price_level), float(volume)])
 
+        # Return exact same structure as primary path
         return {
+            'symbol': symbol,
             'bids': bids,
             'asks': asks,
             'timestamp': datetime.utcnow().timestamp() * 1000,
+            'exchange': exchange,
             'source': 'synthetic_orderbook'
         }
 

@@ -18,14 +18,15 @@ Market Data Models for Historical Storage
 Enterprise-grade data persistence for real market data
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from decimal import Decimal
 from enum import Enum
 
 from sqlalchemy import (
     Column, String, DateTime, Float, BigInteger, Integer,
-    Boolean, JSON, Index, UniqueConstraint, ForeignKey, Text, Numeric
+    Boolean, JSON, Index, UniqueConstraint, ForeignKey, Text, Numeric,
+    CheckConstraint, func
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -265,7 +266,7 @@ class MarketDataOHLCV(Base):
     vwap = Column(Numeric(20, 8))  # Volume-weighted average price
 
     # Metadata
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     source = Column(String(50), default="ccxt")  # Data source
     is_validated = Column(Boolean, default=False)
 
@@ -309,7 +310,7 @@ class MarketTicker(Base):
     change_24h = Column(Numeric(10, 4))  # Percentage
 
     # Metadata
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index('idx_ticker_lookup', 'symbol', 'exchange', 'timestamp'),
@@ -346,7 +347,7 @@ class OrderBookSnapshot(Base):
     ask_depth_10 = Column(Numeric(20, 8))  # Total ask volume in top 10 levels
 
     # Metadata
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     levels_count = Column(Integer, default=20)
 
     __table_args__ = (
@@ -378,7 +379,7 @@ class StrategyPerformanceHistory(Base):
     total_trades = Column(Integer, default=0)
     winning_trades = Column(Integer, default=0)
     losing_trades = Column(Integer, default=0)
-    win_rate = Column(Numeric(5, 4))
+    win_rate = Column(Numeric(5, 2), CheckConstraint('win_rate >= 0 AND win_rate <= 100', name='check_strategy_win_rate_range'))
 
     # Financial metrics
     starting_balance = Column(Numeric(20, 8), nullable=False)
@@ -409,7 +410,7 @@ class StrategyPerformanceHistory(Base):
     trade_distribution = Column(JSON)  # Distribution by hour/day
 
     # Metadata
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_live = Column(Boolean, default=False)  # Live vs backtest
     data_source = Column(String(50), default="real_market_data")
 
@@ -455,7 +456,7 @@ class BacktestResult(Base):
 
     # Trade statistics
     total_trades = Column(Integer, default=0)
-    win_rate = Column(Numeric(5, 4))
+    win_rate = Column(Numeric(5, 2), CheckConstraint('win_rate >= 0 AND win_rate <= 100', name='check_backtest_win_rate_range'))
     profit_factor = Column(Numeric(10, 4))
     expectancy = Column(Numeric(20, 8))
 
@@ -476,7 +477,7 @@ class BacktestResult(Base):
     data_gaps_count = Column(Integer, default=0)
 
     # Metadata
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     execution_time = Column(Float)  # seconds
     data_source = Column(String(50), default="real_market_data")
     engine_version = Column(String(20), default="2.0.0")

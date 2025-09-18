@@ -79,7 +79,7 @@ class RealPerformanceTracker(LoggerMixin):
                     return self._empty_performance_metrics(strategy_id, "no_trades_yet")
 
                 # Calculate real metrics from actual trades
-                metrics = await self._calculate_real_metrics(trades, strategy_id, user_id)
+                metrics = await self._calculate_real_metrics(trades, strategy_id, user_id, period_days)
 
                 # Store in database for historical tracking
                 await self._store_performance_history(
@@ -97,38 +97,46 @@ class RealPerformanceTracker(LoggerMixin):
                 return metrics
 
         except Exception as e:
-            self.logger.error("Failed to track performance", error=str(e))
+            self.logger.exception(
+                "Failed to track strategy performance",
+                strategy_id=strategy_id,
+                user_id=user_id,
+                period_days=period_days,
+                error=str(e)
+            )
             return self._empty_performance_metrics(strategy_id, "error")
 
     async def _calculate_real_metrics(
         self,
         trades: List[Trade],
         strategy_id: str,
-        user_id: str
+        user_id: str,
+        period_days: int
     ) -> Dict[str, Any]:
         """
         Calculate comprehensive performance metrics from real trades.
         """
         # Convert trades to dataframe for easier analysis
         trade_data = []
-        for trade in trades:
+        for t in trades:
+            action = getattr(t.action, "name", str(t.action))
+            status = getattr(t.status, "name", str(t.status))
             trade_data.append({
-                'timestamp': trade.created_at,
-                'symbol': trade.symbol,
-                'side': trade.side,
-                'quantity': float(trade.quantity),
-                'entry_price': float(trade.entry_price),
-                'exit_price': float(trade.exit_price) if trade.exit_price else None,
-                'pnl': float(trade.profit_realized_usd) if trade.profit_realized_usd else 0,
-                'fees': float(trade.fees_paid) if trade.fees_paid else 0,
-                'status': trade.status
+                'timestamp': t.created_at,
+                'symbol': t.symbol,
+                'action': action,
+                'quantity': float(t.executed_quantity or 0),
+                'executed_price': float(t.executed_price or 0),
+                'pnl': float(t.profit_realized_usd or 0),
+                'fees': float(t.fees_paid or 0),
+                'status': status,
             })
 
         df = pd.DataFrame(trade_data)
 
         # Calculate core metrics
         total_trades = len(df)
-        completed_trades = df[df['exit_price'].notna()]
+        completed_trades = df[df['status'] == 'COMPLETED']
 
         if len(completed_trades) == 0:
             # All trades still open
@@ -155,17 +163,24 @@ class RealPerformanceTracker(LoggerMixin):
         total_fees = completed_trades['fees'].sum()
         net_pnl = total_pnl - total_fees
 
-        # Risk metrics
-        returns = completed_trades['pnl'].values
+        # Risk metrics - use returns instead of raw PnL
+        # Approximate returns per trade as pnl divided by notional; fallback if notional unknown
+        import numpy as np
+        notional = (completed_trades['executed_price'] * completed_trades['quantity']).replace(0, np.nan)
+        ret_series = (completed_trades['pnl'] / notional).replace([np.inf, -np.inf], np.nan).dropna()
+        returns = ret_series.values
+
         if len(returns) > 1:
             sharpe_ratio = self._calculate_sharpe_ratio(returns)
             max_drawdown = self._calculate_max_drawdown(returns)
-            profit_factor = self._calculate_profit_factor(winning_trades['pnl'].values,
-                                                         losing_trades['pnl'].values)
         else:
             sharpe_ratio = 0
             max_drawdown = 0
-            profit_factor = 0
+
+        # Profit factor depends on wins/losses, not return series length
+        profit_factor = self._calculate_profit_factor(
+            winning_trades['pnl'].values, losing_trades['pnl'].values
+        )
 
         # Trade analysis
         avg_win = winning_trades['pnl'].mean() if len(winning_trades) > 0 else 0
@@ -176,7 +191,7 @@ class RealPerformanceTracker(LoggerMixin):
         # Time analysis
         trade_duration = []
         for _, trade in completed_trades.iterrows():
-            if trade['exit_price']:
+            if trade['status'] == 'COMPLETED':
                 # In real implementation, we'd track entry/exit times
                 trade_duration.append(1)  # Placeholder
 
@@ -187,7 +202,8 @@ class RealPerformanceTracker(LoggerMixin):
         return {
             'strategy_id': strategy_id,
             'user_id': user_id,
-            'period_days': len(set(df['timestamp'].dt.date)),
+            'period_days': period_days,  # Requested window length
+            'active_days': len(set(df['timestamp'].dt.date)),  # Unique active trade days
 
             # Trade statistics
             'total_trades': total_trades,
@@ -241,16 +257,18 @@ class RealPerformanceTracker(LoggerMixin):
         if len(returns) == 0:
             return 0
 
-        cumulative = np.cumprod(1 + returns / 100)
+        # Returns are already fractions (pnl/notional), don't divide by 100 again
+        cumulative = np.cumprod(1 + returns)
         running_max = np.maximum.accumulate(cumulative)
         drawdown = (cumulative - running_max) / running_max
 
-        return float(np.min(drawdown) * 100) if len(drawdown) > 0 else 0
+        # Return as positive percentage (magnitude of peak-to-trough loss)
+        return float(abs(np.min(drawdown)) * 100) if len(drawdown) > 0 else 0
 
     def _calculate_profit_factor(self, wins: np.ndarray, losses: np.ndarray) -> float:
         """Calculate profit factor (gross wins / gross losses)."""
         total_wins = np.sum(wins) if len(wins) > 0 else 0
-        total_losses = abs(np.sum(losses)) if len(losses) > 0 else 1
+        total_losses = abs(np.sum(losses)) if len(losses) > 0 else 0
 
         if total_losses == 0:
             return float('inf') if total_wins > 0 else 0
@@ -278,11 +296,11 @@ class RealPerformanceTracker(LoggerMixin):
                 total_trades=metrics.get('total_trades', 0),
                 winning_trades=metrics.get('winning_trades', 0),
                 losing_trades=metrics.get('losing_trades', 0),
-                win_rate=Decimal(str(metrics.get('win_rate', 0))),
-                starting_balance=Decimal('10000'),  # Would get from user account
+                win_rate=(Decimal(str(metrics.get('win_rate', 0))) * Decimal('100')).quantize(Decimal('0.01')),
+                starting_balance=Decimal('10000'),  # TODO: replace with real balance
                 ending_balance=Decimal('10000') + Decimal(str(metrics.get('net_pnl', 0))),
                 total_pnl=Decimal(str(metrics.get('total_pnl', 0))),
-                total_pnl_pct=Decimal(str(metrics.get('total_pnl', 0))) / Decimal('100'),
+                total_pnl_pct=(Decimal(str(metrics.get('total_pnl', 0))) / Decimal('10000')) * Decimal('100'),
                 max_drawdown=Decimal(str(metrics.get('max_drawdown', 0))),
                 sharpe_ratio=Decimal(str(metrics.get('sharpe_ratio', 0))),
                 best_trade_pnl=Decimal(str(metrics.get('best_trade', 0))),
@@ -299,7 +317,19 @@ class RealPerformanceTracker(LoggerMixin):
             self.logger.info("✅ Stored performance history", strategy_id=strategy_id)
 
         except Exception as e:
-            self.logger.error("Failed to store performance history", error=str(e))
+            # Rollback the transaction
+            await db.rollback()
+
+            # Log full traceback with context
+            self.logger.exception(
+                "Failed to store performance history",
+                strategy_id=strategy_id,
+                user_id=user_id,
+                error=str(e)
+            )
+
+            # Re-raise to let caller handle the failure
+            raise
 
     def _empty_performance_metrics(self, strategy_id: str, reason: str) -> Dict[str, Any]:
         """Return empty but properly structured metrics."""

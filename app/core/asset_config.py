@@ -54,6 +54,9 @@ class AssetConfiguration:
     Dynamic asset configuration without hardcoded limits.
     """
 
+    # Configuration flag - True allows all assets, False enforces whitelist
+    ALLOW_ALL_ASSETS = True  # Default: allow all assets (current behavior)
+
     # Top 100+ crypto assets by market cap - NO LIMITATIONS
     ALL_SUPPORTED_ASSETS = [
         # Top 10 by Market Cap
@@ -266,13 +269,18 @@ class AssetConfiguration:
             return "altcoin"
 =======
         Check if a symbol is supported.
-        By default, ALL symbols are supported (no restrictions).
+        Respects the ALLOW_ALL_ASSETS flag - if True, allows all symbols;
+        if False, enforces the whitelist in ALL_SUPPORTED_ASSETS.
         """
         # Extract base asset from symbol (BTC/USDT -> BTC)
         base_asset = symbol.split('/')[0].upper() if '/' in symbol else symbol.upper()
 
-        # Check if in our list OR allow any asset (no restrictions)
-        return base_asset in cls.ALL_SUPPORTED_ASSETS or True  # Always true = no limits
+        # If ALLOW_ALL_ASSETS is True, allow everything (current default behavior)
+        if cls.ALLOW_ALL_ASSETS:
+            return True
+
+        # Otherwise, check if the parsed base_asset is in the whitelist
+        return base_asset in cls.ALL_SUPPORTED_ASSETS
 
 
 # Global configuration instance

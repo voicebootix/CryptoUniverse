@@ -54,6 +54,13 @@ from app.models.ab_testing import (
     ABTestParticipant,
     ABTestMetric,
 )
+from app.models.market_data import (
+    MarketDataOHLCV,
+    MarketTicker,
+    OrderBookSnapshot,
+    StrategyPerformanceHistory,
+    BacktestResult,
+)
 
 __all__ = [
     "Base",
@@ -122,4 +129,10 @@ __all__ = [
     "ABTestResult",
     "ABTestParticipant",
     "ABTestMetric",
+    # Market Data models
+    "MarketDataOHLCV",
+    "MarketTicker",
+    "OrderBookSnapshot",
+    "StrategyPerformanceHistory",
+    "BacktestResult",
 ]
