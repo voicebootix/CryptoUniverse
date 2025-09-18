@@ -1,8 +1,8 @@
 """Add real market data tables
 
 Revision ID: add_real_market_data
-Revises: add_chat_memory_tables
-Create Date: 2024-01-18 10:00:00.000000
+Revises: add_chat_memory_001
+Create Date: 2025-01-18 12:00:00.000000
 
 """
 from alembic import op
@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = 'add_real_market_data'
-down_revision = 'add_chat_memory_tables'
+down_revision = 'add_chat_memory_001'
 branch_labels = None
 depends_on = None
 
@@ -31,13 +31,12 @@ def upgrade() -> None:
         sa.Column('volume', sa.Numeric(20, 8), nullable=False),
         sa.Column('trade_count', sa.Integer(), nullable=True),
         sa.Column('vwap', sa.Numeric(20, 8), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
         sa.Column('source', sa.String(50), nullable=True),
         sa.Column('is_validated', sa.Boolean(), nullable=True),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('symbol', 'exchange', 'timeframe', 'timestamp', name='unique_candle')
     )
-    op.create_index('idx_ohlcv_lookup', 'market_data_ohlcv', ['symbol', 'exchange', 'timeframe', 'timestamp'])
     op.create_index('idx_ohlcv_timestamp', 'market_data_ohlcv', ['timestamp'])
 
     # Create market_tickers table
@@ -57,7 +56,7 @@ def upgrade() -> None:
         sa.Column('volume_24h', sa.Numeric(20, 8), nullable=True),
         sa.Column('quote_volume_24h', sa.Numeric(20, 8), nullable=True),
         sa.Column('change_24h', sa.Numeric(10, 4), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index('idx_ticker_lookup', 'market_tickers', ['symbol', 'exchange', 'timestamp'])
@@ -68,15 +67,15 @@ def upgrade() -> None:
         sa.Column('symbol', sa.String(20), nullable=False),
         sa.Column('exchange', sa.String(50), nullable=False),
         sa.Column('timestamp', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('bids', sa.JSON(), nullable=False),
-        sa.Column('asks', sa.JSON(), nullable=False),
+        sa.Column('bids', postgresql.JSONB(), nullable=False),
+        sa.Column('asks', postgresql.JSONB(), nullable=False),
         sa.Column('best_bid', sa.Numeric(20, 8), nullable=True),
         sa.Column('best_ask', sa.Numeric(20, 8), nullable=True),
         sa.Column('spread', sa.Numeric(20, 8), nullable=True),
         sa.Column('spread_pct', sa.Numeric(10, 4), nullable=True),
         sa.Column('bid_depth_10', sa.Numeric(20, 8), nullable=True),
         sa.Column('ask_depth_10', sa.Numeric(20, 8), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
         sa.Column('levels_count', sa.Integer(), nullable=True),
         sa.PrimaryKeyConstraint('id')
     )
@@ -94,7 +93,7 @@ def upgrade() -> None:
         sa.Column('total_trades', sa.Integer(), nullable=True),
         sa.Column('winning_trades', sa.Integer(), nullable=True),
         sa.Column('losing_trades', sa.Integer(), nullable=True),
-        sa.Column('win_rate', sa.Numeric(5, 4), nullable=True),
+        sa.Column('win_rate', sa.Numeric(5, 2), nullable=True),
         sa.Column('starting_balance', sa.Numeric(20, 8), nullable=False),
         sa.Column('ending_balance', sa.Numeric(20, 8), nullable=False),
         sa.Column('total_pnl', sa.Numeric(20, 8), nullable=False),
@@ -111,9 +110,9 @@ def upgrade() -> None:
         sa.Column('total_fees', sa.Numeric(20, 8), nullable=True),
         sa.Column('total_slippage', sa.Numeric(20, 8), nullable=True),
         sa.Column('avg_execution_time', sa.Float(), nullable=True),
-        sa.Column('traded_symbols', sa.JSON(), nullable=True),
-        sa.Column('trade_distribution', sa.JSON(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('traded_symbols', postgresql.JSONB(), nullable=True),
+        sa.Column('trade_distribution', postgresql.JSONB(), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
         sa.Column('is_live', sa.Boolean(), nullable=True),
         sa.Column('data_source', sa.String(50), nullable=True),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
@@ -131,15 +130,15 @@ def upgrade() -> None:
         sa.Column('start_date', sa.DateTime(timezone=True), nullable=False),
         sa.Column('end_date', sa.DateTime(timezone=True), nullable=False),
         sa.Column('initial_capital', sa.Numeric(20, 8), nullable=False),
-        sa.Column('symbols', sa.JSON(), nullable=False),
-        sa.Column('strategy_params', sa.JSON(), nullable=True),
-        sa.Column('risk_params', sa.JSON(), nullable=True),
-        sa.Column('execution_params', sa.JSON(), nullable=True),
+        sa.Column('symbols', postgresql.JSONB(), nullable=False),
+        sa.Column('strategy_params', postgresql.JSONB(), nullable=True),
+        sa.Column('risk_params', postgresql.JSONB(), nullable=True),
+        sa.Column('execution_params', postgresql.JSONB(), nullable=True),
         sa.Column('final_capital', sa.Numeric(20, 8), nullable=False),
         sa.Column('total_return', sa.Numeric(10, 4), nullable=True),
         sa.Column('total_return_pct', sa.Numeric(10, 4), nullable=True),
         sa.Column('total_trades', sa.Integer(), nullable=True),
-        sa.Column('win_rate', sa.Numeric(5, 4), nullable=True),
+        sa.Column('win_rate', sa.Numeric(5, 2), nullable=True),
         sa.Column('profit_factor', sa.Numeric(10, 4), nullable=True),
         sa.Column('expectancy', sa.Numeric(20, 8), nullable=True),
         sa.Column('max_drawdown', sa.Numeric(10, 4), nullable=True),
@@ -147,12 +146,12 @@ def upgrade() -> None:
         sa.Column('sharpe_ratio', sa.Numeric(10, 4), nullable=True),
         sa.Column('sortino_ratio', sa.Numeric(10, 4), nullable=True),
         sa.Column('calmar_ratio', sa.Numeric(10, 4), nullable=True),
-        sa.Column('equity_curve', sa.JSON(), nullable=True),
-        sa.Column('trade_log', sa.JSON(), nullable=True),
-        sa.Column('monthly_returns', sa.JSON(), nullable=True),
+        sa.Column('equity_curve', postgresql.JSONB(), nullable=True),
+        sa.Column('trade_log', postgresql.JSONB(), nullable=True),
+        sa.Column('monthly_returns', postgresql.JSONB(), nullable=True),
         sa.Column('data_quality_score', sa.Numeric(5, 2), nullable=True),
         sa.Column('data_gaps_count', sa.Integer(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
         sa.Column('execution_time', sa.Float(), nullable=True),
         sa.Column('data_source', sa.String(50), nullable=True),
         sa.Column('engine_version', sa.String(20), nullable=True),
@@ -179,5 +178,4 @@ def downgrade() -> None:
     op.drop_table('market_tickers')
 
     op.drop_index('idx_ohlcv_timestamp', table_name='market_data_ohlcv')
-    op.drop_index('idx_ohlcv_lookup', table_name='market_data_ohlcv')
     op.drop_table('market_data_ohlcv')
