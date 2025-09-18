@@ -26,11 +26,12 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, 
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, desc, func
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.models.trading import Trade, TradeStatus
 from app.models.exchange import ExchangeAccount
@@ -44,29 +45,63 @@ router = APIRouter()
 
 
 # Helper Functions
-async def get_or_create_credit_account(user_id: str, db: AsyncSession) -> CreditAccount:
-    """Get existing credit account or create new one with zero balances."""
+async def get_or_create_credit_account(user_id: str, db: AsyncSession, user: Optional[User] = None) -> CreditAccount:
+    """Get existing credit account or create new one with role-based initial credits."""
     # Try to find existing account
     stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
     result = await db.execute(stmt)
     credit_account = result.scalar_one_or_none()
-    
+
     if credit_account:
         return credit_account
-    
-    # Create new account with zero balances
+
+    # Load user if not provided to determine initial credits
+    if user is None:
+        user_stmt = select(User).where(User.id == user_id)
+        user_result = await db.execute(user_stmt)
+        user = user_result.scalar_one_or_none()
+
+    # Determine initial credits based on user role and feature flags
+    initial_credits = 0
+    if user and user.role == UserRole.ADMIN:
+        # Check if admin auto-grant is enabled via feature flag
+        auto_grant_enabled = getattr(settings, 'auto_grant_admin_credits', False)
+        if auto_grant_enabled:
+            initial_credits = getattr(settings, 'admin_initial_credits', 0)
+
+    # Create new account with role-based initial credits
     credit_account = CreditAccount(
         user_id=user_id,
-        total_credits=0,
-        available_credits=0,
+        total_credits=initial_credits,
+        available_credits=initial_credits,
         used_credits=0,
         expired_credits=0
     )
-    
+
     db.add(credit_account)
-    await db.commit()
-    await db.refresh(credit_account)
-    return credit_account
+
+    try:
+        await db.commit()
+        await db.refresh(credit_account)
+        logger.info("Created credit account", user_id=str(user_id), initial_credits=initial_credits)
+        return credit_account
+    except IntegrityError:
+        # Handle race condition - another process created the account
+        await db.rollback()
+        logger.info("Account creation race condition detected, re-fetching", user_id=str(user_id))
+
+        # Re-fetch the existing account
+        result = await db.execute(stmt)
+        credit_account = result.scalar_one_or_none()
+
+        if credit_account:
+            return credit_account
+        else:
+            # This should not happen, but fail safely
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create or retrieve credit account"
+            )
 
 
 # Request/Response Models
@@ -140,25 +175,18 @@ async def get_credit_balance(
     )
     
     try:
-        # Get credit account
-        stmt = select(CreditAccount).where(CreditAccount.user_id == current_user.id)
-        result = await db.execute(stmt)
-        credit_account = result.scalar_one_or_none()
-        
-        if not credit_account:
-            # Create credit account if doesn't exist
-            credit_account = CreditAccount(
-                user_id=current_user.id,
-                available_credits=0,
-                total_credits=0,
-                used_credits=0
-            )
-            db.add(credit_account)
-            await db.commit()
-            await db.refresh(credit_account)
+        logger.info("Getting credit balance", user_id=str(current_user.id))
+        logger.debug("Getting credit balance for user", user_id=str(current_user.id), user_email=current_user.email)
+
+        # Get or create credit account using centralized helper
+        credit_account = await get_or_create_credit_account(current_user.id, db, current_user)
+
+        logger.info("Retrieved credit account",
+                   user_id=str(current_user.id),
+                   available_credits=credit_account.available_credits,
+                   total_credits=credit_account.total_credits)
         
         # Calculate profit potential using domain model method
-        from app.services.profit_sharing_service import profit_sharing_service
         await profit_sharing_service.ensure_pricing_loaded()  # Ensure pricing loaded if needed by model
         
         profit_potential = credit_account.calculate_profit_potential()

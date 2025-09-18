@@ -223,6 +223,8 @@ class CreditTransaction(Base):
     profit_amount_usd = Column(Numeric(12, 2), nullable=True)  # Profit that triggered usage
     
     # External references
+    provider = Column(String(50), nullable=True, index=True)  # Payment provider: stripe, coinbase, crypto_payment, etc.
+    reference_id = Column(String(255), nullable=True, index=True)  # General external reference ID
     stripe_payment_intent_id = Column(String(100), nullable=True, index=True)
     billing_history_id = Column(UUID(as_uuid=True), ForeignKey("billing_history.id"), nullable=True, index=True)
     
@@ -246,7 +248,7 @@ class CreditTransaction(Base):
     account = relationship("CreditAccount", back_populates="transactions")
     credit_pack = relationship("CreditPack", back_populates="transactions")
     
-    # Indexes
+    # Indexes (unique constraint handled by migration-created partial index)
     __table_args__ = (
         Index("idx_transaction_type_created", "transaction_type", "created_at"),
         Index("idx_transaction_account_type", "account_id", "transaction_type"),
