@@ -38,6 +38,10 @@ def upgrade() -> None:
         # Create new indexes with proper names
         op.create_index('idx_legacy_market_data_symbol_timestamp', 'legacy_market_data', ['symbol', 'timestamp'])
         op.create_index('idx_legacy_market_data_exchange_timestamp', 'legacy_market_data', ['exchange', 'timestamp'])
+
+        # Create additional single-column indexes for parity with fresh install
+        op.create_index('idx_legacy_market_data_symbol', 'legacy_market_data', ['symbol'])
+        op.create_index('idx_legacy_market_data_timestamp', 'legacy_market_data', ['timestamp'])
     else:
         # If market_data doesn't exist, create legacy_market_data directly
         op.create_table('legacy_market_data',
