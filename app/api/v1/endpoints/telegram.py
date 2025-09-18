@@ -808,9 +808,15 @@ async def _process_telegram_command(
         command = parts[0].lower()
         args = parts[1:] if len(parts) > 1 else []
         
-        # Check command permissions
-        if not connection.has_command_permission(command):
-            return f"❌ You don't have permission to use {command}"
+        # Check command permissions - allow basic commands for all
+        basic_commands = ["/help", "/status", "/balance", "/opportunities", "/positions", "/market"]
+        trading_commands = ["/buy", "/sell", "/autonomous"]
+        
+        # Skip permission check for basic commands
+        if command not in basic_commands:
+            # Only check permissions for trading commands
+            if command in trading_commands and not connection.trading_enabled:
+                return f"❌ Trading not enabled. Enable it in settings to use {command}"
         
         # Route command to appropriate handler
         if command == "/status":
@@ -827,6 +833,8 @@ async def _process_telegram_command(
             return await _handle_market_command(connection, args, db)
         elif command == "/autonomous":
             return await _handle_autonomous_command(connection, args, db)
+        elif command == "/opportunities":
+            return await _handle_opportunities_command(connection, db)
         elif command == "/credits":
             return await _handle_credits_command(connection, db)
         elif command == "/help":
