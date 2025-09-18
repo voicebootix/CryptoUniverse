@@ -105,7 +105,7 @@ async def grant_admin_full_strategy_access(
         # Step 3: Get all available strategies from marketplace
         try:
             marketplace_result = await strategy_marketplace_service.get_marketplace_strategies(
-                include_inactive=False
+                user_id=target_user_id
             )
 
             if not marketplace_result.get("success"):
@@ -258,7 +258,9 @@ async def get_admin_portfolio_status(
         )
 
         # Get total available strategies for comparison
-        marketplace_result = await strategy_marketplace_service.get_marketplace_strategies()
+        marketplace_result = await strategy_marketplace_service.get_marketplace_strategies(
+            user_id=str(current_user.id)
+        )
         total_available = len(marketplace_result.get("strategies", [])) if marketplace_result.get("success") else 0
 
         current_strategies = len(portfolio_result.get("active_strategies", []))
