@@ -79,7 +79,7 @@ class RealPerformanceTracker(LoggerMixin):
                     return self._empty_performance_metrics(strategy_id, "no_trades_yet")
 
                 # Calculate real metrics from actual trades
-                metrics = await self._calculate_real_metrics(trades, strategy_id, user_id)
+                metrics = await self._calculate_real_metrics(trades, strategy_id, user_id, period_days)
 
                 # Store in database for historical tracking
                 await self._store_performance_history(
@@ -110,7 +110,8 @@ class RealPerformanceTracker(LoggerMixin):
         self,
         trades: List[Trade],
         strategy_id: str,
-        user_id: str
+        user_id: str,
+        period_days: int
     ) -> Dict[str, Any]:
         """
         Calculate comprehensive performance metrics from real trades.
@@ -201,7 +202,8 @@ class RealPerformanceTracker(LoggerMixin):
         return {
             'strategy_id': strategy_id,
             'user_id': user_id,
-            'period_days': len(set(df['timestamp'].dt.date)),
+            'period_days': period_days,  # Requested window length
+            'active_days': len(set(df['timestamp'].dt.date)),  # Unique active trade days
 
             # Trade statistics
             'total_trades': total_trades,
@@ -260,8 +262,8 @@ class RealPerformanceTracker(LoggerMixin):
         running_max = np.maximum.accumulate(cumulative)
         drawdown = (cumulative - running_max) / running_max
 
-        # Return as percentage (multiply by 100)
-        return float(np.min(drawdown) * 100) if len(drawdown) > 0 else 0
+        # Return as positive percentage (magnitude of peak-to-trough loss)
+        return float(abs(np.min(drawdown)) * 100) if len(drawdown) > 0 else 0
 
     def _calculate_profit_factor(self, wins: np.ndarray, losses: np.ndarray) -> float:
         """Calculate profit factor (gross wins / gross losses)."""
