@@ -55,6 +55,12 @@ async def get_or_create_credit_account(user_id: str, db: AsyncSession, user: Opt
     if credit_account:
         return credit_account
 
+    # Load user if not provided to determine initial credits
+    if user is None:
+        user_stmt = select(User).where(User.id == user_id)
+        user_result = await db.execute(user_stmt)
+        user = user_result.scalar_one_or_none()
+
     # Determine initial credits based on user role
     initial_credits = 0
     if user and user.role == UserRole.ADMIN:
@@ -166,7 +172,8 @@ async def get_credit_balance(
     )
     
     try:
-        logger.info("Getting credit balance", user_id=str(current_user.id), user_email=current_user.email)
+        logger.info("Getting credit balance", user_id=str(current_user.id))
+        logger.debug("Getting credit balance for user", user_id=str(current_user.id), user_email=current_user.email)
 
         # Get or create credit account using centralized helper
         credit_account = await get_or_create_credit_account(current_user.id, db, current_user)
@@ -177,7 +184,6 @@ async def get_credit_balance(
                    total_credits=credit_account.total_credits)
         
         # Calculate profit potential using domain model method
-        from app.services.profit_sharing_service import profit_sharing_service
         await profit_sharing_service.ensure_pricing_loaded()  # Ensure pricing loaded if needed by model
         
         profit_potential = credit_account.calculate_profit_potential()

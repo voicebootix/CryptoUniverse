@@ -223,6 +223,7 @@ class CreditTransaction(Base):
     profit_amount_usd = Column(Numeric(12, 2), nullable=True)  # Profit that triggered usage
     
     # External references
+    reference_id = Column(String(255), nullable=True, index=True)  # General external reference ID
     stripe_payment_intent_id = Column(String(100), nullable=True, index=True)
     billing_history_id = Column(UUID(as_uuid=True), ForeignKey("billing_history.id"), nullable=True, index=True)
     
