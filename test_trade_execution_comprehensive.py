@@ -370,10 +370,6 @@ class TestAdvancedTradingScenarios:
             assert "error" in result
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "--tb=short"])
-
-
 class TestTradeExecutionSystem:
     """Enterprise-level test suite for all trade execution issues"""
 
@@ -681,6 +677,4 @@ async def run_comprehensive_tests():
         return False
 
 
-if __name__ == "__main__":
-    success = asyncio.run(run_comprehensive_tests())
-    exit(0 if success else 1)
+# Test file should be run with pytest command, not directly

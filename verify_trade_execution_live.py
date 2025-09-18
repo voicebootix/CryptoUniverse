@@ -34,6 +34,16 @@ def api_url(path: str) -> str:
     return urljoin(BASE_URL.rstrip('/') + '/', path.lstrip('/'))
 
 
+async def http_get(url: str, headers: Optional[Dict] = None, timeout: int = 30) -> requests.Response:
+    """Async wrapper for GET requests to avoid blocking the event loop."""
+    return await asyncio.to_thread(requests.get, url, headers=headers, timeout=timeout)
+
+
+async def http_post(url: str, json: Optional[Dict] = None, headers: Optional[Dict] = None, timeout: int = 30) -> requests.Response:
+    """Async wrapper for POST requests to avoid blocking the event loop."""
+    return await asyncio.to_thread(requests.post, url, json=json, headers=headers, timeout=timeout)
+
+
 def validate_environment():
     """Validate all required environment variables are present."""
     missing_vars = []
@@ -77,7 +87,7 @@ async def login_and_get_token() -> Optional[str]:
             "password": ADMIN_PASSWORD
         }
         print(f"🔐 Authenticating with {api_url('/api/v1/auth/login')}")
-        response = requests.post(
+        response = await http_post(
             api_url('/api/v1/auth/login'),
             json=login_data,
             timeout=30
@@ -117,7 +127,7 @@ async def verify_trade_execution_service(token: str) -> Dict[str, Any]:
     # Test 1: Service Health Check
     print("\n📊 Testing service health...")
     try:
-        response = requests.get(api_url('/api/v1/health/health'), headers=headers, timeout=10)
+        response = await http_get(api_url('/api/v1/health/health'), headers=headers, timeout=10)
         if response.status_code == 200:
             print("✅ Service health check passed")
             results['health_check'] = True
@@ -131,7 +141,7 @@ async def verify_trade_execution_service(token: str) -> Dict[str, Any]:
     # Test 2: User Portfolio Access
     print("\n💼 Testing portfolio access...")
     try:
-        response = requests.get(api_url('/api/v1/trading/balance'), headers=headers, timeout=15)
+        response = await http_get(api_url('/api/v1/trading/balance'), headers=headers, timeout=15)
         if response.status_code == 200:
             portfolio = response.json()
             print(f"✅ Portfolio access successful")
@@ -147,7 +157,7 @@ async def verify_trade_execution_service(token: str) -> Dict[str, Any]:
     # Test 3: Market Data Access
     print("\n📈 Testing market data access...")
     try:
-        response = requests.get(api_url('/api/v1/market/market-health'), headers=headers, timeout=10)
+        response = await http_get(api_url('/api/v1/market/market-health'), headers=headers, timeout=10)
         if response.status_code == 200:
             print("✅ Market data access successful")
             results['market_data'] = True
@@ -169,7 +179,7 @@ async def verify_trade_execution_service(token: str) -> Dict[str, Any]:
             "simulation_mode": True  # Always use simulation for verification
         }
 
-        response = requests.post(
+        response = await http_post(
             api_url('/api/v1/paper-trading/execute'),
             json=test_trade,
             headers=headers,
@@ -212,7 +222,7 @@ async def verify_risk_management(token: str) -> Dict[str, Any]:
             "simulation_mode": True
         }
 
-        response = requests.post(
+        response = await http_post(
             api_url('/api/v1/ai-consensus/validate-trade'),
             json=large_trade,
             headers=headers,
