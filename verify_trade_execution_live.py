@@ -13,6 +13,7 @@ import json
 import requests
 from datetime import datetime
 from typing import Optional, Dict, Any
+from urllib.parse import urljoin
 import time
 
 # Load configuration from environment with validation
@@ -26,6 +27,11 @@ RUN_LIVE_VERIFICATION = os.getenv('RUN_LIVE_VERIFICATION', '').lower() == 'true'
 # Test configuration
 MAX_TEST_AMOUNT = float(os.getenv('MAX_TEST_AMOUNT', '10.0'))  # Maximum test trade amount
 SIMULATION_MODE = os.getenv('FORCE_SIMULATION_MODE', 'true').lower() == 'true'
+
+
+def api_url(path: str) -> str:
+    """Robust URL joining that handles BASE_URL with or without /api/v1."""
+    return urljoin(BASE_URL.rstrip('/') + '/', path.lstrip('/'))
 
 
 def validate_environment():
@@ -42,7 +48,7 @@ def validate_environment():
     if missing_vars:
         print(f"❌ ERROR: Missing required environment variables: {', '.join(missing_vars)}")
         print("\n📋 Required environment variables:")
-        print("   CRYPTOUNIVERSE_BASE_URL - API base URL (e.g., https://api.cryptouniverse.com/api/v1)")
+        print("   CRYPTOUNIVERSE_BASE_URL - API base URL (e.g., https://api.cryptouniverse.com or https://api.cryptouniverse.com/api/v1)")
         print("   CRYPTOUNIVERSE_ADMIN_EMAIL - Admin email for authentication")
         print("   CRYPTOUNIVERSE_ADMIN_PASSWORD - Admin password")
         print("   RUN_LIVE_VERIFICATION - Must be 'true' to run live tests")
@@ -70,9 +76,9 @@ async def login_and_get_token() -> Optional[str]:
             "email": ADMIN_EMAIL,
             "password": ADMIN_PASSWORD
         }
-        print(f"🔐 Authenticating with {BASE_URL}/auth/login")
+        print(f"🔐 Authenticating with {api_url('/api/v1/auth/login')}")
         response = requests.post(
-            f"{BASE_URL}/api/v1/auth/login",
+            api_url('/api/v1/auth/login'),
             json=login_data,
             timeout=30
         )
@@ -111,7 +117,7 @@ async def verify_trade_execution_service(token: str) -> Dict[str, Any]:
     # Test 1: Service Health Check
     print("\n📊 Testing service health...")
     try:
-        response = requests.get(f"{BASE_URL}/api/v1/health/health", headers=headers, timeout=10)
+        response = requests.get(api_url('/api/v1/health/health'), headers=headers, timeout=10)
         if response.status_code == 200:
             print("✅ Service health check passed")
             results['health_check'] = True
@@ -125,7 +131,7 @@ async def verify_trade_execution_service(token: str) -> Dict[str, Any]:
     # Test 2: User Portfolio Access
     print("\n💼 Testing portfolio access...")
     try:
-        response = requests.get(f"{BASE_URL}/api/v1/trading/balance", headers=headers, timeout=15)
+        response = requests.get(api_url('/api/v1/trading/balance'), headers=headers, timeout=15)
         if response.status_code == 200:
             portfolio = response.json()
             print(f"✅ Portfolio access successful")
@@ -141,7 +147,7 @@ async def verify_trade_execution_service(token: str) -> Dict[str, Any]:
     # Test 3: Market Data Access
     print("\n📈 Testing market data access...")
     try:
-        response = requests.get(f"{BASE_URL}/api/v1/market/market-health", headers=headers, timeout=10)
+        response = requests.get(api_url('/api/v1/market/market-health'), headers=headers, timeout=10)
         if response.status_code == 200:
             print("✅ Market data access successful")
             results['market_data'] = True
@@ -164,7 +170,7 @@ async def verify_trade_execution_service(token: str) -> Dict[str, Any]:
         }
 
         response = requests.post(
-            f"{BASE_URL}/api/v1/paper-trading/execute",
+            api_url('/api/v1/paper-trading/execute'),
             json=test_trade,
             headers=headers,
             timeout=30
@@ -207,7 +213,7 @@ async def verify_risk_management(token: str) -> Dict[str, Any]:
         }
 
         response = requests.post(
-            f"{BASE_URL}/api/v1/ai-consensus/validate-trade",
+            api_url('/api/v1/ai-consensus/validate-trade'),
             json=large_trade,
             headers=headers,
             timeout=15

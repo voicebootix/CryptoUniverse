@@ -193,19 +193,20 @@ class TestEnhancedChatEngineIntegration:
         user_id = str(uuid.uuid4())  # Fixed: Use proper UUID string
         message = "Execute a small BTC trade"
 
-        # Create mock database session
+        # Create mock database session with proper async context manager
         mock_db = AsyncMock()
         mock_result = Mock()
-        mock_result.scalar_one_or_none.return_value = Mock(
+        mock_result.first.return_value = Mock(
             id=uuid.UUID(user_id),
             simulation_mode=True,
             simulation_balance=10000.00
         )
         mock_db.execute.return_value = mock_result
 
-        # Create async generator for get_database
-        async def fake_get_database():
-            yield mock_db
+        # Create async context manager mock for get_database
+        mock_get_database = AsyncMock()
+        mock_get_database.__aenter__.return_value = mock_db
+        mock_get_database.__aexit__.return_value = None
 
         # Mock the trade executor
         mock_executor = AsyncMock()
@@ -215,8 +216,8 @@ class TestEnhancedChatEngineIntegration:
             "simulation": True
         })
 
-        # Apply patches with correct async generator
-        with patch('app.services.ai_chat_engine_fixes.get_database', new=fake_get_database):
+        # Apply patches with correct async context manager
+        with patch('app.services.ai_chat_engine_fixes.get_database', return_value=mock_get_database):
             with patch.object(chat_engine, 'trade_executor', mock_executor):
 
                 # Test chat processing
@@ -239,12 +240,12 @@ class TestEnhancedChatEngineIntegration:
 
         user_id = "db_error_user"
 
-        # Create a failing async generator
-        async def failing_get_database():
-            raise Exception("Database connection failed")
-            yield  # This will never be reached
+        # Create a failing async context manager
+        mock_failing_database = AsyncMock()
+        mock_failing_database.__aenter__.side_effect = Exception("Database connection failed")
+        mock_failing_database.__aexit__.return_value = None
 
-        with patch('app.services.ai_chat_engine_fixes.get_database', new=failing_get_database):
+        with patch('app.services.ai_chat_engine_fixes.get_database', return_value=mock_failing_database):
             # Test that database errors are handled gracefully
             try:
                 result = await chat_engine.get_user_simulation_mode(user_id)
@@ -260,26 +261,30 @@ class TestEnhancedChatEngineIntegration:
 
         user_ids = [f"concurrent_user_{i}" for i in range(3)]
 
-        # Mock database with proper async generator
-        mock_dbs = []
+        # Mock database with proper async context manager
+        mock_context_managers = []
         for _ in user_ids:
             mock_db = AsyncMock()
             mock_result = Mock()
-            mock_result.scalar_one_or_none.return_value = Mock(
+            mock_result.first.return_value = Mock(
                 simulation_mode=True,
                 simulation_balance=5000.00
             )
             mock_db.execute.return_value = mock_result
-            mock_dbs.append(mock_db)
 
-        db_index = 0
-        async def concurrent_get_database():
-            nonlocal db_index
-            current_db = mock_dbs[db_index % len(mock_dbs)]
-            db_index += 1
-            yield current_db
+            mock_context_manager = AsyncMock()
+            mock_context_manager.__aenter__.return_value = mock_db
+            mock_context_manager.__aexit__.return_value = None
+            mock_context_managers.append(mock_context_manager)
 
-        with patch('app.services.ai_chat_engine_fixes.get_database', new=concurrent_get_database):
+        call_index = 0
+        def get_mock_database():
+            nonlocal call_index
+            current_mock = mock_context_managers[call_index % len(mock_context_managers)]
+            call_index += 1
+            return current_mock
+
+        with patch('app.services.ai_chat_engine_fixes.get_database', side_effect=get_mock_database):
             # Execute concurrent operations
             tasks = [
                 chat_engine.get_user_simulation_mode(user_id)
@@ -368,11 +373,11 @@ class TestTradeExecutionSystem:
     def setup_method(self):
         """Set up test environment"""
         self.user_id = str(uuid.uuid4())
-        self.mock_user = Mock(spec=User)
+        self.mock_user = Mock()
         self.mock_user.id = self.user_id
         self.mock_user.simulation_mode = True
         self.mock_user.simulation_balance = 10000
-        self.mock_user.role = UserRole.TRADER
+        self.mock_user.role = 'TRADER'
 
     @pytest.mark.asyncio
     async def test_fix_1_order_params_bug_fixed(self):
@@ -486,12 +491,16 @@ class TestTradeExecutionSystem:
         with patch('app.services.ai_chat_engine_fixes.get_database') as mock_get_db, \
              patch.object(chat_engine, 'trade_executor') as mock_executor:
 
-            # Mock database return
+            # Mock database return with proper async context manager
             mock_db = AsyncMock()
             mock_result = Mock()
-            mock_result.scalar_one_or_none.return_value = mock_user
+            mock_result.first.return_value = mock_user
             mock_db.execute = AsyncMock(return_value=mock_result)
-            mock_get_db.return_value = AsyncMock(__aenter__=AsyncMock(return_value=mock_db))
+
+            mock_context_manager = AsyncMock()
+            mock_context_manager.__aenter__.return_value = mock_db
+            mock_context_manager.__aexit__.return_value = None
+            mock_get_db.return_value = mock_context_manager
 
             # Mock successful execution
             mock_executor.execute_trade = AsyncMock(return_value={"success": True})
