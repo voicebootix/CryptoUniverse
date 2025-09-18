@@ -987,9 +987,14 @@ I encountered an error during the 5-phase execution. The trade was not completed
             total_opportunities = len(opportunities)
             total_potential = sum(opp.get("profit_potential_usd", 0) for opp in opportunities)
             
+            # Handle None response from AI consensus
+            ai_recommendation = "Market opportunities analyzed using your active trading strategies."
+            if ai_validation and isinstance(ai_validation, dict):
+                ai_recommendation = ai_validation.get('final_recommendation', ai_recommendation)
+            
             response_content = f"""🎯 **ENTERPRISE Opportunity Discovery Results**
 
-{ai_validation.get('final_recommendation', 'Market opportunities analyzed using your active trading strategies.')}
+{ai_recommendation}
 
 **📊 Discovery Summary:**
 • **{total_opportunities}** opportunities found using your **{user_profile.get('active_strategies', 0)}** active strategies
@@ -1012,7 +1017,7 @@ I encountered an error during the 5-phase execution. The trade was not completed
 
             return {
                 "content": response_content,
-                "confidence": ai_validation.get("consensus_score", 0.85),
+                "confidence": ai_validation.get("consensus_score", 0.85) if ai_validation and isinstance(ai_validation, dict) else 0.85,
                 "metadata": {
                     "service_used": "user_opportunity_discovery",
                     "opportunities_count": total_opportunities,
@@ -1062,8 +1067,12 @@ I encountered an error during the 5-phase execution. The trade was not completed
                 user_id=user_id
             )
             
+            ai_content = "Analysis complete"
+            if ai_format and isinstance(ai_format, dict):
+                ai_content = ai_format.get('final_recommendation', ai_content)
+            
             return {
-                "content": f"📊 **Real Market Analysis**\n\n{ai_format.get('final_recommendation', 'Analysis complete')}",
+                "content": f"📊 **Real Market Analysis**\n\n{ai_content}",
                 "confidence": 0.9,
                 "metadata": {"service_used": "market_analysis", "real_data": True}
             }
@@ -1099,9 +1108,15 @@ I encountered an error during the 5-phase execution. The trade was not completed
                 user_id=user_id
             )
             
+            ai_content = "Analysis complete"
+            consensus_score = 0.85
+            if ai_analysis and isinstance(ai_analysis, dict):
+                ai_content = ai_analysis.get('final_recommendation', ai_content)
+                consensus_score = ai_analysis.get("consensus_score", consensus_score)
+            
             return {
-                "content": f"💼 **Your Portfolio Analysis**\n\n{ai_analysis.get('final_recommendation', 'Analysis complete')}",
-                "confidence": ai_analysis.get("consensus_score", 0.85),
+                "content": f"💼 **Your Portfolio Analysis**\n\n{ai_content}",
+                "confidence": consensus_score,
                 "metadata": {"service_used": "portfolio_analysis", "real_data": True}
             }
             
