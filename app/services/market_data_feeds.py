@@ -15,6 +15,7 @@ import structlog
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
 from app.core.supabase import supabase_client
+from app.core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitBreakerError
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -118,16 +119,32 @@ class MarketDataFeeds:
             "global": ["coingecko", "coinpaprika"]
         }
         
-        # ENTERPRISE CIRCUIT BREAKER STATE for external APIs
+        # ENTERPRISE CIRCUIT BREAKER STATE using existing CircuitBreaker implementation
         self.circuit_breakers = {}
         for api_name in self.apis.keys():
-            self.circuit_breakers[api_name] = {
-                "failures": 0,
-                "last_failure": 0,
-                "open_until": 0,
-                "max_failures": 5,
-                "timeout": 300  # 5 minutes
-            }
+            # Configure circuit breaker based on API characteristics
+            if api_name == "alpha_vantage":
+                config = CircuitBreakerConfig(
+                    failure_threshold=3,  # Strict rate limits
+                    timeout_seconds=300,  # 5 minutes
+                    max_timeout_seconds=1800  # 30 minutes max
+                )
+            elif api_name == "coingecko":
+                config = CircuitBreakerConfig(
+                    failure_threshold=7,  # More lenient
+                    timeout_seconds=120,  # 2 minutes
+                    max_timeout_seconds=900  # 15 minutes max
+                )
+            else:
+                config = CircuitBreakerConfig()  # Default configuration
+            
+            self.circuit_breakers[api_name] = CircuitBreaker(
+                name=f"market_data_{api_name}",
+                config=config
+            )
+        
+        # Enable circuit breakers based on configuration
+        self.circuit_breakers_enabled = settings.CIRCUIT_BREAKER_ENABLED
         
         # Symbol mappings for different APIs
         self.symbol_mappings = {
@@ -208,26 +225,37 @@ class MarketDataFeeds:
         
         return False
     
-    def _handle_api_failure(self, api_name: str, error: str):
-        """ENTERPRISE: Handle API failure with circuit breaker logic."""
-        current_time = time.time()
-        breaker = self.circuit_breakers.get(api_name, {})
-        
-        breaker["failures"] = breaker.get("failures", 0) + 1
-        breaker["last_failure"] = current_time
-        
-        # Open circuit breaker if too many failures
-        if breaker["failures"] >= breaker.get("max_failures", 5):
-            breaker["open_until"] = current_time + breaker.get("timeout", 300)
-            logger.warning(f"Circuit breaker OPENED for {api_name} after {breaker['failures']} failures")
+    async def _handle_api_failure(self, api_name: str, error: str):
+        """ENTERPRISE: Handle API failure using existing CircuitBreaker implementation."""
+        if not self.circuit_breakers_enabled:
+            return
+            
+        circuit_breaker = self.circuit_breakers.get(api_name)
+        if circuit_breaker:
+            # Record failure in circuit breaker
+            await circuit_breaker._record_failure()
+            logger.warning(f"Circuit breaker failure recorded for {api_name}", error=error)
     
-    def _handle_api_success(self, api_name: str):
-        """ENTERPRISE: Handle API success - reset circuit breaker."""
-        breaker = self.circuit_breakers.get(api_name, {})
-        if breaker.get("failures", 0) > 0:
-            logger.info(f"Circuit breaker CLOSED for {api_name} - API recovered")
-        breaker["failures"] = 0
-        breaker["open_until"] = 0
+    async def _handle_api_success(self, api_name: str):
+        """ENTERPRISE: Handle API success using existing CircuitBreaker implementation."""
+        if not self.circuit_breakers_enabled:
+            return
+            
+        circuit_breaker = self.circuit_breakers.get(api_name)
+        if circuit_breaker:
+            # Record success in circuit breaker
+            await circuit_breaker._record_success()
+            logger.debug(f"Circuit breaker success recorded for {api_name}")
+    
+    async def _check_circuit_breaker(self, api_name: str) -> bool:
+        """Check if API call should be allowed by circuit breaker."""
+        if not self.circuit_breakers_enabled:
+            return True
+            
+        circuit_breaker = self.circuit_breakers.get(api_name)
+        if circuit_breaker:
+            return await circuit_breaker._should_try()
+        return True
     
     def _get_api_params(self, api_name: str, base_params: Dict = None) -> Dict[str, Any]:
         """Get API parameters including API key if required."""
