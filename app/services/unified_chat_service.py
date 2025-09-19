@@ -19,8 +19,11 @@ from dataclasses import dataclass
 from enum import Enum
 
 import structlog
+from sqlalchemy import select
+
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
+from app.core.database import AsyncSessionLocal
 from app.core.redis import get_redis_client
 
 # Import the new ChatAI service for conversations
@@ -694,7 +697,13 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                 requires_approval = True
                 decision_id = str(uuid.uuid4())
                 # Store decision for later execution
-                await self._store_pending_decision(decision_id, intent_analysis, context_data, session.user_id)
+                await self._store_pending_decision(
+                    decision_id,
+                    intent_analysis,
+                    context_data,
+                    session.user_id,
+                    session.conversation_mode
+                )
             
             # Save to memory
             await self._save_conversation(
@@ -775,7 +784,13 @@ Respond naturally using ONLY the real data provided."""
         # Handle action requirements
         if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
             decision_id = str(uuid.uuid4())
-            await self._store_pending_decision(decision_id, intent_analysis, context_data, session.user_id)
+            await self._store_pending_decision(
+                decision_id,
+                intent_analysis,
+                context_data,
+                session.user_id,
+                session.conversation_mode
+            )
             
             yield {
                 "type": "action_required",
@@ -971,7 +986,8 @@ Provide a helpful response using the real data available. Never use placeholder 
         decision_id: str,
         intent_analysis: Dict[str, Any],
         context_data: Dict[str, Any],
-        user_id: str
+        user_id: str,
+        conversation_mode: ConversationMode
     ):
         """Store pending decision for later execution."""
         try:
@@ -982,6 +998,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "user_id": user_id,
                     "intent": intent_analysis["intent"].value,
                     "context_data": context_data,
+                    "conversation_mode": conversation_mode.value,
                     "created_at": datetime.utcnow().isoformat(),
                     "expires_at": (datetime.utcnow() + timedelta(minutes=5)).isoformat()
                 }
@@ -1015,7 +1032,15 @@ Provide a helpful response using the real data available. Never use placeholder 
                 return {"success": False, "error": "Decision not found or expired"}
             
             decision = json.loads(decision_data)
-            
+
+            conversation_mode = None
+            conversation_mode_value = decision.get("conversation_mode")
+            if conversation_mode_value:
+                try:
+                    conversation_mode = ConversationMode(conversation_mode_value)
+                except ValueError:
+                    conversation_mode = None
+
             # Verify user
             if decision["user_id"] != user_id:
                 return {"success": False, "error": "Unauthorized"}
@@ -1032,7 +1057,9 @@ Provide a helpful response using the real data available. Never use placeholder 
                 return await self._execute_trade_with_validation(
                     context_data.get("trade_validation", {}),
                     user_id,
-                    modifications
+                    modifications,
+                    conversation_mode=conversation_mode,
+                    context_data=context_data
                 )
             
             elif intent == ChatIntent.REBALANCING:
@@ -1054,23 +1081,38 @@ Provide a helpful response using the real data available. Never use placeholder 
         self,
         trade_params: Dict[str, Any],
         user_id: str,
-        modifications: Optional[Dict[str, Any]] = None
+        modifications: Optional[Dict[str, Any]] = None,
+        conversation_mode: Optional[ConversationMode] = None,
+        context_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Execute trade with FULL 5-phase validation.
-        PRESERVED from original implementation.
+        PRESERVED from original implementation with simulation-aware routing.
         """
+        trade_params = dict(trade_params or {})
         if modifications:
             trade_params.update(modifications)
-        
-        phases_completed = []
-        
+
+        phases_completed: List[str] = []
+        context_data = context_data or {}
+        market_data = context_data.get("market_data", {})
+
         try:
+            missing_fields = [
+                field for field in ("symbol", "action") if not trade_params.get(field)
+            ]
+            if missing_fields:
+                return {
+                    "success": False,
+                    "message": f"Missing required trade parameters: {', '.join(missing_fields)}",
+                    "phases_completed": phases_completed
+                }
+
             # Phase 1: Analysis
             self.logger.info("Phase 1: Trade Analysis", trade=trade_params)
             analysis = await self.market_analysis.analyze_trade_opportunity(trade_params)
             phases_completed.append("analysis")
-            
+
             # Phase 2: AI Consensus (ONLY for trade validation)
             self.logger.info("Phase 2: AI Consensus Validation")
             consensus = await self.ai_consensus.validate_trade_decision(
@@ -1080,7 +1122,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                 user_id=user_id
             )
             phases_completed.append("consensus")
-            
+
             if not consensus.get("approved", False):
                 return {
                     "success": False,
@@ -1088,12 +1130,12 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "reason": consensus.get("reason", "Risk threshold exceeded"),
                     "phases_completed": phases_completed
                 }
-            
+
             # Phase 3: Validation
             self.logger.info("Phase 3: Trade Validation")
             validation = await self.trade_executor.validate_trade(trade_params, user_id)
             phases_completed.append("validation")
-            
+
             if not validation.get("valid", False):
                 return {
                     "success": False,
@@ -1101,18 +1143,76 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "reason": validation.get("reason", "Invalid parameters"),
                     "phases_completed": phases_completed
                 }
-            
+
             # Phase 4: Execution
             self.logger.info("Phase 4: Trade Execution")
+
+            if conversation_mode == ConversationMode.PAPER_TRADING:
+                quantity = trade_params.get("quantity")
+                notional_amount = trade_params.get("amount") or trade_params.get("position_size_usd")
+
+                if not quantity and notional_amount and market_data.get("current_price"):
+                    try:
+                        quantity = float(notional_amount) / float(market_data["current_price"])
+                    except (TypeError, ZeroDivisionError):
+                        quantity = None
+
+                if quantity is None:
+                    return {
+                        "success": False,
+                        "message": "Unable to determine trade quantity for paper trading",
+                        "phases_completed": phases_completed
+                    }
+
+                paper_result = await self.paper_trading.execute_paper_trade(
+                    user_id=user_id,
+                    symbol=trade_params["symbol"],
+                    side=trade_params["action"],
+                    quantity=quantity,
+                    strategy_used=trade_params.get("strategy", "chat_trade"),
+                    order_type=trade_params.get("order_type", "market")
+                )
+                phases_completed.append("execution")
+
+                if not paper_result.get("success", False):
+                    return {
+                        "success": False,
+                        "message": paper_result.get("error", "Paper trade execution failed"),
+                        "phases_completed": phases_completed,
+                        "execution_details": paper_result
+                    }
+
+                monitoring = {"monitoring_active": False, "paper_trading": True}
+                phases_completed.append("monitoring")
+
+                return {
+                    "success": True,
+                    "message": paper_result.get("message", "Paper trade executed successfully"),
+                    "trade_id": paper_result.get("paper_trade", {}).get("trade_id"),
+                    "phases_completed": phases_completed,
+                    "execution_details": paper_result,
+                    "monitoring_details": monitoring
+                }
+
+            simulation_mode = await self._get_user_simulation_mode(user_id)
+            if simulation_mode is None:
+                simulation_mode = True
+
+            trade_request = self._build_trade_request_for_execution(trade_params, market_data)
+            if not trade_request.get("symbol") or not trade_request.get("action"):
+                return {
+                    "success": False,
+                    "message": "Unable to build trade request for execution",
+                    "phases_completed": phases_completed
+                }
+
             execution = await self.trade_executor.execute_trade(
-                user_id=user_id,
-                symbol=trade_params["symbol"],
-                action=trade_params["action"],
-                amount=trade_params["amount"],
-                order_type=trade_params.get("order_type", "market")
+                trade_request,
+                user_id,
+                simulation_mode
             )
             phases_completed.append("execution")
-            
+
             if not execution.get("success", False):
                 return {
                     "success": False,
@@ -1120,7 +1220,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "reason": execution.get("error", "Unknown error"),
                     "phases_completed": phases_completed
                 }
-            
+
             # Phase 5: Monitoring
             self.logger.info("Phase 5: Trade Monitoring")
             monitoring = await self._initiate_trade_monitoring(
@@ -1128,15 +1228,16 @@ Provide a helpful response using the real data available. Never use placeholder 
                 user_id
             )
             phases_completed.append("monitoring")
-            
+
             return {
                 "success": True,
                 "message": "Trade executed successfully",
                 "trade_id": execution["trade_id"],
                 "phases_completed": phases_completed,
-                "execution_details": execution
+                "execution_details": execution,
+                "monitoring_details": monitoring
             }
-            
+
         except Exception as e:
             self.logger.exception("Trade execution error", error=str(e))
             return {
@@ -1144,7 +1245,84 @@ Provide a helpful response using the real data available. Never use placeholder 
                 "error": str(e),
                 "phases_completed": phases_completed
             }
-    
+
+    async def _get_user_simulation_mode(self, user_id: str) -> Optional[bool]:
+        """Fetch the user's simulation mode preference from the database."""
+        try:
+            user_identifier: Any = user_id
+            try:
+                user_identifier = uuid.UUID(str(user_id))
+            except (ValueError, TypeError):
+                user_identifier = user_id
+
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(User.simulation_mode).where(User.id == user_identifier)
+                )
+                value = result.scalar_one_or_none()
+                if value is None:
+                    return None
+                return bool(value)
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to fetch user simulation mode",
+                error=str(exc),
+                user_id=str(user_id)
+            )
+            return None
+
+    def _build_trade_request_for_execution(
+        self,
+        trade_params: Dict[str, Any],
+        market_data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Build a trade request payload compatible with the trade executor."""
+        market_data = market_data or {}
+        trade_request: Dict[str, Any] = {}
+
+        symbol = trade_params.get("symbol")
+        if symbol:
+            trade_request["symbol"] = symbol
+
+        action = trade_params.get("action")
+        if action:
+            trade_request["action"] = action.upper() if isinstance(action, str) else action
+
+        order_type = trade_params.get("order_type")
+        if isinstance(order_type, str):
+            trade_request["order_type"] = order_type.upper()
+        else:
+            trade_request["order_type"] = order_type or "MARKET"
+
+        if trade_params.get("quantity"):
+            trade_request["quantity"] = trade_params["quantity"]
+
+        amount = trade_params.get("amount") or trade_params.get("position_size_usd")
+        if amount:
+            trade_request["position_size_usd"] = amount
+            price = market_data.get("current_price")
+            if price:
+                try:
+                    quantity = float(amount) / float(price)
+                    if quantity > 0:
+                        trade_request.setdefault("quantity", quantity)
+                except (TypeError, ZeroDivisionError):
+                    pass
+
+        for optional_key in [
+            "price",
+            "take_profit",
+            "stop_loss",
+            "exchange",
+            "time_in_force",
+            "opportunity_data",
+            "strategy"
+        ]:
+            if optional_key in trade_params and trade_params[optional_key] is not None:
+                trade_request[optional_key] = trade_params[optional_key]
+
+        return trade_request
+
     async def _execute_rebalancing(
         self,
         rebalance_analysis: Dict[str, Any],
