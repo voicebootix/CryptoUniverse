@@ -4625,10 +4625,7 @@ class TradingStrategiesService(LoggerMixin):
                 # Aggregate real trades for the requested period
                 pnl_avg_expr = func.avg(Trade.profit_realized_usd)
                 pnl_sq_avg_expr = func.avg(Trade.profit_realized_usd * Trade.profit_realized_usd)
-                pnl_variance_expr = pnl_sq_avg_expr - (pnl_avg_expr * pnl_avg_expr)
-                pnl_stddev_expr = func.sqrt(
-                    case((pnl_variance_expr > 0, pnl_variance_expr), else_=0.0)
-                )
+                # Variance and stddev will be computed in Python after query execution
 
                 trade_stmt = select(
                     func.count(Trade.id).label("total_trades"),
@@ -4642,7 +4639,8 @@ class TradingStrategiesService(LoggerMixin):
                     func.min(Trade.profit_realized_usd).label("largest_loss"),
                     func.sum(Trade.total_value).label("total_value"),
                     func.sum(Trade.fees_paid).label("total_fees"),
-                    pnl_stddev_expr.label("pnl_stddev")
+                    pnl_avg_expr.label("pnl_avg"),
+                    pnl_sq_avg_expr.label("pnl_sq_avg")
                 ).select_from(Trade)
 
                 trade_time = func.coalesce(Trade.completed_at, Trade.executed_at, Trade.created_at)
@@ -4675,15 +4673,19 @@ class TradingStrategiesService(LoggerMixin):
                     net_pnl = safe_float(trade_row.total_pnl, 0.0)
                     total_value = max(safe_float(trade_row.total_value, 0.0), 0.0)
                     avg_trade_pnl = safe_float(trade_row.avg_trade_pnl, 0.0)
-                    pnl_stddev = safe_float(trade_row.pnl_stddev, 0.0)
+                    # Compute variance and stddev in Python
+                    pnl_avg = safe_float(trade_row.pnl_avg, 0.0)
+                    pnl_sq_avg = safe_float(trade_row.pnl_sq_avg, 0.0)
+                    pnl_variance = max(0.0, pnl_sq_avg - (pnl_avg ** 2))
+                    pnl_stddev = math.sqrt(pnl_variance)
                     avg_notional = total_value / total_trades if total_trades > 0 else 0.0
 
-                    win_rate_pct = (winning_trades / total_trades) * 100 if total_trades else 0.0
-                    total_return_pct = (net_pnl / total_value) * 100 if total_value else 0.0
+                    win_rate_decimal = (winning_trades / total_trades) if total_trades else 0.0
+                    total_return_decimal = (net_pnl / total_value) if total_value else 0.0
                     volatility_ratio = (pnl_stddev / avg_notional) if avg_notional else 0.0
-                    avg_trade_pct = (avg_trade_pnl / avg_notional) * 100 if avg_notional else 0.0
-                    largest_win_pct = (safe_float(trade_row.largest_win, 0.0) / avg_notional) * 100 if avg_notional else 0.0
-                    largest_loss_pct = (safe_float(trade_row.largest_loss, 0.0) / avg_notional) * 100 if avg_notional else 0.0
+                    avg_trade_decimal = (avg_trade_pnl / avg_notional) if avg_notional else 0.0
+                    largest_win_decimal = (safe_float(trade_row.largest_win, 0.0) / avg_notional) if avg_notional else 0.0
+                    largest_loss_decimal = (safe_float(trade_row.largest_loss, 0.0) / avg_notional) if avg_notional else 0.0
 
                     if gross_loss < 0:
                         profit_factor = gross_profit / abs(gross_loss) if abs(gross_loss) > 0 else 0.0
@@ -4693,18 +4695,26 @@ class TradingStrategiesService(LoggerMixin):
                         profit_factor = 0.0
 
                     return {
-                        "total_return": total_return_pct,
+                        "total_return": total_return_decimal,
+                        "total_return_units": "decimal",
                         "benchmark_return": 0.0,
+                        "benchmark_return_units": "decimal",
                         "volatility": volatility_ratio,
+                        "volatility_units": "ratio",
                         "max_drawdown": 0.0,
                         "recovery_time": None,
-                        "win_rate": win_rate_pct,
+                        "win_rate": win_rate_decimal,
+                        "win_rate_units": "decimal",
                         "profit_factor": profit_factor,
-                        "avg_trade": avg_trade_pct,
-                        "largest_win": largest_win_pct,
-                        "largest_loss": largest_loss_pct,
+                        "avg_trade": avg_trade_decimal,
+                        "avg_trade_units": "decimal",
+                        "largest_win": largest_win_decimal,
+                        "largest_win_units": "decimal",
+                        "largest_loss": largest_loss_decimal,
+                        "largest_loss_units": "decimal",
                         "total_trades": total_trades,
                         "net_pnl": net_pnl,
+                        "net_pnl_units": "usd",
                         "data_quality": "verified_real_trades",
                         "status": "verified_real_trades",
                         "performance_badges": []
@@ -4733,27 +4743,37 @@ class TradingStrategiesService(LoggerMixin):
                 backtest = backtest_result.scalars().first()
 
                 if backtest:
-                    total_return_pct = safe_float(backtest.total_return_pct, safe_float(backtest.total_return, 0.0))
-                    win_rate_pct = safe_float(backtest.win_rate, 0.0)
+                    total_return_decimal = safe_float(backtest.total_return_pct, safe_float(backtest.total_return, 0.0)) / 100
+                    win_rate_decimal = safe_float(backtest.win_rate, 0.0) / 100
                     profit_factor = safe_float(backtest.profit_factor, 0.0)
-                    avg_trade_pct = safe_float(backtest.avg_trade_return, 0.0)
+                    avg_trade_decimal = safe_float(backtest.avg_trade_return, 0.0) / 100
                     max_drawdown = safe_float(backtest.max_drawdown, 0.0)
                     volatility_ratio = safe_float(backtest.volatility, 0.0)
                     recovery_time = safe_int(backtest.max_drawdown_duration, 0)
 
                     return {
-                        "total_return": total_return_pct,
+                        "total_return": total_return_decimal,
+                        "total_return_units": "decimal",
                         "benchmark_return": 0.0,
+                        "benchmark_return_units": "decimal",
                         "volatility": volatility_ratio,
+                        "volatility_units": "ratio",
                         "max_drawdown": max_drawdown,
+                        "max_drawdown_units": "decimal",
                         "recovery_time": recovery_time,
-                        "win_rate": win_rate_pct,
+                        "recovery_time_units": "days",
+                        "win_rate": win_rate_decimal,
+                        "win_rate_units": "decimal",
                         "profit_factor": profit_factor,
-                        "avg_trade": avg_trade_pct,
+                        "avg_trade": avg_trade_decimal,
+                        "avg_trade_units": "decimal",
                         "largest_win": 0.0,
+                        "largest_win_units": "decimal",
                         "largest_loss": 0.0,
+                        "largest_loss_units": "decimal",
                         "total_trades": safe_int(backtest.total_trades, 0),
                         "net_pnl": safe_float(backtest.final_capital, 0.0) - safe_float(backtest.initial_capital, 0.0),
+                        "net_pnl_units": "usd",
                         "data_quality": "simulated_backtest",
                         "status": "backtest_only",
                         "performance_badges": ["Simulated / No live trades"]
@@ -4786,6 +4806,7 @@ class TradingStrategiesService(LoggerMixin):
             return {
                 "total_return": 0.0,
                 "benchmark_return": 0.0,
+                        "benchmark_return_units": "decimal",
                 "volatility": 0.0,
                 "max_drawdown": 0.0,
                 "recovery_time": None,
@@ -4793,7 +4814,9 @@ class TradingStrategiesService(LoggerMixin):
                 "profit_factor": 0.0,
                 "avg_trade": 0.0,
                 "largest_win": 0.0,
+                        "largest_win_units": "decimal",
                 "largest_loss": 0.0,
+                        "largest_loss_units": "decimal",
                 "returns_are_percent": True,
                 "benchmark_is_percent": True,
                 "volatility_is_percent": False,
