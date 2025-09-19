@@ -485,6 +485,8 @@ class StrategyMarketplaceService(LoggerMixin):
             data_quality: Optional[str] = None
             status: Optional[str] = None
             badges: List[str] = []
+            unit_metadata: Dict[str, Any] = {}
+            risk_metrics: Dict[str, Any] = {}
 
             # Check for nested structure under 'strategy_performance_analysis'
             if "strategy_performance_analysis" in performance_result:
@@ -492,42 +494,179 @@ class StrategyMarketplaceService(LoggerMixin):
                 if isinstance(analysis, dict):
                     data_quality = analysis.get("data_quality")
                     status = analysis.get("status")
-                    badges = analysis.get("performance_badges", [])
+                    badges = analysis.get("performance_badges") or analysis.get("badges", [])
                     performance_data = analysis.get("performance_metrics") or analysis
+                    if isinstance(analysis.get("unit_metadata"), dict):
+                        unit_metadata.update(analysis["unit_metadata"])
+                    if isinstance(analysis.get("risk_adjusted_metrics"), dict):
+                        risk_metrics = analysis["risk_adjusted_metrics"]
 
             # Check for direct 'performance_metrics' key (legacy structure)
             if performance_data is None and "performance_metrics" in performance_result:
                 performance_data = performance_result["performance_metrics"]
                 data_quality = data_quality or performance_result.get("data_quality")
                 status = status or performance_result.get("status")
-                badges = badges or performance_result.get("badges", [])
+                badges = badges or performance_result.get("performance_badges") or performance_result.get("badges", [])
+                if isinstance(performance_result.get("unit_metadata"), dict):
+                    unit_metadata.update(performance_result["unit_metadata"])
+                if isinstance(performance_result.get("risk_adjusted_metrics"), dict):
+                    risk_metrics = performance_result["risk_adjusted_metrics"]
 
             # Check for top-level metrics (flat structure)
             if performance_data is None and any(key in performance_result for key in ["total_pnl", "win_rate", "total_trades"]):
                 performance_data = performance_result
                 data_quality = data_quality or performance_result.get("data_quality")
                 status = status or performance_result.get("status")
-                badges = badges or performance_result.get("badges", [])
+                badges = badges or performance_result.get("performance_badges") or performance_result.get("badges", [])
+                if isinstance(performance_result.get("unit_metadata"), dict):
+                    unit_metadata.update(performance_result["unit_metadata"])
+                if isinstance(performance_result.get("risk_adjusted_metrics"), dict):
+                    risk_metrics = performance_result["risk_adjusted_metrics"]
 
             if not performance_data or not isinstance(performance_data, dict):
                 return None
+
+            # Some data providers embed unit hints directly alongside the metrics
+            if isinstance(performance_data.get("unit_metadata"), dict):
+                unit_metadata.update(performance_data["unit_metadata"])
+
+            # Incorporate explicit unit fields that may live alongside metrics
+            for unit_key in [
+                "pnl_unit",
+                "returns_unit",
+                "volatility_unit",
+                "max_drawdown_unit",
+                "drawdown_unit",
+                "win_rate_unit",
+                "average_trade_unit",
+                "avg_trade_unit",
+                "largest_win_unit",
+                "largest_loss_unit",
+                "best_trade_unit",
+                "worst_trade_unit",
+                "win_rate_is_percent",
+                "average_trade_is_percent",
+                "avg_trade_is_percent",
+                "max_drawdown_is_percent",
+                "volatility_is_percent",
+                "returns_are_percent",
+                "largest_win_is_percent",
+                "largest_loss_is_percent",
+            ]:
+                if unit_key in performance_data and unit_key not in unit_metadata:
+                    unit_metadata[unit_key] = performance_data[unit_key]
+
+            def _to_float(value: Any) -> Optional[float]:
+                try:
+                    if value is None:
+                        return None
+                    return float(value)
+                except (TypeError, ValueError):
+                    return None
+
+            def _get_unit(*keys: str) -> Any:
+                for key in keys:
+                    if key in unit_metadata:
+                        return unit_metadata[key]
+                return None
+
+            def _convert_value(
+                value: Any,
+                unit_keys: List[str],
+                percent_flag_keys: Optional[List[str]] = None,
+                default: float = 0.0,
+                enable_percent_fallback: bool = True,
+            ) -> float:
+                numeric = _to_float(value)
+                if numeric is None:
+                    return default
+
+                unit_value = _get_unit(*unit_keys)
+
+                if unit_value is None and percent_flag_keys:
+                    for flag_key in percent_flag_keys:
+                        flag_value = _get_unit(flag_key)
+                        if isinstance(flag_value, bool):
+                            unit_value = "percent" if flag_value else "fraction"
+                            break
+
+                if isinstance(unit_value, str):
+                    unit_lower = unit_value.lower()
+                    if unit_lower in {"percent", "percentage", "%"}:
+                        return numeric / 100.0 if enable_percent_fallback else numeric
+                    if unit_lower in {"bps", "basis_points"}:
+                        return numeric / 10000.0 if enable_percent_fallback else numeric
+                    if unit_lower in {"fraction", "decimal"}:
+                        return numeric
+                    # Currency or absolute units should remain untouched
+                    return numeric
+
+                if isinstance(unit_value, bool):
+                    return numeric / 100.0 if unit_value and enable_percent_fallback else numeric
+
+                if enable_percent_fallback and abs(numeric) > 1:
+                    # Fallback to heuristic only when no metadata is available
+                    return numeric / 100.0
+                return numeric
 
             # Normalize and backfill metrics with type safety
             normalized = {}
 
             # Core financial metrics with neutral defaults
-            normalized["total_pnl"] = self._safe_float(performance_data.get("total_pnl", 0))
+            total_pnl_candidates = [
+                performance_data.get("total_pnl"),
+                performance_data.get("total_pnl_usd"),
+                performance_data.get("net_pnl_usd"),
+                performance_data.get("net_pnl"),
+                performance_data.get("profit_usd"),
+            ]
+            total_pnl = next((value for value in total_pnl_candidates if value is not None), 0.0)
+            normalized["total_pnl"] = self._safe_float(total_pnl)
 
             # Normalize win_rate to canonical 0-1 fraction unit (handles both percentage and fraction inputs)
-            raw_win_rate = self._safe_float(performance_data.get("win_rate", 0))
-            normalized["win_rate"] = self.normalize_win_rate_to_fraction(raw_win_rate)
+            raw_win_rate = performance_data.get("win_rate")
+            if raw_win_rate is None:
+                raw_win_rate = performance_data.get("winning_trades_pct")
+                if raw_win_rate is not None and "win_rate_unit" not in unit_metadata:
+                    unit_metadata.setdefault("win_rate_unit", "percent")
+            normalized["win_rate"] = _convert_value(
+                raw_win_rate,
+                ["win_rate_unit", "win_rate_is_percent"],
+                percent_flag_keys=["win_rate_is_percent"],
+            )
 
-            normalized["total_trades"] = self._safe_int(performance_data.get("total_trades", 0))
-            normalized["avg_return"] = self._safe_float(performance_data.get("avg_return", 0))
+            total_trades_value = performance_data.get("total_trades")
+            if total_trades_value is None:
+                total_trades_value = performance_data.get("trade_count")
+            normalized["total_trades"] = self._safe_int(total_trades_value)
+            avg_return_source = performance_data.get("avg_return")
+            if avg_return_source is None:
+                avg_return_source = performance_data.get("average_trade_return")
+            if avg_return_source is None:
+                avg_return_source = performance_data.get("avg_trade_return")
+            normalized["avg_return"] = _convert_value(
+                avg_return_source,
+                ["average_trade_unit", "avg_trade_unit", "average_trade_is_percent", "avg_trade_is_percent"],
+                percent_flag_keys=["average_trade_is_percent", "avg_trade_is_percent"],
+            )
 
             # Additional metrics with neutral defaults
-            normalized["sharpe_ratio"] = performance_data.get("sharpe_ratio")  # Keep None if missing
-            normalized["max_drawdown"] = self._safe_float(performance_data.get("max_drawdown", 0))
+            sharpe_source = risk_metrics.get("sharpe_ratio") if risk_metrics else performance_data.get("sharpe_ratio")
+            if sharpe_source is None and risk_metrics:
+                sharpe_source = risk_metrics.get("sharpe_ratio")
+            sharpe_value = _to_float(sharpe_source)
+            normalized["sharpe_ratio"] = sharpe_value
+
+            max_drawdown_source = performance_data.get("max_drawdown")
+            if max_drawdown_source is None:
+                max_drawdown_source = performance_data.get("max_drawdown_pct")
+            if max_drawdown_source is None:
+                max_drawdown_source = performance_data.get("total_return_pct")
+            normalized["max_drawdown"] = _convert_value(
+                max_drawdown_source,
+                ["max_drawdown_unit", "drawdown_unit", "max_drawdown_is_percent"],
+                percent_flag_keys=["max_drawdown_is_percent"],
+            )
 
             # Track data quality metadata for UI badges
             normalized["data_quality"] = data_quality or performance_data.get("data_quality", "simulated")
@@ -539,30 +678,58 @@ class StrategyMarketplaceService(LoggerMixin):
                 normalized["last_7_days_pnl"] = 0.0
                 normalized["last_30_days_pnl"] = 0.0
             else:
-                normalized["last_7_days_pnl"] = self._safe_float(
-                    performance_data.get("last_7_days_pnl", 0)
-                )
-                normalized["last_30_days_pnl"] = self._safe_float(
-                    performance_data.get("last_30_days_pnl", 0)
-                )
+                last_7_candidates = [
+                    performance_data.get("last_7_days_pnl"),
+                    performance_data.get("pnl_last_7_days"),
+                    performance_data.get("pnl_7d"),
+                ]
+                last_30_candidates = [
+                    performance_data.get("last_30_days_pnl"),
+                    performance_data.get("pnl_last_30_days"),
+                    performance_data.get("pnl_30d"),
+                ]
+                last_7_value = next((value for value in last_7_candidates if value is not None), 0.0)
+                last_30_value = next((value for value in last_30_candidates if value is not None), 0.0)
+                normalized["last_7_days_pnl"] = self._safe_float(last_7_value)
+                normalized["last_30_days_pnl"] = self._safe_float(last_30_value)
 
             # Trading activity metrics - no optimistic defaults
-            winning_trades = performance_data.get("winning_trades")
+            winning_trades = None
+            for key in ["winning_trades", "winning_trades_count", "wins"]:
+                if key in performance_data:
+                    winning_trades = performance_data.get(key)
+                    break
             if winning_trades is not None:
                 normalized["winning_trades"] = self._safe_int(winning_trades)
             else:
                 # Only calculate from actual data if both values are present and > 0
                 if normalized["total_trades"] > 0 and normalized["win_rate"] > 0:
-                    normalized["winning_trades"] = int(normalized["total_trades"] * normalized["win_rate"])
+                    estimated_wins = int(round(normalized["total_trades"] * normalized["win_rate"]))
+                    normalized["winning_trades"] = min(normalized["total_trades"], max(0, estimated_wins))
                 else:
                     normalized["winning_trades"] = 0
 
             # Risk metrics - explicit neutral defaults only
-            normalized["best_trade_pnl"] = self._safe_float(
-                performance_data.get("best_trade_pnl", 0.0)
+            best_trade_source = performance_data.get("best_trade_pnl")
+            if best_trade_source is None:
+                best_trade_source = performance_data.get("largest_win")
+            if best_trade_source is None:
+                best_trade_source = performance_data.get("best_trade")
+            normalized["best_trade_pnl"] = _convert_value(
+                best_trade_source,
+                ["largest_win_unit", "best_trade_unit", "largest_win_is_percent"],
+                percent_flag_keys=["largest_win_is_percent"],
             )
-            normalized["worst_trade_pnl"] = self._safe_float(
-                performance_data.get("worst_trade_pnl", 0.0)
+
+            worst_trade_source = performance_data.get("worst_trade_pnl")
+            if worst_trade_source is None:
+                worst_trade_source = performance_data.get("largest_loss")
+            if worst_trade_source is None:
+                worst_trade_source = performance_data.get("worst_trade")
+            normalized["worst_trade_pnl"] = _convert_value(
+                worst_trade_source,
+                ["largest_loss_unit", "worst_trade_unit", "largest_loss_is_percent"],
+                percent_flag_keys=["largest_loss_is_percent"],
             )
 
             # Supported symbols - no optimistic defaults
@@ -603,10 +770,20 @@ class StrategyMarketplaceService(LoggerMixin):
 
     def _build_performance_badges(self, data_quality: Optional[str]) -> List[str]:
         """Build badges to describe performance data quality for UI consumers."""
-        normalized_quality = data_quality or "no_data"
-        if normalized_quality == "verified_real_trades":
+        normalized_quality = (data_quality or "no_data").lower()
+
+        if normalized_quality in {"verified_real_trades", "real_trades", "live", "live_trading"}:
             return []
-        return ["Simulated / No live trades"]
+
+        badge_map = {
+            "no_data": ["No performance data available"],
+            "unknown": ["No performance data available"],
+            "simulated": ["Simulated / No live trades"],
+            "paper_trading": ["Simulated / No live trades"],
+            "backtest": ["Backtest results"],
+        }
+
+        return badge_map.get(normalized_quality, ["Simulated / No live trades"])
     
     async def _get_backtest_results(self, strategy_func: str) -> Dict[str, Any]:
         """Get REAL backtesting results using actual market data."""
