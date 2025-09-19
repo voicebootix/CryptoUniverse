@@ -299,7 +299,18 @@ class StrategyPerformanceHistory(Base):
     @win_rate_fraction.setter
     def win_rate_fraction(self, value: float):
         """Set win rate from 0-1 fraction."""
-        self.win_rate = min(value * 100.0, 100.0)
+        from decimal import Decimal, ROUND_HALF_UP
+
+        # Clamp to valid range (0.0-1.0)
+        clamped_value = max(0.0, min(value, 1.0))
+
+        # Convert to percentage and then to Decimal with proper rounding
+        percentage = clamped_value * 100.0
+        decimal_percentage = Decimal(str(percentage)).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+
+        self.win_rate = float(decimal_percentage)
     
     @property
     def win_rate_percent(self) -> float:
@@ -309,7 +320,17 @@ class StrategyPerformanceHistory(Base):
     @win_rate_percent.setter
     def win_rate_percent(self, value: float):
         """Set win rate from 0-100 percentage."""
-        self.win_rate = min(value, 100.0)
+        from decimal import Decimal, ROUND_HALF_UP
+
+        # Clamp to valid range (0.0-100.0)
+        clamped_value = max(0.0, min(value, 100.0))
+
+        # Convert to Decimal with proper rounding
+        decimal_percentage = Decimal(str(clamped_value)).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+
+        self.win_rate = float(decimal_percentage)
 
 
 class BacktestResult(Base):

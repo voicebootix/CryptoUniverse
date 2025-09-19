@@ -659,8 +659,7 @@ class TradeExecutionService(LoggerMixin):
                 filtered_request["action"] = action_upper
                 filtered_request["side"] = action_upper.lower()
 
-        # Normalize quantity from amount or quantity fields
-        normalized_quantity: Optional[float] = None
+        # Only normalize explicit unit quantities, preserve USD sizing
         quantity_value = filtered_request.get("quantity")
         amount_value = filtered_request.get("amount")
         position_size_value = filtered_request.get("position_size_usd")
@@ -674,19 +673,26 @@ class TradeExecutionService(LoggerMixin):
                 errors.append(f"Invalid {field_name} value")
                 return None
 
-        normalized_quantity = _convert_to_float(quantity_value, "quantity")
-        if normalized_quantity is None:
-            normalized_quantity = _convert_to_float(amount_value, "amount")
-        if normalized_quantity is None and position_size_value is not None:
-            normalized_quantity = _convert_to_float(position_size_value, "position_size_usd")
+        # Only parse "quantity" field - don't convert amount/position_size_usd into quantity
+        if quantity_value is not None:
+            normalized_quantity = _convert_to_float(quantity_value, "quantity")
+            if normalized_quantity is None:
+                pass  # Error already added by _convert_to_float
+            elif normalized_quantity <= 0:
+                errors.append("Trade quantity must be greater than zero")
+            else:
+                filtered_request["quantity"] = normalized_quantity
 
-        if normalized_quantity is None:
-            errors.append("Trade quantity is required")
-        elif normalized_quantity <= 0:
-            errors.append("Trade quantity must be greater than zero")
-        else:
-            filtered_request["quantity"] = normalized_quantity
-            filtered_request.setdefault("amount", normalized_quantity)
+        # Keep amount and position_size_usd unchanged in filtered_request
+        # Don't set filtered_request["quantity"] from amount/position_size_usd
+
+        # Validate that at least one sizing method is provided
+        has_quantity = quantity_value is not None and "quantity" in filtered_request
+        has_amount = amount_value is not None
+        has_position_size = position_size_value is not None
+
+        if not (has_quantity or has_amount or has_position_size):
+            errors.append("Trade sizing is required (quantity, amount, or position_size_usd)")
 
         order_type = filtered_request.get("order_type", "MARKET")
         if isinstance(order_type, str):
