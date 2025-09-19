@@ -131,38 +131,66 @@ const MyStrategies: React.FC = () => {
   const [showStrategyDetails, setShowStrategyDetails] = useState(false);
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'paused'>('all');
 
-  // Fetch user's strategy portfolio
+  // Fetch user's strategy portfolio using new unified endpoint
   const { data: portfolio, isLoading: portfolioLoading, error: portfolioError } = useQuery<UserStrategyPortfolio, AxiosError>({
-    queryKey: ['user-strategy-portfolio'],
+    queryKey: ['unified-strategy-portfolio'],
     queryFn: async () => {
       try {
-        const response = await apiClient.get<UserStrategyPortfolio>('/strategies/my-portfolio');
-        return response.data;
+        // Use new enterprise unified endpoint
+        const response = await apiClient.get<any>('/unified-strategies/portfolio');
+
+        // Transform response to match expected interface
+        const portfolioData = response.data;
+
+        return {
+          summary: portfolioData.summary || {
+            total_strategies: 0,
+            active_strategies: 0,
+            welcome_strategies: 0,
+            purchased_strategies: 0,
+            total_portfolio_value: 0,
+            total_pnl_usd: 0,
+            total_pnl_percentage: 0,
+            monthly_credit_cost: 0,
+            profit_potential_used: 0,
+            profit_potential_remaining: 100
+          },
+          strategies: portfolioData.strategies || portfolioData.active_strategies || []
+        };
       } catch (error: unknown) {
-        console.error('Failed to fetch portfolio:', error);
-        // Return empty portfolio if endpoint not found
+        console.error('Failed to fetch unified portfolio:', error);
+
+        // Fallback to old endpoint for backwards compatibility
         if (axios.isAxiosError(error) && error.response?.status === 404) {
-          return {
-            summary: {
-              total_strategies: 0,
-              active_strategies: 0,
-              welcome_strategies: 0,
-              purchased_strategies: 0,
-              total_portfolio_value: 0,
-              total_pnl_usd: 0,
-              total_pnl_percentage: 0,
-              monthly_credit_cost: 0,
-              profit_potential_used: 0,
-              profit_potential_remaining: 100
-            },
-            strategies: []
-          };
+          try {
+            console.log('Falling back to legacy portfolio endpoint...');
+            const fallbackResponse = await apiClient.get<UserStrategyPortfolio>('/strategies/my-portfolio');
+            return fallbackResponse.data;
+          } catch (fallbackError) {
+            console.error('Legacy endpoint also failed:', fallbackError);
+          }
         }
-        throw error;
+
+        // Return empty portfolio as last resort
+        return {
+          summary: {
+            total_strategies: 0,
+            active_strategies: 0,
+            welcome_strategies: 0,
+            purchased_strategies: 0,
+            total_portfolio_value: 0,
+            total_pnl_usd: 0,
+            total_pnl_percentage: 0,
+            monthly_credit_cost: 0,
+            profit_potential_used: 0,
+            profit_potential_remaining: 100
+          },
+          strategies: []
+        };
       }
     },
     refetchInterval: 30000,
-    retry: 2,
+    retry: 1, // Reduced retry count for faster fallback
     staleTime: 15000
   });
 
@@ -176,7 +204,7 @@ const MyStrategies: React.FC = () => {
     },
     onSuccess: (data, variables) => {
       toast.success(`Strategy ${variables.active ? 'activated' : 'paused'} successfully`);
-      queryClient.invalidateQueries({ queryKey: ['user-strategy-portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['unified-strategy-portfolio'] });
     },
     onError: (error: unknown) => {
       const message = axios.isAxiosError(error)
@@ -196,7 +224,7 @@ const MyStrategies: React.FC = () => {
     },
     onSuccess: () => {
       toast.success('Strategy configuration updated successfully');
-      queryClient.invalidateQueries({ queryKey: ['user-strategy-portfolio'] });
+      queryClient.invalidateQueries({ queryKey: ['unified-strategy-portfolio'] });
     },
     onError: (error: unknown) => {
       const message = axios.isAxiosError(error)
@@ -301,7 +329,7 @@ const MyStrategies: React.FC = () => {
               : errorMessage}
           </p>
           <div className="flex gap-2 justify-center">
-            <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['user-strategy-portfolio'] })}>
+            <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['unified-strategy-portfolio'] })}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Retry
             </Button>

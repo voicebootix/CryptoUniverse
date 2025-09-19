@@ -24,6 +24,8 @@ from app.models.user import User, UserRole
 from app.models.trading import TradingStrategy
 from app.core.redis import get_redis_client
 from app.services.strategy_marketplace_service import strategy_marketplace_service
+from app.services.unified_strategy_service import UnifiedStrategyService
+from app.models.strategy_access import StrategyType, StrategyAccessType
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -180,47 +182,66 @@ async def grant_admin_full_strategy_access(
             strategy_type=request.strategy_type
         )
 
-        # Step 5: Grant strategies via existing working service (enterprise batch operation)
+        # Step 5: Grant strategies using the proven working service method
         strategies_granted = []
 
         try:
-            # Clear existing strategies first
-            redis_key = f"user_strategies:{target_user_id}"
-            await redis.delete(redis_key)
+            logger.info(
+                "🔄 Using working marketplace service to grant strategies",
+                operation_id=operation_id,
+                strategies_to_grant=len(strategies_to_grant)
+            )
 
-            # Add each strategy using the same method as the working service
+            # Use the unified strategy service for admin grants (no credit consumption)
+            unified_service = UnifiedStrategyService()
+
             for strategy_id in strategies_to_grant:
                 try:
-                    # Use the same safe Redis operation as the working service
-                    result = await redis.sadd(redis_key, strategy_id)
-                    if result is not None:
-                        strategies_granted.append(strategy_id)
+                    # Use UnifiedStrategyService.grant_strategy_access with ADMIN_GRANT
+                    strategy_type = StrategyType.AI_STRATEGY if strategy_id.startswith("ai_") else StrategyType.COMMUNITY_STRATEGY
+
+                    await unified_service.grant_strategy_access(
+                        user_id=target_user_id,
+                        strategy_id=strategy_id,
+                        strategy_type=strategy_type,
+                        access_type=StrategyAccessType.ADMIN_GRANT,
+                        subscription_type="admin_grant",
+                        credits_paid=0,  # No credits consumed for admin grants
+                        expires_at=None,  # Permanent access
+                        metadata={
+                            "granted_by_admin": current_user.email,
+                            "grant_reason": "admin_privilege",
+                            "operation_id": operation_id
+                        }
+                    )
+
+                    # grant_strategy_access returns the access object, not a dict with "success"
+                    strategies_granted.append(strategy_id)
+                    logger.debug(
+                        "✅ Strategy granted successfully via UnifiedStrategyService",
+                        strategy_id=strategy_id,
+                        user_id=target_user_id,
+                        access_type="ADMIN_GRANT"
+                    )
+
                 except Exception as e:
                     logger.warning(
-                        "Failed to add strategy",
+                        "Exception granting strategy",
                         operation_id=operation_id,
                         strategy_id=strategy_id,
                         error=str(e)
                     )
 
-            # Set reasonable expiry (1 year for admin access)
-            if len(strategies_granted) > 0:
-                await redis.expire(redis_key, 86400 * 365)
-
-            # Verify the operation
-            final_strategies = await redis.smembers(redis_key)
-            verified_count = len(final_strategies) if final_strategies else 0
-
             logger.info(
-                "✅ Admin strategy grant completed",
+                "✅ Admin strategy grant completed via UnifiedStrategyService (no credits consumed)",
                 operation_id=operation_id,
                 strategies_granted_count=len(strategies_granted),
-                verified_count=verified_count
+                total_attempted=len(strategies_to_grant)
             )
 
         except Exception as e:
             logger.error(
-                "❌ Redis strategy grant failed",
+                "❌ Strategy grant via service failed",
                 operation_id=operation_id,
                 error=str(e)
             )

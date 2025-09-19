@@ -14,7 +14,8 @@ import structlog
 from app.api.v1.endpoints import (
     auth, trading, admin, exchanges, strategies, credits,
     telegram, paper_trading, unified_chat, market_analysis, api_keys, ai_consensus,
-    password_reset, health, opportunity_discovery, admin_testing, ab_testing, admin_strategy_access
+    password_reset, health, opportunity_discovery, admin_testing, ab_testing, admin_strategy_access,
+    unified_strategies
 )
 
 logger = structlog.get_logger(__name__)
@@ -46,6 +47,7 @@ api_router.include_router(ai_consensus.router, prefix="/ai-consensus", tags=["AI
 api_router.include_router(opportunity_discovery.router, prefix="/opportunities", tags=["Opportunity Discovery"])
 api_router.include_router(ab_testing.router, prefix="/ab-testing", tags=["A/B Testing"])
 api_router.include_router(admin_strategy_access.router, tags=["Admin Strategy Management"])
+api_router.include_router(unified_strategies.router, tags=["Enterprise Strategy Management"])
 
 # Add monitoring endpoint that frontend expects
 @api_router.get("/monitoring/alerts")
