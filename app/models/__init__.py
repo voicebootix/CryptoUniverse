@@ -61,6 +61,7 @@ from app.models.market_data import (
     StrategyPerformanceHistory,
     BacktestResult,
 )
+from app.models.strategy_access import UserStrategyAccess, StrategyAccessType, StrategyType
 
 __all__ = [
     "Base",
@@ -135,4 +136,8 @@ __all__ = [
     "OrderBookSnapshot",
     "StrategyPerformanceHistory",
     "BacktestResult",
+    # Strategy Access models
+    "UserStrategyAccess",
+    "StrategyAccessType",
+    "StrategyType",
 ]

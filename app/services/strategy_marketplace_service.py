@@ -1375,15 +1375,26 @@ class StrategyMarketplaceService(LoggerMixin):
             from sqlalchemy import select
 
             async with get_database() as db:
-                # Check if this is an admin user
+                # Check if this is an admin user (convert string UUID to proper UUID)
+                import uuid
+                try:
+                    user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+                except ValueError:
+                    self.logger.warning("Invalid user_id format for admin check", user_id=user_id)
+                    user_uuid = user_id  # Use as-is if conversion fails
+
                 admin_check = await db.execute(
-                    select(User.role).where(User.id == user_id)
+                    select(User.role).where(User.id == user_uuid)
                 )
                 user_role = admin_check.scalar_one_or_none()
+
+                self.logger.info("Admin role check result", user_id=user_id, user_role=user_role, admin_enum=UserRole.ADMIN)
 
                 if user_role == UserRole.ADMIN:
                     self.logger.info("🔧 Using admin fast path for portfolio", user_id=user_id)
                     return await self._get_admin_portfolio_fast_path(user_id, db)
+                else:
+                    self.logger.info("Not admin user, using Redis path", user_id=user_id, user_role=user_role)
         except Exception as e:
             self.logger.warning("Admin check failed, using normal path", error=str(e))
 
