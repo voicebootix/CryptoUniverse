@@ -813,8 +813,12 @@ class TradeExecutionService(LoggerMixin):
                     symbol=trade_request['symbol']
                 )
 
-                # Execute as simulation instead
-                simulation_result = await self._execute_simulated_order(trade_request, user_id)
+                # Execute as simulation instead using standard simulation path
+                simulation_result = await self._simulate_order_execution(
+                    trade_request,
+                    user_id,
+                    strategy_id=strategy_id,
+                )
 
                 # Add a notice that this was executed in simulation mode
                 if simulation_result.get("success"):
