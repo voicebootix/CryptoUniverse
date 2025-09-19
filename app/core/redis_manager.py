@@ -335,14 +335,25 @@ class EnterpriseRedisManager(LoggerMixin):
             # Ping test
             await asyncio.wait_for(self._redis.ping(), timeout=self._command_timeout)
             
-            # Basic operation test
-            test_key = "health_check_test"
-            await self._redis.set(test_key, "test_value", ex=10)
+            # Basic operation test with enterprise data integrity verification
+            test_key = f"health_check_{int(time.time())}"
+            test_value = f"test_value_{int(time.time())}"
+            expected_bytes = test_value.encode('utf-8')
+            
+            # Set test data with expiration
+            await self._redis.set(test_key, test_value, ex=10)
+            
+            # Retrieve and verify data integrity
             result = await self._redis.get(test_key)
+            
+            # Clean up test data
             await self._redis.delete(test_key)
             
-            if result != b"test_value":
-                raise ValueError("Health check data integrity failure")
+            # Verify data integrity with proper byte comparison
+            if result is None:
+                raise ValueError("Health check data retrieval failure - key not found")
+            elif result != expected_bytes:
+                raise ValueError(f"Health check data integrity failure - expected {expected_bytes}, got {result}")
             
             # Calculate response time
             response_time = (time.time() - start_time) * 1000  # milliseconds
