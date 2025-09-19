@@ -24,16 +24,19 @@ import { mapTradeExecutionResponse } from '@/lib/utils/typeMappers';
 export const paperTradingApi = {
   async getStats(): Promise<PaperTradingStats> {
     try {
-      const response = await apiClient.get<ApiResponse<PaperTradingStats>>(
-        API_ENDPOINTS.PAPER_TRADING_STATS
-      );
-      return response.data.data || {
-        totalTrades: 0,
-        winRate: 0,
-        totalProfit: 0,
-        bestTrade: 0,
-        worstTrade: 0,
-        readyForLive: false
+      const response = await apiClient.get(API_ENDPOINTS.PAPER_TRADING_STATS);
+      const statsPayload = response.data || {};
+      const portfolio = statsPayload.virtual_portfolio || {};
+      const stats = statsPayload.stats || {};
+      const performance = portfolio.performance_metrics || {};
+
+      return {
+        totalTrades: stats.total_trades ?? performance.total_trades ?? 0,
+        winRate: stats.win_rate ?? performance.win_rate ?? 0,
+        totalProfit: stats.total_profit ?? performance.total_profit_loss ?? 0,
+        bestTrade: stats.best_trade ?? performance.best_trade ?? 0,
+        worstTrade: stats.worst_trade ?? performance.worst_trade ?? 0,
+        readyForLive: statsPayload.ready_for_live_trading ?? false
       };
     } catch (error) {
       console.error('Failed to fetch paper trading stats:', error);

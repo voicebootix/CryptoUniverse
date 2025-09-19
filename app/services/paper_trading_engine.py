@@ -447,6 +447,47 @@ class PaperTradingEngine(LoggerMixin):
         except Exception as e:
             self.logger.error("Paper trading performance failed", error=str(e))
             return {"success": False, "error": str(e)}
+
+    async def reset_paper_trading_account(self, user_id: str) -> Dict[str, Any]:
+        """Reset a user's paper trading account to the initial state."""
+
+        try:
+            portfolio_key = f"paper_portfolio:{user_id}"
+
+            if self.redis is None:
+                await self.async_init()
+
+            if self.redis is None:
+                return {"success": False, "error": "Paper trading storage unavailable"}
+
+            # Remove any existing virtual portfolio so a fresh one can be created
+            if self.redis:
+                try:
+                    await self.redis.delete(portfolio_key)
+                except AttributeError:
+                    # Older redis clients may expose `delete` via `unlink`
+                    await self.redis.unlink(portfolio_key)
+
+            # Re-run setup to create a brand new portfolio
+            setup_result = await self.setup_paper_trading_account(user_id)
+
+            if setup_result.get("success"):
+                portfolio = setup_result.get("virtual_portfolio") or setup_result.get("portfolio", {})
+
+                return {
+                    "success": True,
+                    "virtual_portfolio": portfolio,
+                    "message": "Paper trading account reset to initial balance"
+                }
+
+            return {
+                "success": False,
+                "error": setup_result.get("error", "Failed to reset paper trading account")
+            }
+
+        except Exception as e:
+            self.logger.error("Paper trading reset failed", error=str(e))
+            return {"success": False, "error": str(e)}
     
     def _calculate_trade_profit(self, trade: Dict[str, Any]) -> float:
         """Calculate profit for completed trade."""
