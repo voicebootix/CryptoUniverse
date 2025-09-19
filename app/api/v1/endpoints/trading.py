@@ -393,7 +393,7 @@ async def toggle_simulation_mode(
     try:
         # Update user's simulation mode in database
         current_user.simulation_mode = request.enable
-        current_user.simulation_balance = int(request.virtual_balance)
+        current_user.simulation_balance = float(request.virtual_balance)
 
         if request.reset_portfolio:
             current_user.last_simulation_reset = datetime.utcnow()
