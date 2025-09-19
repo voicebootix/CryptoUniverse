@@ -644,6 +644,8 @@ class TradeExecutionService(LoggerMixin):
         symbol = filtered_request.get("symbol")
         if not symbol or not isinstance(symbol, str):
             errors.append("Trade symbol is required")
+        else:
+            filtered_request["symbol"] = symbol.upper()
 
         action_value = filtered_request.get("action") or filtered_request.get("side")
         if not action_value or not isinstance(action_value, str):
