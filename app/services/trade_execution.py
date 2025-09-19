@@ -625,17 +625,107 @@ class TradeExecutionService(LoggerMixin):
         self.circuit_breaker = TradingCircuitBreaker()
         self.exchange_connector = ExchangeConnector()
         self.daily_trade_count = {}
-    
+
+    async def validate_trade(
+        self,
+        trade_request: Dict[str, Any],
+        user_id: str
+    ) -> Dict[str, Any]:
+        """Validate trade parameters before execution."""
+
+        filtered_request = {
+            key: value
+            for key, value in trade_request.items()
+            if key not in {"validation_required", "user_id"}
+        }
+
+        errors: List[str] = []
+
+        symbol = filtered_request.get("symbol")
+        if not symbol or not isinstance(symbol, str):
+            errors.append("Trade symbol is required")
+        else:
+            filtered_request["symbol"] = symbol.upper()
+
+        action_value = filtered_request.get("action") or filtered_request.get("side")
+        if not action_value or not isinstance(action_value, str):
+            errors.append("Trade action is required")
+            action_upper = None
+        else:
+            action_upper = action_value.upper()
+            if action_upper not in {"BUY", "SELL"}:
+                errors.append(f"Unsupported trade action: {action_value}")
+            else:
+                filtered_request["action"] = action_upper
+                filtered_request["side"] = action_upper.lower()
+
+        # Normalize quantity from amount or quantity fields
+        normalized_quantity: Optional[float] = None
+        quantity_value = filtered_request.get("quantity")
+        amount_value = filtered_request.get("amount")
+        position_size_value = filtered_request.get("position_size_usd")
+
+        def _convert_to_float(raw_value: Any, field_name: str) -> Optional[float]:
+            if raw_value is None:
+                return None
+            try:
+                return float(raw_value)
+            except (TypeError, ValueError):
+                errors.append(f"Invalid {field_name} value")
+                return None
+
+        normalized_quantity = _convert_to_float(quantity_value, "quantity")
+        if normalized_quantity is None:
+            normalized_quantity = _convert_to_float(amount_value, "amount")
+        if normalized_quantity is None and position_size_value is not None:
+            normalized_quantity = _convert_to_float(position_size_value, "position_size_usd")
+
+        if normalized_quantity is None:
+            errors.append("Trade quantity is required")
+        elif normalized_quantity <= 0:
+            errors.append("Trade quantity must be greater than zero")
+        else:
+            filtered_request["quantity"] = normalized_quantity
+            filtered_request.setdefault("amount", normalized_quantity)
+
+        order_type = filtered_request.get("order_type", "MARKET")
+        if isinstance(order_type, str):
+            filtered_request["order_type"] = order_type.upper()
+        else:
+            errors.append("Invalid order type")
+
+        if errors:
+            return {
+                "valid": False,
+                "reason": "; ".join(errors),
+                "trade_request": filtered_request
+            }
+
+        return {
+            "valid": True,
+            "trade_request": filtered_request
+        }
+
     async def execute_trade(
         self,
         trade_request: Dict[str, Any],
         user_id: str,
-        simulation_mode: bool = True
+        simulation_mode: bool = True,
+        strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute trade with full lifecycle management."""
-        self.logger.info("💰 Executing trade", user_id=user_id, simulation=simulation_mode)
-        
+        self.logger.info(
+            "💰 Executing trade",
+            user_id=user_id,
+            simulation=simulation_mode,
+            strategy_id=strategy_id,
+        )
+
         try:
+            trade_request = dict(trade_request)
+            if strategy_id:
+                trade_request["strategy_id"] = strategy_id
+
             # Validate and resolve symbol
             symbol_validation = await self.symbol_validator.validate_and_resolve_symbol(
                 trade_request.get("symbol"),
@@ -679,9 +769,17 @@ class TradeExecutionService(LoggerMixin):
             
             # Execute based on mode
             if simulation_mode:
-                return await self._simulate_order_execution(trade_request, user_id)
+                return await self._simulate_order_execution(
+                    trade_request,
+                    user_id,
+                    strategy_id=strategy_id,
+                )
             else:
-                return await self._execute_real_order(trade_request, user_id)
+                return await self._execute_real_order(
+                    trade_request,
+                    user_id,
+                    strategy_id=strategy_id,
+                )
                 
         except Exception as e:
             self.logger.error("Trade execution failed", error=str(e), exc_info=True)
@@ -694,7 +792,8 @@ class TradeExecutionService(LoggerMixin):
     async def _simulate_order_execution(
         self,
         trade_request: Dict[str, Any],
-        user_id: str
+        user_id: str,
+        strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Simulate order execution using REAL market data and order books."""
         from app.services.real_market_data import real_market_data_service
@@ -751,7 +850,7 @@ class TradeExecutionService(LoggerMixin):
         executed_quantity = quantity * fill_rate
         fees = executed_quantity * execution_price * 0.001  # 0.1% trading fee
         
-        return {
+        response = {
             "success": True,
             "simulation_result": {
                 "order_id": f"SIM_{int(time.time())}_{uuid.uuid4().hex[:9]}",
@@ -764,11 +863,18 @@ class TradeExecutionService(LoggerMixin):
             },
             "timestamp": datetime.utcnow().isoformat()
         }
-    
+
+        if strategy_id:
+            response["strategy_id"] = strategy_id
+            response["simulation_result"]["strategy_id"] = strategy_id
+
+        return response
+
     async def _execute_real_order(
         self,
         trade_request: Dict[str, Any],
-        user_id: str
+        user_id: str,
+        strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute real order using user's exchange credentials."""
         try:
@@ -787,8 +893,12 @@ class TradeExecutionService(LoggerMixin):
                     symbol=trade_request['symbol']
                 )
 
-                # Execute as simulation instead
-                simulation_result = await self._execute_simulated_order(trade_request, user_id)
+                # Execute as simulation instead using standard simulation path
+                simulation_result = await self._simulate_order_execution(
+                    trade_request,
+                    user_id,
+                    strategy_id=strategy_id,
+                )
 
                 # Add a notice that this was executed in simulation mode
                 if simulation_result.get("success"):
@@ -843,7 +953,8 @@ class TradeExecutionService(LoggerMixin):
                 trade_request=trade_request,
                 execution_result=execution_result,
                 position_value_usd=position_value_usd,
-                exchange_account_id=credentials.get("account_id")
+                exchange_account_id=credentials.get("account_id"),
+                strategy_id=strategy_id or trade_request.get("strategy_id"),
             )
             
             return {
@@ -1070,7 +1181,8 @@ class TradeExecutionService(LoggerMixin):
         trade_request: Dict[str, Any],
         execution_result: Dict[str, Any],
         position_value_usd: float,
-        exchange_account_id: str = None
+        exchange_account_id: str = None,
+        strategy_id: Optional[str] = None,
     ) -> None:
         """Record trade execution in database for audit trail."""
         try:
@@ -1078,25 +1190,37 @@ class TradeExecutionService(LoggerMixin):
                 from app.models.trading import Trade, TradeAction, TradeStatus, OrderType
                 from decimal import Decimal
                 import uuid
-                
+
                 # Validate required fields before creating Trade
                 if not exchange_account_id:
                     self.logger.error("Cannot create Trade record: exchange_account_id is required")
                     return
-                
+
                 # Convert IDs to proper UUID format (except external order IDs)
                 try:
                     user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
                 except ValueError as e:
                     self.logger.error("Invalid user_id UUID format", user_id=user_id, error=str(e))
                     return
-                
+
                 try:
                     account_uuid = uuid.UUID(exchange_account_id) if isinstance(exchange_account_id, str) else exchange_account_id
                 except ValueError as e:
                     self.logger.error("Invalid exchange_account_id UUID format", account_id=exchange_account_id, error=str(e))
                     return
-                
+
+                strategy_uuid = None
+                if strategy_id:
+                    try:
+                        strategy_uuid = uuid.UUID(str(strategy_id))
+                    except (ValueError, TypeError) as e:
+                        self.logger.warning(
+                            "Invalid strategy_id for trade record",
+                            strategy_id=strategy_id,
+                            error=str(e),
+                        )
+                        strategy_uuid = None
+
                 # Keep external order ID as string (don't convert to UUID)
                 external_order_id = execution_result.get("order_id")
                 
@@ -1133,12 +1257,14 @@ class TradeExecutionService(LoggerMixin):
                     market_price_at_execution=Decimal(str(execution_result["execution_price"])),
                     credits_used=0,  # Will be calculated by credit system
                     exchange_account_id=account_uuid,
+                    strategy_id=strategy_uuid,
                     executed_at=datetime.utcnow(),
                     completed_at=datetime.utcnow(),
                     meta_data={
                         "exchange": execution_result.get("exchange"),
                         "fills": execution_result.get("fills", []),
-                        "raw_response": execution_result.get("raw_response", {})
+                        "raw_response": execution_result.get("raw_response", {}),
+                        "strategy_id": str(strategy_uuid) if strategy_uuid else trade_request.get("strategy_id"),
                     }
                 )
                 
@@ -1167,7 +1293,8 @@ class TradeExecutionService(LoggerMixin):
         quantity: float,
         order_type: str = "market",
         exchange: str = "auto",
-        user_id: str = "system"
+        user_id: str = "system",
+        strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute real trade for autonomous operations.
@@ -1183,11 +1310,18 @@ class TradeExecutionService(LoggerMixin):
                 "quantity": quantity,
                 "order_type": order_type.upper(),
                 "exchange": exchange,
-                "user_id": user_id
+                "user_id": user_id,
             }
-            
+
+            if strategy_id:
+                trade_request["strategy_id"] = strategy_id
+
             # Execute using existing real order execution (now with user credentials)
-            result = await self._execute_real_order(trade_request, user_id)
+            result = await self._execute_real_order(
+                trade_request,
+                user_id,
+                strategy_id=strategy_id,
+            )
             
             if result.get("success"):
                 execution_data = result.get("execution_result", {})

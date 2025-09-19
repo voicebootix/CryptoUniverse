@@ -306,6 +306,9 @@ const DashboardLayout: React.FC = () => {
           </div>
         </main>
       </div>
+
+      {/* Global Chat Widget - Available on all pages */}
+      <ChatWidget />
     </div>
   );
 };
@@ -447,8 +450,6 @@ const SidebarContent: React.FC<SidebarContentProps> = ({
         </div>
       </nav>
 
-      {/* Chat Widget - Available on all pages */}
-      <ChatWidget />
     </div>
   );
 };
