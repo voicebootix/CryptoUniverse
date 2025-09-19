@@ -4596,7 +4596,7 @@ class TradingStrategiesService(LoggerMixin):
             return {
                 "total_return": 15.5,
                 "benchmark_return": 12.0,
-                "volatility": 0.045,
+                "volatility": 4.5,
                 "max_drawdown": -8.5,
                 "recovery_time": 12,
                 "win_rate": 62,
@@ -4619,7 +4619,7 @@ class TradingStrategiesService(LoggerMixin):
             return {
                 "total_return": 0.0,
                 "benchmark_return": 0.0,
-                "volatility": 0.01,
+                "volatility": 1.0,
                 "max_drawdown": 0.0,
                 "recovery_time": 0,
                 "win_rate": 50,
