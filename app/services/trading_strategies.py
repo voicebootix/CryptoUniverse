@@ -3928,6 +3928,13 @@ class TradingStrategiesService(LoggerMixin):
 
             async with AsyncSessionLocal() as db:
                 # Aggregate real trades for the requested period
+                pnl_avg_expr = func.avg(Trade.profit_realized_usd)
+                pnl_sq_avg_expr = func.avg(Trade.profit_realized_usd * Trade.profit_realized_usd)
+                pnl_variance_expr = pnl_sq_avg_expr - (pnl_avg_expr * pnl_avg_expr)
+                pnl_stddev_expr = func.sqrt(
+                    case((pnl_variance_expr > 0, pnl_variance_expr), else_=0.0)
+                )
+
                 trade_stmt = select(
                     func.count(Trade.id).label("total_trades"),
                     func.sum(Trade.profit_realized_usd).label("total_pnl"),
@@ -3940,7 +3947,7 @@ class TradingStrategiesService(LoggerMixin):
                     func.min(Trade.profit_realized_usd).label("largest_loss"),
                     func.sum(Trade.total_value).label("total_value"),
                     func.sum(Trade.fees_paid).label("total_fees"),
-                    func.stddev_pop(Trade.profit_realized_usd).label("pnl_stddev")
+                    pnl_stddev_expr.label("pnl_stddev")
                 ).select_from(Trade)
 
                 trade_time = func.coalesce(Trade.completed_at, Trade.executed_at, Trade.created_at)
