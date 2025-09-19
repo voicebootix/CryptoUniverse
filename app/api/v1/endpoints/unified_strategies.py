@@ -128,7 +128,7 @@ async def get_admin_portfolio_status(
         )
 
         # Additional admin diagnostics
-        async with get_database() as db:
+        async for db in get_database():
             from sqlalchemy import select, func
             from app.models.strategy_access import UserStrategyAccess
 
@@ -341,7 +341,7 @@ async def unified_strategy_health():
 
     try:
         # Test database connectivity
-        async with get_database() as db:
+        async for db in get_database():
             from sqlalchemy import text
             await db.execute(text("SELECT 1"))
 
