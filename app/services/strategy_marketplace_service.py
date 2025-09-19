@@ -385,7 +385,7 @@ class StrategyMarketplaceService(LoggerMixin):
                         credit_cost_monthly=monthly_cost,
                         credit_cost_per_execution=execution_cost,
                         win_rate=performance_data.get("win_rate", 0),
-                        avg_return=performance_data.get("avg_return", 0),
+                        avg_return=performance_data.get("total_return_pct", 0),
                         sharpe_ratio=performance_data.get("sharpe_ratio"),
                         max_drawdown=performance_data.get("max_drawdown", 0),
                         total_trades=performance_data.get("total_trades", 0),
@@ -457,7 +457,6 @@ class StrategyMarketplaceService(LoggerMixin):
 
             # Try fallback method with safer database handling
             try:
-                from app.services.trading_strategies_service import trading_strategies_service
                 performance_result = await trading_strategies_service.strategy_performance(
                     strategy_name=strategy_func,
                     user_id=user_id
@@ -487,10 +486,10 @@ class StrategyMarketplaceService(LoggerMixin):
         # Always return safe defaults - never let performance data block marketplace
         return {
             "strategy_id": strategy_id,
-            "total_pnl": 0.0,
+            "total_pnl_usd": 0.0,  # USD amount
             "win_rate": 0.0,
             "total_trades": 0,
-            "avg_return": 0.0,
+            "total_return_pct": 0.0,  # percentage
             "sharpe_ratio": None,
             "max_drawdown": 0.0,
             "data_quality": "no_data",
@@ -502,29 +501,11 @@ class StrategyMarketplaceService(LoggerMixin):
     async def _get_platform_strategy_id_safe(self, strategy_func: str) -> str:
         """Safely get platform strategy ID without failing."""
         try:
-            from app.services.trading_strategies_service import trading_strategies_service
             return await trading_strategies_service.get_platform_strategy_id(strategy_func)
         except Exception as e:
             self.logger.warning(f"Failed to get platform strategy ID for {strategy_func}: {e}")
             return None
 
-        except Exception as e:
-            self.logger.error(f"Failed to get performance for {strategy_func}", error=str(e))
-            # Return neutral defaults on error with all required fields
-            return {
-                "strategy_id": f"ai_{strategy_func}",
-                "total_pnl": 0.0,
-                "win_rate": 0.0,  # Normalized 0-1 range
-                "total_trades": 0,
-                "avg_return": 0.0,
-                "sharpe_ratio": None,
-                "max_drawdown": 0.0,
-                "last_7_days_pnl": 0.0,
-                "last_30_days_pnl": 0.0,
-                "status": "error",
-                "data_quality": "no_data",
-                "badges": self._build_performance_badges("no_data")
-            }
 
     def _normalize_performance_data(self, performance_result: Dict[str, Any], strategy_func: str) -> Dict[str, Any]:
         """
@@ -555,7 +536,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 badges = badges or performance_result.get("badges", [])
 
             # Check for top-level metrics (flat structure)
-            if performance_data is None and any(key in performance_result for key in ["total_pnl", "win_rate", "total_trades"]):
+            if performance_data is None and any(key in performance_result for key in ["total_pnl_usd", "win_rate", "total_trades"]):
                 performance_data = performance_result
                 data_quality = data_quality or performance_result.get("data_quality")
                 status = status or performance_result.get("status")
@@ -568,14 +549,14 @@ class StrategyMarketplaceService(LoggerMixin):
             normalized = {}
 
             # Core financial metrics with neutral defaults
-            normalized["total_pnl"] = self._safe_float(performance_data.get("total_pnl", 0))
+            normalized["total_pnl_usd"] = self._safe_float(performance_data.get("total_pnl", 0))  # USD amount
 
             # Normalize win_rate to canonical 0-1 fraction unit (handles both percentage and fraction inputs)
             raw_win_rate = self._safe_float(performance_data.get("win_rate", 0))
             normalized["win_rate"] = self.normalize_win_rate_to_fraction(raw_win_rate)
 
             normalized["total_trades"] = self._safe_int(performance_data.get("total_trades", 0))
-            normalized["avg_return"] = self._safe_float(performance_data.get("avg_return", 0))
+            normalized["total_return_pct"] = self._safe_float(performance_data.get("avg_return", 0))  # percentage
 
             # Additional metrics with neutral defaults
             normalized["sharpe_ratio"] = performance_data.get("sharpe_ratio")  # Keep None if missing
@@ -624,7 +605,7 @@ class StrategyMarketplaceService(LoggerMixin):
                            strategy=strategy_func,
                            source_keys=list(performance_data.keys()),
                            normalized_keys=list(normalized.keys()),
-                           total_pnl=normalized["total_pnl"],
+                           total_pnl_usd=normalized["total_pnl_usd"],
                            win_rate=normalized["win_rate"])
 
             return normalized
@@ -757,7 +738,7 @@ class StrategyMarketplaceService(LoggerMixin):
         # Strategy-specific realistic performance profiles
         strategy_profiles = {
             "spot_momentum_strategy": {
-                "total_pnl": 45.2,  # Changed from total_return to total_pnl
+                "total_pnl_usd": 45.2,  # USD amount
                 "max_drawdown": 18.7,
                 "sharpe_ratio": 1.34,
                 "win_rate": 0.623,  # Convert from percentage to normalized fraction (0-1)
@@ -768,7 +749,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 "calmar_ratio": 2.42
             },
             "risk_management": {
-                "total_pnl": 12.8,  # Changed from total_return to total_pnl
+                "total_pnl_usd": 12.8,  # USD amount
                 "max_drawdown": 4.2,
                 "sharpe_ratio": 2.87,
                 "win_rate": 0.789,  # Convert from percentage to normalized fraction (0-1)
@@ -779,7 +760,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 "calmar_ratio": 3.05
             },
             "pairs_trading": {
-                "total_pnl": 23.6,  # Changed from total_return to total_pnl
+                "total_pnl_usd": 23.6,  # USD amount
                 "max_drawdown": 8.9,
                 "sharpe_ratio": 1.89,
                 "win_rate": 0.712,  # Convert from percentage to normalized fraction (0-1)
@@ -790,7 +771,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 "calmar_ratio": 2.65
             },
             "statistical_arbitrage": {
-                "total_pnl": 31.4,  # Changed from total_return to total_pnl
+                "total_pnl_usd": 31.4,  # USD amount
                 "max_drawdown": 11.2,
                 "sharpe_ratio": 2.12,
                 "win_rate": 0.687,  # Convert from percentage to normalized fraction (0-1)
@@ -801,7 +782,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 "calmar_ratio": 2.80
             },
             "market_making": {
-                "total_pnl": 18.9,  # Changed from total_return to total_pnl
+                "total_pnl_usd": 18.9,  # USD amount
                 "max_drawdown": 3.8,
                 "sharpe_ratio": 3.21,
                 "win_rate": 0.842,  # Convert from percentage to normalized fraction (0-1)
@@ -815,7 +796,7 @@ class StrategyMarketplaceService(LoggerMixin):
         
         # Get strategy-specific profile or use conservative default
         profile = strategy_profiles.get(strategy_func, {
-            "total_pnl": 15.3,  # Changed from total_return to total_pnl
+            "total_pnl_usd": 15.3,  # USD amount
             "max_drawdown": 8.5,
             "sharpe_ratio": 1.45,
             "win_rate": 0.658,  # Convert from percentage to normalized fraction (0-1)
@@ -986,7 +967,7 @@ class StrategyMarketplaceService(LoggerMixin):
             
             return {
                 "backtest_period": f"{min(h[0]['date'] for h in historical_data.values())} to {max(h[-1]['date'] for h in historical_data.values())}",
-                "total_pnl": round(total_return, 1),  # Changed from total_return to total_pnl
+                "total_pnl_usd": round(total_return, 1),  # USD amount
                 "max_drawdown": round(max_drawdown * 100, 1),
                 "sharpe_ratio": round(sharpe_ratio, 2),
                 "win_rate": round(win_rate / 100, 3),  # Convert percentage to normalized fraction (0-1)
@@ -1029,11 +1010,10 @@ class StrategyMarketplaceService(LoggerMixin):
         try:
             from app.models.user_strategies import UserStrategy
             from app.models.user import User
-            from app.core.database import get_db
             from sqlalchemy.orm import joinedload
 
             # Use proper async context management for database
-            async with get_db() as db:
+            async for db in get_database():
                 try:
                     # Get published strategies with proper joins
                     community_strategies = await db.execute(
@@ -1063,7 +1043,7 @@ class StrategyMarketplaceService(LoggerMixin):
                                 credit_cost_monthly=getattr(strategy, 'credit_cost', 15),
                                 credit_cost_per_execution=1,
                                 win_rate=getattr(strategy, 'win_rate', 0.0),
-                                avg_return=getattr(strategy, 'avg_return', 0.0),
+                                avg_return=getattr(strategy, 'total_return_pct', 0.0),
                                 sharpe_ratio=getattr(strategy, 'sharpe_ratio', None),
                                 max_drawdown=getattr(strategy, 'max_drawdown', 0.0),
                                 total_trades=getattr(strategy, 'total_trades', 0),
@@ -1157,7 +1137,7 @@ class StrategyMarketplaceService(LoggerMixin):
                         "data_quality": "no_data",
                         "status": "no_trades",
                         "total_trades": 0,
-                        "total_pnl": 0.0,
+                        "total_pnl_usd": 0.0,
                         "win_rate": 0.0,
                         "badges": self._build_performance_badges("no_data")
                     }
@@ -1169,7 +1149,7 @@ class StrategyMarketplaceService(LoggerMixin):
 
                 return {
                     "period": "30_days",
-                    "total_pnl": total_pnl,  # USD amount
+                    "total_pnl_usd": total_pnl,  # USD amount
                     "win_rate": win_rate,    # 0-1 normalized fraction
                     "total_trades": len(recent_trades),
                     "avg_trade_pnl": total_pnl / len(recent_trades),
@@ -1186,7 +1166,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 "data_quality": "no_data",
                 "status": "error",
                 "total_trades": 0,
-                "total_pnl": 0.0,
+                "total_pnl_usd": 0.0,
                 "win_rate": 0.0
             }
     
@@ -1428,7 +1408,7 @@ class StrategyMarketplaceService(LoggerMixin):
 
             for strategy in strategy_portfolio:
                 perf = strategy.get("performance", {})
-                pnl = perf.get("total_pnl", 0)
+                pnl = perf.get("total_pnl_usd", 0)
                 total_pnl += pnl
 
                 transformed_strategy = {
