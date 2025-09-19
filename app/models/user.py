@@ -17,6 +17,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     JSON,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -96,7 +97,7 @@ class User(Base):
     
     # Trading preferences
     simulation_mode = Column(Boolean, default=True, nullable=False)  # Default to simulation for safety
-    simulation_balance = Column(Integer, default=10000, nullable=False)  # Virtual balance in USD
+    simulation_balance = Column(Numeric(20, 2), default=10000.00, nullable=False)  # Virtual balance in USD
     last_simulation_reset = Column(DateTime, nullable=True)
 
     # Referral system
