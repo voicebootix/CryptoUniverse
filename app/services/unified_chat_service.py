@@ -1328,9 +1328,11 @@ Provide a helpful response using the real data available. Never use placeholder 
         if symbol:
             trade_request["symbol"] = symbol
 
-        action = trade_params.get("action")
+        action = trade_params.get("action") or trade_params.get("side")
         if action:
-            trade_request["action"] = action.upper() if isinstance(action, str) else action
+            normalized_action = action.upper() if isinstance(action, str) else action
+            trade_request["action"] = normalized_action
+            trade_request["side"] = normalized_action
 
         order_type = trade_params.get("order_type")
         if isinstance(order_type, str):
