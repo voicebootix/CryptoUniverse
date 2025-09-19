@@ -220,8 +220,9 @@ class UnifiedStrategyService(LoggerMixin):
         )
 
         try:
-            # Use async generator correctly
+            # Use async generator correctly with single iteration
             async for db in get_database():
+                try:
                     # Get user and role if not provided
                     if user_role is None:
                         user = await db.execute(
@@ -258,6 +259,11 @@ class UnifiedStrategyService(LoggerMixin):
                     )
 
                     return portfolio
+                except Exception as e:
+                    # Re-raise to be handled by outer exception handler
+                    raise
+                # Only process first (and only) database session
+                break
 
         except Exception as e:
             execution_time = (datetime.utcnow() - operation_start).total_seconds()
