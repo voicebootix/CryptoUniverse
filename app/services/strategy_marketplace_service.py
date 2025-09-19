@@ -661,7 +661,11 @@ class StrategyMarketplaceService(LoggerMixin):
             if max_drawdown_source is None:
                 max_drawdown_source = performance_data.get("max_drawdown_pct")
             if max_drawdown_source is None:
-                max_drawdown_source = performance_data.get("total_return_pct")
+                max_drawdown_source = performance_data.get("drawdown")
+            if max_drawdown_source is None:
+                max_drawdown_source = performance_data.get("drawdown_pct")
+            if max_drawdown_source is None:
+                max_drawdown_source = 0.0
             normalized["max_drawdown"] = _convert_value(
                 max_drawdown_source,
                 ["max_drawdown_unit", "drawdown_unit", "max_drawdown_is_percent"],
@@ -718,7 +722,7 @@ class StrategyMarketplaceService(LoggerMixin):
             normalized["best_trade_pnl"] = _convert_value(
                 best_trade_source,
                 ["largest_win_unit", "best_trade_unit", "largest_win_is_percent"],
-                percent_flag_keys=["largest_win_is_percent"],
+                enable_percent_fallback=False
             )
 
             worst_trade_source = performance_data.get("worst_trade_pnl")
@@ -729,7 +733,7 @@ class StrategyMarketplaceService(LoggerMixin):
             normalized["worst_trade_pnl"] = _convert_value(
                 worst_trade_source,
                 ["largest_loss_unit", "worst_trade_unit", "largest_loss_is_percent"],
-                percent_flag_keys=["largest_loss_is_percent"],
+                enable_percent_fallback=False
             )
 
             # Supported symbols - no optimistic defaults
