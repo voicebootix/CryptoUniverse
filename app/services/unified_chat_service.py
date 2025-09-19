@@ -161,6 +161,14 @@ class UnifiedChatService(LoggerMixin):
         self.redis = None
         self._redis_initialized = False
 
+        # Personality system from conversational AI
+        self.personalities = self._initialize_personalities()
+
+        # Intent patterns from original chat engine
+        self.intent_patterns = self._initialize_intent_patterns()
+
+        self.logger.info("🧠 UNIFIED CHAT SERVICE INITIALIZED - All features preserved")
+
     @staticmethod
     def _coerce_to_bool(value: Any, default: bool = True) -> bool:
         """Convert a potentially string-based flag into a boolean."""
@@ -175,14 +183,6 @@ class UnifiedChatService(LoggerMixin):
             return normalized not in {"false", "0", "no", "off"}
 
         return bool(value)
-
-        # Personality system from conversational AI
-        self.personalities = self._initialize_personalities()
-        
-        # Intent patterns from original chat engine
-        self.intent_patterns = self._initialize_intent_patterns()
-        
-        self.logger.info("🧠 UNIFIED CHAT SERVICE INITIALIZED - All features preserved")
     
     async def _ensure_redis(self):
         """Ensure Redis connection for caching."""
@@ -1366,6 +1366,10 @@ Provide a helpful response using the real data available. Never use placeholder 
         ]:
             if optional_key in trade_params and trade_params[optional_key] is not None:
                 trade_request[optional_key] = trade_params[optional_key]
+
+        action_value = trade_request.get("action")
+        if isinstance(action_value, str) and action_value:
+            trade_request.setdefault("side", action_value.lower())
 
         return trade_request
 
