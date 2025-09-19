@@ -220,43 +220,44 @@ class UnifiedStrategyService(LoggerMixin):
         )
 
         try:
-            async with get_database() as db:
-                # Get user and role if not provided
-                if user_role is None:
-                    user = await db.execute(
-                        select(User).where(User.id == UUID(user_id))
+            # Use async generator correctly
+            async for db in get_database():
+                    # Get user and role if not provided
+                    if user_role is None:
+                        user = await db.execute(
+                            select(User).where(User.id == UUID(user_id))
+                        )
+                        user_obj = user.scalar_one_or_none()
+                        if not user_obj:
+                            raise ValueError(f"User {user_id} not found")
+                        user_role = user_obj.role
+
+                    # Route to appropriate strategy retrieval method
+                    if user_role == UserRole.ADMIN:
+                        portfolio = await self._get_admin_full_portfolio(user_id, db)
+                    else:
+                        portfolio = await self._get_user_owned_portfolio(user_id, db, user_role)
+
+                    # Add metadata and performance tracking
+                    execution_time = (datetime.utcnow() - operation_start).total_seconds()
+                    portfolio.metadata.update({
+                        "operation_id": operation_id,
+                        "execution_time_seconds": execution_time,
+                        "data_freshness": "realtime",
+                        "api_version": "v2_unified",
+                        "compliance_checked": True
+                    })
+
+                    self.logger.info(
+                        "✅ ENTERPRISE PORTFOLIO SUCCESS",
+                        operation_id=operation_id,
+                        user_id=user_id,
+                        strategies_count=len(portfolio.strategies),
+                        active_strategies=len([s for s in portfolio.strategies if s.get("is_active", True)]),
+                        execution_time_seconds=execution_time
                     )
-                    user_obj = user.scalar_one_or_none()
-                    if not user_obj:
-                        raise ValueError(f"User {user_id} not found")
-                    user_role = user_obj.role
 
-                # Route to appropriate strategy retrieval method
-                if user_role == UserRole.ADMIN:
-                    portfolio = await self._get_admin_full_portfolio(user_id, db)
-                else:
-                    portfolio = await self._get_user_owned_portfolio(user_id, db, user_role)
-
-                # Add metadata and performance tracking
-                execution_time = (datetime.utcnow() - operation_start).total_seconds()
-                portfolio.metadata.update({
-                    "operation_id": operation_id,
-                    "execution_time_seconds": execution_time,
-                    "data_freshness": "realtime",
-                    "api_version": "v2_unified",
-                    "compliance_checked": True
-                })
-
-                self.logger.info(
-                    "✅ ENTERPRISE PORTFOLIO SUCCESS",
-                    operation_id=operation_id,
-                    user_id=user_id,
-                    strategies_count=len(portfolio.strategies),
-                    active_strategies=len([s for s in portfolio.strategies if s.get("is_active", True)]),
-                    execution_time_seconds=execution_time
-                )
-
-                return portfolio
+                    return portfolio
 
         except Exception as e:
             execution_time = (datetime.utcnow() - operation_start).total_seconds()
@@ -766,7 +767,7 @@ class UnifiedStrategyService(LoggerMixin):
         without IntegrityError on unique constraint violations.
         """
 
-        async with get_database() as db:
+        async for db in get_database():
             try:
                 # First attempt: Try to create new access record
                 new_access = UserStrategyAccess(
@@ -844,7 +845,7 @@ class UnifiedStrategyService(LoggerMixin):
     ) -> bool:
         """Revoke strategy access"""
 
-        async with get_database() as db:
+        async for db in get_database():
             result = await db.execute(
                 select(UserStrategyAccess).where(
                     and_(
