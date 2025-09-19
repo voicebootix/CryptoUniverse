@@ -160,7 +160,22 @@ class UnifiedChatService(LoggerMixin):
         # Redis for state management
         self.redis = None
         self._redis_initialized = False
-        
+
+    @staticmethod
+    def _coerce_to_bool(value: Any, default: bool = True) -> bool:
+        """Convert a potentially string-based flag into a boolean."""
+        if value is None:
+            return default
+
+        if isinstance(value, bool):
+            return value
+
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return normalized not in {"false", "0", "no", "off"}
+
+        return bool(value)
+
         # Personality system from conversational AI
         self.personalities = self._initialize_personalities()
         
@@ -1089,14 +1104,18 @@ Provide a helpful response using the real data available. Never use placeholder 
         Execute trade with FULL 5-phase validation.
         PRESERVED from original implementation with simulation-aware routing.
         """
-        trade_params = dict(trade_params or {})
+        # Merge both approaches for robust trade execution
+        trade_payload = dict(trade_params or {})
+
         if modifications:
-            trade_params.update(modifications)
+            trade_payload.update(modifications)
 
         phases_completed: List[str] = []
         context_data = context_data or {}
         market_data = context_data.get("market_data", {})
 
+        # Determine simulation mode for execution (defaults to True)
+        simulation_mode = self._coerce_to_bool(trade_payload.get("simulation_mode"), True)
         try:
             missing_fields = [
                 field for field in ("symbol", "action") if not trade_params.get(field)
@@ -1109,14 +1128,14 @@ Provide a helpful response using the real data available. Never use placeholder 
                 }
 
             # Phase 1: Analysis
-            self.logger.info("Phase 1: Trade Analysis", trade=trade_params)
-            analysis = await self.market_analysis.analyze_trade_opportunity(trade_params)
+            self.logger.info("Phase 1: Trade Analysis", trade=trade_payload)
+            analysis = await self.market_analysis.analyze_trade_opportunity(trade_payload)
             phases_completed.append("analysis")
 
             # Phase 2: AI Consensus (ONLY for trade validation)
             self.logger.info("Phase 2: AI Consensus Validation")
             consensus = await self.ai_consensus.validate_trade_decision(
-                trade_params=trade_params,
+                trade_params=trade_payload,
                 market_analysis=analysis,
                 confidence_threshold=85.0,
                 user_id=user_id
@@ -1133,7 +1152,18 @@ Provide a helpful response using the real data available. Never use placeholder 
 
             # Phase 3: Validation
             self.logger.info("Phase 3: Trade Validation")
-            validation = await self.trade_executor.validate_trade(trade_params, user_id)
+            trade_request = dict(trade_payload)
+            trade_request.pop("user_id", None)
+            trade_request.pop("validation_required", None)
+            trade_request.pop("simulation_mode", None)
+
+            trade_request = {k: v for k, v in trade_request.items() if v is not None}
+
+            # Ensure basic action mapping for validator
+            if "action" not in trade_request and "side" in trade_request:
+                trade_request["action"] = trade_request["side"]
+
+            validation = await self.trade_executor.validate_trade(trade_request, user_id)
             phases_completed.append("validation")
 
             if not validation.get("valid", False):
@@ -1143,6 +1173,9 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "reason": validation.get("reason", "Invalid parameters"),
                     "phases_completed": phases_completed
                 }
+
+            trade_request = validation.get("trade_request", trade_request)
+            trade_request.setdefault("side", trade_request.get("action", "BUY").lower())
 
             # Phase 4: Execution
             self.logger.info("Phase 4: Trade Execution")
@@ -1349,12 +1382,58 @@ Provide a helpful response using the real data available. Never use placeholder 
             
             results = []
             for trade in trades:
+                base_request = {
+                    "symbol": trade.get("symbol"),
+                    "action": trade.get("action") or trade.get("side"),
+                    "amount": trade.get("amount"),
+                    "quantity": trade.get("quantity", trade.get("amount")),
+                    "order_type": trade.get("order_type", "market"),
+                    "price": trade.get("price"),
+                    "exchange": trade.get("exchange"),
+                    "stop_loss": trade.get("stop_loss"),
+                    "take_profit": trade.get("take_profit"),
+                }
+
+                base_request = {k: v for k, v in base_request.items() if v is not None}
+
+                if "action" not in base_request and "side" in base_request:
+                    base_request["action"] = base_request["side"]
+
+                try:
+                    validation = await self.trade_executor.validate_trade(dict(base_request), user_id)
+                except Exception as validation_error:
+                    self.logger.exception(
+                        "Rebalancing trade validation crashed",
+                        error=str(validation_error),
+                        trade=base_request
+                    )
+                    results.append({
+                        "success": False,
+                        "error": str(validation_error),
+                        "trade_request": base_request
+                    })
+                    continue
+
+                if not validation.get("valid", False):
+                    results.append({
+                        "success": False,
+                        "error": validation.get("reason", "Invalid parameters"),
+                        "trade_request": validation.get("trade_request", base_request)
+                    })
+                    continue
+
+                normalized_request = validation.get("trade_request", base_request)
+                normalized_request.setdefault(
+                    "side",
+                    normalized_request.get("action", "BUY").lower()
+                )
+
+                simulation_mode = self._coerce_to_bool(trade.get("simulation_mode"), True)
+
                 result = await self.trade_executor.execute_trade(
-                    user_id=user_id,
-                    symbol=trade["symbol"],
-                    action=trade["action"],
-                    amount=trade["amount"],
-                    order_type="market"
+                    normalized_request,
+                    user_id,
+                    simulation_mode
                 )
                 results.append(result)
             
