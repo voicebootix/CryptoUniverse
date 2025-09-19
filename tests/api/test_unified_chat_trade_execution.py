@@ -92,6 +92,9 @@ async def test_live_trade_uses_simulation_true(unified_service: UnifiedChatServi
 
     unified_service.trade_executor.execute_trade.assert_awaited_once()
     exec_args = unified_service.trade_executor.execute_trade.call_args.args
+    request_payload = exec_args[0]
+    assert request_payload["action"] == "SELL"
+    assert request_payload["side"] == "SELL"
     assert exec_args[2] is True
 
 

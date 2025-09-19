@@ -308,8 +308,11 @@ export const API_ENDPOINTS = {
   TRADE_POSITIONS: '/trading/positions',
   
   // Paper Trading Endpoints
+  PAPER_TRADING_SETUP: '/paper-trading/setup',
+  PAPER_TRADING_PERFORMANCE: '/paper-trading/performance',
   PAPER_TRADING_EXECUTE: '/paper-trading/execute',
   PAPER_TRADING_STATS: '/paper-trading/stats',
+  PAPER_TRADING_RESET: '/paper-trading/reset',
   PAPER_TRADING_HISTORY: '/paper-trading/history',
   
   // User Endpoints

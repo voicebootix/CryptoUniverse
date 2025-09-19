@@ -48,10 +48,12 @@ async def setup_paper_trading(
         result = await paper_engine.setup_paper_trading_account(str(current_user.id))
         
         if result.get("success"):
+            portfolio = result.get("virtual_portfolio") or result.get("portfolio") or {}
+
             return {
                 "success": True,
-                "message": "Paper trading account created successfully",
-                "virtual_portfolio": result["virtual_portfolio"]
+                "message": result.get("message", "Paper trading account created successfully"),
+                "virtual_portfolio": portfolio
             }
         else:
             raise HTTPException(
@@ -143,6 +145,90 @@ async def get_paper_trading_performance(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Performance analysis failed: {str(e)}"
+        )
+
+
+@router.get("/stats")
+async def get_paper_trading_stats(
+    current_user: User = Depends(get_current_user),
+    paper_engine: PaperTradingEngine = Depends(get_paper_trading_engine)
+):
+    """Return simplified paper trading statistics for dashboard views."""
+
+    try:
+        result = await paper_engine.get_paper_trading_performance(str(current_user.id))
+
+        if result.get("success"):
+            portfolio = result.get("paper_portfolio", {})
+            performance_metrics = portfolio.get("performance_metrics", {})
+
+            stats = {
+                "total_trades": performance_metrics.get("total_trades", 0),
+                "win_rate": performance_metrics.get("win_rate", 0),
+                "total_profit": performance_metrics.get("total_profit_loss", 0),
+                "best_trade": performance_metrics.get("best_trade", 0),
+                "worst_trade": performance_metrics.get("worst_trade", 0)
+            }
+
+            return {
+                "success": True,
+                "virtual_portfolio": portfolio,
+                "stats": stats,
+                "confidence_metrics": result.get("confidence_metrics", {}),
+                "ready_for_live_trading": result.get("ready_for_live_trading", False),
+                "live_trading_recommendation": result.get("live_trading_recommendation", {})
+            }
+
+        if result.get("needs_setup"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Paper trading account not found. Please setup first."
+            )
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("error", "Failed to get paper trading stats")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Paper trading stats failed", user_id=str(current_user.id), error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Paper trading stats failed: {str(e)}"
+        )
+
+
+@router.post("/reset")
+async def reset_paper_trading_account(
+    current_user: User = Depends(get_current_user),
+    paper_engine: PaperTradingEngine = Depends(get_paper_trading_engine)
+):
+    """Reset the user's paper trading account to the initial balance."""
+
+    try:
+        result = await paper_engine.reset_paper_trading_account(str(current_user.id))
+
+        if result.get("success"):
+            return {
+                "success": True,
+                "message": result.get("message", "Paper trading account reset successfully"),
+                "virtual_portfolio": result.get("virtual_portfolio", {})
+            }
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("error", "Failed to reset paper trading account")
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Paper trading reset failed", user_id=str(current_user.id), error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Paper trading reset failed: {str(e)}"
         )
 
 
