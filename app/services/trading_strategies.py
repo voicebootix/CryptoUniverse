@@ -272,7 +272,7 @@ class DerivativesEngine(LoggerMixin):
         symbol: str,
         parameters: StrategyParameters,
         exchange: str = "binance",
-        user_id: str = None,
+        user_id: Optional[str] = None,
         strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute futures trading strategy."""
@@ -774,7 +774,7 @@ class SpotAlgorithms(LoggerMixin):
         self,
         symbol: str,
         parameters: StrategyParameters,
-        user_id: str = None,
+        user_id: Optional[str] = None,
         strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute momentum-based spot trading strategy."""
@@ -886,7 +886,7 @@ class SpotAlgorithms(LoggerMixin):
         self,
         symbol: str,
         parameters: StrategyParameters,
-        user_id: str = None,
+        user_id: Optional[str] = None,
         strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute mean reversion spot trading strategy."""
@@ -961,7 +961,7 @@ class SpotAlgorithms(LoggerMixin):
         self,
         symbol: str,
         parameters: StrategyParameters,
-        user_id: str = None,
+        user_id: Optional[str] = None,
         strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute breakout spot trading strategy."""
@@ -1429,12 +1429,12 @@ class TradingStrategiesService(LoggerMixin):
     async def execute_strategy(
         self,
         function: str,
-        strategy_type: str = None,
+        strategy_type: Optional[str] = None,
         symbol: str = "BTC/USDT",
         parameters: Dict[str, Any] = None,
         risk_mode: str = "balanced",
         exchange: str = "binance",
-        user_id: str = None,
+        user_id: Optional[str] = None,
         simulation_mode: bool = True
     ) -> Dict[str, Any]:
         """Main strategy execution router - handles all 25+ functions."""
@@ -5686,7 +5686,7 @@ class TradingStrategiesService(LoggerMixin):
             self.logger.error(f"Position fetch failed: {e}")
             return {"error": str(e)}
 
-    def _calculate_new_liquidation_price(self, position: Dict[str, Any], adjustment: float = 0, target_leverage: float = None) -> float:
+    def _calculate_new_liquidation_price(self, position: Dict[str, Any], adjustment: float = 0, target_leverage: Optional[float] = None) -> float:
         """Calculate new liquidation price after leverage adjustment."""
         try:
             # Extract values from position dict with validation
@@ -6646,7 +6646,7 @@ class TradingStrategiesService(LoggerMixin):
     async def options_chain(
         self,
         underlying_symbol: str,
-        expiry_date: str = None,
+        expiry_date: Optional[str] = None,
         user_id: str = None
     ) -> Dict[str, Any]:
         """Options chain analysis with real market data."""

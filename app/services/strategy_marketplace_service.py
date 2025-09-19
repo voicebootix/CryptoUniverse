@@ -15,7 +15,6 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
-from decimal import Decimal
 from dataclasses import dataclass
 
 import structlog
@@ -519,7 +518,7 @@ class StrategyMarketplaceService(LoggerMixin):
             # Core financial metrics with neutral defaults
             normalized["total_pnl"] = self._safe_float(performance_data.get("total_pnl", 0))
 
-            # Normalize win_rate to 0-1 range (convert percentages if >1)
+            # Normalize win_rate to canonical 0-1 fraction unit (handles both percentage and fraction inputs)
             raw_win_rate = self._safe_float(performance_data.get("win_rate", 0))
             normalized["win_rate"] = self.normalize_win_rate_to_fraction(raw_win_rate)
 
@@ -961,7 +960,7 @@ class StrategyMarketplaceService(LoggerMixin):
             "variant_b": {
                 "name": "Optimized Parameters", 
                 "return": 28.7,
-                "win_rate": 74.8,
+                "win_rate": 74.8,  # Will be converted to 0.748 internally
                 "trades": 142
             },
             "winner": "variant_b",
@@ -1047,12 +1046,12 @@ class StrategyMarketplaceService(LoggerMixin):
         """Calculate credit pricing based on strategy performance."""
         base_price = 20  # Base 20 credits
         
-        # Performance multipliers
-        if strategy.win_rate > 80:
+        # Performance multipliers (win_rate is 0-1 fraction internally)
+        if strategy.win_rate > 0.80:  # 80%
             base_price *= 2.0
-        elif strategy.win_rate > 70:
+        elif strategy.win_rate > 0.70:  # 70%
             base_price *= 1.5
-        elif strategy.win_rate > 60:
+        elif strategy.win_rate > 0.60:  # 60%
             base_price *= 1.2
         
         # Sharpe ratio multiplier

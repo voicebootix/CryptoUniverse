@@ -21,7 +21,6 @@ import uuid
 
 import aiohttp
 import structlog
-from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal, get_database
@@ -1181,7 +1180,7 @@ class TradeExecutionService(LoggerMixin):
         trade_request: Dict[str, Any],
         execution_result: Dict[str, Any],
         position_value_usd: float,
-        exchange_account_id: str = None,
+        exchange_account_id: Optional[str] = None,
         strategy_id: Optional[str] = None,
     ) -> None:
         """Record trade execution in database for audit trail."""
