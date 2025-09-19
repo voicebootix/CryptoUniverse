@@ -29,6 +29,9 @@ import enum
 
 from app.core.database import Base
 
+# Import for relationship resolution
+from app.models.strategy_access import UserStrategyAccess
+
 
 class UserRole(str, enum.Enum):
     """User role enumeration."""
