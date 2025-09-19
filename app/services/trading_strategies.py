@@ -4875,7 +4875,7 @@ class TradingStrategiesService(LoggerMixin):
                 "outperformance_pct": relative_outperformance_pct,
                 "beta": strategy_data.get("beta", 0.8),
                 "correlation": strategy_data.get("correlation", 0.75),
-                "tracking_error": tracking_error_decimal,
+                "tracking_error": tracking_error_decimal * 100,
                 "up_capture": strategy_data.get("up_capture", 85),    # % of benchmark up moves captured
                 "down_capture": strategy_data.get("down_capture", 70), # % of benchmark down moves captured
                 "hit_rate": strategy_data.get("hit_rate", 58),        # % of periods beating benchmark

@@ -155,7 +155,8 @@ async def test_strategy_performance_handles_percent_and_decimal_sources():
     assert percent_comparison["outperformance"] == pytest.approx(3.0)
     assert decimal_comparison["outperformance"] == pytest.approx(3.0)
     assert percent_comparison["outperformance_pct"] == pytest.approx(decimal_comparison["outperformance_pct"])
-    assert percent_comparison["tracking_error"] == pytest.approx(decimal_comparison["tracking_error"])
+    assert percent_comparison["tracking_error"] == pytest.approx(1.5)
+    assert decimal_comparison["tracking_error"] == pytest.approx(1.5)
 
     assert percent_result["strategy_performance_analysis"]["optimization_recommendations"] == \
         decimal_result["strategy_performance_analysis"]["optimization_recommendations"]
