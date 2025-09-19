@@ -119,6 +119,7 @@ class User(Base):
     credit_account = relationship("CreditAccount", back_populates="user", uselist=False, cascade="all, delete-orphan")
     exchange_accounts = relationship("ExchangeAccount", back_populates="user", cascade="all, delete-orphan")
     portfolios = relationship("Portfolio", back_populates="user", cascade="all, delete-orphan")
+    strategy_access = relationship("UserStrategyAccess", back_populates="user", cascade="all, delete-orphan")
     trades = relationship("Trade", back_populates="user", cascade="all, delete-orphan")
     positions = relationship("Position", back_populates="user", cascade="all, delete-orphan")
     orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")

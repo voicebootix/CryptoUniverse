@@ -180,47 +180,60 @@ async def grant_admin_full_strategy_access(
             strategy_type=request.strategy_type
         )
 
-        # Step 5: Grant strategies via existing working service (enterprise batch operation)
+        # Step 5: Grant strategies using the proven working service method
         strategies_granted = []
 
         try:
-            # Clear existing strategies first
-            redis_key = f"user_strategies:{target_user_id}"
-            await redis.delete(redis_key)
+            logger.info(
+                "🔄 Using working marketplace service to grant strategies",
+                operation_id=operation_id,
+                strategies_to_grant=len(strategies_to_grant)
+            )
 
-            # Add each strategy using the same method as the working service
+            # Use the marketplace service that we know works
             for strategy_id in strategies_to_grant:
                 try:
-                    # Use the same safe Redis operation as the working service
-                    result = await redis.sadd(redis_key, strategy_id)
-                    if result is not None:
+                    # Use the proven working purchase_strategy_access method
+                    result = await strategy_marketplace_service.purchase_strategy_access(
+                        user_id=target_user_id,
+                        strategy_id=strategy_id,
+                        subscription_type="permanent",  # Admin gets permanent access
+                        db_session=db
+                    )
+
+                    if result.get("success"):
                         strategies_granted.append(strategy_id)
+                        logger.debug(
+                            "✅ Strategy granted successfully",
+                            strategy_id=strategy_id,
+                            user_id=target_user_id
+                        )
+                    else:
+                        logger.warning(
+                            "Failed to grant strategy",
+                            operation_id=operation_id,
+                            strategy_id=strategy_id,
+                            error=result.get("error", "Unknown")
+                        )
+
                 except Exception as e:
                     logger.warning(
-                        "Failed to add strategy",
+                        "Exception granting strategy",
                         operation_id=operation_id,
                         strategy_id=strategy_id,
                         error=str(e)
                     )
 
-            # Set reasonable expiry (1 year for admin access)
-            if len(strategies_granted) > 0:
-                await redis.expire(redis_key, 86400 * 365)
-
-            # Verify the operation
-            final_strategies = await redis.smembers(redis_key)
-            verified_count = len(final_strategies) if final_strategies else 0
-
             logger.info(
-                "✅ Admin strategy grant completed",
+                "✅ Admin strategy grant completed via working service",
                 operation_id=operation_id,
                 strategies_granted_count=len(strategies_granted),
-                verified_count=verified_count
+                total_attempted=len(strategies_to_grant)
             )
 
         except Exception as e:
             logger.error(
-                "❌ Redis strategy grant failed",
+                "❌ Strategy grant via service failed",
                 operation_id=operation_id,
                 error=str(e)
             )
