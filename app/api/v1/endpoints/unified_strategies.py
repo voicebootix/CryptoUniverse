@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import get_database
+from app.core.database import get_database, AsyncSessionLocal
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User, UserRole
 from app.models.strategy_access import StrategyAccessType, StrategyType
@@ -69,7 +69,8 @@ class BulkAccessResponse(BaseModel):
 
 @router.get("/portfolio", response_model=Dict[str, Any])
 async def get_unified_portfolio(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
 ):
     """
     Get unified strategy portfolio for current user.
@@ -88,7 +89,8 @@ async def get_unified_portfolio(
     try:
         portfolio = await unified_strategy_service.get_user_strategy_portfolio(
             user_id=str(current_user.id),
-            user_role=current_user.role
+            user_role=current_user.role,
+            db=db
         )
 
         return portfolio.to_dict()
@@ -128,7 +130,7 @@ async def get_admin_portfolio_status(
         )
 
         # Additional admin diagnostics
-        async for db in get_database():
+        async with AsyncSessionLocal() as db:
             from sqlalchemy import select, func
             from app.models.strategy_access import UserStrategyAccess
 

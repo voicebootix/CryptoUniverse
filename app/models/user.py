@@ -177,6 +177,13 @@ class User(Base):
         if self.profile:
             return self.profile.full_name
         return self.email.split('@')[0]
+
+    @property
+    def display_name(self) -> str:
+        """Get user's display name from profile or email."""
+        if self.profile:
+            return self.profile.display_name
+        return self.email.split('@')[0]
     
 
     

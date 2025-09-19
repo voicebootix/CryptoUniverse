@@ -201,7 +201,8 @@ class UnifiedStrategyService(LoggerMixin):
     async def get_user_strategy_portfolio(
         self,
         user_id: str,
-        user_role: Optional[UserRole] = None
+        user_role: Optional[UserRole] = None,
+        db: Optional[AsyncSession] = None
     ) -> UnifiedStrategyPortfolio:
         """
         Enterprise unified strategy portfolio retrieval.
@@ -220,43 +221,12 @@ class UnifiedStrategyService(LoggerMixin):
         )
 
         try:
-            async with AsyncSessionLocal() as db:
-                # Get user and role if not provided
-                if user_role is None:
-                    user = await db.execute(
-                        select(User).where(User.id == UUID(user_id))
-                    )
-                    user_obj = user.scalar_one_or_none()
-                    if not user_obj:
-                        raise ValueError(f"User {user_id} not found")
-                    user_role = user_obj.role
-
-                # Route to appropriate strategy retrieval method
-                if user_role == UserRole.ADMIN:
-                    portfolio = await self._get_admin_full_portfolio(user_id, db)
-                else:
-                    portfolio = await self._get_user_owned_portfolio(user_id, db, user_role)
-
-                # Add metadata and performance tracking
-                execution_time = (datetime.utcnow() - operation_start).total_seconds()
-                portfolio.metadata.update({
-                    "operation_id": operation_id,
-                    "execution_time_seconds": execution_time,
-                    "data_freshness": "realtime",
-                    "api_version": "v2_unified",
-                    "compliance_checked": True
-                })
-
-                self.logger.info(
-                    "✅ ENTERPRISE PORTFOLIO SUCCESS",
-                    operation_id=operation_id,
-                    user_id=user_id,
-                    strategies_count=len(portfolio.strategies),
-                    active_strategies=len([s for s in portfolio.strategies if s.get("is_active", True)]),
-                    execution_time_seconds=execution_time
-                )
-
-                return portfolio
+            # Use provided database session or create new one
+            if db is None:
+                async with AsyncSessionLocal() as db:
+                    return await self._get_portfolio_with_db(user_id, user_role, db)
+            else:
+                return await self._get_portfolio_with_db(user_id, user_role, db)
 
         except Exception as e:
             execution_time = (datetime.utcnow() - operation_start).total_seconds()
@@ -271,7 +241,6 @@ class UnifiedStrategyService(LoggerMixin):
             )
 
             # Return graceful degraded state
-            # Ensure user_role is never None to prevent to_dict() errors
             safe_user_role = user_role if user_role is not None else UserRole.VIEWER
 
             return UnifiedStrategyPortfolio(
@@ -285,6 +254,54 @@ class UnifiedStrategyService(LoggerMixin):
                     "execution_time_seconds": execution_time
                 }
             )
+
+    async def _get_portfolio_with_db(
+        self,
+        user_id: str,
+        user_role: Optional[UserRole],
+        db: AsyncSession
+    ) -> UnifiedStrategyPortfolio:
+        """Helper method to get portfolio with provided database session"""
+
+        operation_start = datetime.utcnow()
+        operation_id = f"portfolio_{user_id[:8]}"
+
+        # Get user and role if not provided
+        if user_role is None:
+            user = await db.execute(
+                select(User).where(User.id == UUID(user_id))
+            )
+            user_obj = user.scalar_one_or_none()
+            if not user_obj:
+                raise ValueError(f"User {user_id} not found")
+            user_role = user_obj.role
+
+        # Route to appropriate strategy retrieval method
+        if user_role == UserRole.ADMIN:
+            portfolio = await self._get_admin_full_portfolio(user_id, db)
+        else:
+            portfolio = await self._get_user_owned_portfolio(user_id, db, user_role)
+
+        # Add metadata and performance tracking
+        execution_time = (datetime.utcnow() - operation_start).total_seconds()
+        portfolio.metadata.update({
+            "operation_id": operation_id,
+            "execution_time_seconds": execution_time,
+            "data_freshness": "realtime",
+            "api_version": "v2_unified",
+            "compliance_checked": True
+        })
+
+        self.logger.info(
+            "✅ ENTERPRISE PORTFOLIO SUCCESS",
+            operation_id=operation_id,
+            user_id=user_id,
+            strategies_count=len(portfolio.strategies),
+            active_strategies=len([s for s in portfolio.strategies if s.get("is_active", True)]),
+            execution_time_seconds=execution_time
+        )
+
+        return portfolio
 
     async def _get_admin_full_portfolio(
         self,
@@ -490,7 +507,7 @@ class UnifiedStrategyService(LoggerMixin):
                 "description": strategy.description or "Community strategy",
                 "category": strategy.strategy_type.value if strategy.strategy_type else "community",
                 "is_ai_strategy": False,
-                "publisher_name": strategy.user.display_name if strategy.user else "Anonymous",
+                "publisher_name": getattr(strategy.user, 'display_name', strategy.user.email.split('@')[0]) if strategy.user else "Anonymous",
                 "publisher_id": str(strategy.user_id) if strategy.user_id else None,
 
                 # Access information
