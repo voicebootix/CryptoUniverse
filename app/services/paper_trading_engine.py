@@ -53,6 +53,27 @@ class PaperTradingEngine(LoggerMixin):
     def __init__(self):
         self.redis = None
         self.initial_virtual_balance = 10000.0  # $10K virtual starting balance
+    # Lua script for atomic portfolio reset - prevents race conditions
+    ATOMIC_RESET_LUA_SCRIPT = """
+    local portfolio_key = KEYS[1]
+    local lock_key = KEYS[2]
+    local initial_portfolio_json = ARGV[1]
+    local lock_timeout = ARGV[2] or "5000"
+
+    -- Acquire distributed lock for this user's portfolio operations
+    local lock_result = redis.call('SET', lock_key, '1', 'PX', lock_timeout, 'NX')
+    if not lock_result then
+        return {err = 'LOCK_FAILED', msg = 'Another reset operation is in progress'}
+    end
+
+    -- Atomically replace portfolio with initial state
+    redis.call('SET', portfolio_key, initial_portfolio_json)
+
+    -- Release the lock
+    redis.call('DEL', lock_key)
+
+    return {ok = 'SUCCESS', msg = 'Portfolio reset atomically'}
+    """
     
     async def async_init(self):
         """Initialize async components."""
@@ -66,11 +87,16 @@ class PaperTradingEngine(LoggerMixin):
             existing = await self.redis.get(portfolio_key)
             
             if existing:
-                return {
-                    "success": True,
-                    "message": "Paper trading account already exists",
-                    "portfolio": json.loads(existing)
-                }
+                try:
+                    existing_portfolio = json.loads(existing)
+                    return {
+                        "success": True,
+                        "message": "Paper trading account already exists",
+                        "portfolio": existing_portfolio
+                    }
+                except (json.JSONDecodeError, TypeError) as e:
+                    self.logger.warning(f"Corrupted paper portfolio data for user {user_id}, recreating", error=str(e))
+                    # Continue to create new portfolio if existing data is corrupted
             
             # Create virtual portfolio
             virtual_portfolio = {
@@ -153,7 +179,11 @@ class PaperTradingEngine(LoggerMixin):
                     return {"success": False, "error": "Failed to setup paper trading account"}
                 portfolio_data = await self.redis.get(portfolio_key)
             
-            portfolio = json.loads(portfolio_data)
+            try:
+                portfolio = json.loads(portfolio_data)
+            except (json.JSONDecodeError, TypeError) as e:
+                self.logger.error(f"Failed to parse portfolio data for user {user_id}", error=str(e))
+                return {"success": False, "error": "Portfolio data corrupted, please reset your paper trading account"}
             
             # Calculate trade value
             trade_value = quantity * current_price
@@ -401,7 +431,11 @@ class PaperTradingEngine(LoggerMixin):
                     "needs_setup": True
                 }
             
-            portfolio = json.loads(portfolio_data)
+            try:
+                portfolio = json.loads(portfolio_data)
+            except (json.JSONDecodeError, TypeError) as e:
+                self.logger.error(f"Failed to parse portfolio data for user {user_id}", error=str(e))
+                return {"success": False, "error": "Portfolio data corrupted, please reset your paper trading account"}
             
             # Update with latest prices
             await self._update_portfolio_metrics(portfolio)
@@ -449,45 +483,125 @@ class PaperTradingEngine(LoggerMixin):
             return {"success": False, "error": str(e)}
 
     async def reset_paper_trading_account(self, user_id: str) -> Dict[str, Any]:
-        """Reset a user's paper trading account to the initial state."""
+        """
+        Atomically reset a user's paper trading account to the initial state.
 
+        Uses Redis Lua script to ensure atomic operation and prevent race conditions.
+        Includes distributed locking to serialize concurrent reset requests.
+        """
         try:
-            portfolio_key = f"paper_portfolio:{user_id}"
-
             if self.redis is None:
                 await self.async_init()
 
             if self.redis is None:
                 return {"success": False, "error": "Paper trading storage unavailable"}
 
-            # Remove any existing virtual portfolio so a fresh one can be created
-            if self.redis:
-                try:
-                    await self.redis.delete(portfolio_key)
-                except AttributeError:
-                    # Older redis clients may expose `delete` via `unlink`
-                    await self.redis.unlink(portfolio_key)
+            portfolio_key = f"paper_portfolio:{user_id}"
+            lock_key = f"paper_portfolio_lock:{user_id}"
 
-            # Re-run setup to create a brand new portfolio
+            # Create fresh initial portfolio state
+            initial_portfolio = {
+                "user_id": user_id,
+                "cash_balance": self.initial_virtual_balance,
+                "total_value": self.initial_virtual_balance,
+                "positions": [],
+                "trade_history": [],
+                "performance_metrics": {
+                    "total_trades": 0,
+                    "winning_trades": 0,
+                    "total_profit_loss": 0.0,
+                    "best_trade": 0.0,
+                    "worst_trade": 0.0,
+                    "average_trade": 0.0,
+                    "win_rate": 0.0,
+                    "sharpe_ratio": 0.0,
+                    "max_drawdown": 0.0
+                },
+                "created_at": datetime.utcnow().isoformat(),
+                "last_updated": datetime.utcnow().isoformat()
+            }
+
+            initial_portfolio_json = json.dumps(initial_portfolio, default=str)
+
+            # Execute atomic reset using Lua script
+            try:
+                result = await self.redis.eval(
+                    self.ATOMIC_RESET_LUA_SCRIPT,
+                    2,  # Number of keys
+                    portfolio_key,
+                    lock_key,
+                    initial_portfolio_json,
+                    "5000"  # Lock timeout in milliseconds
+                )
+
+                if isinstance(result, dict) and result.get('err') == 'LOCK_FAILED':
+                    return {
+                        "success": False,
+                        "error": "Another reset operation is in progress. Please try again in a few seconds."
+                    }
+
+                self.logger.info(f"Paper trading account reset atomically for user {user_id}")
+
+                return {
+                    "success": True,
+                    "virtual_portfolio": initial_portfolio,
+                    "message": "Paper trading account reset to initial balance (atomic operation)"
+                }
+
+            except Exception as lua_error:
+                self.logger.error(f"Atomic reset failed for user {user_id}", error=str(lua_error))
+
+                # Fallback to manual lock-based approach if Lua script fails
+                return await self._reset_with_distributed_lock(user_id)
+
+        except Exception as e:
+            self.logger.error(f"Paper trading reset failed for user {user_id}", error=str(e))
+            return {"success": False, "error": f"Reset failed: {str(e)}"}
+
+    async def _reset_with_distributed_lock(self, user_id: str) -> Dict[str, Any]:
+        """
+        Fallback reset method using distributed locking for race condition protection.
+        Used when Redis Lua scripting is not available.
+        """
+        portfolio_key = f"paper_portfolio:{user_id}"
+        lock_key = f"paper_portfolio_lock:{user_id}"
+
+        # Acquire distributed lock
+        lock_acquired = await self.redis.set(lock_key, "1", nx=True, px=5000)
+
+        if not lock_acquired:
+            return {
+                "success": False,
+                "error": "Another reset operation is in progress. Please try again in a few seconds."
+            }
+
+        try:
+            # Delete existing portfolio
+            await self.redis.delete(portfolio_key)
+
+            # Create new portfolio
             setup_result = await self.setup_paper_trading_account(user_id)
 
             if setup_result.get("success"):
                 portfolio = setup_result.get("virtual_portfolio") or setup_result.get("portfolio", {})
-
                 return {
                     "success": True,
                     "virtual_portfolio": portfolio,
-                    "message": "Paper trading account reset to initial balance"
+                    "message": "Paper trading account reset to initial balance (distributed lock)"
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": setup_result.get("error", "Failed to reset paper trading account")
                 }
 
-            return {
-                "success": False,
-                "error": setup_result.get("error", "Failed to reset paper trading account")
-            }
+        finally:
+            # Always release the lock
+            try:
+                await self.redis.delete(lock_key)
+            except Exception as lock_release_error:
+                self.logger.warning(f"Failed to release reset lock for user {user_id}", error=str(lock_release_error))
 
-        except Exception as e:
-            self.logger.error("Paper trading reset failed", error=str(e))
-            return {"success": False, "error": str(e)}
     
     def _calculate_trade_profit(self, trade: Dict[str, Any]) -> float:
         """Calculate profit for completed trade."""
