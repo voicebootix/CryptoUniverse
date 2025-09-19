@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
-from app.core.database import get_database
+from app.core.database import get_database, AsyncSessionLocal
 from app.models.user import User, UserRole
 from app.models.trading import TradingStrategy
 from app.models.strategy_access import UserStrategyAccess, StrategyAccessType, StrategyType
@@ -220,50 +220,43 @@ class UnifiedStrategyService(LoggerMixin):
         )
 
         try:
-            # Use async generator correctly with single iteration
-            async for db in get_database():
-                try:
-                    # Get user and role if not provided
-                    if user_role is None:
-                        user = await db.execute(
-                            select(User).where(User.id == UUID(user_id))
-                        )
-                        user_obj = user.scalar_one_or_none()
-                        if not user_obj:
-                            raise ValueError(f"User {user_id} not found")
-                        user_role = user_obj.role
-
-                    # Route to appropriate strategy retrieval method
-                    if user_role == UserRole.ADMIN:
-                        portfolio = await self._get_admin_full_portfolio(user_id, db)
-                    else:
-                        portfolio = await self._get_user_owned_portfolio(user_id, db, user_role)
-
-                    # Add metadata and performance tracking
-                    execution_time = (datetime.utcnow() - operation_start).total_seconds()
-                    portfolio.metadata.update({
-                        "operation_id": operation_id,
-                        "execution_time_seconds": execution_time,
-                        "data_freshness": "realtime",
-                        "api_version": "v2_unified",
-                        "compliance_checked": True
-                    })
-
-                    self.logger.info(
-                        "✅ ENTERPRISE PORTFOLIO SUCCESS",
-                        operation_id=operation_id,
-                        user_id=user_id,
-                        strategies_count=len(portfolio.strategies),
-                        active_strategies=len([s for s in portfolio.strategies if s.get("is_active", True)]),
-                        execution_time_seconds=execution_time
+            async with AsyncSessionLocal() as db:
+                # Get user and role if not provided
+                if user_role is None:
+                    user = await db.execute(
+                        select(User).where(User.id == UUID(user_id))
                     )
+                    user_obj = user.scalar_one_or_none()
+                    if not user_obj:
+                        raise ValueError(f"User {user_id} not found")
+                    user_role = user_obj.role
 
-                    return portfolio
-                except Exception as e:
-                    # Re-raise to be handled by outer exception handler
-                    raise
-                # Only process first (and only) database session
-                break
+                # Route to appropriate strategy retrieval method
+                if user_role == UserRole.ADMIN:
+                    portfolio = await self._get_admin_full_portfolio(user_id, db)
+                else:
+                    portfolio = await self._get_user_owned_portfolio(user_id, db, user_role)
+
+                # Add metadata and performance tracking
+                execution_time = (datetime.utcnow() - operation_start).total_seconds()
+                portfolio.metadata.update({
+                    "operation_id": operation_id,
+                    "execution_time_seconds": execution_time,
+                    "data_freshness": "realtime",
+                    "api_version": "v2_unified",
+                    "compliance_checked": True
+                })
+
+                self.logger.info(
+                    "✅ ENTERPRISE PORTFOLIO SUCCESS",
+                    operation_id=operation_id,
+                    user_id=user_id,
+                    strategies_count=len(portfolio.strategies),
+                    active_strategies=len([s for s in portfolio.strategies if s.get("is_active", True)]),
+                    execution_time_seconds=execution_time
+                )
+
+                return portfolio
 
         except Exception as e:
             execution_time = (datetime.utcnow() - operation_start).total_seconds()
@@ -773,7 +766,7 @@ class UnifiedStrategyService(LoggerMixin):
         without IntegrityError on unique constraint violations.
         """
 
-        async for db in get_database():
+        async with AsyncSessionLocal() as db:
             try:
                 # First attempt: Try to create new access record
                 new_access = UserStrategyAccess(
@@ -851,7 +844,7 @@ class UnifiedStrategyService(LoggerMixin):
     ) -> bool:
         """Revoke strategy access"""
 
-        async for db in get_database():
+        async with AsyncSessionLocal() as db:
             result = await db.execute(
                 select(UserStrategyAccess).where(
                     and_(
