@@ -7,6 +7,7 @@ instead of synthetic data.
 """
 
 import asyncio
+from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 from decimal import Decimal
@@ -97,7 +98,11 @@ class RealBacktestingEngine(LoggerMixin):
 
                 # Generate signals using actual strategy
                 signals = await self._generate_strategy_signals(
-                    strategy_func, current_prices, portfolio, timestamp
+                    strategy_func,
+                    symbols,
+                    historical_data,
+                    portfolio,
+                    timestamp
                 )
 
                 # Execute trades based on signals
@@ -222,23 +227,57 @@ class RealBacktestingEngine(LoggerMixin):
     async def _generate_strategy_signals(
         self,
         strategy_func: str,
-        current_prices: Dict[str, float],
+        symbols: List[str],
+        historical_data: Dict[str, pd.DataFrame],
         portfolio: Dict,
         timestamp: datetime
     ) -> Optional[Dict[str, Any]]:
         """
-        Generate trading signals using actual strategy function.
+        Generate trading signals using the trading strategies service in backtest mode.
         """
         try:
-            # Call real strategy function
-            result = await trading_strategies_service.execute_strategy_function(
-                function_name=strategy_func,
-                params={
-                    'prices': current_prices,
-                    'portfolio': portfolio,
-                    'timestamp': timestamp.isoformat(),
-                    'mode': 'backtest'
-                }
+            price_snapshots: Dict[str, List[Dict[str, Any]]] = {}
+
+            for symbol in symbols:
+                df = historical_data.get(symbol)
+                if df is None or df.empty:
+                    continue
+
+                history = df[df.index <= timestamp]
+                if history.empty:
+                    continue
+
+                history = history.tail(250)
+                snapshots: List[Dict[str, Any]] = []
+
+                for idx, row in history.iterrows():
+                    close_price = row.get('close') if 'close' in row else None
+                    if close_price is None or pd.isna(close_price):
+                        continue
+
+                    snapshots.append({
+                        'timestamp': idx.to_pydatetime() if hasattr(idx, 'to_pydatetime') else idx,
+                        'open': float(row.get('open', close_price)),
+                        'high': float(row.get('high', close_price)),
+                        'low': float(row.get('low', close_price)),
+                        'close': float(close_price),
+                        'volume': float(row.get('volume', 0))
+                    })
+
+                if snapshots:
+                    price_snapshots[symbol] = snapshots
+
+            if not price_snapshots:
+                return None
+
+            portfolio_snapshot = deepcopy(portfolio)
+
+            result = await trading_strategies_service.run_for_backtest(
+                strategy_func=strategy_func,
+                symbols=list(price_snapshots.keys()),
+                price_snapshots=price_snapshots,
+                portfolio_snapshot=portfolio_snapshot,
+                as_of=timestamp
             )
 
             if result.get('success') and result.get('signals'):

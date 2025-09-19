@@ -22,7 +22,9 @@ from sqlalchemy import (
     String,
     Text,
     Index,
+    literal,
 )
+from sqlalchemy.orm import column_property
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -142,10 +144,12 @@ class TradingStrategy(Base):
     confidence_threshold = Column(Numeric(5, 2), default=70.0, nullable=False)
     consensus_required = Column(Boolean, default=True, nullable=False)
 
-    # Strategy IDE fields
-    strategy_code = Column(Text, nullable=True)  # User's custom strategy code
-    category = Column(String(50), nullable=True)  # Strategy category
-    meta_data = Column('metadata', JSON, default=dict, nullable=False)  # Additional metadata
+    # Strategy IDE fields - READ-ONLY placeholders; remove after migration
+    strategy_code = column_property(literal(None).cast(Text))  # READ-ONLY placeholder; remove after migration
+    category = column_property(literal(None).cast(String(50)))  # READ-ONLY placeholder; remove after migration
+    meta_data = column_property(literal(None).cast(JSON))  # READ-ONLY placeholder; remove after migration
+
+    # Note: No metadata property to avoid SQLAlchemy conflict - use meta_data directly
     
     # Timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)

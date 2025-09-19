@@ -944,7 +944,7 @@ class StrategyTemplate(BaseModel):
     risk_level: str
 
 class StrategyValidationRequest(BaseModel):
-    code: str
+    code: Optional[str] = None  # Optional for backward compatibility; functionality disabled until migration
     strategy_name: Optional[str] = None
     parameters: Optional[Dict[str, Any]] = None
 
@@ -957,17 +957,17 @@ class StrategyValidationResult(BaseModel):
 
 class StrategySaveRequest(BaseModel):
     name: str
-    code: str
+    code: Optional[str] = None  # Deprecated/ignored server-side; accepted for backward compatibility
     description: Optional[str] = None
-    category: str = "custom"
+    category: Optional[str] = None  # Deprecated/ignored server-side; accepted for backward compatibility
     parameters: Dict[str, Any] = Field(default_factory=dict)
     risk_parameters: Optional[Dict[str, Any]] = None
     entry_conditions: Optional[List[Dict[str, Any]]] = None
     exit_conditions: Optional[List[Dict[str, Any]]] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Optional[Dict[str, Any]] = None  # Deprecated/ignored server-side; accepted for backward compatibility
 
 class StrategyBacktestRequest(BaseModel):
-    code: str
+    code: Optional[str] = None  # Deprecated/ignored server-side; accepted for backward compatibility
     symbol: str = "BTC/USDT"
     start_date: str
     end_date: str
@@ -1199,6 +1199,13 @@ async def validate_strategy_code(
     try:
         import ast
 
+        # Check if code is provided
+        if not request.code:
+            raise HTTPException(
+                status_code=422,
+                detail="Strategy code is required for validation but temporarily disabled due to database migration. Please try again later."
+            )
+
         code = request.code
         errors = []
         warnings = []
@@ -1381,11 +1388,11 @@ async def save_strategy(
             risk_parameters=risk_parameters,
             entry_conditions=entry_conditions,
             exit_conditions=exit_conditions,
-            strategy_code=request.code,
-            category=request.category,
+            # strategy_code=request.code,  # READ-ONLY placeholder; remove after migration
+            # category=request.category,   # READ-ONLY placeholder; remove after migration
             is_simulation=True,  # Default to simulation mode
             is_active=False,     # Not active until user enables
-            meta_data=request.metadata
+            # meta_data=request.metadata   # READ-ONLY placeholder; remove after migration
         )
 
         db.add(strategy)
@@ -1594,7 +1601,7 @@ class StrategySubmissionRequest(BaseModel):
     strategy_id: str
     name: str
     description: str
-    category: str
+    category: Optional[str] = None  # Deprecated/ignored server-side; accepted for backward compatibility
     risk_level: RiskLevel = RiskLevel.MEDIUM
     expected_return_range: conlist(Decimal, min_length=2, max_length=2)
     required_capital: conint(ge=0)
@@ -2449,7 +2456,7 @@ async def submit_strategy_for_review(
                 user_id=str(current_user.id),
                 name=request.name,
                 description=request.description,
-                category=request.category,
+                # category=request.category,  # READ-ONLY placeholder; remove after migration
                 risk_level=request.risk_level,
                 expected_return_min=float(request.expected_return_range[0]) if request.expected_return_range else 0.0,
                 expected_return_max=float(request.expected_return_range[1]) if request.expected_return_range else 0.0,
@@ -2509,7 +2516,7 @@ async def submit_strategy_for_review(
             user_id=str(current_user.id),
             strategy_name=request.name,
             submission_id=submission_id,
-            category=request.category,
+            # category=request.category,  # READ-ONLY placeholder; remove after migration
             risk_level=request.risk_level,
             persisted=persisted
         )

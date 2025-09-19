@@ -358,36 +358,29 @@ class StrategyMarketplaceService(LoggerMixin):
             strategy_id = f"ai_{strategy_func}"
 
             # Get real performance metrics from actual trades
-            real_metrics = await real_performance_tracker.track_strategy_performance(
-                strategy_id=strategy_id,
-                user_id=user_id,
-                period_days=30
-            )
+            strategy_uuid = await trading_strategies_service.get_platform_strategy_id(strategy_func)
 
-            if real_metrics:
-                data_quality = real_metrics.get('data_quality') or 'verified_real_trades'
-                badges = self._build_performance_badges(data_quality)
-                if badges and not real_metrics.get('badges'):
-                    real_metrics['badges'] = badges
+            if strategy_uuid:
+                real_metrics = await real_performance_tracker.track_strategy_performance(
+                    strategy_id=strategy_uuid,
+                    user_id=user_id,
+                    period_days=30,
+                    include_simulations=True,
+                )
 
-                status = real_metrics.get('status')
-                total_trades = real_metrics.get('total_trades', 0)
-
-                # If no trades yet, return the zeroed metrics so UI can surface badge
-                if status == 'no_trades_yet':
+                if real_metrics and real_metrics.get('total_trades', 0) > 0:
+                    # We have trade data (real or simulation) for this strategy
                     self.logger.info(
-                        "Strategy has no real trades yet", strategy=strategy_func, user_id=user_id
+                        "✅ Using performance data for platform strategy",
+                        strategy_function=strategy_func,
+                        data_quality=real_metrics.get('data_quality')
                     )
-                    real_metrics.setdefault('total_pnl', 0)
-                    real_metrics.setdefault('win_rate', 0)
-                    real_metrics.setdefault('avg_return', 0)
-                    real_metrics.setdefault('total_trades', 0)
                     return real_metrics
-
-                # We have real trade data!
-                if total_trades and total_trades > 0:
-                    self.logger.info(f"✅ Using REAL performance data for {strategy_func}")
-                    return real_metrics
+            else:
+                self.logger.warning(
+                    "Platform strategy UUID not found for performance lookup",
+                    strategy_function=strategy_func,
+                )
 
             # Fallback to trying existing function
             performance_result = await trading_strategies_service.strategy_performance(

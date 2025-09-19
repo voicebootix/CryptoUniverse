@@ -48,8 +48,17 @@ from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_manager
 from app.core.logging import LoggerMixin
-from app.models.trading import TradingStrategy, Trade, Position, Order, TradeStatus
-from app.models.user import User
+from app.core.security import get_password_hash
+from app.models.trading import (
+    TradingStrategy,
+    Trade,
+    Position,
+    Order,
+    TradeStatus,
+    StrategyType as TradingStrategyType,
+)
+from app.models.system import SystemConfiguration
+from app.models.user import User, UserRole, UserStatus
 from app.models.credit import CreditAccount, CreditTransaction
 from app.models.analytics import PerformanceMetric, RiskMetric
 from app.models.market_data import BacktestResult
@@ -58,6 +67,105 @@ from app.services.market_analysis_core import MarketAnalysisService
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
+
+
+# Platform AI strategy definitions
+PLATFORM_STRATEGY_FUNCTIONS: List[str] = [
+    # Derivatives
+    "futures_trade",
+    "options_trade",
+    "perpetual_trade",
+    "leverage_position",
+    "complex_strategy",
+    "margin_status",
+    "funding_arbitrage",
+    "basis_trade",
+    "options_chain",
+    "calculate_greeks",
+    "liquidation_price",
+    "hedge_position",
+    # Spot algorithms
+    "spot_momentum_strategy",
+    "spot_mean_reversion",
+    "spot_breakout_strategy",
+    # Algorithmic trading
+    "algorithmic_trading",
+    "pairs_trading",
+    "statistical_arbitrage",
+    "market_making",
+    "scalping_strategy",
+    "swing_trading",
+    # Portfolio and risk
+    "position_management",
+    "risk_management",
+    "portfolio_optimization",
+    "strategy_performance",
+]
+
+PLATFORM_STRATEGY_NAME_MAP: Dict[str, str] = {
+    "futures_trade": "AI Futures Trading",
+    "options_trade": "AI Options Strategies",
+    "perpetual_trade": "AI Perpetual Contracts",
+    "leverage_position": "AI Leverage Manager",
+    "complex_strategy": "AI Complex Derivatives",
+    "margin_status": "AI Margin Monitor",
+    "funding_arbitrage": "AI Funding Arbitrage",
+    "basis_trade": "AI Basis Trading",
+    "options_chain": "AI Options Chain Explorer",
+    "calculate_greeks": "AI Options Greeks Calculator",
+    "liquidation_price": "AI Liquidation Guardian",
+    "hedge_position": "AI Hedge Strategist",
+    "spot_momentum_strategy": "AI Momentum Trader",
+    "spot_mean_reversion": "AI Mean Reversion Pro",
+    "spot_breakout_strategy": "AI Breakout Hunter",
+    "algorithmic_trading": "AI Algorithmic Suite",
+    "pairs_trading": "AI Pairs Trader",
+    "statistical_arbitrage": "AI Statistical Arbitrage",
+    "market_making": "AI Market Maker",
+    "scalping_strategy": "AI Scalping Engine",
+    "swing_trading": "AI Swing Navigator",
+    "position_management": "AI Position Manager",
+    "risk_management": "AI Risk Guardian",
+    "portfolio_optimization": "AI Portfolio Optimizer",
+    "strategy_performance": "AI Strategy Analytics",
+}
+
+DERIVATIVES_FUNCTIONS = {
+    "futures_trade",
+    "options_trade",
+    "perpetual_trade",
+    "leverage_position",
+    "complex_strategy",
+    "margin_status",
+    "funding_arbitrage",
+    "basis_trade",
+    "options_chain",
+    "calculate_greeks",
+    "liquidation_price",
+    "hedge_position",
+}
+
+SPOT_FUNCTIONS = {
+    "spot_momentum_strategy",
+    "spot_mean_reversion",
+    "spot_breakout_strategy",
+}
+
+ALGORITHMIC_FUNCTIONS = {
+    "algorithmic_trading",
+    "pairs_trading",
+    "statistical_arbitrage",
+    "market_making",
+    "scalping_strategy",
+    "swing_trading",
+}
+
+PORTFOLIO_FUNCTIONS = {
+    "position_management",
+    "risk_management",
+    "portfolio_optimization",
+    "strategy_performance",
+}
 
 
 class StrategyType(str, Enum):
@@ -164,7 +272,8 @@ class DerivativesEngine(LoggerMixin):
         symbol: str,
         parameters: StrategyParameters,
         exchange: str = "binance",
-        user_id: str = None
+        user_id: str = None,
+        strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute futures trading strategy."""
         self.logger.info("Executing futures trade", strategy=strategy_type, symbol=symbol)
@@ -198,7 +307,10 @@ class DerivativesEngine(LoggerMixin):
             
             # Use trade executor for actual execution
             execution_result = await self.trade_executor.execute_trade(
-                trade_request, user_id, simulation_mode=False
+                trade_request,
+                user_id,
+                simulation_mode=False,
+                strategy_id=strategy_id,
             )
             
             # Set stop loss and take profit if specified
@@ -662,7 +774,8 @@ class SpotAlgorithms(LoggerMixin):
         self,
         symbol: str,
         parameters: StrategyParameters,
-        user_id: str = None
+        user_id: str = None,
+        strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute momentum-based spot trading strategy."""
         self.logger.info("Executing momentum strategy", symbol=symbol)
@@ -716,7 +829,10 @@ class SpotAlgorithms(LoggerMixin):
                 }
                 
                 execution_result = await self.trade_executor.execute_trade(
-                    trade_request, user_id, simulation_mode=True
+                    trade_request,
+                    user_id,
+                    simulation_mode=True,
+                    strategy_id=strategy_id,
                 )
                 
                 return {
@@ -770,7 +886,8 @@ class SpotAlgorithms(LoggerMixin):
         self,
         symbol: str,
         parameters: StrategyParameters,
-        user_id: str = None
+        user_id: str = None,
+        strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute mean reversion spot trading strategy."""
         self.logger.info("Executing mean reversion strategy", symbol=symbol)
@@ -811,7 +928,10 @@ class SpotAlgorithms(LoggerMixin):
                 }
                 
                 execution_result = await self.trade_executor.execute_trade(
-                    trade_request, user_id, simulation_mode=True
+                    trade_request,
+                    user_id,
+                    simulation_mode=True,
+                    strategy_id=strategy_id,
                 )
             
             return {
@@ -841,7 +961,8 @@ class SpotAlgorithms(LoggerMixin):
         self,
         symbol: str,
         parameters: StrategyParameters,
-        user_id: str = None
+        user_id: str = None,
+        strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute breakout spot trading strategy."""
         self.logger.info("Executing breakout strategy", symbol=symbol)
@@ -897,7 +1018,10 @@ class SpotAlgorithms(LoggerMixin):
                 }
                 
                 execution_result = await self.trade_executor.execute_trade(
-                    trade_request, user_id, simulation_mode=True
+                    trade_request,
+                    user_id,
+                    simulation_mode=True,
+                    strategy_id=strategy_id,
                 )
             
             return {
@@ -1010,11 +1134,11 @@ class TradingStrategiesService(LoggerMixin):
         # Initialize dependencies
         self.trade_executor = TradeExecutionService()
         self.market_analyzer = MarketAnalysisService()
-        
+
         # Initialize strategy engines
         self.derivatives_engine = DerivativesEngine(self.trade_executor)
         self.spot_algorithms = SpotAlgorithms(self.trade_executor, self.market_analyzer)
-        
+
         # Service state
         self.active_strategies = {}
         self.performance_metrics = {
@@ -1022,6 +1146,257 @@ class TradingStrategiesService(LoggerMixin):
             "successful_strategies": 0,
             "total_pnl": 0.0
         }
+
+        # Platform strategy cache
+        self._platform_strategy_ids: Dict[str, str] = {}
+        self._platform_strategy_lock = asyncio.Lock()
+        self._platform_strategy_owner_id: Optional[uuid.UUID] = None
+
+    async def get_platform_strategy_id(self, function_name: str) -> Optional[str]:
+        """Return the UUID for a platform AI strategy function."""
+        if function_name not in PLATFORM_STRATEGY_FUNCTIONS:
+            return None
+
+        await self._ensure_platform_strategy_cache()
+        return self._platform_strategy_ids.get(function_name)
+
+    async def get_platform_strategy_mapping(self) -> Dict[str, str]:
+        """Return mapping of platform strategy functions to UUIDs."""
+        await self._ensure_platform_strategy_cache()
+        return dict(self._platform_strategy_ids)
+
+    async def _ensure_platform_strategy_cache(self) -> None:
+        """Ensure platform strategies are seeded and cached."""
+        if self._platform_strategy_ids:
+            return
+
+        async with self._platform_strategy_lock:
+            if self._platform_strategy_ids:
+                return
+
+            async with AsyncSessionLocal() as session:
+                mapping = await self._load_or_seed_platform_strategies(session)
+                self._platform_strategy_ids = mapping
+
+    async def _load_or_seed_platform_strategies(self, session) -> Dict[str, str]:
+        """Load platform strategy mapping or seed missing entries."""
+        mapping: Dict[str, str] = {}
+        config_stmt = select(SystemConfiguration).where(
+            SystemConfiguration.key == "platform_ai_strategy_ids"
+        )
+        config_entry = (await session.execute(config_stmt)).scalar_one_or_none()
+
+        raw_mapping = {}
+        if config_entry and isinstance(config_entry.value, dict):
+            raw_mapping = config_entry.value
+
+        valid_mapping: Dict[str, str] = {}
+        missing_functions: List[str] = []
+
+        for function_name in PLATFORM_STRATEGY_FUNCTIONS:
+            raw_id = raw_mapping.get(function_name)
+            strategy_obj = None
+
+            if raw_id:
+                try:
+                    strategy_uuid = uuid.UUID(str(raw_id))
+                    strategy_obj = await session.get(TradingStrategy, strategy_uuid)
+                except (ValueError, TypeError):
+                    strategy_obj = None
+
+            if strategy_obj:
+                valid_mapping[function_name] = str(strategy_obj.id)
+            else:
+                missing_functions.append(function_name)
+
+        if missing_functions:
+            seeded = await self._seed_platform_strategies(
+                session, missing_functions
+            )
+            valid_mapping.update(seeded)
+
+        if not config_entry:
+            config_entry = SystemConfiguration(
+                key="platform_ai_strategy_ids",
+                value=valid_mapping,
+                description="Mapping of platform AI strategy functions to TradingStrategy UUIDs",
+            )
+            session.add(config_entry)
+        else:
+            config_entry.value = valid_mapping
+
+        await session.commit()
+        return valid_mapping
+
+    async def _seed_platform_strategies(
+        self,
+        session,
+        missing_functions: List[str],
+    ) -> Dict[str, str]:
+        """Create TradingStrategy rows for missing platform strategies."""
+        owner_id = await self._get_platform_strategy_owner(session)
+        seeded_mapping: Dict[str, str] = {}
+
+        for function_name in missing_functions:
+            metadata = self._infer_strategy_metadata(function_name)
+            strategy = TradingStrategy(
+                user_id=owner_id,
+                name=self._format_platform_strategy_name(function_name),
+                description=(
+                    f"Platform AI strategy that executes the {function_name.replace('_', ' ')} pipeline."
+                ),
+                strategy_type=metadata["strategy_type"],
+                parameters={
+                    "function": function_name,
+                    "default_timeframe": "1h",
+                    "default_quantity": 0.1,
+                    "supports_real_trading": True,
+                },
+                risk_parameters={
+                    "risk_level": metadata["risk_level"],
+                    "max_drawdown": 0.2,
+                    "position_size_pct": 5,
+                },
+                entry_conditions={
+                    "type": "ai_signal",
+                    "source": function_name,
+                    "confidence_threshold": 70,
+                },
+                exit_conditions={
+                    "type": "ai_signal",
+                    "source": function_name,
+                    "rules": ["risk_management", "take_profit"],
+                },
+                is_active=True,
+                is_simulation=True,
+                max_positions=3,
+                max_risk_per_trade=Decimal("2.00"),
+                target_symbols=["BTC/USDT", "ETH/USDT", "SOL/USDT"],
+                target_exchanges=["binance", "kraken", "kucoin"],
+                timeframe="1h",
+                ai_models=["platform_ai_v1"],
+                confidence_threshold=Decimal("70.0"),
+                consensus_required=True,
+                meta_data={
+                    "platform_strategy": True,
+                    "strategy_function": function_name,
+                    "category": metadata["category"],
+                    "auto_seeded": True,
+                },
+            )
+
+            session.add(strategy)
+            await session.flush()
+
+            seeded_mapping[function_name] = str(strategy.id)
+            self.logger.info(
+                "Seeded platform strategy",
+                function=function_name,
+                strategy_id=str(strategy.id),
+            )
+
+        return seeded_mapping
+
+    async def _get_platform_strategy_owner(self, session) -> uuid.UUID:
+        """Ensure there is a user owning platform strategies."""
+        if self._platform_strategy_owner_id:
+            return self._platform_strategy_owner_id
+
+        config_stmt = select(SystemConfiguration).where(
+            SystemConfiguration.key == "platform_strategy_user_id"
+        )
+        config_entry = (await session.execute(config_stmt)).scalar_one_or_none()
+
+        owner_uuid: Optional[uuid.UUID] = None
+        if config_entry and isinstance(config_entry.value, dict):
+            raw_id = config_entry.value.get("user_id")
+            if raw_id:
+                try:
+                    potential_uuid = uuid.UUID(str(raw_id))
+                    user = await session.get(User, potential_uuid)
+                    if user:
+                        owner_uuid = potential_uuid
+                except (ValueError, TypeError):
+                    owner_uuid = None
+
+        if not owner_uuid:
+            admin_stmt = select(User).where(User.role == UserRole.ADMIN).order_by(User.created_at)
+            admin_user = (await session.execute(admin_stmt)).scalars().first()
+
+            if admin_user:
+                owner_uuid = admin_user.id
+            else:
+                password_hash = get_password_hash(uuid.uuid4().hex)
+                platform_user = User(
+                    email="platform-ai@cryptouniverse.com",
+                    hashed_password=password_hash,
+                    is_active=True,
+                    is_verified=True,
+                    role=UserRole.ADMIN,
+                    status=UserStatus.ACTIVE,
+                )
+                session.add(platform_user)
+                await session.flush()
+                owner_uuid = platform_user.id
+
+        if config_entry:
+            config_entry.value = {"user_id": str(owner_uuid)}
+        else:
+            config_entry = SystemConfiguration(
+                key="platform_strategy_user_id",
+                value={"user_id": str(owner_uuid)},
+                description="Owner record for platform AI strategies",
+            )
+            session.add(config_entry)
+
+        self._platform_strategy_owner_id = owner_uuid
+        return owner_uuid
+
+    def _infer_strategy_metadata(self, function_name: str) -> Dict[str, Any]:
+        """Infer metadata used when seeding platform strategies."""
+        if function_name in DERIVATIVES_FUNCTIONS:
+            category = "derivatives"
+            risk_level = "high"
+        elif function_name in SPOT_FUNCTIONS:
+            category = "spot"
+            risk_level = "medium"
+        elif function_name in ALGORITHMIC_FUNCTIONS:
+            category = "algorithmic"
+            risk_level = "medium_high"
+        else:
+            category = "portfolio"
+            risk_level = "low"
+
+        if function_name == "spot_momentum_strategy":
+            strategy_type = TradingStrategyType.MOMENTUM
+        elif function_name == "spot_mean_reversion":
+            strategy_type = TradingStrategyType.MEAN_REVERSION
+        elif function_name == "scalping_strategy":
+            strategy_type = TradingStrategyType.SCALPING
+        elif function_name in {"funding_arbitrage", "basis_trade", "statistical_arbitrage", "pairs_trading"}:
+            strategy_type = TradingStrategyType.ARBITRAGE
+        elif function_name == "risk_management":
+            strategy_type = TradingStrategyType.ALGORITHMIC
+        elif function_name == "portfolio_optimization":
+            strategy_type = TradingStrategyType.ALGORITHMIC
+        elif function_name == "position_management":
+            strategy_type = TradingStrategyType.ALGORITHMIC
+        else:
+            strategy_type = TradingStrategyType.ALGORITHMIC
+
+        return {
+            "category": category,
+            "risk_level": risk_level,
+            "strategy_type": strategy_type,
+        }
+
+    def _format_platform_strategy_name(self, function_name: str) -> str:
+        """Get human readable name for strategy function."""
+        return PLATFORM_STRATEGY_NAME_MAP.get(
+            function_name,
+            function_name.replace("_", " ").title(),
+        )
+
     
     async def get_active_strategy(self, user_id: str) -> Dict[str, Any]:
         """Get the active trading strategy for a user."""
@@ -1203,7 +1578,309 @@ class TradingStrategiesService(LoggerMixin):
                 "function": function,
                 "timestamp": datetime.utcnow().isoformat()
             }
-    
+
+    async def run_for_backtest(
+        self,
+        strategy_func: str,
+        symbols: List[str],
+        price_snapshots: Dict[str, List[Dict[str, Any]]],
+        portfolio_snapshot: Dict[str, Any],
+        as_of: datetime
+    ) -> Dict[str, Any]:
+        """Execute strategy logic deterministically for the backtesting engine."""
+
+        try:
+            generated_signals: Dict[str, Dict[str, Any]] = {}
+            indicator_log: Dict[str, Dict[str, Any]] = {}
+
+            for symbol in symbols:
+                snapshots = price_snapshots.get(symbol, [])
+                if not snapshots:
+                    continue
+
+                closes = [snap.get("close") for snap in snapshots if snap.get("close") is not None]
+                if not closes:
+                    continue
+
+                signal_payload: Optional[Dict[str, Any]] = None
+
+                if strategy_func == "spot_momentum_strategy":
+                    signal_payload = self._generate_backtest_momentum_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func == "spot_mean_reversion":
+                    signal_payload = self._generate_backtest_mean_reversion_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                else:
+                    self.logger.debug(
+                        "Backtest run received unsupported strategy", strategy=strategy_func
+                    )
+
+                if signal_payload and signal_payload.get("signal"):
+                    signal = signal_payload["signal"]
+                    if signal.get("action") in {"BUY", "SELL"} and signal.get("quantity", 0) > 0:
+                        generated_signals[symbol] = signal
+                        if signal_payload.get("indicators"):
+                            indicator_log[symbol] = signal_payload["indicators"]
+
+            return {
+                "success": True,
+                "signals": generated_signals,
+                "indicators": indicator_log,
+                "strategy": strategy_func,
+                "timestamp": as_of.isoformat()
+            }
+
+        except Exception as exc:
+            self.logger.error(
+                "Backtest strategy execution failed", strategy=strategy_func, error=str(exc)
+            )
+            return {
+                "success": False,
+                "error": str(exc),
+                "strategy": strategy_func,
+                "timestamp": as_of.isoformat()
+            }
+
+    def _generate_backtest_momentum_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Create momentum-based signals using only provided price history."""
+
+        if not closes:
+            return None
+
+        latest_price = closes[-1]
+        rsi = self._calculate_backtest_rsi(closes)
+        macd_value, macd_signal, macd_trend = self._calculate_backtest_macd(closes)
+
+        signal_strength = 5
+        action = "HOLD"
+
+        if rsi > 60 and macd_trend == "BULLISH":
+            signal_strength = 8
+            action = "BUY"
+        elif rsi < 40 and macd_trend == "BEARISH":
+            signal_strength = 8
+            action = "SELL"
+        elif rsi >= 55 and macd_trend == "BULLISH":
+            signal_strength = 6
+            action = "BUY"
+        elif rsi <= 45 and macd_trend == "BEARISH":
+            signal_strength = 6
+            action = "SELL"
+        else:
+            # Fallback to simple momentum when there isn't enough data for indicators
+            if len(closes) >= 3:
+                if closes[-1] > closes[-2] > closes[-3]:
+                    signal_strength = 7
+                    action = "BUY"
+                elif closes[-1] < closes[-2] < closes[-3]:
+                    signal_strength = 7
+                    action = "SELL"
+
+        if action == "HOLD":
+            return None
+
+        position_info = portfolio_snapshot.get("positions", {}).get(symbol, {})
+        position_quantity = float(position_info.get("quantity", 0) or 0)
+        quantity = 0.0
+
+        if action == "BUY":
+            if position_quantity > 0:
+                return None
+            quantity = self._determine_position_size(portfolio_snapshot, latest_price, allocation=0.1)
+        elif action == "SELL":
+            if position_quantity <= 0:
+                return None
+            quantity = round(float(position_quantity), 6)
+
+        if quantity <= 0 or latest_price <= 0:
+            return None
+
+        confidence = min(100, max(10, signal_strength * 10))
+        stop_loss = latest_price * (0.98 if action == "BUY" else 1.02)
+        take_profit = latest_price * (1.05 if action == "BUY" else 0.95)
+
+        return {
+            "signal": {
+                "action": action,
+                "quantity": quantity,
+                "confidence": confidence,
+                "price": latest_price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "reason": "momentum_backtest_signal"
+            },
+            "indicators": {
+                "rsi": rsi,
+                "macd": macd_value,
+                "macd_signal": macd_signal,
+                "macd_trend": macd_trend,
+                "signal_strength": signal_strength
+            }
+        }
+
+    def _generate_backtest_mean_reversion_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate mean-reversion signals using supplied price history."""
+
+        if len(closes) < 5:
+            return None
+
+        window = min(len(closes), 20)
+        recent = closes[-window:]
+        mean_price = float(np.mean(recent))
+        std_dev = float(np.std(recent))
+
+        if not np.isfinite(std_dev) or std_dev == 0:
+            return None
+
+        current_price = recent[-1]
+        z_score = (current_price - mean_price) / std_dev
+
+        if z_score > 1.5:
+            action = "SELL"
+        elif z_score < -1.5:
+            action = "BUY"
+        else:
+            return None
+
+        position_info = portfolio_snapshot.get("positions", {}).get(symbol, {})
+        position_quantity = float(position_info.get("quantity", 0) or 0)
+
+        if action == "BUY" and position_quantity > 0:
+            return None
+        if action == "SELL" and position_quantity <= 0:
+            return None
+
+        quantity = (
+            self._determine_position_size(portfolio_snapshot, current_price, allocation=0.08)
+            if action == "BUY"
+            else round(float(position_quantity), 6)
+        )
+
+        if quantity <= 0 or current_price <= 0:
+            return None
+
+        confidence = min(95, max(30, abs(z_score) * 30))
+        stop_loss = current_price * (0.97 if action == "BUY" else 1.03)
+        take_profit = current_price * (1.04 if action == "BUY" else 0.96)
+
+        return {
+            "signal": {
+                "action": action,
+                "quantity": quantity,
+                "confidence": confidence,
+                "price": current_price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "reason": "mean_reversion_backtest_signal"
+            },
+            "indicators": {
+                "z_score": z_score,
+                "mean_price": mean_price,
+                "standard_deviation": std_dev
+            }
+        }
+
+    def _determine_position_size(
+        self,
+        portfolio_snapshot: Dict[str, Any],
+        price: float,
+        allocation: float = 0.1
+    ) -> float:
+        """Allocate a fraction of available cash to a trade."""
+
+        try:
+            cash = float(portfolio_snapshot.get("cash", 0) or 0)
+        except (TypeError, ValueError):
+            cash = 0.0
+
+        if cash <= 0 or price <= 0 or allocation <= 0:
+            return 0.0
+
+        quantity = cash * allocation / price
+        return round(max(quantity, 0), 6)
+
+    def _calculate_backtest_rsi(self, closes: List[float], period: int = 14) -> float:
+        """Calculate RSI from a series of close prices."""
+
+        if len(closes) < 2:
+            return 50.0
+
+        series = pd.Series(closes)
+        delta = series.diff()
+        ups = delta.clip(lower=0)
+        downs = -delta.clip(upper=0)
+
+        roll_up = ups.rolling(window=period, min_periods=min(period, len(ups))).mean()
+        roll_down = downs.rolling(window=period, min_periods=min(period, len(downs))).mean()
+
+        avg_gain = roll_up.iloc[-1]
+        avg_loss = roll_down.iloc[-1]
+
+        if pd.isna(avg_gain) and len(ups.dropna()) > 0:
+            avg_gain = ups.dropna().mean()
+        if pd.isna(avg_loss) and len(downs.dropna()) > 0:
+            avg_loss = downs.dropna().mean()
+
+        if not np.isfinite(avg_loss) or avg_loss == 0:
+            return 80.0 if avg_gain and avg_gain > 0 else 50.0
+
+        rs = avg_gain / avg_loss if avg_loss else 0
+        if not np.isfinite(rs) or rs < 0:
+            return 50.0
+
+        rsi = 100 - (100 / (1 + rs))
+        return float(max(0.0, min(100.0, rsi)))
+
+    def _calculate_backtest_macd(self, closes: List[float]) -> Tuple[float, float, str]:
+        """Calculate a MACD-like trend indicator from close prices."""
+
+        if len(closes) < 3:
+            delta = closes[-1] - closes[0]
+            if delta > 0:
+                return delta, delta, "BULLISH"
+            if delta < 0:
+                return delta, delta, "BEARISH"
+            return 0.0, 0.0, "NEUTRAL"
+
+        series = pd.Series(closes)
+        fast_span = 12 if len(series) >= 12 else max(2, len(series) // 2 or 2)
+        slow_span = 26 if len(series) >= 26 else max(fast_span + 1, len(series))
+        ema_fast = series.ewm(span=fast_span, adjust=False).mean()
+        ema_slow = series.ewm(span=slow_span, adjust=False).mean()
+        macd_line = ema_fast - ema_slow
+
+        signal_span = 9 if len(macd_line) >= 9 else max(2, len(macd_line) // 2 or 2)
+        signal_line = macd_line.ewm(span=signal_span, adjust=False).mean()
+
+        macd_value = float(macd_line.iloc[-1])
+        signal_value = float(signal_line.iloc[-1])
+
+        if not np.isfinite(macd_value):
+            macd_value = 0.0
+        if not np.isfinite(signal_value):
+            signal_value = 0.0
+
+        if macd_value > signal_value + 1e-9:
+            trend = "BULLISH"
+        elif macd_value < signal_value - 1e-9:
+            trend = "BEARISH"
+        else:
+            trend = "NEUTRAL"
+
+        return macd_value, signal_value, trend
+
     async def _execute_derivatives_strategy(
         self,
         function: str,
@@ -1214,7 +1891,9 @@ class TradingStrategiesService(LoggerMixin):
         user_id: str
     ) -> Dict[str, Any]:
         """Execute derivatives trading strategies."""
-        
+
+        strategy_uuid = await self.get_platform_strategy_id(function)
+
         if function == "futures_trade":
             # Set default strategy type if not provided
             default_strategy_type = strategy_type or "long_futures"
@@ -1222,9 +1901,14 @@ class TradingStrategiesService(LoggerMixin):
                 strategy_enum = StrategyType(default_strategy_type)
             except ValueError:
                 strategy_enum = StrategyType.LONG_FUTURES  # Fallback to default
-            
+
             return await self.derivatives_engine.futures_trade(
-                strategy_enum, symbol, parameters, exchange, user_id
+                strategy_enum,
+                symbol,
+                parameters,
+                exchange,
+                user_id,
+                strategy_id=strategy_uuid,
             )
         
         elif function == "options_trade":
@@ -1320,20 +2004,31 @@ class TradingStrategiesService(LoggerMixin):
         user_id: str
     ) -> Dict[str, Any]:
         """Execute spot trading strategies."""
-        
+
+        strategy_uuid = await self.get_platform_strategy_id(function)
+
         if function == "spot_momentum_strategy":
             return await self.spot_algorithms.spot_momentum_strategy(
-                symbol, parameters, user_id
+                symbol,
+                parameters,
+                user_id,
+                strategy_id=strategy_uuid,
             )
-        
+
         elif function == "spot_mean_reversion":
             return await self.spot_algorithms.spot_mean_reversion(
-                symbol, parameters, user_id
+                symbol,
+                parameters,
+                user_id,
+                strategy_id=strategy_uuid,
             )
-        
+
         elif function == "spot_breakout_strategy":
             return await self.spot_algorithms.spot_breakout_strategy(
-                symbol, parameters, user_id
+                symbol,
+                parameters,
+                user_id,
+                strategy_id=strategy_uuid,
             )
         
         else:
