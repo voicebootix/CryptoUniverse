@@ -24,6 +24,8 @@ from app.models.user import User, UserRole
 from app.models.trading import TradingStrategy
 from app.core.redis import get_redis_client
 from app.services.strategy_marketplace_service import strategy_marketplace_service
+from app.services.unified_strategy_service import UnifiedStrategyService
+from app.models.strategy_access import StrategyType, StrategyAccessType
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -190,30 +192,37 @@ async def grant_admin_full_strategy_access(
                 strategies_to_grant=len(strategies_to_grant)
             )
 
-            # Use the marketplace service that we know works
+            # Use the unified strategy service for admin grants (no credit consumption)
+            unified_service = UnifiedStrategyService()
+
             for strategy_id in strategies_to_grant:
                 try:
-                    # Use the proven working purchase_strategy_access method
-                    result = await strategy_marketplace_service.purchase_strategy_access(
+                    # Use UnifiedStrategyService.grant_strategy_access with ADMIN_GRANT
+                    strategy_type = StrategyType.AI_STRATEGY if strategy_id.startswith("ai_") else StrategyType.COMMUNITY_STRATEGY
+
+                    await unified_service.grant_strategy_access(
                         user_id=target_user_id,
                         strategy_id=strategy_id,
-                        subscription_type="monthly"  # Use supported subscription type
+                        strategy_type=strategy_type,
+                        access_type=StrategyAccessType.ADMIN_GRANT,
+                        subscription_type="admin_grant",
+                        credits_paid=0,  # No credits consumed for admin grants
+                        expires_at=None,  # Permanent access
+                        metadata={
+                            "granted_by_admin": current_user.email,
+                            "grant_reason": "admin_privilege",
+                            "operation_id": operation_id
+                        }
                     )
 
-                    if result.get("success"):
-                        strategies_granted.append(strategy_id)
-                        logger.debug(
-                            "✅ Strategy granted successfully",
-                            strategy_id=strategy_id,
-                            user_id=target_user_id
-                        )
-                    else:
-                        logger.warning(
-                            "Failed to grant strategy",
-                            operation_id=operation_id,
-                            strategy_id=strategy_id,
-                            error=result.get("error", "Unknown")
-                        )
+                    # grant_strategy_access returns the access object, not a dict with "success"
+                    strategies_granted.append(strategy_id)
+                    logger.debug(
+                        "✅ Strategy granted successfully via UnifiedStrategyService",
+                        strategy_id=strategy_id,
+                        user_id=target_user_id,
+                        access_type="ADMIN_GRANT"
+                    )
 
                 except Exception as e:
                     logger.warning(
@@ -224,7 +233,7 @@ async def grant_admin_full_strategy_access(
                     )
 
             logger.info(
-                "✅ Admin strategy grant completed via working service",
+                "✅ Admin strategy grant completed via UnifiedStrategyService (no credits consumed)",
                 operation_id=operation_id,
                 strategies_granted_count=len(strategies_granted),
                 total_attempted=len(strategies_to_grant)

@@ -24,33 +24,36 @@ payload = {
 # Make the login request
 response = requests.post(url, json=payload)
 
-print(f"Status Code: {response.status_code}")
-print(f"Response: {json.dumps(response.json(), indent=2)}")
+# Assert successful login
+assert response.status_code == 200, f"Login failed with status {response.status_code}: {response.text}"
 
-if response.status_code == 200:
-    data = response.json()
-    token = data.get("access_token")
-    if token:
-        print(f"\nAccess Token: {token[:50]}...")
+data = response.json()
+token = data.get("access_token")
 
-        # Now check strategies
-        headers = {"Authorization": f"Bearer {token}"}
+# Assert token is present and valid (fail fast if missing)
+assert token is not None, "Access token is missing from login response"
+assert isinstance(token, str) and len(token) > 10, "Access token appears to be invalid"
 
-        # Get user strategies
-        strategies_url = f"{base_url}/api/v1/strategies/user"
-        strategies_response = requests.get(strategies_url, headers=headers)
+print("Login successful - authentication token received")
 
-        print("\n=== User Strategies ===")
-        print(f"Status Code: {strategies_response.status_code}")
+# Now check strategies
+headers = {"Authorization": f"Bearer {token}"}
 
-        if strategies_response.status_code == 200:
-            strategies = strategies_response.json()
-            print(f"Total strategies: {len(strategies)}")
-            for i, strategy in enumerate(strategies, 1):
-                print(f"\nStrategy {i}:")
-                print(f"  - ID: {strategy.get('id')}")
-                print(f"  - Name: {strategy.get('name')}")
-                print(f"  - Type: {strategy.get('type')}")
-                print(f"  - Status: {strategy.get('status')}")
-        else:
-            print(f"Error: {strategies_response.text}")
+# Get user strategies
+strategies_url = f"{base_url}/api/v1/strategies/user"
+strategies_response = requests.get(strategies_url, headers=headers)
+
+print("\n=== User Strategies ===")
+print(f"Status Code: {strategies_response.status_code}")
+
+if strategies_response.status_code == 200:
+    strategies = strategies_response.json()
+    print(f"Total strategies: {len(strategies)}")
+    for i, strategy in enumerate(strategies, 1):
+        print(f"\nStrategy {i}:")
+        print(f"  - ID: {strategy.get('id')}")
+        print(f"  - Name: {strategy.get('name')}")
+        print(f"  - Type: {strategy.get('type')}")
+        print(f"  - Status: {strategy.get('status')}")
+else:
+    print(f"Error: {strategies_response.text}")

@@ -270,9 +270,12 @@ class UnifiedStrategyService(LoggerMixin):
             )
 
             # Return graceful degraded state
+            # Ensure user_role is never None to prevent to_dict() errors
+            safe_user_role = user_role if user_role is not None else UserRole.VIEWER
+
             return UnifiedStrategyPortfolio(
                 user_id=user_id,
-                user_role=user_role,
+                user_role=safe_user_role,
                 strategies=[],
                 summary=self._generate_empty_summary(),
                 metadata={
@@ -868,7 +871,7 @@ class UnifiedStrategyService(LoggerMixin):
                     subscription_type="permanent",
                     credits_paid=0,
                     expires_at=None,
-                    metadata_json={"auto_granted": True, "admin_privilege": True}
+                    metadata={"auto_granted": True, "admin_privilege": True}
                 )
                 granted_access.append(access)
 

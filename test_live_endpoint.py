@@ -6,10 +6,19 @@ import pytest
 def test_live_enterprise_endpoint():
     """Test enterprise endpoint with proper pytest assertions"""
 
-    # Get configuration from environment
-    base_url = os.getenv("ENTERPRISE_API_BASE", "https://cryptouniverse.onrender.com")
+    # Get configuration from environment - require explicit opt-ins
+    run_live_tests = os.getenv("RUN_LIVE_E2E")
+    base_url = os.getenv("ENTERPRISE_API_BASE")
     email = os.getenv("ADMIN_EMAIL")
     password = os.getenv("ADMIN_PASSWORD")
+
+    # Require explicit opt-in to run live E2E tests
+    if run_live_tests != "1":
+        pytest.skip("RUN_LIVE_E2E not set to '1'; skipping live E2E test")
+
+    # Require explicit base URL (no production default)
+    if not base_url:
+        pytest.skip("ENTERPRISE_API_BASE not explicitly provided; skipping live test")
 
     # Skip test if credentials not available
     if not email or not password:

@@ -71,9 +71,18 @@ async def restore_user_strategies(
     )
 
     try:
-        # Step 1: Validate target user exists
+        # Step 1: Convert user_id string to UUID and validate
+        try:
+            user_uuid = uuid.UUID(request.user_id)
+        except (ValueError, TypeError) as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid UUID format for user_id: {request.user_id}"
+            )
+
+        # Step 2: Validate target user exists
         target_user = await db.execute(
-            select(User).where(User.id == request.user_id)
+            select(User).where(User.id == user_uuid)
         )
         target_user = target_user.scalar_one_or_none()
 
@@ -117,7 +126,7 @@ async def restore_user_strategies(
             for strategy_id in strategies_to_restore:
                 try:
                     # Determine strategy type based on ID
-                    strategy_type = StrategyType.AI if strategy_id.startswith("ai_") else StrategyType.COMMUNITY
+                    strategy_type = StrategyType.AI_STRATEGY if strategy_id.startswith("ai_") else StrategyType.COMMUNITY_STRATEGY
 
                     await unified_service.grant_strategy_access(
                         user_id=request.user_id,
@@ -278,8 +287,6 @@ async def restore_user_strategies(
                 "ℹ️ Redis cache refresh skipped - Redis unavailable (not critical)",
                 operation_id=operation_id
             )
-                strategies_failed = strategies_to_add.copy()
-                strategies_to_add = []
 
         # Step 7: Log recovery operation to database
         background_tasks.add_task(
