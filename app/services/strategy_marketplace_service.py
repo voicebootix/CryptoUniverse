@@ -348,16 +348,29 @@ class StrategyMarketplaceService(LoggerMixin):
             from app.services.real_performance_tracker import real_performance_tracker
 
             # Get real performance metrics from actual trades
-            real_metrics = await real_performance_tracker.track_strategy_performance(
-                strategy_id=f"ai_{strategy_func}",
-                user_id=user_id,
-                period_days=30
-            )
+            strategy_uuid = await trading_strategies_service.get_platform_strategy_id(strategy_func)
 
-            if real_metrics and real_metrics.get('total_trades', 0) > 0:
-                # We have real trade data!
-                self.logger.info(f"✅ Using REAL performance data for {strategy_func}")
-                return real_metrics
+            if strategy_uuid:
+                real_metrics = await real_performance_tracker.track_strategy_performance(
+                    strategy_id=strategy_uuid,
+                    user_id=user_id,
+                    period_days=30,
+                    include_simulations=True,
+                )
+
+                if real_metrics and real_metrics.get('total_trades', 0) > 0:
+                    # We have trade data (real or simulation) for this strategy
+                    self.logger.info(
+                        "✅ Using performance data for platform strategy",
+                        strategy_function=strategy_func,
+                        data_quality=real_metrics.get('data_quality')
+                    )
+                    return real_metrics
+            else:
+                self.logger.warning(
+                    "Platform strategy UUID not found for performance lookup",
+                    strategy_function=strategy_func,
+                )
 
             # Fallback to trying existing function
             performance_result = await trading_strategies_service.strategy_performance(
