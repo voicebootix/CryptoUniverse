@@ -386,43 +386,34 @@ class StrategyMarketplaceService(LoggerMixin):
                 if normalized_metrics:
                     return normalized_metrics
 
-            # Fallback to realistic sample data based on strategy type
-            sample_performance = {
-                "risk_management": {
-                    "total_pnl": 1250.50,
-                    "win_rate": 0.72,
-                    "total_trades": 45,
-                    "avg_return": 0.08
-                },
-                "portfolio_optimization": {
-                    "total_pnl": 890.25,
-                    "win_rate": 0.68,
-                    "total_trades": 32,
-                    "avg_return": 0.06
-                },
-                "spot_momentum_strategy": {
-                    "total_pnl": 2150.75,
-                    "win_rate": 0.75,
-                    "total_trades": 78,
-                    "avg_return": 0.12
-                }
+            # No reliable data - return neutral defaults
+            return {
+                "total_pnl": 0.0,
+                "win_rate": 0.0,  # Normalized 0-1 range
+                "total_trades": 0,
+                "avg_return": 0.0,
+                "sharpe_ratio": None,
+                "max_drawdown": 0.0,
+                "last_7_days_pnl": 0.0,
+                "last_30_days_pnl": 0.0,
+                "status": "no_data",
+                "data_quality": "no_data"
             }
-
-            return sample_performance.get(strategy_func, {
-                "total_pnl": 500.0,
-                "win_rate": 0.65,
-                "total_trades": 25,
-                "avg_return": 0.05
-            })
 
         except Exception as e:
             self.logger.error(f"Failed to get performance for {strategy_func}", error=str(e))
-            # Return default positive performance
+            # Return neutral defaults on error
             return {
-                "total_pnl": 500.0,
-                "win_rate": 0.65,
-                "total_trades": 25,
-                "avg_return": 0.05
+                "total_pnl": 0.0,
+                "win_rate": 0.0,  # Normalized 0-1 range
+                "total_trades": 0,
+                "avg_return": 0.0,
+                "sharpe_ratio": None,
+                "max_drawdown": 0.0,
+                "last_7_days_pnl": 0.0,
+                "last_30_days_pnl": 0.0,
+                "status": "error",
+                "data_quality": "no_data"
             }
 
     def _normalize_performance_data(self, performance_result: Dict[str, Any], strategy_func: str) -> Dict[str, Any]:
@@ -454,23 +445,31 @@ class StrategyMarketplaceService(LoggerMixin):
             # Normalize and backfill metrics with type safety
             normalized = {}
 
-            # Core financial metrics with fallbacks
+            # Core financial metrics with neutral defaults
             normalized["total_pnl"] = self._safe_float(performance_data.get("total_pnl", 0))
-            normalized["win_rate"] = self._safe_float(performance_data.get("win_rate", 0.65))
-            normalized["total_trades"] = self._safe_int(performance_data.get("total_trades", 25))
-            normalized["avg_return"] = self._safe_float(performance_data.get("avg_return", 0.05))
 
-            # Additional metrics with intelligent defaults
-            normalized["sharpe_ratio"] = self._safe_float(performance_data.get("sharpe_ratio", 1.2))
-            normalized["max_drawdown"] = self._safe_float(performance_data.get("max_drawdown", 0.12))
+            # Normalize win_rate to 0-1 range (convert percentages if >1)
+            raw_win_rate = self._safe_float(performance_data.get("win_rate", 0))
+            normalized["win_rate"] = raw_win_rate / 100.0 if raw_win_rate > 1 else raw_win_rate
 
-            # Time-based metrics
-            normalized["last_7_days_pnl"] = self._safe_float(
-                performance_data.get("last_7_days_pnl", normalized["total_pnl"] * 0.1)
-            )
-            normalized["last_30_days_pnl"] = self._safe_float(
-                performance_data.get("last_30_days_pnl", normalized["total_pnl"] * 0.6)
-            )
+            normalized["total_trades"] = self._safe_int(performance_data.get("total_trades", 0))
+            normalized["avg_return"] = self._safe_float(performance_data.get("avg_return", 0))
+
+            # Additional metrics with neutral defaults
+            normalized["sharpe_ratio"] = performance_data.get("sharpe_ratio")  # Keep None if missing
+            normalized["max_drawdown"] = self._safe_float(performance_data.get("max_drawdown", 0))
+
+            # Time-based metrics - force to 0 if no trades to avoid derived optimism
+            if normalized["total_trades"] == 0:
+                normalized["last_7_days_pnl"] = 0.0
+                normalized["last_30_days_pnl"] = 0.0
+            else:
+                normalized["last_7_days_pnl"] = self._safe_float(
+                    performance_data.get("last_7_days_pnl", 0)
+                )
+                normalized["last_30_days_pnl"] = self._safe_float(
+                    performance_data.get("last_30_days_pnl", 0)
+                )
 
             # Trading activity metrics
             winning_trades = performance_data.get("winning_trades",
@@ -999,26 +998,40 @@ class StrategyMarketplaceService(LoggerMixin):
                 recent_trades = result.scalars().all()
                 
                 if not recent_trades:
-                    return {}
-                
-                # Calculate 30-day performance
+                    return {
+                        "data_quality": "no_data",
+                        "status": "no_trades",
+                        "total_trades": 0,
+                        "total_pnl": 0.0,
+                        "win_rate": 0.0
+                    }
+
+                # Calculate 30-day performance with consistent field names and units
                 total_pnl = sum(float(trade.profit_realized_usd) for trade in recent_trades)
                 winning_trades = sum(1 for trade in recent_trades if trade.profit_realized_usd > 0)
-                win_rate = (winning_trades / len(recent_trades)) * 100
-                
+                win_rate = winning_trades / len(recent_trades)  # Normalized 0-1 range
+
                 return {
                     "period": "30_days",
-                    "total_return": total_pnl,
-                    "win_rate": win_rate,
+                    "total_pnl": total_pnl,  # USD amount
+                    "win_rate": win_rate,    # 0-1 normalized fraction
                     "total_trades": len(recent_trades),
                     "avg_trade_pnl": total_pnl / len(recent_trades),
                     "best_trade": max(float(trade.profit_realized_usd) for trade in recent_trades),
-                    "worst_trade": min(float(trade.profit_realized_usd) for trade in recent_trades)
+                    "worst_trade": min(float(trade.profit_realized_usd) for trade in recent_trades),
+                    "data_quality": "verified_real_trades",
+                    "status": "live_trades"
                 }
                 
         except Exception as e:
             self.logger.error("Failed to get live performance", error=str(e))
-            return {}
+            return {
+                "data_quality": "no_data",
+                "status": "error",
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "win_rate": 0.0
+            }
     
     async def purchase_strategy_access(
         self,
