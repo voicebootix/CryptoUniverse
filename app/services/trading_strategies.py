@@ -3943,11 +3943,13 @@ class TradingStrategiesService(LoggerMixin):
                     func.stddev_pop(Trade.profit_realized_usd).label("pnl_stddev")
                 ).select_from(Trade)
 
+                trade_time = func.coalesce(Trade.completed_at, Trade.executed_at, Trade.created_at)
+
                 trade_filters = [
                     Trade.status == TradeStatus.COMPLETED,
                     Trade.is_simulation.is_(False),
-                    Trade.created_at >= period_start,
-                    Trade.created_at <= period_end
+                    trade_time >= period_start,
+                    trade_time <= period_end
                 ]
 
                 if user_uuid:
@@ -4182,8 +4184,18 @@ class TradingStrategiesService(LoggerMixin):
             total_trades = safe_int(strategy_data.get("total_trades"), 0)
             net_pnl = safe_float(strategy_data.get("net_pnl"), 0.0)
 
+            total_return_dec = total_return / 100.0
+            benchmark_return_dec = benchmark_return / 100.0
+
+            volatility_is_percent = abs(volatility) > 1.0
+            volatility_dec = (volatility / 100.0) if volatility_is_percent else volatility
+            max_drawdown_dec = (max_drawdown / 100.0) if abs(max_drawdown) > 1.0 else max_drawdown
+
             annualized_return = total_return * (365 / period_days) if period_days else 0.0
-            volatility_annualized = volatility * (252 ** 0.5)
+            volatility_annualized_dec = volatility_dec * (252 ** 0.5)
+            volatility_annualized = (
+                volatility_annualized_dec * 100 if volatility_is_percent else volatility_annualized_dec
+            )
 
             # Core performance metrics
             perf_result["performance_metrics"] = {
@@ -4208,34 +4220,53 @@ class TradingStrategiesService(LoggerMixin):
             sortino_ratio = 0.0
             calmar_ratio = 0.0
 
-            if volatility_annualized:
-                sharpe_ratio = (total_return - risk_free_rate) / volatility_annualized
+            if volatility_annualized_dec:
+                sharpe_ratio = (total_return_dec - risk_free_rate) / volatility_annualized_dec
 
-            downside_vol = volatility * 0.7 * (252 ** 0.5)
-            if downside_vol:
-                sortino_ratio = (total_return - risk_free_rate) / downside_vol
+            downside_vol_dec = volatility_dec * 0.7 * (252 ** 0.5)
+            if downside_vol_dec:
+                sortino_ratio = (total_return_dec - risk_free_rate) / downside_vol_dec
 
-            if max_drawdown:
-                calmar_ratio = total_return / abs(max_drawdown)
+            if max_drawdown_dec:
+                calmar_ratio = total_return_dec / abs(max_drawdown_dec)
+
+            beta = safe_float(strategy_data.get("beta"), 0.8)
+            tracking_error_dec = volatility_dec * 0.5 if volatility_dec else 0.0
+            treynor_ratio = ((total_return_dec - risk_free_rate) / beta) if beta else 0.0
+            information_ratio = (
+                ((total_return_dec - benchmark_return_dec) / tracking_error_dec)
+                if tracking_error_dec else 0.0
+            )
+            jensen_alpha = total_return_dec - (
+                risk_free_rate + beta * (benchmark_return_dec - risk_free_rate)
+            )
+            var_adjusted_return = (
+                (total_return_dec / (volatility_dec * 1.65)) if volatility_dec else 0.0
+            )
+            cvar_adjusted_return = (
+                (total_return_dec / (volatility_dec * 2.33)) if volatility_dec else 0.0
+            )
 
             perf_result["risk_adjusted_metrics"] = {
                 "sharpe_ratio": round(sharpe_ratio, 3),
                 "sortino_ratio": round(sortino_ratio, 3),
                 "calmar_ratio": round(calmar_ratio, 3),
-                "treynor_ratio": strategy_data.get("treynor_ratio", 1.25),
-                "information_ratio": ((total_return - benchmark_return) / (volatility * 0.5)) if volatility else 0.0,
-                "jensen_alpha": total_return - (risk_free_rate + strategy_data.get("beta", 0.8) * (benchmark_return - risk_free_rate)),
-                "var_adjusted_return": (total_return / (volatility * 1.65)) if volatility else 0.0,
-                "cvar_adjusted_return": (total_return / (volatility * 2.33)) if volatility else 0.0
+                "treynor_ratio": round(treynor_ratio, 3),
+                "information_ratio": round(information_ratio, 3),
+                "jensen_alpha": round(jensen_alpha, 3),
+                "var_adjusted_return": round(var_adjusted_return, 3),
+                "cvar_adjusted_return": round(cvar_adjusted_return, 3)
             }
 
             # Benchmark comparison
-            tracking_error = volatility * 0.5 if volatility else 0.0
+            tracking_error = (
+                tracking_error_dec * 100 if volatility_is_percent else tracking_error_dec
+            )
             perf_result["benchmark_comparison"] = {
                 "benchmark": "BTC",
                 "outperformance": total_return - benchmark_return,
                 "outperformance_pct": ((total_return - benchmark_return) / abs(benchmark_return)) * 100 if benchmark_return else 0.0,
-                "beta": strategy_data.get("beta", 0.8),
+                "beta": beta,
                 "correlation": strategy_data.get("correlation", 0.75),
                 "tracking_error": tracking_error,
                 "up_capture": strategy_data.get("up_capture", 85),    # % of benchmark up moves captured
