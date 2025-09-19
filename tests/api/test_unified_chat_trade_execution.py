@@ -116,3 +116,36 @@ async def test_paper_trading_mode_uses_paper_engine(unified_service: UnifiedChat
     unified_service.trade_executor.execute_trade.assert_not_awaited()
     unified_service._get_user_simulation_mode.assert_not_awaited()
     assert result["execution_details"]["paper_trade"]["trade_id"] == "paper-trade"
+
+
+@pytest.mark.asyncio
+async def test_simulation_trade_without_trade_id_skips_monitoring(
+    unified_service: UnifiedChatService,
+):
+    """Simulator responses lacking trade IDs should bypass monitoring gracefully."""
+    unified_service._get_user_simulation_mode = AsyncMock(return_value=True)
+
+    simulated_execution = {
+        "success": True,
+        "simulation_result": {"order_id": "SIM-123", "status": "FILLED"},
+    }
+    unified_service.trade_executor.execute_trade = AsyncMock(return_value=simulated_execution)
+    unified_service._initiate_trade_monitoring.reset_mock()
+
+    result = await unified_service._execute_trade_with_validation(
+        trade_params={
+            "symbol": "XRPUSDT",
+            "action": "buy",
+            "quantity": 100,
+            "order_type": "market",
+        },
+        user_id=str(uuid.uuid4()),
+        conversation_mode=ConversationMode.LIVE_TRADING,
+        context_data={"market_data": {"current_price": 0.6}},
+    )
+
+    unified_service._initiate_trade_monitoring.assert_not_awaited()
+    assert result["success"] is True
+    assert "monitoring" not in result["phases_completed"]
+    assert result["monitoring_details"]["monitoring_active"] is False
+    assert result["trade_id"] == "SIM-123"

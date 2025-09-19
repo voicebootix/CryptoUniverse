@@ -1221,18 +1221,29 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "phases_completed": phases_completed
                 }
 
-            # Phase 5: Monitoring
-            self.logger.info("Phase 5: Trade Monitoring")
-            monitoring = await self._initiate_trade_monitoring(
-                execution["trade_id"],
-                user_id
-            )
-            phases_completed.append("monitoring")
+            trade_id = execution.get("trade_id")
+            simulation_identifier = execution.get("simulation_result", {}).get("order_id")
+            derived_trade_id = trade_id or simulation_identifier
+
+            if trade_id:
+                # Phase 5: Monitoring
+                self.logger.info("Phase 5: Trade Monitoring")
+                monitoring = await self._initiate_trade_monitoring(
+                    trade_id,
+                    user_id
+                )
+                phases_completed.append("monitoring")
+            else:
+                monitoring = {
+                    "monitoring_active": False,
+                    "reason": "Trade monitoring skipped - no trade ID available",
+                    "simulation": simulation_identifier is not None
+                }
 
             return {
                 "success": True,
-                "message": "Trade executed successfully",
-                "trade_id": execution["trade_id"],
+                "message": execution.get("message", "Trade executed successfully"),
+                "trade_id": derived_trade_id,
                 "phases_completed": phases_completed,
                 "execution_details": execution,
                 "monitoring_details": monitoring
