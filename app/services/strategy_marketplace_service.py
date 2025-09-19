@@ -549,14 +549,14 @@ class StrategyMarketplaceService(LoggerMixin):
             normalized = {}
 
             # Core financial metrics with neutral defaults
-            normalized["total_pnl_usd"] = self._safe_float(performance_data.get("total_pnl", 0))  # USD amount
+            normalized["total_pnl_usd"] = self._safe_float(performance_data.get("total_pnl_usd", 0))  # USD amount
 
             # Normalize win_rate to canonical 0-1 fraction unit (handles both percentage and fraction inputs)
-            raw_win_rate = self._safe_float(performance_data.get("win_rate", 0))
+            raw_win_rate = self._safe_float(performance_data.get("win_rate", performance_data.get("winning_trades_pct", 0)))
             normalized["win_rate"] = self.normalize_win_rate_to_fraction(raw_win_rate)
 
             normalized["total_trades"] = self._safe_int(performance_data.get("total_trades", 0))
-            normalized["total_return_pct"] = self._safe_float(performance_data.get("avg_return", 0))  # percentage
+            normalized["total_return_pct"] = self._safe_float(performance_data.get("total_return_pct", performance_data.get("avg_return", 0)))  # percentage
 
             # Additional metrics with neutral defaults
             normalized["sharpe_ratio"] = performance_data.get("sharpe_ratio")  # Keep None if missing
