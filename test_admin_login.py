@@ -2,6 +2,9 @@ import os
 import requests
 import json
 
+# Timeout constant for all HTTP requests
+REQUEST_TIMEOUT = 10  # seconds
+
 # Configuration from environment variables
 base_url = os.environ.get("CRYPTOUNIVERSE_BASE_URL", "https://cryptouniverse.onrender.com")
 admin_email = os.environ.get("CRYPTOUNIVERSE_ADMIN_EMAIL")
@@ -21,8 +24,8 @@ payload = {
     "password": admin_password
 }
 
-# Make the login request
-response = requests.post(url, json=payload)
+# Make the login request with timeout
+response = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
 
 # Assert successful login
 assert response.status_code == 200, f"Login failed with status {response.status_code}: {response.text}"
@@ -39,9 +42,9 @@ print("Login successful - authentication token received")
 # Now check strategies
 headers = {"Authorization": f"Bearer {token}"}
 
-# Get user strategies
+# Get user strategies with timeout
 strategies_url = f"{base_url}/api/v1/strategies/user"
-strategies_response = requests.get(strategies_url, headers=headers)
+strategies_response = requests.get(strategies_url, headers=headers, timeout=REQUEST_TIMEOUT)
 
 print("\n=== User Strategies ===")
 print(f"Status Code: {strategies_response.status_code}")
