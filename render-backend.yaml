@@ -42,6 +42,8 @@ services:
         value: "10.0"
       - key: MAX_POSITION_SIZE_PCT
         value: "20.0"
+      - key: AB_TESTING_DEMO_MODE
+        value: "false"
 
   # Redis Cache Service
   - type: redis

@@ -69,6 +69,7 @@ class KrakenNonceManager:
     """
     
     def __init__(self):
+        self.logger = structlog.get_logger(__name__)  # FIX: Add missing logger attribute
         self._local_call_count = 0
         self._server_time_offset = 0
         self._last_time_sync = 0
