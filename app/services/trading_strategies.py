@@ -1576,7 +1576,309 @@ class TradingStrategiesService(LoggerMixin):
                 "function": function,
                 "timestamp": datetime.utcnow().isoformat()
             }
-    
+
+    async def run_for_backtest(
+        self,
+        strategy_func: str,
+        symbols: List[str],
+        price_snapshots: Dict[str, List[Dict[str, Any]]],
+        portfolio_snapshot: Dict[str, Any],
+        as_of: datetime
+    ) -> Dict[str, Any]:
+        """Execute strategy logic deterministically for the backtesting engine."""
+
+        try:
+            generated_signals: Dict[str, Dict[str, Any]] = {}
+            indicator_log: Dict[str, Dict[str, Any]] = {}
+
+            for symbol in symbols:
+                snapshots = price_snapshots.get(symbol, [])
+                if not snapshots:
+                    continue
+
+                closes = [snap.get("close") for snap in snapshots if snap.get("close") is not None]
+                if not closes:
+                    continue
+
+                signal_payload: Optional[Dict[str, Any]] = None
+
+                if strategy_func == "spot_momentum_strategy":
+                    signal_payload = self._generate_backtest_momentum_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func == "spot_mean_reversion":
+                    signal_payload = self._generate_backtest_mean_reversion_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                else:
+                    self.logger.debug(
+                        "Backtest run received unsupported strategy", strategy=strategy_func
+                    )
+
+                if signal_payload and signal_payload.get("signal"):
+                    signal = signal_payload["signal"]
+                    if signal.get("action") in {"BUY", "SELL"} and signal.get("quantity", 0) > 0:
+                        generated_signals[symbol] = signal
+                        if signal_payload.get("indicators"):
+                            indicator_log[symbol] = signal_payload["indicators"]
+
+            return {
+                "success": True,
+                "signals": generated_signals,
+                "indicators": indicator_log,
+                "strategy": strategy_func,
+                "timestamp": as_of.isoformat()
+            }
+
+        except Exception as exc:
+            self.logger.error(
+                "Backtest strategy execution failed", strategy=strategy_func, error=str(exc)
+            )
+            return {
+                "success": False,
+                "error": str(exc),
+                "strategy": strategy_func,
+                "timestamp": as_of.isoformat()
+            }
+
+    def _generate_backtest_momentum_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Create momentum-based signals using only provided price history."""
+
+        if not closes:
+            return None
+
+        latest_price = closes[-1]
+        rsi = self._calculate_backtest_rsi(closes)
+        macd_value, macd_signal, macd_trend = self._calculate_backtest_macd(closes)
+
+        signal_strength = 5
+        action = "HOLD"
+
+        if rsi > 60 and macd_trend == "BULLISH":
+            signal_strength = 8
+            action = "BUY"
+        elif rsi < 40 and macd_trend == "BEARISH":
+            signal_strength = 8
+            action = "SELL"
+        elif rsi >= 55 and macd_trend == "BULLISH":
+            signal_strength = 6
+            action = "BUY"
+        elif rsi <= 45 and macd_trend == "BEARISH":
+            signal_strength = 6
+            action = "SELL"
+        else:
+            # Fallback to simple momentum when there isn't enough data for indicators
+            if len(closes) >= 3:
+                if closes[-1] > closes[-2] > closes[-3]:
+                    signal_strength = 7
+                    action = "BUY"
+                elif closes[-1] < closes[-2] < closes[-3]:
+                    signal_strength = 7
+                    action = "SELL"
+
+        if action == "HOLD":
+            return None
+
+        position_info = portfolio_snapshot.get("positions", {}).get(symbol, {})
+        position_quantity = float(position_info.get("quantity", 0) or 0)
+        quantity = 0.0
+
+        if action == "BUY":
+            if position_quantity > 0:
+                return None
+            quantity = self._determine_position_size(portfolio_snapshot, latest_price, allocation=0.1)
+        elif action == "SELL":
+            if position_quantity <= 0:
+                return None
+            quantity = round(float(position_quantity), 6)
+
+        if quantity <= 0 or latest_price <= 0:
+            return None
+
+        confidence = min(100, max(10, signal_strength * 10))
+        stop_loss = latest_price * (0.98 if action == "BUY" else 1.02)
+        take_profit = latest_price * (1.05 if action == "BUY" else 0.95)
+
+        return {
+            "signal": {
+                "action": action,
+                "quantity": quantity,
+                "confidence": confidence,
+                "price": latest_price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "reason": "momentum_backtest_signal"
+            },
+            "indicators": {
+                "rsi": rsi,
+                "macd": macd_value,
+                "macd_signal": macd_signal,
+                "macd_trend": macd_trend,
+                "signal_strength": signal_strength
+            }
+        }
+
+    def _generate_backtest_mean_reversion_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate mean-reversion signals using supplied price history."""
+
+        if len(closes) < 5:
+            return None
+
+        window = min(len(closes), 20)
+        recent = closes[-window:]
+        mean_price = float(np.mean(recent))
+        std_dev = float(np.std(recent))
+
+        if not np.isfinite(std_dev) or std_dev == 0:
+            return None
+
+        current_price = recent[-1]
+        z_score = (current_price - mean_price) / std_dev
+
+        if z_score > 1.5:
+            action = "SELL"
+        elif z_score < -1.5:
+            action = "BUY"
+        else:
+            return None
+
+        position_info = portfolio_snapshot.get("positions", {}).get(symbol, {})
+        position_quantity = float(position_info.get("quantity", 0) or 0)
+
+        if action == "BUY" and position_quantity > 0:
+            return None
+        if action == "SELL" and position_quantity <= 0:
+            return None
+
+        quantity = (
+            self._determine_position_size(portfolio_snapshot, current_price, allocation=0.08)
+            if action == "BUY"
+            else round(float(position_quantity), 6)
+        )
+
+        if quantity <= 0 or current_price <= 0:
+            return None
+
+        confidence = min(95, max(30, abs(z_score) * 30))
+        stop_loss = current_price * (0.97 if action == "BUY" else 1.03)
+        take_profit = current_price * (1.04 if action == "BUY" else 0.96)
+
+        return {
+            "signal": {
+                "action": action,
+                "quantity": quantity,
+                "confidence": confidence,
+                "price": current_price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "reason": "mean_reversion_backtest_signal"
+            },
+            "indicators": {
+                "z_score": z_score,
+                "mean_price": mean_price,
+                "standard_deviation": std_dev
+            }
+        }
+
+    def _determine_position_size(
+        self,
+        portfolio_snapshot: Dict[str, Any],
+        price: float,
+        allocation: float = 0.1
+    ) -> float:
+        """Allocate a fraction of available cash to a trade."""
+
+        try:
+            cash = float(portfolio_snapshot.get("cash", 0) or 0)
+        except (TypeError, ValueError):
+            cash = 0.0
+
+        if cash <= 0 or price <= 0 or allocation <= 0:
+            return 0.0
+
+        quantity = cash * allocation / price
+        return round(max(quantity, 0), 6)
+
+    def _calculate_backtest_rsi(self, closes: List[float], period: int = 14) -> float:
+        """Calculate RSI from a series of close prices."""
+
+        if len(closes) < 2:
+            return 50.0
+
+        series = pd.Series(closes)
+        delta = series.diff()
+        ups = delta.clip(lower=0)
+        downs = -delta.clip(upper=0)
+
+        roll_up = ups.rolling(window=period, min_periods=min(period, len(ups))).mean()
+        roll_down = downs.rolling(window=period, min_periods=min(period, len(downs))).mean()
+
+        avg_gain = roll_up.iloc[-1]
+        avg_loss = roll_down.iloc[-1]
+
+        if pd.isna(avg_gain) and len(ups.dropna()) > 0:
+            avg_gain = ups.dropna().mean()
+        if pd.isna(avg_loss) and len(downs.dropna()) > 0:
+            avg_loss = downs.dropna().mean()
+
+        if not np.isfinite(avg_loss) or avg_loss == 0:
+            return 80.0 if avg_gain and avg_gain > 0 else 50.0
+
+        rs = avg_gain / avg_loss if avg_loss else 0
+        if not np.isfinite(rs) or rs < 0:
+            return 50.0
+
+        rsi = 100 - (100 / (1 + rs))
+        return float(max(0.0, min(100.0, rsi)))
+
+    def _calculate_backtest_macd(self, closes: List[float]) -> Tuple[float, float, str]:
+        """Calculate a MACD-like trend indicator from close prices."""
+
+        if len(closes) < 3:
+            delta = closes[-1] - closes[0]
+            if delta > 0:
+                return delta, delta, "BULLISH"
+            if delta < 0:
+                return delta, delta, "BEARISH"
+            return 0.0, 0.0, "NEUTRAL"
+
+        series = pd.Series(closes)
+        fast_span = 12 if len(series) >= 12 else max(2, len(series) // 2 or 2)
+        slow_span = 26 if len(series) >= 26 else max(fast_span + 1, len(series))
+        ema_fast = series.ewm(span=fast_span, adjust=False).mean()
+        ema_slow = series.ewm(span=slow_span, adjust=False).mean()
+        macd_line = ema_fast - ema_slow
+
+        signal_span = 9 if len(macd_line) >= 9 else max(2, len(macd_line) // 2 or 2)
+        signal_line = macd_line.ewm(span=signal_span, adjust=False).mean()
+
+        macd_value = float(macd_line.iloc[-1])
+        signal_value = float(signal_line.iloc[-1])
+
+        if not np.isfinite(macd_value):
+            macd_value = 0.0
+        if not np.isfinite(signal_value):
+            signal_value = 0.0
+
+        if macd_value > signal_value + 1e-9:
+            trend = "BULLISH"
+        elif macd_value < signal_value - 1e-9:
+            trend = "BEARISH"
+        else:
+            trend = "NEUTRAL"
+
+        return macd_value, signal_value, trend
+
     async def _execute_derivatives_strategy(
         self,
         function: str,
