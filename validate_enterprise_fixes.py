@@ -161,34 +161,33 @@ def validate_ab_testing_config():
 
 
 def validate_circuit_breaker_system():
-    """Validate circuit breaker system."""
+    """Validate circuit breaker system integration."""
     print("🔄 Validating Circuit Breaker System...")
     
-    circuit_breaker_file = Path("/workspace/app/services/enterprise_circuit_breaker.py")
+    existing_circuit_breaker = Path("/workspace/app/core/circuit_breaker.py")
     market_data_file = Path("/workspace/app/services/market_data_feeds.py")
     
-    if not circuit_breaker_file.exists():
-        print("❌ Enterprise circuit breaker service missing")
+    if not existing_circuit_breaker.exists():
+        print("❌ Existing circuit breaker service missing")
         return False
     
     if not market_data_file.exists():
         print("❌ Market data feeds file missing")
         return False
     
-    circuit_content = circuit_breaker_file.read_text()
     market_content = market_data_file.read_text()
     
-    # Check for enterprise circuit breaker features
-    if "EnterpriseCircuitBreaker" not in circuit_content:
-        print("❌ Enterprise circuit breaker class missing")
+    # Check for integration with existing circuit breaker
+    if "from app.core.circuit_breaker import CircuitBreaker" not in market_content:
+        print("❌ Circuit breaker integration missing in market data")
         return False
     
-    # Check for improved circuit breaker logic in market data
-    if "adaptive_timeout" not in market_content:
-        print("❌ Adaptive timeout logic missing in market data")
+    # Check for proper circuit breaker usage
+    if "CircuitBreakerConfig" not in market_content:
+        print("❌ Circuit breaker configuration missing")
         return False
     
-    print("✅ Circuit breaker system validated")
+    print("✅ Circuit breaker system integrated with existing implementation")
     return True
 
 

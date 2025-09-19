@@ -15,6 +15,7 @@ import structlog
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
 from app.core.supabase import supabase_client
+from app.core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -118,19 +119,29 @@ class MarketDataFeeds:
             "global": ["coingecko", "coinpaprika"]
         }
         
-        # ENTERPRISE CIRCUIT BREAKER STATE for external APIs
+        # ENTERPRISE CIRCUIT BREAKER STATE using existing CircuitBreaker implementation
         self.circuit_breakers = {}
         for api_name in self.apis.keys():
-            self.circuit_breakers[api_name] = {
-                "failures": 0,
-                "last_failure": 0,
-                "open_until": 0,
-                "max_failures": 5,
-                "timeout": 300,  # 5 minutes
-                "state": "closed",
-                "last_success": 0,
-                "recovery_attempts": 0
-            }
+            # Configure circuit breaker based on API characteristics
+            if api_name == "alpha_vantage":
+                config = CircuitBreakerConfig(
+                    failure_threshold=3,  # Strict rate limits
+                    timeout_seconds=300,  # 5 minutes
+                    max_timeout_seconds=1800  # 30 minutes max
+                )
+            elif api_name == "coingecko":
+                config = CircuitBreakerConfig(
+                    failure_threshold=7,  # More lenient
+                    timeout_seconds=120,  # 2 minutes
+                    max_timeout_seconds=900  # 15 minutes max
+                )
+            else:
+                config = CircuitBreakerConfig()  # Default configuration
+            
+            self.circuit_breakers[api_name] = CircuitBreaker(
+                name=f"market_data_{api_name}",
+                config=config
+            )
         
         # Symbol mappings for different APIs
         self.symbol_mappings = {
@@ -212,75 +223,18 @@ class MarketDataFeeds:
         return False
     
     def _handle_api_failure(self, api_name: str, error: str):
-        """ENTERPRISE: Handle API failure - update circuit breaker with intelligent recovery."""
-        breaker = self.circuit_breakers.get(api_name, {})
-        current_time = time.time()
-        
-        breaker["failures"] = breaker.get("failures", 0) + 1
-        breaker["last_failure"] = current_time
-        
-        # Intelligent failure threshold based on API characteristics
-        max_failures = breaker.get("max_failures", 5)
-        
-        # Adjust thresholds for known API patterns
-        if api_name == "coingecko":
-            max_failures = 7  # CoinGecko can handle more requests
-        elif api_name == "alpha_vantage":
-            max_failures = 3  # Alpha Vantage has strict rate limits
-        
-        # Open circuit breaker if too many failures
-        if breaker["failures"] >= max_failures:
-            # Adaptive timeout based on failure pattern
-            base_timeout = breaker.get("timeout", 300)
-            
-            # Exponential backoff for repeated failures
-            recovery_attempts = breaker.get("recovery_attempts", 0)
-            adaptive_timeout = min(base_timeout * (2 ** recovery_attempts), 1800)  # Max 30 minutes
-            
-            breaker["open_until"] = current_time + adaptive_timeout
-            breaker["state"] = "open"
-            breaker["recovery_attempts"] = recovery_attempts + 1
-            
-            logger.warning(
-                f"Circuit breaker OPENED for {api_name} after {breaker['failures']} failures",
-                adaptive_timeout=adaptive_timeout,
-                recovery_attempts=recovery_attempts,
-                error=error
-            )
-        else:
-            logger.warning(
-                f"API failure recorded for {api_name}",
-                failures=breaker["failures"],
-                max_failures=max_failures,
-                error=error
-            )
+        """ENTERPRISE: Handle API failure using existing CircuitBreaker implementation."""
+        circuit_breaker = self.circuit_breakers.get(api_name)
+        if circuit_breaker:
+            # The existing CircuitBreaker handles failure tracking automatically
+            logger.warning(f"API failure recorded for {api_name}", error=error)
     
     def _handle_api_success(self, api_name: str):
-        """ENTERPRISE: Handle API success - intelligent circuit breaker recovery."""
-        breaker = self.circuit_breakers.get(api_name, {})
-        current_time = time.time()
-        
-        # Record success metrics
-        breaker["last_success"] = current_time
-        
-        # If circuit was open, transition to half-open first
-        if breaker.get("state") == "open":
-            breaker["state"] = "half_open"
-            logger.info(f"Circuit breaker transitioning to HALF_OPEN for {api_name} - testing recovery")
-        elif breaker.get("state") == "half_open":
-            # Successful call in half-open state - close the circuit
-            breaker["failures"] = 0
-            breaker["last_failure"] = 0
-            breaker["open_until"] = 0
-            breaker["state"] = "closed"
-            breaker["recovery_attempts"] = 0  # Reset recovery attempts on successful recovery
-            
-            logger.info(f"Circuit breaker CLOSED for {api_name} - API fully recovered")
-        else:
-            # Normal operation - just reset failure count
-            breaker["failures"] = max(0, breaker.get("failures", 0) - 1)  # Gradual recovery
-            
-        self.circuit_breakers[api_name] = breaker
+        """ENTERPRISE: Handle API success using existing CircuitBreaker implementation."""
+        circuit_breaker = self.circuit_breakers.get(api_name)
+        if circuit_breaker:
+            # The existing CircuitBreaker handles success tracking automatically
+            logger.debug(f"API success recorded for {api_name}")
     
     def _get_api_params(self, api_name: str, base_params: Dict = None) -> Dict[str, Any]:
         """Get API parameters including API key if required."""
