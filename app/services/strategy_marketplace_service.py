@@ -15,7 +15,6 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
-from decimal import Decimal
 from dataclasses import dataclass
 
 import structlog
@@ -67,7 +66,9 @@ class StrategyMarketplaceItem:
     backtest_results: Dict[str, Any]
     ab_test_results: Dict[str, Any]
     live_performance: Dict[str, Any]
-    
+    performance_badges: List[str]
+    data_quality: str
+
     # Metadata
     created_at: datetime
     last_updated: datetime
@@ -90,6 +91,51 @@ class StrategyMarketplaceService(LoggerMixin):
         # Strategy pricing will be loaded dynamically from admin settings
         self.strategy_pricing = None
     
+    # Win Rate Conversion Utilities
+    # CANONICAL UNIT: 0-1 (fraction) for all internal operations
+
+    @staticmethod
+    def normalize_win_rate_to_fraction(value: float) -> float:
+        """
+        Convert win rate input to canonical 0-1 fraction.
+
+        Args:
+            value: Win rate as either fraction (0-1) or percentage (0-100)
+
+        Returns:
+            float: Win rate as fraction (0-1)
+
+        Examples:
+            >>> normalize_win_rate_to_fraction(0.75)  # Already fraction
+            0.75
+            >>> normalize_win_rate_to_fraction(75.0)  # Percentage
+            0.75
+            >>> normalize_win_rate_to_fraction(100.0) # Edge case
+            1.0
+        """
+        if value > 1.0:
+            return min(value / 100.0, 1.0)  # Convert percentage to fraction, cap at 1.0
+        return min(value, 1.0)  # Already fraction, cap at 1.0
+
+    @staticmethod
+    def convert_fraction_to_percentage(fraction: float) -> float:
+        """
+        Convert canonical 0-1 fraction to percentage for DB/API output.
+
+        Args:
+            fraction: Win rate as fraction (0-1)
+
+        Returns:
+            float: Win rate as percentage (0-100)
+
+        Examples:
+            >>> convert_fraction_to_percentage(0.75)
+            75.0
+            >>> convert_fraction_to_percentage(1.0)
+            100.0
+        """
+        return fraction * 100.0
+
     async def ensure_pricing_loaded(self):
         """Ensure strategy pricing is loaded from admin settings."""
         if self.strategy_pricing is None:
@@ -290,11 +336,15 @@ class StrategyMarketplaceService(LoggerMixin):
                 for strategy_func, config in self.ai_strategy_catalog.items():
                     # Get real performance from your database
                     performance_data = await self._get_ai_strategy_performance(strategy_func, user_id)
-                    
+
+                    data_quality = performance_data.get("data_quality", "no_data")
+                    badges = list(performance_data.get("badges") or self._build_performance_badges(data_quality))
+                    performance_data.setdefault("badges", badges)
+
                     # Get dynamic pricing for this strategy
                     monthly_cost = self.strategy_pricing.get(strategy_func, 25)
                     execution_cost = max(1, monthly_cost // 30)
-                    
+
                     marketplace_item = StrategyMarketplaceItem(
                         strategy_id=f"ai_{strategy_func}",
                         name=config["name"],
@@ -317,6 +367,8 @@ class StrategyMarketplaceService(LoggerMixin):
                         backtest_results=await self._get_backtest_results(strategy_func),
                         ab_test_results=await self._get_ab_test_results(strategy_func),
                         live_performance=performance_data,
+                        performance_badges=badges,
+                        data_quality=data_quality,
                         created_at=datetime(2024, 1, 1),  # AI strategies launch date
                         last_updated=datetime.utcnow(),
                         is_active=True,
@@ -346,6 +398,8 @@ class StrategyMarketplaceService(LoggerMixin):
         try:
             # Use real performance tracker for actual trade data
             from app.services.real_performance_tracker import real_performance_tracker
+
+            strategy_id = f"ai_{strategy_func}"
 
             # Get real performance metrics from actual trades
             strategy_uuid = await trading_strategies_service.get_platform_strategy_id(strategy_func)
@@ -386,43 +440,38 @@ class StrategyMarketplaceService(LoggerMixin):
                 if normalized_metrics:
                     return normalized_metrics
 
-            # Fallback to realistic sample data based on strategy type
-            sample_performance = {
-                "risk_management": {
-                    "total_pnl": 1250.50,
-                    "win_rate": 0.72,
-                    "total_trades": 45,
-                    "avg_return": 0.08
-                },
-                "portfolio_optimization": {
-                    "total_pnl": 890.25,
-                    "win_rate": 0.68,
-                    "total_trades": 32,
-                    "avg_return": 0.06
-                },
-                "spot_momentum_strategy": {
-                    "total_pnl": 2150.75,
-                    "win_rate": 0.75,
-                    "total_trades": 78,
-                    "avg_return": 0.12
-                }
+            # No reliable data - return neutral defaults with all required fields
+            return {
+                "strategy_id": strategy_id,
+                "total_pnl": 0.0,
+                "win_rate": 0.0,  # Normalized 0-1 range
+                "total_trades": 0,
+                "avg_return": 0.0,
+                "sharpe_ratio": None,
+                "max_drawdown": 0.0,
+                "last_7_days_pnl": 0.0,
+                "last_30_days_pnl": 0.0,
+                "status": "no_data",
+                "data_quality": "no_data",
+                "badges": self._build_performance_badges("no_data")
             }
-
-            return sample_performance.get(strategy_func, {
-                "total_pnl": 500.0,
-                "win_rate": 0.65,
-                "total_trades": 25,
-                "avg_return": 0.05
-            })
 
         except Exception as e:
             self.logger.error(f"Failed to get performance for {strategy_func}", error=str(e))
-            # Return default positive performance
+            # Return neutral defaults on error with all required fields
             return {
-                "total_pnl": 500.0,
-                "win_rate": 0.65,
-                "total_trades": 25,
-                "avg_return": 0.05
+                "strategy_id": f"ai_{strategy_func}",
+                "total_pnl": 0.0,
+                "win_rate": 0.0,  # Normalized 0-1 range
+                "total_trades": 0,
+                "avg_return": 0.0,
+                "sharpe_ratio": None,
+                "max_drawdown": 0.0,
+                "last_7_days_pnl": 0.0,
+                "last_30_days_pnl": 0.0,
+                "status": "error",
+                "data_quality": "no_data",
+                "badges": self._build_performance_badges("no_data")
             }
 
     def _normalize_performance_data(self, performance_result: Dict[str, Any], strategy_func: str) -> Dict[str, Any]:
@@ -432,21 +481,33 @@ class StrategyMarketplaceService(LoggerMixin):
         """
         try:
             # Try multiple possible locations for performance data
-            performance_data = None
+            performance_data: Optional[Dict[str, Any]] = None
+            data_quality: Optional[str] = None
+            status: Optional[str] = None
+            badges: List[str] = []
 
             # Check for nested structure under 'strategy_performance_analysis'
             if "strategy_performance_analysis" in performance_result:
                 analysis = performance_result["strategy_performance_analysis"]
-                if isinstance(analysis, dict) and "performance_metrics" in analysis:
-                    performance_data = analysis["performance_metrics"]
+                if isinstance(analysis, dict):
+                    data_quality = analysis.get("data_quality")
+                    status = analysis.get("status")
+                    badges = analysis.get("performance_badges", [])
+                    performance_data = analysis.get("performance_metrics") or analysis
 
             # Check for direct 'performance_metrics' key (legacy structure)
-            elif "performance_metrics" in performance_result:
+            if performance_data is None and "performance_metrics" in performance_result:
                 performance_data = performance_result["performance_metrics"]
+                data_quality = data_quality or performance_result.get("data_quality")
+                status = status or performance_result.get("status")
+                badges = badges or performance_result.get("badges", [])
 
             # Check for top-level metrics (flat structure)
-            elif any(key in performance_result for key in ["total_pnl", "win_rate", "total_trades"]):
+            if performance_data is None and any(key in performance_result for key in ["total_pnl", "win_rate", "total_trades"]):
                 performance_data = performance_result
+                data_quality = data_quality or performance_result.get("data_quality")
+                status = status or performance_result.get("status")
+                badges = badges or performance_result.get("badges", [])
 
             if not performance_data or not isinstance(performance_data, dict):
                 return None
@@ -454,23 +515,36 @@ class StrategyMarketplaceService(LoggerMixin):
             # Normalize and backfill metrics with type safety
             normalized = {}
 
-            # Core financial metrics with fallbacks
+            # Core financial metrics with neutral defaults
             normalized["total_pnl"] = self._safe_float(performance_data.get("total_pnl", 0))
-            normalized["win_rate"] = self._safe_float(performance_data.get("win_rate", 0.65))
-            normalized["total_trades"] = self._safe_int(performance_data.get("total_trades", 25))
-            normalized["avg_return"] = self._safe_float(performance_data.get("avg_return", 0.05))
 
-            # Additional metrics with intelligent defaults
-            normalized["sharpe_ratio"] = self._safe_float(performance_data.get("sharpe_ratio", 1.2))
-            normalized["max_drawdown"] = self._safe_float(performance_data.get("max_drawdown", 0.12))
+            # Normalize win_rate to canonical 0-1 fraction unit (handles both percentage and fraction inputs)
+            raw_win_rate = self._safe_float(performance_data.get("win_rate", 0))
+            normalized["win_rate"] = self.normalize_win_rate_to_fraction(raw_win_rate)
 
-            # Time-based metrics
-            normalized["last_7_days_pnl"] = self._safe_float(
-                performance_data.get("last_7_days_pnl", normalized["total_pnl"] * 0.1)
-            )
-            normalized["last_30_days_pnl"] = self._safe_float(
-                performance_data.get("last_30_days_pnl", normalized["total_pnl"] * 0.6)
-            )
+            normalized["total_trades"] = self._safe_int(performance_data.get("total_trades", 0))
+            normalized["avg_return"] = self._safe_float(performance_data.get("avg_return", 0))
+
+            # Additional metrics with neutral defaults
+            normalized["sharpe_ratio"] = performance_data.get("sharpe_ratio")  # Keep None if missing
+            normalized["max_drawdown"] = self._safe_float(performance_data.get("max_drawdown", 0))
+
+            # Track data quality metadata for UI badges
+            normalized["data_quality"] = data_quality or performance_data.get("data_quality", "simulated")
+            normalized["status"] = status or performance_data.get("status")
+            normalized["badges"] = badges or self._build_performance_badges(normalized["data_quality"])
+
+            # Time-based metrics - force to 0 if no trades to avoid derived optimism
+            if normalized["total_trades"] == 0:
+                normalized["last_7_days_pnl"] = 0.0
+                normalized["last_30_days_pnl"] = 0.0
+            else:
+                normalized["last_7_days_pnl"] = self._safe_float(
+                    performance_data.get("last_7_days_pnl", 0)
+                )
+                normalized["last_30_days_pnl"] = self._safe_float(
+                    performance_data.get("last_30_days_pnl", 0)
+                )
 
             # Trading activity metrics
             winning_trades = performance_data.get("winning_trades",
@@ -522,6 +596,13 @@ class StrategyMarketplaceService(LoggerMixin):
             return int(float(value))  # Convert through float to handle string numbers
         except (ValueError, TypeError):
             return default
+
+    def _build_performance_badges(self, data_quality: Optional[str]) -> List[str]:
+        """Build badges to describe performance data quality for UI consumers."""
+        normalized_quality = data_quality or "no_data"
+        if normalized_quality == "verified_real_trades":
+            return []
+        return ["Simulated / No live trades"]
     
     async def _get_backtest_results(self, strategy_func: str) -> Dict[str, Any]:
         """Get REAL backtesting results using actual market data."""
@@ -879,7 +960,7 @@ class StrategyMarketplaceService(LoggerMixin):
             "variant_b": {
                 "name": "Optimized Parameters", 
                 "return": 28.7,
-                "win_rate": 74.8,
+                "win_rate": 74.8,  # Will be converted to 0.748 internally
                 "trades": 142
             },
             "winner": "variant_b",
@@ -908,7 +989,22 @@ class StrategyMarketplaceService(LoggerMixin):
                 for strategy, publisher in strategies:
                     # Calculate pricing based on performance
                     monthly_cost = self._calculate_strategy_pricing(strategy)
-                    
+
+                    live_performance = await self._get_live_performance(str(strategy.id))
+                    live_quality = live_performance.get("data_quality", "no_data") if isinstance(live_performance, dict) else "no_data"
+                    live_badges = []
+                    if isinstance(live_performance, dict):
+                        live_badges = list(live_performance.get("badges") or self._build_performance_badges(live_quality))
+                        live_performance.setdefault("badges", live_badges)
+                    else:
+                        live_performance = {
+                            "data_quality": "no_data",
+                            "status": "no_data",
+                            "total_trades": 0,
+                            "badges": self._build_performance_badges("no_data")
+                        }
+                        live_badges = live_performance["badges"]
+
                     item = StrategyMarketplaceItem(
                         strategy_id=str(strategy.id),
                         name=strategy.name,
@@ -930,7 +1026,9 @@ class StrategyMarketplaceService(LoggerMixin):
                         supported_symbols=strategy.target_symbols,
                         backtest_results={},  # Would be populated from backtesting service
                         ab_test_results={},   # Would be populated from A/B testing
-                        live_performance=await self._get_live_performance(str(strategy.id)),
+                        live_performance=live_performance,
+                        performance_badges=live_badges,
+                        data_quality=live_quality,
                         created_at=strategy.created_at,
                         last_updated=strategy.updated_at,
                         is_active=strategy.is_active,
@@ -948,12 +1046,12 @@ class StrategyMarketplaceService(LoggerMixin):
         """Calculate credit pricing based on strategy performance."""
         base_price = 20  # Base 20 credits
         
-        # Performance multipliers
-        if strategy.win_rate > 80:
+        # Performance multipliers (win_rate is 0-1 fraction internally)
+        if strategy.win_rate > 0.80:  # 80%
             base_price *= 2.0
-        elif strategy.win_rate > 70:
+        elif strategy.win_rate > 0.70:  # 70%
             base_price *= 1.5
-        elif strategy.win_rate > 60:
+        elif strategy.win_rate > 0.60:  # 60%
             base_price *= 1.2
         
         # Sharpe ratio multiplier
@@ -997,28 +1095,44 @@ class StrategyMarketplaceService(LoggerMixin):
                 
                 result = await db.execute(stmt)
                 recent_trades = result.scalars().all()
-                
+
                 if not recent_trades:
-                    return {}
-                
-                # Calculate 30-day performance
+                    return {
+                        "data_quality": "no_data",
+                        "status": "no_trades",
+                        "total_trades": 0,
+                        "total_pnl": 0.0,
+                        "win_rate": 0.0,
+                        "badges": self._build_performance_badges("no_data")
+                    }
+
+                # Calculate 30-day performance with consistent field names and units
                 total_pnl = sum(float(trade.profit_realized_usd) for trade in recent_trades)
                 winning_trades = sum(1 for trade in recent_trades if trade.profit_realized_usd > 0)
-                win_rate = (winning_trades / len(recent_trades)) * 100
-                
+                win_rate = winning_trades / len(recent_trades)  # Normalized 0-1 range
+
                 return {
                     "period": "30_days",
-                    "total_return": total_pnl,
-                    "win_rate": win_rate,
+                    "total_pnl": total_pnl,  # USD amount
+                    "win_rate": win_rate,    # 0-1 normalized fraction
                     "total_trades": len(recent_trades),
                     "avg_trade_pnl": total_pnl / len(recent_trades),
                     "best_trade": max(float(trade.profit_realized_usd) for trade in recent_trades),
-                    "worst_trade": min(float(trade.profit_realized_usd) for trade in recent_trades)
+                    "worst_trade": min(float(trade.profit_realized_usd) for trade in recent_trades),
+                    "data_quality": "verified_real_trades",
+                    "status": "live_trades",
+                    "badges": self._build_performance_badges("verified_real_trades")
                 }
-                
+
         except Exception as e:
             self.logger.error("Failed to get live performance", error=str(e))
-            return {}
+            return {
+                "data_quality": "no_data",
+                "status": "error",
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "win_rate": 0.0
+            }
     
     async def purchase_strategy_access(
         self,
@@ -1157,9 +1271,9 @@ class StrategyMarketplaceService(LoggerMixin):
         """Get user's purchased/active strategies with enterprise reliability."""
         import asyncio
         
-        # Add method-level timeout for entire operation
+        # Add method-level timeout for entire operation (increased for Redis reliability)
         try:
-            async with asyncio.timeout(5.0):  # 5 second timeout for entire method
+            async with asyncio.timeout(20.0):  # 20 second timeout for entire method
                 return await self._get_user_strategy_portfolio_impl(user_id)
         except asyncio.TimeoutError:
             self.logger.error("❌ Portfolio fetch timeout", user_id=user_id)
@@ -1185,7 +1299,7 @@ class StrategyMarketplaceService(LoggerMixin):
         try:
             # Get Redis with timeout for connection
             from app.core.redis import get_redis_client
-            redis = await asyncio.wait_for(get_redis_client(), timeout=2.0)
+            redis = await asyncio.wait_for(get_redis_client(), timeout=10.0)
             
             if not redis:
                 self.logger.warning("Redis unavailable for strategy portfolio retrieval")
@@ -1198,10 +1312,10 @@ class StrategyMarketplaceService(LoggerMixin):
                            redis_key=redis_key,
                            redis_available=bool(redis))
             
-            # Get strategies with timeout to prevent hanging
+            # Get strategies with timeout to prevent hanging (increased for reliability)
             active_strategies = await asyncio.wait_for(
                 self._safe_redis_operation(redis.smembers, redis_key),
-                timeout=3.0
+                timeout=15.0
             )
             if active_strategies is None:
                 active_strategies = set()  # Fallback to empty set if Redis fails
