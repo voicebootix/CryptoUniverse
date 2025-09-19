@@ -1275,9 +1275,9 @@ class StrategyMarketplaceService(LoggerMixin):
         """Get user's purchased/active strategies with enterprise reliability."""
         import asyncio
         
-        # Add method-level timeout for entire operation
+        # Add method-level timeout for entire operation (increased for Redis reliability)
         try:
-            async with asyncio.timeout(5.0):  # 5 second timeout for entire method
+            async with asyncio.timeout(20.0):  # 20 second timeout for entire method
                 return await self._get_user_strategy_portfolio_impl(user_id)
         except asyncio.TimeoutError:
             self.logger.error("❌ Portfolio fetch timeout", user_id=user_id)
@@ -1303,7 +1303,7 @@ class StrategyMarketplaceService(LoggerMixin):
         try:
             # Get Redis with timeout for connection
             from app.core.redis import get_redis_client
-            redis = await asyncio.wait_for(get_redis_client(), timeout=2.0)
+            redis = await asyncio.wait_for(get_redis_client(), timeout=10.0)
             
             if not redis:
                 self.logger.warning("Redis unavailable for strategy portfolio retrieval")
@@ -1316,10 +1316,10 @@ class StrategyMarketplaceService(LoggerMixin):
                            redis_key=redis_key,
                            redis_available=bool(redis))
             
-            # Get strategies with timeout to prevent hanging
+            # Get strategies with timeout to prevent hanging (increased for reliability)
             active_strategies = await asyncio.wait_for(
                 self._safe_redis_operation(redis.smembers, redis_key),
-                timeout=3.0
+                timeout=15.0
             )
             if active_strategies is None:
                 active_strategies = set()  # Fallback to empty set if Redis fails
