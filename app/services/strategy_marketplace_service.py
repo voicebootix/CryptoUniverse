@@ -142,66 +142,95 @@ class StrategyMarketplaceService(LoggerMixin):
             await self._load_dynamic_strategy_pricing()
     
     async def _load_dynamic_strategy_pricing(self) -> Dict[str, int]:
-        """Load strategy pricing from admin configuration."""
+        """Load strategy pricing from admin configuration with robust error handling."""
         try:
-            from app.core.redis import get_redis_client
-            redis = await get_redis_client()
-            
-            # Load from admin settings
-            strategy_pricing_data = await redis.hgetall("admin:strategy_pricing") if redis else {}
-            
-            if strategy_pricing_data:
-                strategy_pricing = {}
-                for key, value in strategy_pricing_data.items():
-                    # Handle both bytes and string responses from Redis
-                    strategy_name = key.decode() if isinstance(key, bytes) else str(key)
-                    try:
-                        credit_cost = int(value.decode()) if isinstance(value, bytes) else int(value)
-                    except (ValueError, AttributeError):
-                        # Fallback to default if conversion fails
-                        credit_cost = 25
-                    strategy_pricing[strategy_name] = credit_cost
-                
-                self.strategy_pricing = strategy_pricing
-                return strategy_pricing
-            else:
-                # Set defaults and save for admin
-                default_pricing = {
-                    # FREE Basic Strategies (included with any credit purchase)
-                    "risk_management": 0,           # Free - essential risk control
-                    "portfolio_optimization": 0,   # Free - basic portfolio management  
-                    "spot_momentum_strategy": 0,   # Free - basic momentum trading
-                    
-                    # Premium AI Strategies - Dynamic pricing
-                    "spot_mean_reversion": 20,
-                    "spot_breakout_strategy": 25,
-                    "scalping_strategy": 35,
-                    "pairs_trading": 40,
-                    "statistical_arbitrage": 50,
-                    "market_making": 55,
-                    "futures_trade": 60,
-                    "options_trade": 75,
-                    "complex_strategy": 100,
-                    "funding_arbitrage": 45,
-                    "hedge_position": 65
-                }
-                
-                # Save defaults for admin to modify
-                await redis.hset("admin:strategy_pricing", mapping=default_pricing)
-                
-                self.strategy_pricing = default_pricing
-                return default_pricing
-                
-        except Exception as e:
-            self.logger.error("Failed to load strategy pricing", error=str(e))
-            # Emergency fallback
-            fallback_pricing = {
-                "spot_momentum_strategy": 0,   # Free
+            try:
+                from app.core.redis import get_redis_client
+                redis = await get_redis_client()
+            except Exception as e:
+                self.logger.warning(f"Redis connection failed: {e}")
+                redis = None
+
+            # Load from admin settings if Redis is available
+            if redis:
+                try:
+                    strategy_pricing_data = await redis.hgetall("admin:strategy_pricing")
+
+                    if strategy_pricing_data:
+                        strategy_pricing = {}
+                        for key, value in strategy_pricing_data.items():
+                            # Handle both bytes and string responses from Redis
+                            strategy_name = key.decode() if isinstance(key, bytes) else str(key)
+                            try:
+                                credit_cost = int(value.decode()) if isinstance(value, bytes) else int(value)
+                            except (ValueError, AttributeError):
+                                # Fallback to default if conversion fails
+                                credit_cost = 25
+                            strategy_pricing[strategy_name] = credit_cost
+
+                        self.strategy_pricing = strategy_pricing
+                        self.logger.info(f"Loaded pricing for {len(strategy_pricing)} strategies from Redis")
+                        return strategy_pricing
+
+                except Exception as e:
+                    self.logger.warning(f"Failed to load from Redis: {e}")
+
+            # Use defaults when Redis is unavailable or empty
+            default_pricing = {
+                # FREE Basic Strategies (included with any credit purchase)
+                "risk_management": 0,           # Free - essential risk control
+                "portfolio_optimization": 0,   # Free - basic portfolio management
+                "spot_momentum_strategy": 0,   # Free - basic momentum trading
+
+                # Premium AI Strategies - Dynamic pricing
                 "spot_mean_reversion": 20,
+                "spot_breakout_strategy": 25,
+                "scalping_strategy": 35,
+                "pairs_trading": 40,
+                "statistical_arbitrage": 50,
+                "market_making": 55,
+                "futures_trade": 60,
+                "options_trade": 75,
+                "complex_strategy": 100,
+                "funding_arbitrage": 45,
+                "hedge_position": 65,
+                "algorithmic_trading": 30,
+                "swing_trading": 35,
+                "position_management": 15,
+                "strategy_performance": 20,
+                "perpetual_trade": 70,
+                "leverage_position": 55,
+                "margin_status": 10,
+                "basis_trade": 50,
+                "options_chain": 60,
+                "calculate_greeks": 45,
+                "liquidation_price": 25
+            }
+
+            # Try to save defaults for admin to modify (but don't fail if we can't)
+            if redis:
+                try:
+                    await redis.hset("admin:strategy_pricing", mapping=default_pricing)
+                    self.logger.info("Saved default pricing to Redis")
+                except Exception as e:
+                    self.logger.warning(f"Could not save defaults to Redis: {e}")
+
+            self.strategy_pricing = default_pricing
+            self.logger.info(f"Using default pricing for {len(default_pricing)} strategies")
+            return default_pricing
+
+        except Exception as e:
+            self.logger.error(f"Critical error loading strategy pricing: {e}")
+            # Emergency fallback - at least some strategies should work
+            emergency_pricing = {
+                "spot_momentum_strategy": 0,
+                "risk_management": 0,
+                "portfolio_optimization": 0,
+                "spot_mean_reversion": 25,
                 "market_making": 25
             }
-            self.strategy_pricing = fallback_pricing
-            return fallback_pricing
+            self.strategy_pricing = emergency_pricing
+            return emergency_pricing
             
     def _build_ai_strategy_catalog(self) -> Dict[str, Dict[str, Any]]:
         """Build catalog dynamically from ALL available strategy functions."""
@@ -356,7 +385,7 @@ class StrategyMarketplaceService(LoggerMixin):
                         credit_cost_monthly=monthly_cost,
                         credit_cost_per_execution=execution_cost,
                         win_rate=performance_data.get("win_rate", 0),
-                        avg_return=performance_data.get("avg_return", 0),
+                        avg_return=performance_data.get("total_return_pct", 0),
                         sharpe_ratio=performance_data.get("sharpe_ratio"),
                         max_drawdown=performance_data.get("max_drawdown", 0),
                         total_trades=performance_data.get("total_trades", 0),
@@ -394,85 +423,102 @@ class StrategyMarketplaceService(LoggerMixin):
             return {"success": False, "error": str(e)}
     
     async def _get_ai_strategy_performance(self, strategy_func: str, user_id: str) -> Dict[str, Any]:
-        """Get REAL performance data for AI strategy from actual trades."""
+        """Get REAL performance data for AI strategy from actual trades with robust error handling."""
+        strategy_id = f"ai_{strategy_func}"
+
         try:
-            # Use real performance tracker for actual trade data
+            # Try to get real performance data, but don't let failures block the marketplace
             from app.services.real_performance_tracker import real_performance_tracker
 
-            strategy_id = f"ai_{strategy_func}"
-
-            # Get real performance metrics from actual trades
-            strategy_uuid = await trading_strategies_service.get_platform_strategy_id(strategy_func)
+            strategy_uuid = await self._get_platform_strategy_id_safe(strategy_func)
 
             if strategy_uuid:
-                real_metrics = await real_performance_tracker.track_strategy_performance(
-                    strategy_id=strategy_uuid,
-                    user_id=user_id,
-                    period_days=30,
-                    include_simulations=True,
-                )
-
-                if real_metrics and real_metrics.get('total_trades', 0) > 0:
-                    # We have trade data (real or simulation) for this strategy
-                    self.logger.info(
-                        "✅ Using performance data for platform strategy",
-                        strategy_function=strategy_func,
-                        data_quality=real_metrics.get('data_quality')
+                try:
+                    real_metrics = await real_performance_tracker.track_strategy_performance(
+                        strategy_id=strategy_uuid,
+                        user_id=user_id,
+                        period_days=30,
+                        include_simulations=True,
                     )
-                    return real_metrics
-            else:
+
+                    if real_metrics and real_metrics.get('total_trades', 0) > 0:
+                        self.logger.info(
+                            "Using performance data for platform strategy",
+                            strategy_function=strategy_func,
+                            data_quality=real_metrics.get('data_quality')
+                        )
+                        try:
+                            # Apply same normalization as other paths
+                            normalized_metrics = self._normalize_performance_data(real_metrics, strategy_func)
+                            if normalized_metrics:
+                                return normalized_metrics
+                        except Exception as e:
+                            self.logger.warning(
+                                "Real metrics normalization failed",
+                                strategy_function=strategy_func,
+                                normalization_error=str(e)
+                            )
+                            # Fall back to raw data
+
+                        return real_metrics  # Fallback to raw data if normalization fails
+                except Exception as e:
+                    self.logger.warning(
+                        "Performance tracker failed, using fallback",
+                        strategy_func=strategy_func,
+                        error=str(e)
+                    )
+
+            # Try fallback method with safer database handling
+            try:
+                performance_result = await trading_strategies_service.strategy_performance(
+                    strategy_name=strategy_func,
+                    user_id=user_id
+                )
+
+                if performance_result.get("success"):
+                    normalized_metrics = self._normalize_performance_data(
+                        performance_result, strategy_func
+                    )
+                    if normalized_metrics:
+                        return normalized_metrics
+
+            except Exception as e:
                 self.logger.warning(
-                    "Platform strategy UUID not found for performance lookup",
-                    strategy_function=strategy_func,
+                    "Strategy performance fallback failed",
+                    strategy_func=strategy_func,
+                    error=str(e)
                 )
-
-            # Fallback to trying existing function
-            performance_result = await trading_strategies_service.strategy_performance(
-                strategy_name=strategy_func,
-                user_id=user_id
-            )
-
-            if performance_result.get("success"):
-                # Handle nested response structure properly
-                normalized_metrics = self._normalize_performance_data(
-                    performance_result, strategy_func
-                )
-                if normalized_metrics:
-                    return normalized_metrics
-
-            # No reliable data - return neutral defaults with all required fields
-            return {
-                "strategy_id": strategy_id,
-                "total_pnl": 0.0,
-                "win_rate": 0.0,  # Normalized 0-1 range
-                "total_trades": 0,
-                "avg_return": 0.0,
-                "sharpe_ratio": None,
-                "max_drawdown": 0.0,
-                "last_7_days_pnl": 0.0,
-                "last_30_days_pnl": 0.0,
-                "status": "no_data",
-                "data_quality": "no_data",
-                "badges": self._build_performance_badges("no_data")
-            }
 
         except Exception as e:
-            self.logger.error(f"Failed to get performance for {strategy_func}", error=str(e))
-            # Return neutral defaults on error with all required fields
-            return {
-                "strategy_id": f"ai_{strategy_func}",
-                "total_pnl": 0.0,
-                "win_rate": 0.0,  # Normalized 0-1 range
-                "total_trades": 0,
-                "avg_return": 0.0,
-                "sharpe_ratio": None,
-                "max_drawdown": 0.0,
-                "last_7_days_pnl": 0.0,
-                "last_30_days_pnl": 0.0,
-                "status": "error",
-                "data_quality": "no_data",
-                "badges": self._build_performance_badges("no_data")
-            }
+            self.logger.warning(
+                "Performance data retrieval failed completely",
+                strategy_func=strategy_func,
+                error=str(e)
+            )
+
+        # Always return safe defaults - never let performance data block marketplace
+        return {
+            "strategy_id": strategy_id,
+            "total_pnl_usd": 0.0,  # USD amount
+            "win_rate": 0.0,
+            "total_trades": 0,
+            "total_return_pct": 0.0,  # percentage
+            "sharpe_ratio": None,
+            "max_drawdown": 0.0,
+            "data_quality": "no_data",
+            "supported_symbols": ["BTC", "ETH", "BNB"],
+            "badges": ["New Strategy", "No Historical Data"],
+            "last_updated": None
+        }
+
+    async def _get_platform_strategy_id_safe(self, strategy_func: str) -> str:
+        """Safely get platform strategy ID without failing."""
+        try:
+            return await trading_strategies_service.get_platform_strategy_id(strategy_func)
+        except Exception as e:
+            self.logger.warning(f"Failed to get platform strategy ID for {strategy_func}: {e}")
+            return None
+
 
     def _normalize_performance_data(self, performance_result: Dict[str, Any], strategy_func: str) -> Dict[str, Any]:
         """
@@ -503,7 +549,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 badges = badges or performance_result.get("badges", [])
 
             # Check for top-level metrics (flat structure)
-            if performance_data is None and any(key in performance_result for key in ["total_pnl", "win_rate", "total_trades"]):
+            if performance_data is None and any(key in performance_result for key in ["total_pnl_usd", "win_rate", "total_trades"]):
                 performance_data = performance_result
                 data_quality = data_quality or performance_result.get("data_quality")
                 status = status or performance_result.get("status")
@@ -516,14 +562,14 @@ class StrategyMarketplaceService(LoggerMixin):
             normalized = {}
 
             # Core financial metrics with neutral defaults
-            normalized["total_pnl"] = self._safe_float(performance_data.get("total_pnl", 0))
+            normalized["total_pnl_usd"] = self._safe_float(performance_data.get("total_pnl_usd", 0))  # USD amount
 
             # Normalize win_rate to canonical 0-1 fraction unit (handles both percentage and fraction inputs)
-            raw_win_rate = self._safe_float(performance_data.get("win_rate", 0))
+            raw_win_rate = self._safe_float(performance_data.get("win_rate", performance_data.get("winning_trades_pct", 0)))
             normalized["win_rate"] = self.normalize_win_rate_to_fraction(raw_win_rate)
 
             normalized["total_trades"] = self._safe_int(performance_data.get("total_trades", 0))
-            normalized["avg_return"] = self._safe_float(performance_data.get("avg_return", 0))
+            normalized["total_return_pct"] = self._safe_float(performance_data.get("total_return_pct", performance_data.get("avg_return", 0)))  # percentage
 
             # Additional metrics with neutral defaults
             normalized["sharpe_ratio"] = performance_data.get("sharpe_ratio")  # Keep None if missing
@@ -572,7 +618,7 @@ class StrategyMarketplaceService(LoggerMixin):
                            strategy=strategy_func,
                            source_keys=list(performance_data.keys()),
                            normalized_keys=list(normalized.keys()),
-                           total_pnl=normalized["total_pnl"],
+                           total_pnl_usd=normalized["total_pnl_usd"],
                            win_rate=normalized["win_rate"])
 
             return normalized
@@ -705,7 +751,7 @@ class StrategyMarketplaceService(LoggerMixin):
         # Strategy-specific realistic performance profiles
         strategy_profiles = {
             "spot_momentum_strategy": {
-                "total_pnl": 45.2,  # Changed from total_return to total_pnl
+                "total_pnl_usd": 45.2,  # USD amount
                 "max_drawdown": 18.7,
                 "sharpe_ratio": 1.34,
                 "win_rate": 0.623,  # Convert from percentage to normalized fraction (0-1)
@@ -716,7 +762,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 "calmar_ratio": 2.42
             },
             "risk_management": {
-                "total_pnl": 12.8,  # Changed from total_return to total_pnl
+                "total_pnl_usd": 12.8,  # USD amount
                 "max_drawdown": 4.2,
                 "sharpe_ratio": 2.87,
                 "win_rate": 0.789,  # Convert from percentage to normalized fraction (0-1)
@@ -727,7 +773,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 "calmar_ratio": 3.05
             },
             "pairs_trading": {
-                "total_pnl": 23.6,  # Changed from total_return to total_pnl
+                "total_pnl_usd": 23.6,  # USD amount
                 "max_drawdown": 8.9,
                 "sharpe_ratio": 1.89,
                 "win_rate": 0.712,  # Convert from percentage to normalized fraction (0-1)
@@ -738,7 +784,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 "calmar_ratio": 2.65
             },
             "statistical_arbitrage": {
-                "total_pnl": 31.4,  # Changed from total_return to total_pnl
+                "total_pnl_usd": 31.4,  # USD amount
                 "max_drawdown": 11.2,
                 "sharpe_ratio": 2.12,
                 "win_rate": 0.687,  # Convert from percentage to normalized fraction (0-1)
@@ -749,7 +795,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 "calmar_ratio": 2.80
             },
             "market_making": {
-                "total_pnl": 18.9,  # Changed from total_return to total_pnl
+                "total_pnl_usd": 18.9,  # USD amount
                 "max_drawdown": 3.8,
                 "sharpe_ratio": 3.21,
                 "win_rate": 0.842,  # Convert from percentage to normalized fraction (0-1)
@@ -763,7 +809,7 @@ class StrategyMarketplaceService(LoggerMixin):
         
         # Get strategy-specific profile or use conservative default
         profile = strategy_profiles.get(strategy_func, {
-            "total_pnl": 15.3,  # Changed from total_return to total_pnl
+            "total_pnl_usd": 15.3,  # USD amount
             "max_drawdown": 8.5,
             "sharpe_ratio": 1.45,
             "win_rate": 0.658,  # Convert from percentage to normalized fraction (0-1)
@@ -934,7 +980,7 @@ class StrategyMarketplaceService(LoggerMixin):
             
             return {
                 "backtest_period": f"{min(h[0]['date'] for h in historical_data.values())} to {max(h[-1]['date'] for h in historical_data.values())}",
-                "total_pnl": round(total_return, 1),  # Changed from total_return to total_pnl
+                "total_pnl_usd": round(total_return, 1),  # USD amount
                 "max_drawdown": round(max_drawdown * 100, 1),
                 "sharpe_ratio": round(sharpe_ratio, 2),
                 "win_rate": round(win_rate / 100, 3),  # Convert percentage to normalized fraction (0-1)
@@ -973,77 +1019,76 @@ class StrategyMarketplaceService(LoggerMixin):
         }
     
     async def _get_community_strategies(self, user_id: str) -> List[StrategyMarketplaceItem]:
-        """Get community-published strategies."""
+        """Get community-published strategies with robust error handling."""
         try:
+            from app.models.user_strategies import UserStrategy
+            from app.models.user import User
+            from sqlalchemy.orm import joinedload
+
+            # Use proper async context management for database
             async for db in get_database():
-                # Get published strategies from community
-                stmt = select(TradingStrategy, StrategyPublisher).join(
-                    StrategyPublisher, TradingStrategy.user_id == StrategyPublisher.user_id
-                ).where(
-                    and_(
-                        TradingStrategy.is_active == True,
-                        StrategyPublisher.verified == True
+                try:
+                    # Get published strategies with proper joins
+                    community_strategies = await db.execute(
+                        select(UserStrategy)
+                        .options(joinedload(UserStrategy.user))
+                        .where(
+                            UserStrategy.is_published == True,
+                            UserStrategy.is_active == True
+                        )
+                        .order_by(UserStrategy.created_at.desc())
+                        .limit(50)  # Reasonable limit
                     )
-                ).order_by(desc(TradingStrategy.total_pnl))
-                
-                result = await db.execute(stmt)
-                strategies = result.fetchall()
-                
-                community_items = []
-                for strategy, publisher in strategies:
-                    # Calculate pricing based on performance
-                    monthly_cost = self._calculate_strategy_pricing(strategy)
+                    strategies = community_strategies.scalars().all()
 
-                    live_performance = await self._get_live_performance(str(strategy.id))
-                    live_quality = live_performance.get("data_quality", "no_data") if isinstance(live_performance, dict) else "no_data"
-                    live_badges = []
-                    if isinstance(live_performance, dict):
-                        live_badges = list(live_performance.get("badges") or self._build_performance_badges(live_quality))
-                        live_performance.setdefault("badges", live_badges)
-                    else:
-                        live_performance = {
-                            "data_quality": "no_data",
-                            "status": "no_data",
-                            "total_trades": 0,
-                            "badges": self._build_performance_badges("no_data")
-                        }
-                        live_badges = live_performance["badges"]
+                    marketplace_items = []
+                    for strategy in strategies:
+                        try:
+                            # Create marketplace item for each community strategy
+                            item = StrategyMarketplaceItem(
+                                strategy_id=f"community_{strategy.id}",
+                                name=strategy.name or f"Community Strategy {strategy.id}",
+                                description=strategy.description or "Community-created trading strategy",
+                                category=getattr(strategy, 'category', 'community'),
+                                publisher_id=str(strategy.user_id),
+                                publisher_name=strategy.user.username if strategy.user else "Unknown",
+                                is_ai_strategy=False,
+                                credit_cost_monthly=getattr(strategy, 'credit_cost', 15),
+                                credit_cost_per_execution=1,
+                                win_rate=getattr(strategy, 'win_rate', 0.0),
+                                avg_return=getattr(strategy, 'total_return_pct', 0.0),
+                                sharpe_ratio=getattr(strategy, 'sharpe_ratio', None),
+                                max_drawdown=getattr(strategy, 'max_drawdown', 0.0),
+                                total_trades=getattr(strategy, 'total_trades', 0),
+                                min_capital_usd=getattr(strategy, 'min_capital', 1000),
+                                risk_level=getattr(strategy, 'risk_level', 'medium'),
+                                timeframes=getattr(strategy, 'timeframes', ["1h", "4h", "1d"]),
+                                supported_symbols=getattr(strategy, 'supported_symbols', ["BTC", "ETH"]),
+                                backtest_results=None,
+                                ab_test_results=None,
+                                live_performance=None,
+                                performance_badges=["Community Strategy"],
+                                data_quality="limited",
+                                created_at=strategy.created_at,
+                                last_updated=strategy.updated_at,
+                                is_active=strategy.is_active,
+                                tier="community"
+                            )
+                            marketplace_items.append(item)
 
-                    item = StrategyMarketplaceItem(
-                        strategy_id=str(strategy.id),
-                        name=strategy.name,
-                        description=strategy.description or "Community-published strategy",
-                        category=strategy.strategy_type.value,
-                        publisher_id=str(publisher.id),
-                        publisher_name=publisher.display_name,
-                        is_ai_strategy=False,
-                        credit_cost_monthly=monthly_cost,
-                        credit_cost_per_execution=max(1, monthly_cost // 30),
-                        win_rate=strategy.win_rate,
-                        avg_return=float(strategy.total_pnl / strategy.total_trades) if strategy.total_trades > 0 else 0,
-                        sharpe_ratio=float(strategy.sharpe_ratio) if strategy.sharpe_ratio else None,
-                        max_drawdown=float(strategy.max_drawdown),
-                        total_trades=strategy.total_trades,
-                        min_capital_usd=1000,  # Default minimum
-                        risk_level=self._calculate_risk_level(strategy),
-                        timeframes=[strategy.timeframe],
-                        supported_symbols=strategy.target_symbols,
-                        backtest_results={},  # Would be populated from backtesting service
-                        ab_test_results={},   # Would be populated from A/B testing
-                        live_performance=live_performance,
-                        performance_badges=live_badges,
-                        data_quality=live_quality,
-                        created_at=strategy.created_at,
-                        last_updated=strategy.updated_at,
-                        is_active=strategy.is_active,
-                        tier="community"
-                    )
-                    community_items.append(item)
-                
-                return community_items
-                
+                        except Exception as e:
+                            self.logger.warning(f"Failed to create marketplace item for strategy {strategy.id}: {e}")
+                            continue
+
+                    self.logger.info(f"Successfully loaded {len(marketplace_items)} community strategies")
+                    return marketplace_items
+
+                except Exception as e:
+                    self.logger.warning(f"Database query for community strategies failed: {e}")
+                    return []
+
         except Exception as e:
-            self.logger.error("Failed to get community strategies", error=str(e))
+            self.logger.warning(f"Community strategies loading failed completely: {e}")
             return []
     
     def _calculate_strategy_pricing(self, strategy: TradingStrategy) -> int:
@@ -1105,7 +1150,7 @@ class StrategyMarketplaceService(LoggerMixin):
                         "data_quality": "no_data",
                         "status": "no_trades",
                         "total_trades": 0,
-                        "total_pnl": 0.0,
+                        "total_pnl_usd": 0.0,
                         "win_rate": 0.0,
                         "badges": self._build_performance_badges("no_data")
                     }
@@ -1117,7 +1162,7 @@ class StrategyMarketplaceService(LoggerMixin):
 
                 return {
                     "period": "30_days",
-                    "total_pnl": total_pnl,  # USD amount
+                    "total_pnl_usd": total_pnl,  # USD amount
                     "win_rate": win_rate,    # 0-1 normalized fraction
                     "total_trades": len(recent_trades),
                     "avg_trade_pnl": total_pnl / len(recent_trades),
@@ -1134,7 +1179,7 @@ class StrategyMarketplaceService(LoggerMixin):
                 "data_quality": "no_data",
                 "status": "error",
                 "total_trades": 0,
-                "total_pnl": 0.0,
+                "total_pnl_usd": 0.0,
                 "win_rate": 0.0
             }
     
@@ -1465,7 +1510,7 @@ class StrategyMarketplaceService(LoggerMixin):
 
             for strategy in strategy_portfolio:
                 perf = strategy.get("performance", {})
-                pnl = perf.get("total_pnl", 0)
+                pnl = perf.get("total_pnl_usd", 0)
                 total_pnl += pnl
 
                 transformed_strategy = {
