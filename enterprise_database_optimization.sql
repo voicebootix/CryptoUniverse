@@ -86,14 +86,13 @@ WHERE sync_enabled = true;
 -- Impact: <10ms session lookups vs current slow queries
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_sessions_active_lookup
 ON user_sessions(user_id, is_active, expires_at)
-WHERE is_active = true AND expires_at > NOW();
+WHERE is_active = true;
 
 -- 3.2 USER SESSIONS - CLEANUP OPTIMIZATION
 -- Fixes: Background session cleanup operations
 -- Impact: Efficient expired session removal
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_sessions_cleanup
-ON user_sessions(expires_at, is_active)
-WHERE expires_at < NOW();
+ON user_sessions(expires_at DESC, is_active);
 
 -- 3.3 USERS - ROLE AND STATUS FILTERING
 -- Fixes: Admin user queries and role-based access control

@@ -83,7 +83,7 @@ class EnterpriseRedisManager(LoggerMixin):
         # Health monitoring
         self._health_status = RedisHealthStatus.UNKNOWN
         self._last_health_check = 0
-        self._health_check_interval = 30  # seconds
+        self._health_check_interval = settings.REDIS_HEALTH_CHECK_INTERVAL
         
         # Configuration
         self._max_failures = 5
@@ -336,8 +336,11 @@ class EnterpriseRedisManager(LoggerMixin):
             await asyncio.wait_for(self._redis.ping(), timeout=self._command_timeout)
             
             # Basic operation test with enterprise data integrity verification
-            test_key = f"health_check_{int(time.time())}"
-            test_value = f"test_value_{int(time.time())}"
+            # Use high-resolution unique key to prevent worker collisions
+            import uuid
+            unique_suffix = f"{time.time_ns()}_{uuid.uuid4().hex[:8]}"
+            test_key = f"health_check_{unique_suffix}"
+            test_value = f"test_value_{unique_suffix}"
             expected_bytes = test_value.encode('utf-8')
             
             # Set test data with expiration

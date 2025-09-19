@@ -186,26 +186,36 @@ class KrakenNonceManager:
                 if time.time() - self._last_time_sync > 300:  # 5 minutes
                     await self._sync_server_time()
                 
-                # Primary: Redis-based distributed nonce coordination
+                # Primary: Redis-based distributed nonce coordination with atomic operation
                 if self._redis:
                     try:
-                        last_nonce_str = await self._redis.get(self._nonce_key)
-                        last_nonce = int(last_nonce_str) if last_nonce_str else 0
-                        
-                        # Generate nonce with server time adjustment and safety margin
+                        # Use atomic Lua script to prevent race conditions between workers
                         server_time = time.time() + self._server_time_offset
                         current_time_ms = int(server_time * 1000)
-                        new_nonce = max(last_nonce + 1, current_time_ms) + 100  # 100ms safety margin
                         
-                        # Store in Redis with 1 hour expiration
-                        await self._redis.setex(self._nonce_key, 3600, str(new_nonce))
+                        # Atomic nonce generation script
+                        lua_script = """
+                        local key = KEYS[1]
+                        local last = tonumber(redis.call('GET', key) or '0')
+                        local now = tonumber(ARGV[1])
+                        local candidate = math.max(last + 1, now) + 100
+                        redis.call('SET', key, candidate, 'EX', ARGV[2])
+                        return candidate
+                        """
+                        
+                        new_nonce = await self._redis.eval(
+                            lua_script, 
+                            keys=[self._nonce_key], 
+                            args=[str(current_time_ms), '3600']
+                        )
+                        new_nonce = int(new_nonce)
                         
                         self.logger.debug(
-                            "Generated Redis nonce", 
+                            "Generated atomic Redis nonce", 
                             nonce=new_nonce,
-                            last_nonce=last_nonce,
                             server_time_offset=self._server_time_offset,
-                            node_id=self._node_id
+                            node_id=self._node_id,
+                            atomic=True
                         )
                         return new_nonce
                         
@@ -1712,10 +1722,10 @@ async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> D
                 logger.debug(f"Starting balance fetch for {account.exchange_name}", 
                            user_id=user_id, exchange=account.exchange_name)
                 
-                # Use existing balance fetching function with timeout protection
+                # Use existing balance fetching function with configurable timeout protection
                 balances = await asyncio.wait_for(
                     fetch_exchange_balances(api_key, db),
-                    timeout=15.0  # 15 second timeout per exchange
+                    timeout=float(settings.EXCHANGE_API_TIMEOUT)
                 )
                 
                 exchange_duration = (time.time() - exchange_start_time) * 1000
@@ -1746,7 +1756,7 @@ async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> D
                 return result
                 
             except asyncio.TimeoutError:
-                error_msg = f"{account.exchange_name} balance fetch timeout (>15s)"
+                error_msg = f"{account.exchange_name} balance fetch timeout (>{settings.EXCHANGE_API_TIMEOUT}s)"
                 logger.error(error_msg, user_id=user_id, exchange=account.exchange_name)
                 return {
                     "success": False,
@@ -1777,17 +1787,30 @@ async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> D
                     "fetch_time_ms": (time.time() - exchange_start_time) * 1000
                 }
         
-        # Execute all exchange balance fetches in parallel
-        logger.info("🚀 Starting parallel exchange balance fetching", 
-                   user_id=user_id, exchanges=[acc.exchange_name for acc, _ in user_exchanges])
-        
+        # Execute exchange balance fetches (parallel if enabled, sequential if not)
         parallel_start_time = time.time()
         
-        # Use asyncio.gather for true parallel execution
-        exchange_results = await asyncio.gather(
-            *[fetch_exchange_balances_with_metrics(pair) for pair in user_exchanges],
-            return_exceptions=True
-        )
+        if settings.PARALLEL_EXCHANGE_FETCHING:
+            logger.info("🚀 Starting parallel exchange balance fetching", 
+                       user_id=user_id, exchanges=[acc.exchange_name for acc, _ in user_exchanges])
+            
+            # Use asyncio.gather for true parallel execution
+            exchange_results = await asyncio.gather(
+                *[fetch_exchange_balances_with_metrics(pair) for pair in user_exchanges],
+                return_exceptions=True
+            )
+        else:
+            logger.info("🔄 Starting sequential exchange balance fetching (parallel disabled)", 
+                       user_id=user_id, exchanges=[acc.exchange_name for acc, _ in user_exchanges])
+            
+            # Sequential execution for compatibility
+            exchange_results = []
+            for pair in user_exchanges:
+                try:
+                    result = await fetch_exchange_balances_with_metrics(pair)
+                    exchange_results.append(result)
+                except Exception as e:
+                    exchange_results.append(e)
         
         parallel_duration = (time.time() - parallel_start_time) * 1000
         

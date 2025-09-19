@@ -24,7 +24,9 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 # Enterprise A/B Testing Configuration
-DEMO_MODE = os.getenv("AB_TESTING_DEMO_MODE", "false").lower() == "true"
+from app.core.config import get_settings
+settings = get_settings()
+DEMO_MODE = settings.AB_TESTING_DEMO_MODE
 
 if DEMO_MODE:
     logger.warning(
