@@ -2,24 +2,39 @@
 """
 Test the timeout fix for portfolio endpoint
 """
+import os
 import requests
 import time
+from requests.exceptions import RequestException, Timeout
 
 def test_timeout_fix():
     print("TESTING TIMEOUT FIX")
     print("=" * 20)
 
+    # Get configuration from environment
+    base_url = os.environ.get("CRYPTOUNIVERSE_BASE_URL", "https://cryptouniverse.onrender.com")
+    admin_email = os.environ.get("CRYPTOUNIVERSE_ADMIN_EMAIL")
+    admin_password = os.environ.get("CRYPTOUNIVERSE_ADMIN_PASSWORD")
+
+    if not admin_email or not admin_password:
+        print("ERROR: Missing CRYPTOUNIVERSE_ADMIN_EMAIL or CRYPTOUNIVERSE_ADMIN_PASSWORD environment variables")
+        print("Set these environment variables for secure authentication")
+        return False
+
     # Wait for deployment
     print("Waiting 45 seconds for Render deployment...")
     time.sleep(45)
 
+    # Use session for connection reuse
+    session = requests.Session()
+
     # Login
     print("\n1. Admin authentication...")
-    login_url = "https://cryptouniverse.onrender.com/api/v1/auth/login"
-    login_payload = {"email": "admin@cryptouniverse.com", "password": "AdminPass123!"}
+    login_url = f"{base_url}/api/v1/auth/login"
+    login_payload = {"email": admin_email, "password": admin_password}
 
     try:
-        response = requests.post(login_url, json=login_payload, timeout=20)
+        response = session.post(login_url, json=login_payload, timeout=20)
         if response.status_code != 200:
             print(f"Login failed: {response.status_code}")
             return False
@@ -36,10 +51,10 @@ def test_timeout_fix():
     # Test the portfolio endpoint with new timeouts
     print("\n2. Testing portfolio endpoint with timeout fixes...")
     try:
-        portfolio_url = "https://cryptouniverse.onrender.com/api/v1/strategies/my-portfolio"
+        portfolio_url = f"{base_url}/api/v1/strategies/my-portfolio"
 
         start_time = time.time()
-        response = requests.get(portfolio_url, headers=headers, timeout=30)  # Give it more time
+        response = session.get(portfolio_url, headers=headers, timeout=30)  # Give it more time
         elapsed = time.time() - start_time
 
         print(f"  Response: {response.status_code} in {elapsed:.2f}s")
@@ -94,20 +109,24 @@ def test_timeout_fix():
         elapsed = time.time() - start_time
         print(f"  [ERROR] Exception after {elapsed:.2f}s: {e}")
 
-    print("\n3. Checking if admin grant is still working...")
-    try:
-        grant_url = "https://cryptouniverse.onrender.com/api/v1/admin-strategy-access/grant-full-access"
-        grant_payload = {"strategy_type": "all", "grant_reason": "test_after_timeout_fix"}
+    # Gate admin grant behind environment variable to prevent accidental production grants
+    if os.environ.get("ALLOW_GRANT") == "1":
+        print("\n3. Checking if admin grant is still working...")
+        try:
+            grant_url = f"{base_url}/api/v1/admin-strategy-access/grant-full-access"
+            grant_payload = {"strategy_type": "all", "grant_reason": "test_after_timeout_fix"}
 
-        response = requests.post(grant_url, headers=headers, json=grant_payload, timeout=25)
-        if response.status_code == 200:
-            result = response.json()
-            strategies_granted = result.get("total_strategies", 0)
-            print(f"  [OK] Admin grant still works, granted {strategies_granted} strategies")
-        else:
-            print(f"  [ISSUE] Admin grant status: {response.status_code}")
-    except Exception as e:
-        print(f"  Admin grant test error: {e}")
+            response = session.post(grant_url, headers=headers, json=grant_payload, timeout=25)
+            if response.status_code == 200:
+                result = response.json()
+                strategies_granted = result.get("total_strategies", 0)
+                print(f"  [OK] Admin grant still works, granted {strategies_granted} strategies")
+            else:
+                print(f"  [ISSUE] Admin grant status: {response.status_code}")
+        except RequestException as e:
+            print(f"  Admin grant test error: {e}")
+    else:
+        print("\n3. Admin grant check skipped (set ALLOW_GRANT=1 to enable)")
 
     return False
 

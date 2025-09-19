@@ -1,20 +1,35 @@
+import os
 import requests
 import json
 import time
+from requests.exceptions import RequestException, Timeout
 
 def test_enterprise_deployment():
     """Test if the enterprise admin endpoint is deployed and working."""
 
+    # Get configuration from environment
+    base_url = os.environ.get("CRYPTOUNIVERSE_BASE_URL", "https://cryptouniverse.onrender.com")
+    admin_email = os.environ.get("CRYPTOUNIVERSE_ADMIN_EMAIL")
+    admin_password = os.environ.get("CRYPTOUNIVERSE_ADMIN_PASSWORD")
+
+    if not admin_email or not admin_password:
+        print("ERROR: Missing CRYPTOUNIVERSE_ADMIN_EMAIL or CRYPTOUNIVERSE_ADMIN_PASSWORD environment variables")
+        print("Set these environment variables for secure authentication")
+        return False
+
     print("TESTING ENTERPRISE DEPLOYMENT")
     print("=" * 35)
 
+    # Use session for connection reuse
+    session = requests.Session()
+
     # Login
     print("1. Admin authentication...")
-    login_url = "https://cryptouniverse.onrender.com/api/v1/auth/login"
-    login_payload = {"email": "admin@cryptouniverse.com", "password": "AdminPass123!"}
+    login_url = f"{base_url}/api/v1/auth/login"
+    login_payload = {"email": admin_email, "password": admin_password}
 
     try:
-        response = requests.post(login_url, json=login_payload, timeout=10)
+        response = session.post(login_url, json=login_payload, timeout=15)
         if response.status_code != 200:
             print(f"[ERROR] Login failed: {response.text}")
             return False
@@ -24,15 +39,21 @@ def test_enterprise_deployment():
         headers = {"Authorization": f"Bearer {token}"}
         print(f"[OK] Authenticated: {user_id}")
 
-    except Exception as e:
-        print(f"[ERROR] Login failed: {e}")
+    except Timeout as e:
+        print(f"[ERROR] Login timeout: {e}")
+        return False
+    except RequestException as e:
+        print(f"[ERROR] Login network error: {e}")
+        return False
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"[ERROR] Login JSON parsing error: {e}")
         return False
 
     # Test if new endpoint is available
     print("\n2. Testing enterprise endpoint availability...")
     try:
-        status_url = "https://cryptouniverse.onrender.com/api/v1/admin-strategy-access/admin-portfolio-status"
-        response = requests.get(status_url, headers=headers, timeout=10)
+        status_url = f"{base_url}/api/v1/admin-strategy-access/admin-portfolio-status"
+        response = session.get(status_url, headers=headers, timeout=15)
 
         print(f"Endpoint status: {response.status_code}")
 
@@ -46,13 +67,13 @@ def test_enterprise_deployment():
             # If admin doesn't have full access, grant it
             if current < total or current < 20:
                 print("\n3. Granting full strategy access...")
-                grant_url = "https://cryptouniverse.onrender.com/api/v1/admin-strategy-access/grant-full-access"
+                grant_url = f"{base_url}/api/v1/admin-strategy-access/grant-full-access"
                 grant_payload = {
                     "strategy_type": "all",
                     "grant_reason": "enterprise_admin_privilege"
                 }
 
-                response = requests.post(grant_url, headers=headers, json=grant_payload, timeout=30)
+                response = session.post(grant_url, headers=headers, json=grant_payload, timeout=30)
 
                 if response.status_code == 200:
                     result = response.json()
@@ -64,8 +85,8 @@ def test_enterprise_deployment():
                     print("\n4. Verifying portfolio access...")
                     time.sleep(3)
 
-                    portfolio_url = "https://cryptouniverse.onrender.com/api/v1/strategies/my-portfolio"
-                    response = requests.get(portfolio_url, headers=headers, timeout=15)
+                    portfolio_url = f"{base_url}/api/v1/strategies/my-portfolio"
+                    response = session.get(portfolio_url, headers=headers, timeout=15)
 
                     if response.status_code == 200:
                         portfolio = response.json()
@@ -107,6 +128,8 @@ def test_enterprise_deployment():
             print(f"[ERROR] Unexpected response: {response.status_code}")
             print(response.text)
 
+    except Timeout as e:
+        print(f"[ERROR] Endpoint test timeout: {e}")
     except Exception as e:
         print(f"[ERROR] Endpoint test failed: {e}")
 

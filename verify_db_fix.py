@@ -1,19 +1,45 @@
+import os
 import requests
 import json
+from requests.exceptions import RequestException, Timeout
 
 def test_strategy_ownership_after_fix():
     """Test strategy ownership after database fix."""
 
+    # Get configuration from environment
+    base_url = os.environ.get("CRYPTOUNIVERSE_BASE_URL", "https://cryptouniverse.onrender.com")
+    admin_email = os.environ.get("CRYPTOUNIVERSE_ADMIN_EMAIL")
+    admin_password = os.environ.get("CRYPTOUNIVERSE_ADMIN_PASSWORD")
+
+    if not admin_email or not admin_password:
+        print("ERROR: Missing CRYPTOUNIVERSE_ADMIN_EMAIL or CRYPTOUNIVERSE_ADMIN_PASSWORD environment variables")
+        print("Set these environment variables for secure authentication")
+        return False
+
     # Login
-    url = "https://cryptouniverse.onrender.com/api/v1/auth/login"
+    url = f"{base_url}/api/v1/auth/login"
     payload = {
-        "email": "admin@cryptouniverse.com",
-        "password": "AdminPass123!"
+        "email": admin_email,
+        "password": admin_password
     }
 
     print("=== Testing Strategy Ownership After DB Fix ===\n")
 
-    response = requests.post(url, json=payload)
+    # Use session for connection reuse
+    session = requests.Session()
+
+    try:
+        response = session.post(url, json=payload, timeout=15)
+        response.raise_for_status()
+    except Timeout as e:
+        print(f"[FAILED] Login timeout: {e}")
+        return False
+    except RequestException as e:
+        print(f"[FAILED] Login network error: {e}")
+        return False
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"[FAILED] Login JSON parsing error: {e}")
+        return False
     if response.status_code == 200:
         data = response.json()
         token = data.get("access_token")
@@ -34,13 +60,21 @@ def test_strategy_ownership_after_fix():
         ]
 
         for endpoint, method in endpoints_to_test:
-            url = f"https://cryptouniverse.onrender.com{endpoint}"
+            endpoint_url = f"{base_url}{endpoint}"
             print(f"\n--- Testing {method} {endpoint} ---")
 
-            if method == "GET":
-                response = requests.get(url, headers=headers)
-            else:
-                response = requests.post(url, headers=headers, json={})
+            try:
+                if method == "GET":
+                    response = session.get(endpoint_url, headers=headers, timeout=15)
+                else:
+                    response = session.post(endpoint_url, headers=headers, json={}, timeout=15)
+                response.raise_for_status()
+            except Timeout as e:
+                print(f"Timeout error: {e}")
+                continue
+            except RequestException as e:
+                print(f"Network error: {e}")
+                continue
 
             print(f"Status: {response.status_code}")
 
@@ -105,9 +139,17 @@ def test_strategy_ownership_after_fix():
 
         # Test credits balance
         print(f"\n--- Credit Balance Check ---")
-        credits_url = "https://cryptouniverse.onrender.com/api/v1/credits/balance"
-        response = requests.get(credits_url, headers=headers)
-        if response.status_code == 200:
+        credits_url = f"{base_url}/api/v1/credits/balance"
+        try:
+            response = session.get(credits_url, headers=headers, timeout=15)
+            response.raise_for_status()
+        except Timeout as e:
+            print(f"Credits check timeout: {e}")
+            response = None
+        except RequestException as e:
+            print(f"Credits check network error: {e}")
+            response = None
+        if response and response.status_code == 200:
             credits = response.json()
             print(f"Credits: {credits.get('available_credits')}/{credits.get('total_credits')}")
 

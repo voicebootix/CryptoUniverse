@@ -1,23 +1,50 @@
+import os
 import requests
 import json
+from requests.exceptions import RequestException
+
+# Get config from environment
+base_url = os.environ.get("CRYPTOUNIVERSE_BASE_URL", "https://cryptouniverse.onrender.com")
+email = os.environ.get("CRYPTOUNIVERSE_ADMIN_EMAIL")
+password = os.environ.get("CRYPTOUNIVERSE_ADMIN_PASSWORD")
+
+if not email or not password:
+    print("ERROR: Missing CRYPTOUNIVERSE_ADMIN_EMAIL or CRYPTOUNIVERSE_ADMIN_PASSWORD environment variables")
+    print("Set these environment variables or add them to your .env file")
+    exit(1)
 
 # Login endpoint
-url = "https://cryptouniverse.onrender.com/api/v1/auth/login"
+url = f"{base_url}/api/v1/auth/login"
 
-# Admin credentials
+# Admin credentials from environment
 payload = {
-    "email": "admin@cryptouniverse.com",
-    "password": "AdminPass123!"
+    "email": email,
+    "password": password
 }
 
 # Make the login request
-response = requests.post(url, json=payload)
+try:
+    response = requests.post(url, json=payload, timeout=10)
+    response.raise_for_status()
 
-if response.status_code == 200:
     data = response.json()
     token = data.get("access_token")
+
+    if not token:
+        print("Authentication failed: No token received")
+        exit(1)
+
     print(f"[OK] Logged in successfully as admin")
-    print(f"Token: {token[:50]}...")
+    # Never log tokens - only log success status
+
+except RequestException as e:
+    print(f"Login request failed: {e}")
+    exit(1)
+except json.JSONDecodeError as e:
+    print(f"Login response JSON parsing failed: {e}")
+    exit(1)
+
+if token:
 
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -32,14 +59,15 @@ if response.status_code == 200:
     ]
 
     for endpoint in endpoints:
-        url = f"https://cryptouniverse.onrender.com{endpoint}"
+        endpoint_url = f"{base_url}{endpoint}"
         print(f"\n=== Testing {endpoint} ===")
 
-        # Try GET request
-        response = requests.get(url, headers=headers)
-        print(f"GET Status: {response.status_code}")
+        try:
+            # Try GET request with timeout
+            response = requests.get(endpoint_url, headers=headers, timeout=10)
+            response.raise_for_status()
+            print(f"GET Status: {response.status_code}")
 
-        if response.status_code == 200:
             try:
                 data = response.json()
                 if isinstance(data, list):
@@ -53,9 +81,15 @@ if response.status_code == 200:
                 else:
                     print(f"Response: {json.dumps(data, indent=2)[:500]}")
                 break  # Found working endpoint
-            except:
-                print(f"Response: {response.text[:200]}")
-        elif response.status_code != 405:
-            print(f"Error: {response.text[:200]}")
+
+            except json.JSONDecodeError as e:
+                print(f"JSON parsing error: {e}")
+                print(f"Raw response: {response.text[:200]}")
+
+        except RequestException as e:
+            print(f"Network error: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                if e.response.status_code != 405:  # Ignore method not allowed
+                    print(f"Error details: {e.response.text[:200]}")
 else:
-    print(f"Login failed: {response.text}")
+    print("Authentication token not available")
