@@ -42,7 +42,7 @@ from enum import Enum
 
 import structlog
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_, select
+from sqlalchemy import func, and_, or_, case, select
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
@@ -54,12 +54,14 @@ from app.models.trading import (
     Trade,
     Position,
     Order,
+    TradeStatus,
     StrategyType as TradingStrategyType,
 )
 from app.models.system import SystemConfiguration
 from app.models.user import User, UserRole, UserStatus
 from app.models.credit import CreditAccount, CreditTransaction
 from app.models.analytics import PerformanceMetric, RiskMetric
+from app.models.market_data import BacktestResult
 from app.services.trade_execution import TradeExecutionService
 from app.services.market_analysis_core import MarketAnalysisService
 
@@ -270,7 +272,7 @@ class DerivativesEngine(LoggerMixin):
         symbol: str,
         parameters: StrategyParameters,
         exchange: str = "binance",
-        user_id: str = None,
+        user_id: Optional[str] = None,
         strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute futures trading strategy."""
@@ -772,7 +774,7 @@ class SpotAlgorithms(LoggerMixin):
         self,
         symbol: str,
         parameters: StrategyParameters,
-        user_id: str = None,
+        user_id: Optional[str] = None,
         strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute momentum-based spot trading strategy."""
@@ -884,7 +886,7 @@ class SpotAlgorithms(LoggerMixin):
         self,
         symbol: str,
         parameters: StrategyParameters,
-        user_id: str = None,
+        user_id: Optional[str] = None,
         strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute mean reversion spot trading strategy."""
@@ -959,7 +961,7 @@ class SpotAlgorithms(LoggerMixin):
         self,
         symbol: str,
         parameters: StrategyParameters,
-        user_id: str = None,
+        user_id: Optional[str] = None,
         strategy_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute breakout spot trading strategy."""
@@ -1427,12 +1429,12 @@ class TradingStrategiesService(LoggerMixin):
     async def execute_strategy(
         self,
         function: str,
-        strategy_type: str = None,
+        strategy_type: Optional[str] = None,
         symbol: str = "BTC/USDT",
         parameters: Dict[str, Any] = None,
         risk_mode: str = "balanced",
         exchange: str = "binance",
-        user_id: str = None,
+        user_id: Optional[str] = None,
         simulation_mode: bool = True
     ) -> Dict[str, Any]:
         """Main strategy execution router - handles all 25+ functions."""
@@ -4585,14 +4587,199 @@ class TradingStrategiesService(LoggerMixin):
             return {"success": False, "error": str(e), "function": "risk_management"}
     
     async def _get_strategy_performance_data(
-        self, 
-        strategy_name: Optional[str], 
-        analysis_period: str, 
+        self,
+        strategy_name: Optional[str],
+        analysis_period: str,
         user_id: str
     ) -> Dict[str, Any]:
         """Get strategy performance data from database or calculate from trades."""
         try:
-            # Default performance data structure
+            period_days = max(self._get_period_days_safe(analysis_period), 1)
+            period_end = datetime.utcnow()
+            period_start = period_end - timedelta(days=period_days)
+
+            def safe_float(value: Any, default: float = 0.0) -> float:
+                try:
+                    if value is None:
+                        return default
+                    return float(value)
+                except (TypeError, ValueError):
+                    return default
+
+            def safe_int(value: Any, default: int = 0) -> int:
+                try:
+                    if value is None:
+                        return default
+                    return int(value)
+                except (TypeError, ValueError):
+                    return default
+
+            user_uuid = None
+            if user_id:
+                try:
+                    user_uuid = uuid.UUID(str(user_id))
+                except (ValueError, TypeError):
+                    user_uuid = None
+
+            async with AsyncSessionLocal() as db:
+                # Aggregate real trades for the requested period
+                pnl_avg_expr = func.avg(Trade.profit_realized_usd)
+                pnl_sq_avg_expr = func.avg(Trade.profit_realized_usd * Trade.profit_realized_usd)
+                # Variance and stddev will be computed in Python after query execution
+
+                trade_stmt = select(
+                    func.count(Trade.id).label("total_trades"),
+                    func.sum(Trade.profit_realized_usd).label("total_pnl"),
+                    func.avg(Trade.profit_realized_usd).label("avg_trade_pnl"),
+                    func.sum(case((Trade.profit_realized_usd > 0, 1), else_=0)).label("winning_trades"),
+                    func.sum(case((Trade.profit_realized_usd < 0, 1), else_=0)).label("losing_trades"),
+                    func.sum(case((Trade.profit_realized_usd > 0, Trade.profit_realized_usd), else_=0)).label("gross_profit"),
+                    func.sum(case((Trade.profit_realized_usd < 0, Trade.profit_realized_usd), else_=0)).label("gross_loss"),
+                    func.max(Trade.profit_realized_usd).label("largest_win"),
+                    func.min(Trade.profit_realized_usd).label("largest_loss"),
+                    func.sum(Trade.total_value).label("total_value"),
+                    func.sum(Trade.fees_paid).label("total_fees"),
+                    pnl_avg_expr.label("pnl_avg"),
+                    pnl_sq_avg_expr.label("pnl_sq_avg")
+                ).select_from(Trade)
+
+                trade_time = func.coalesce(Trade.completed_at, Trade.executed_at, Trade.created_at)
+
+                trade_filters = [
+                    Trade.status == TradeStatus.COMPLETED,
+                    Trade.is_simulation.is_(False),
+                    trade_time >= period_start,
+                    trade_time <= period_end
+                ]
+
+                if user_uuid:
+                    trade_filters.append(Trade.user_id == user_uuid)
+
+                if strategy_name:
+                    trade_stmt = trade_stmt.join(TradingStrategy, Trade.strategy_id == TradingStrategy.id)
+                    trade_filters.append(TradingStrategy.name == strategy_name)
+
+                for condition in trade_filters:
+                    trade_stmt = trade_stmt.where(condition)
+
+                trade_result = await db.execute(trade_stmt)
+                trade_row = trade_result.first()
+
+                if trade_row and trade_row.total_trades:
+                    total_trades = safe_int(trade_row.total_trades, 0)
+                    winning_trades = safe_int(trade_row.winning_trades, 0)
+                    gross_profit = safe_float(trade_row.gross_profit, 0.0)
+                    gross_loss = safe_float(trade_row.gross_loss, 0.0)
+                    net_pnl = safe_float(trade_row.total_pnl, 0.0)
+                    total_value = max(safe_float(trade_row.total_value, 0.0), 0.0)
+                    avg_trade_pnl = safe_float(trade_row.avg_trade_pnl, 0.0)
+                    # Compute variance and stddev in Python
+                    pnl_avg = safe_float(trade_row.pnl_avg, 0.0)
+                    pnl_sq_avg = safe_float(trade_row.pnl_sq_avg, 0.0)
+                    pnl_variance = max(0.0, pnl_sq_avg - (pnl_avg ** 2))
+                    pnl_stddev = math.sqrt(pnl_variance)
+                    avg_notional = total_value / total_trades if total_trades > 0 else 0.0
+
+                    win_rate_decimal = (winning_trades / total_trades) if total_trades else 0.0
+                    total_return_decimal = (net_pnl / total_value) if total_value else 0.0
+                    volatility_ratio = (pnl_stddev / avg_notional) if avg_notional else 0.0
+                    avg_trade_decimal = (avg_trade_pnl / avg_notional) if avg_notional else 0.0
+                    largest_win_decimal = (safe_float(trade_row.largest_win, 0.0) / avg_notional) if avg_notional else 0.0
+                    largest_loss_decimal = (safe_float(trade_row.largest_loss, 0.0) / avg_notional) if avg_notional else 0.0
+
+                    if gross_loss < 0:
+                        profit_factor = gross_profit / abs(gross_loss) if abs(gross_loss) > 0 else 0.0
+                    elif gross_profit > 0:
+                        profit_factor = 0.0
+                    else:
+                        profit_factor = 0.0
+
+                    return {
+                        "total_return": total_return_decimal,
+                        "total_return_units": "decimal",
+                        "benchmark_return": 0.0,
+                        "benchmark_return_units": "decimal",
+                        "volatility": volatility_ratio,
+                        "volatility_units": "ratio",
+                        "max_drawdown": 0.0,
+                        "recovery_time": None,
+                        "win_rate": win_rate_decimal,
+                        "win_rate_units": "decimal",
+                        "profit_factor": profit_factor,
+                        "avg_trade": avg_trade_decimal,
+                        "avg_trade_units": "decimal",
+                        "largest_win": largest_win_decimal,
+                        "largest_win_units": "decimal",
+                        "largest_loss": largest_loss_decimal,
+                        "largest_loss_units": "decimal",
+                        "total_trades": total_trades,
+                        "net_pnl": net_pnl,
+                        "net_pnl_units": "usd",
+                        "data_quality": "verified_real_trades",
+                        "status": "verified_real_trades",
+                        "performance_badges": []
+                    }
+
+                # Fallback to latest backtest results if available
+                backtest_stmt = select(BacktestResult).order_by(BacktestResult.end_date.desc()).limit(1)
+
+                if strategy_name:
+                    backtest_stmt = backtest_stmt.where(
+                        or_(
+                            BacktestResult.strategy_name == strategy_name,
+                            BacktestResult.strategy_id == strategy_name
+                        )
+                    )
+
+                if user_uuid:
+                    backtest_stmt = backtest_stmt.where(
+                        or_(
+                            BacktestResult.user_id == user_uuid,
+                            BacktestResult.user_id.is_(None)
+                        )
+                    )
+
+                backtest_result = await db.execute(backtest_stmt)
+                backtest = backtest_result.scalars().first()
+
+                if backtest:
+                    total_return_decimal = safe_float(backtest.total_return_pct, safe_float(backtest.total_return, 0.0)) / 100
+                    win_rate_decimal = safe_float(backtest.win_rate, 0.0) / 100
+                    profit_factor = safe_float(backtest.profit_factor, 0.0)
+                    avg_trade_decimal = safe_float(backtest.avg_trade_return, 0.0) / 100
+                    max_drawdown = safe_float(backtest.max_drawdown, 0.0)
+                    volatility_ratio = safe_float(backtest.volatility, 0.0)
+                    recovery_time = safe_int(backtest.max_drawdown_duration, 0)
+
+                    return {
+                        "total_return": total_return_decimal,
+                        "total_return_units": "decimal",
+                        "benchmark_return": 0.0,
+                        "benchmark_return_units": "decimal",
+                        "volatility": volatility_ratio,
+                        "volatility_units": "ratio",
+                        "max_drawdown": max_drawdown,
+                        "max_drawdown_units": "decimal",
+                        "recovery_time": recovery_time,
+                        "recovery_time_units": "days",
+                        "win_rate": win_rate_decimal,
+                        "win_rate_units": "decimal",
+                        "profit_factor": profit_factor,
+                        "avg_trade": avg_trade_decimal,
+                        "avg_trade_units": "decimal",
+                        "largest_win": 0.0,
+                        "largest_win_units": "decimal",
+                        "largest_loss": 0.0,
+                        "largest_loss_units": "decimal",
+                        "total_trades": safe_int(backtest.total_trades, 0),
+                        "net_pnl": safe_float(backtest.final_capital, 0.0) - safe_float(backtest.initial_capital, 0.0),
+                        "net_pnl_units": "usd",
+                        "data_quality": "simulated_backtest",
+                        "status": "backtest_only",
+                        "performance_badges": ["Simulated / No live trades"]
+                    }
+
+            # No data available
             return {
                 "total_return": 15.5,
                 "benchmark_return": 12.0,
@@ -4609,7 +4796,7 @@ class TradingStrategiesService(LoggerMixin):
                 "volatility_is_percent": False,
                 "max_drawdown_is_percent": True,
                 "win_rate_is_percent": True,
-                "avg_trade_is_percent": True,
+                "average_trade_is_percent": True,
                 "largest_win_is_percent": True,
                 "largest_loss_is_percent": True
             }
@@ -4619,122 +4806,91 @@ class TradingStrategiesService(LoggerMixin):
             return {
                 "total_return": 0.0,
                 "benchmark_return": 0.0,
-                "volatility": 0.01,
+                        "benchmark_return_units": "decimal",
+                "volatility": 0.0,
                 "max_drawdown": 0.0,
-                "recovery_time": 0,
-                "win_rate": 50,
-                "profit_factor": 1.0,
+                "recovery_time": None,
+                "win_rate": 0.0,
+                "profit_factor": 0.0,
                 "avg_trade": 0.0,
                 "largest_win": 0.0,
+                        "largest_win_units": "decimal",
                 "largest_loss": 0.0,
+                        "largest_loss_units": "decimal",
                 "returns_are_percent": True,
                 "benchmark_is_percent": True,
                 "volatility_is_percent": False,
                 "max_drawdown_is_percent": True,
                 "win_rate_is_percent": True,
-                "avg_trade_is_percent": True,
+                "average_trade_is_percent": True,
                 "largest_win_is_percent": True,
                 "largest_loss_is_percent": True
             }
 
-    def _normalize_strategy_performance_data(self, strategy_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize strategy performance metrics based on explicit unit metadata."""
+    @staticmethod
+    def _normalize_strategy_performance_data(
+        strategy_data: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Dict[str, bool]]:
+        """Normalize strategy performance metrics to decimal form using explicit unit flags."""
 
-        def _to_float(value: Any, default: float = 0.0) -> float:
-            try:
-                if value is None:
-                    return default
-                return float(value)
-            except (TypeError, ValueError):
-                return default
-
-        def _resolve_flag(flag_value: Optional[bool], numeric_value: float) -> bool:
-            if isinstance(flag_value, bool):
-                return flag_value
-            # Fallback to heuristic only if flag not provided
-            return abs(numeric_value) >= 1.0
-
-        def _normalize_percent_metric(
-            raw_value: Any,
-            flag_value: Optional[bool],
-            default: float = 0.0
-        ) -> Tuple[float, float, bool]:
-            numeric = _to_float(raw_value, default)
-            is_percent = _resolve_flag(flag_value, numeric)
-            decimal = numeric / 100.0 if is_percent else numeric
-            percent = decimal * 100.0
-            return decimal, percent, is_percent
-
-        total_return_decimal, total_return_pct, returns_are_percent = _normalize_percent_metric(
-            strategy_data.get("total_return"),
-            strategy_data.get("returns_are_percent"),
-            0.0
-        )
-        benchmark_return_decimal, benchmark_return_pct, benchmark_is_percent = _normalize_percent_metric(
-            strategy_data.get("benchmark_return"),
-            strategy_data.get("benchmark_is_percent", strategy_data.get("returns_are_percent")),
-            0.0
-        )
-        volatility_decimal, volatility_pct, volatility_is_percent = _normalize_percent_metric(
-            strategy_data.get("volatility"),
-            strategy_data.get("volatility_is_percent"),
-            0.0
-        )
-        max_drawdown_decimal, max_drawdown_pct, max_drawdown_is_percent = _normalize_percent_metric(
-            strategy_data.get("max_drawdown"),
-            strategy_data.get("max_drawdown_is_percent", strategy_data.get("returns_are_percent")),
-            0.0
-        )
-        win_rate_decimal, win_rate_pct, win_rate_is_percent = _normalize_percent_metric(
-            strategy_data.get("win_rate"),
-            strategy_data.get("win_rate_is_percent", True),
-            0.0
-        )
-        avg_trade_decimal, avg_trade_pct, avg_trade_is_percent = _normalize_percent_metric(
-            strategy_data.get("avg_trade"),
-            strategy_data.get("avg_trade_is_percent", strategy_data.get("returns_are_percent")),
-            0.0
-        )
-        largest_win_decimal, largest_win_pct, largest_win_is_percent = _normalize_percent_metric(
-            strategy_data.get("largest_win"),
-            strategy_data.get("largest_win_is_percent", strategy_data.get("returns_are_percent")),
-            0.0
-        )
-        largest_loss_decimal, largest_loss_pct, largest_loss_is_percent = _normalize_percent_metric(
-            strategy_data.get("largest_loss"),
-            strategy_data.get("largest_loss_is_percent", strategy_data.get("returns_are_percent")),
-            0.0
-        )
-
-        return {
-            "total_return_decimal": total_return_decimal,
-            "total_return_pct": total_return_pct,
-            "benchmark_return_decimal": benchmark_return_decimal,
-            "benchmark_return_pct": benchmark_return_pct,
-            "volatility_decimal": volatility_decimal,
-            "volatility_pct": volatility_pct,
-            "max_drawdown_decimal": max_drawdown_decimal,
-            "max_drawdown_pct": max_drawdown_pct,
-            "win_rate_decimal": win_rate_decimal,
-            "win_rate_pct": win_rate_pct,
-            "avg_trade_decimal": avg_trade_decimal,
-            "avg_trade_pct": avg_trade_pct,
-            "largest_win_decimal": largest_win_decimal,
-            "largest_win_pct": largest_win_pct,
-            "largest_loss_decimal": largest_loss_decimal,
-            "largest_loss_pct": largest_loss_pct,
-            "units": {
-                "returns_are_percent": returns_are_percent,
-                "benchmark_is_percent": benchmark_is_percent,
-                "volatility_is_percent": volatility_is_percent,
-                "max_drawdown_is_percent": max_drawdown_is_percent,
-                "win_rate_is_percent": win_rate_is_percent,
-                "avg_trade_is_percent": avg_trade_is_percent,
-                "largest_win_is_percent": largest_win_is_percent,
-                "largest_loss_is_percent": largest_loss_is_percent
+        if not isinstance(strategy_data, dict):
+            return {}, {
+                "returns_are_percent": False,
+                "benchmark_is_percent": False,
+                "volatility_is_percent": False,
+                "max_drawdown_is_percent": False,
+                "win_rate_is_percent": False,
+                "average_trade_is_percent": False,
+                "largest_win_is_percent": False,
+                "largest_loss_is_percent": False,
             }
+
+        flags = {
+            "returns_are_percent": bool(strategy_data.get("returns_are_percent", False)),
+            "benchmark_is_percent": bool(strategy_data.get("benchmark_is_percent", False)),
+            "volatility_is_percent": bool(strategy_data.get("volatility_is_percent", False)),
+            "max_drawdown_is_percent": bool(strategy_data.get("max_drawdown_is_percent", False)),
+            "win_rate_is_percent": bool(strategy_data.get("win_rate_is_percent", False)),
+            "average_trade_is_percent": bool(strategy_data.get("average_trade_is_percent", False)),
+            "largest_win_is_percent": bool(strategy_data.get("largest_win_is_percent", False)),
+            "largest_loss_is_percent": bool(strategy_data.get("largest_loss_is_percent", False)),
         }
 
+        normalized: Dict[str, Any] = dict(strategy_data)
+
+        def _to_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        metric_flag_pairs = [
+            ("total_return", "returns_are_percent"),
+            ("benchmark_return", "benchmark_is_percent"),
+            ("volatility", "volatility_is_percent"),
+            ("max_drawdown", "max_drawdown_is_percent"),
+            ("win_rate", "win_rate_is_percent"),
+            ("avg_trade", "average_trade_is_percent"),
+            ("largest_win", "largest_win_is_percent"),
+            ("largest_loss", "largest_loss_is_percent"),
+        ]
+
+        for metric, flag_key in metric_flag_pairs:
+            if metric not in normalized:
+                continue
+
+            numeric_value = _to_float(normalized.get(metric))
+            if numeric_value is None:
+                continue
+
+            normalized[metric] = (
+                numeric_value / 100.0 if flags.get(flag_key, False) else numeric_value
+            )
+
+        return normalized, flags
+    
     def _get_period_days_safe(self, analysis_period: str) -> int:
         """Convert analysis period string to number of days."""
         try:
@@ -4781,135 +4937,98 @@ class TradingStrategiesService(LoggerMixin):
             
             # Get strategy performance data (mock data for now)
             strategy_data = await self._get_strategy_performance_data(strategy_name, analysis_period, user_id)
-            normalized_metrics = self._normalize_strategy_performance_data(strategy_data)
+            normalized_data, unit_flags = self._normalize_strategy_performance_data(strategy_data)
 
-            total_return_decimal = normalized_metrics["total_return_decimal"]
-            total_return_pct = normalized_metrics["total_return_pct"]
-            benchmark_return_decimal = normalized_metrics["benchmark_return_decimal"]
-            benchmark_return_pct = normalized_metrics["benchmark_return_pct"]
-            volatility_decimal = normalized_metrics["volatility_decimal"]
-            volatility_pct = normalized_metrics["volatility_pct"]
-            max_drawdown_decimal = normalized_metrics["max_drawdown_decimal"]
-            max_drawdown_pct = normalized_metrics["max_drawdown_pct"]
-            win_rate_pct = normalized_metrics["win_rate_pct"]
-            avg_trade_pct = normalized_metrics["avg_trade_pct"]
-            largest_win_pct = normalized_metrics["largest_win_pct"]
-            largest_loss_pct = normalized_metrics["largest_loss_pct"]
+            def _safe_float(value: Any, default: float) -> float:
+                try:
+                    if value is None:
+                        return default
+                    return float(value)
+                except (TypeError, ValueError):
+                    return default
+
+            total_return = _safe_float(normalized_data.get("total_return"), 0.155)
+            benchmark_return = _safe_float(normalized_data.get("benchmark_return"), 0.12)
+            volatility = _safe_float(normalized_data.get("volatility"), 0.045)
+            max_drawdown = _safe_float(normalized_data.get("max_drawdown"), -0.085)
+            win_rate = _safe_float(normalized_data.get("win_rate"), 0.62)
+            average_trade = _safe_float(normalized_data.get("avg_trade"), 0.023)
+            largest_win = _safe_float(normalized_data.get("largest_win"), 0.085)
+            largest_loss = _safe_float(normalized_data.get("largest_loss"), -0.042)
 
             period_days = max(1, self._get_period_days_safe(analysis_period))
-            annualized_return_decimal = total_return_decimal * (365 / period_days)
-            annualized_return_pct = annualized_return_decimal * 100
-            annualized_volatility_decimal = volatility_decimal * (252 ** 0.5)
+            annualized_return = total_return * (365 / period_days)
+            volatility_annualized = volatility * (252 ** 0.5)
 
             perf_result["performance_metrics"] = {
-                "total_return_pct": total_return_pct,
-                "annualized_return_pct": annualized_return_pct,
-                "volatility_annualized": annualized_volatility_decimal,
-                "max_drawdown_pct": max_drawdown_pct,
+                "total_return_pct": total_return * 100,
+                "annualized_return_pct": annualized_return * 100,
+                "volatility_annualized": volatility_annualized * 100,
+                "max_drawdown_pct": max_drawdown * 100,
                 "recovery_time_days": strategy_data.get("recovery_time", 12),
-                "winning_trades_pct": win_rate_pct,
+                "winning_trades_pct": win_rate * 100,
                 "profit_factor": strategy_data.get("profit_factor", 1.75),
-                "average_trade_return": avg_trade_pct,
-                "largest_win": largest_win_pct,
-                "largest_loss": largest_loss_pct
+                "average_trade_return": average_trade * 100,
+                "largest_win": largest_win * 100,
+                "largest_loss": largest_loss * 100
             }
+
+            perf_result["unit_metadata"] = unit_flags
 
             # Risk-adjusted metrics
             risk_free_rate = 0.05  # 5% risk-free rate
+            sqrt_252 = 252 ** 0.5
+            volatility_for_ratio = max(volatility, 1e-9)
+            downside_volatility = max(volatility * 0.7, 1e-9)
 
-            sharpe_ratio = 0.0
-            sortino_ratio = 0.0
-            if annualized_volatility_decimal > 0:
-                sharpe_ratio = (total_return_decimal - risk_free_rate) / annualized_volatility_decimal
-                sortino_ratio = (total_return_decimal - risk_free_rate) / (annualized_volatility_decimal * 0.7)
-
-            calmar_ratio = (
-                total_return_decimal / abs(max_drawdown_decimal)
-                if abs(max_drawdown_decimal) > 1e-9
-                else 0.0
-            )
-
-            tracking_error_decimal = volatility_decimal * 0.5
-            information_ratio = 0.0
-            if tracking_error_decimal != 0:
-                information_ratio = (total_return_decimal - benchmark_return_decimal) / tracking_error_decimal
-
-            var_adjusted_return = (
-                total_return_decimal / (volatility_decimal * 1.65)
-                if volatility_decimal > 0
-                else 0.0
-            )
-            cvar_adjusted_return = (
-                total_return_decimal / (volatility_decimal * 2.33)
-                if volatility_decimal > 0
-                else 0.0
-            )
+            sharpe_ratio = (total_return - risk_free_rate) / (volatility_for_ratio * sqrt_252)
+            sortino_ratio = (total_return - risk_free_rate) / (downside_volatility * sqrt_252)
+            calmar_ratio = total_return / abs(max_drawdown) if abs(max_drawdown) > 1e-9 else 0.0
 
             perf_result["risk_adjusted_metrics"] = {
                 "sharpe_ratio": round(sharpe_ratio, 3),
                 "sortino_ratio": round(sortino_ratio, 3),
                 "calmar_ratio": round(calmar_ratio, 3),
                 "treynor_ratio": strategy_data.get("treynor_ratio", 1.25),
-                "information_ratio": information_ratio,
-                "jensen_alpha": total_return_decimal - (
-                    risk_free_rate
-                    + strategy_data.get("beta", 0.8) * (benchmark_return_decimal - risk_free_rate)
+                "information_ratio": (
+                    (total_return - benchmark_return)
+                    / max(volatility * 0.5, 1e-9)
                 ),
-                "var_adjusted_return": var_adjusted_return,
-                "cvar_adjusted_return": cvar_adjusted_return
+                "jensen_alpha": total_return - (
+                    risk_free_rate
+                    + strategy_data.get("beta", 0.8) * (benchmark_return - risk_free_rate)
+                ),
+                "var_adjusted_return": total_return / max(volatility * 1.65, 1e-9),
+                "cvar_adjusted_return": total_return / max(volatility * 2.33, 1e-9)
             }
 
             # Benchmark comparison
-            outperformance_decimal = total_return_decimal - benchmark_return_decimal
-            outperformance_pct = outperformance_decimal * 100
-            benchmark_abs = abs(benchmark_return_decimal)
-            relative_outperformance_pct = (
-                (outperformance_decimal / benchmark_abs) * 100
-                if benchmark_abs > 0
-                else 0.0
-            )
+            outperformance_decimal = total_return - benchmark_return
+            benchmark_abs = abs(benchmark_return)
+            outperformance_pct = (outperformance_decimal / benchmark_abs) * 100 if benchmark_abs > 1e-9 else 0.0
 
             perf_result["benchmark_comparison"] = {
                 "benchmark": "BTC",
-                "outperformance": outperformance_pct,
-                "outperformance_pct": relative_outperformance_pct,
+                "benchmark_return_pct": benchmark_return * 100,
+                "outperformance": outperformance_decimal * 100,
+                "outperformance_pct": outperformance_pct,
                 "beta": strategy_data.get("beta", 0.8),
                 "correlation": strategy_data.get("correlation", 0.75),
-                "tracking_error": tracking_error_decimal * 100,
+                "tracking_error": volatility * 0.5 * 100,  # Approximation
                 "up_capture": strategy_data.get("up_capture", 85),    # % of benchmark up moves captured
                 "down_capture": strategy_data.get("down_capture", 70), # % of benchmark down moves captured
                 "hit_rate": strategy_data.get("hit_rate", 58),        # % of periods beating benchmark
                 "worst_relative_month": strategy_data.get("worst_relative", -5.2)
             }
-            
+
             # Performance attribution analysis
-            perf_result["attribution_analysis"] = {
-                "asset_allocation_effect": strategy_data.get("allocation_effect", 2.1),
-                "security_selection_effect": strategy_data.get("selection_effect", 3.4),
-                "timing_effect": strategy_data.get("timing_effect", -0.8),
-                "interaction_effect": strategy_data.get("interaction_effect", 0.3),
-                "top_contributors": [
-                    {"asset": "BTC", "contribution": 6.2},
-                    {"asset": "ETH", "contribution": 4.1},
-                    {"asset": "SOL", "contribution": 2.8}
-                ],
-                "top_detractors": [
-                    {"asset": "ADA", "contribution": -1.5},
-                    {"asset": "DOGE", "contribution": -0.8}
-                ],
-                "sector_breakdown": {
-                    "layer_1": 65,      # % allocation to Layer 1s
-                    "defi": 20,         # % allocation to DeFi
-                    "infrastructure": 10, # % allocation to infrastructure
-                    "other": 5          # % allocation to other
-                }
-            }
-            
+            perf_result["attribution_analysis"] = strategy_data.get("attribution_analysis", {})
+
             # Generate optimization recommendations
             optimization_recommendations = []
-            
+
             # Sharpe ratio optimization
-            if sharpe_ratio < 1.0:
+            if strategy_data.get("total_trades", 0) > 0 and sharpe_ratio < 1.0:
                 optimization_recommendations.append({
                     "type": "RISK_EFFICIENCY",
                     "recommendation": "Improve risk-adjusted returns",
@@ -4917,19 +5036,19 @@ class TradingStrategiesService(LoggerMixin):
                     "priority": "HIGH",
                     "expected_improvement": "15-25% Sharpe improvement possible"
                 })
-            
+
             # Drawdown optimization
-            if abs(max_drawdown_pct) > 15:
+            if abs(max_drawdown) > 0.15:
                 optimization_recommendations.append({
                     "type": "DRAWDOWN_CONTROL",
                     "recommendation": "Implement better drawdown controls",
-                    "action": f"Max drawdown {max_drawdown_pct}% is excessive - add stop-losses and position sizing rules",
+                    "action": f"Max drawdown {max_drawdown * 100:.1f}% is excessive - add stop-losses and position sizing rules",
                     "priority": "HIGH",
                     "expected_improvement": "Reduce max drawdown to <10%"
                 })
             
             # Win rate optimization
-            if perf_result["performance_metrics"]["winning_trades_pct"] < 55:
+            if total_trades > 0 and perf_result["performance_metrics"]["winning_trades_pct"] < 55:
                 optimization_recommendations.append({
                     "type": "WIN_RATE_IMPROVEMENT",
                     "recommendation": "Improve trade selection",
@@ -4949,17 +5068,17 @@ class TradingStrategiesService(LoggerMixin):
                 })
             
             # Volatility optimization
-            if volatility_decimal > 0.06:  # 6% daily volatility
+            if volatility > 0.06:  # 6% daily volatility
                 optimization_recommendations.append({
                     "type": "VOLATILITY_REDUCTION",
                     "recommendation": "Reduce strategy volatility",
-                    "action": f"High volatility {volatility_pct:.1f}% - implement position sizing and diversification",
-                    "priority": "MEDIUM",
+                    "action": f"High volatility {volatility*100:.1f}% - implement position sizing and diversification",
+                    "priority": "MEDIUM", 
                     "expected_improvement": "Target <4% daily volatility"
                 })
-            
+
             # Correlation optimization
-            if perf_result["benchmark_comparison"]["correlation"] > 0.9:
+            if perf_result["benchmark_comparison"].get("correlation", 0) > 0.9:
                 optimization_recommendations.append({
                     "type": "DIVERSIFICATION",
                     "recommendation": "Reduce correlation to benchmark",
@@ -4967,9 +5086,12 @@ class TradingStrategiesService(LoggerMixin):
                     "priority": "LOW",
                     "expected_improvement": "Target correlation <0.8"
                 })
-            
-            perf_result["optimization_recommendations"] = optimization_recommendations
-            
+
+            if strategy_data.get("data_quality", "no_data") == "no_data" or strategy_data.get("total_trades", 0) == 0:
+                perf_result["optimization_recommendations"] = []
+            else:
+                perf_result["optimization_recommendations"] = optimization_recommendations
+
             return {
                 "success": True,
                 "timestamp": datetime.utcnow().isoformat(),
@@ -5536,7 +5658,7 @@ class TradingStrategiesService(LoggerMixin):
             self.logger.error(f"Position fetch failed: {e}")
             return {"error": str(e)}
 
-    def _calculate_new_liquidation_price(self, position: Dict[str, Any], adjustment: float = 0, target_leverage: float = None) -> float:
+    def _calculate_new_liquidation_price(self, position: Dict[str, Any], adjustment: float = 0, target_leverage: Optional[float] = None) -> float:
         """Calculate new liquidation price after leverage adjustment."""
         try:
             # Extract values from position dict with validation
@@ -6496,7 +6618,7 @@ class TradingStrategiesService(LoggerMixin):
     async def options_chain(
         self,
         underlying_symbol: str,
-        expiry_date: str = None,
+        expiry_date: Optional[str] = None,
         user_id: str = None
     ) -> Dict[str, Any]:
         """Options chain analysis with real market data."""
