@@ -112,7 +112,8 @@ async def get_unified_portfolio(
 
 @router.get("/portfolio/admin-status")
 async def get_admin_portfolio_status(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
 ):
     """Get detailed admin portfolio status and diagnostics"""
 
@@ -126,21 +127,21 @@ async def get_admin_portfolio_status(
         # Get portfolio data
         portfolio = await unified_strategy_service.get_user_strategy_portfolio(
             user_id=str(current_user.id),
-            user_role=current_user.role
+            user_role=current_user.role,
+            db=db
         )
 
         # Additional admin diagnostics
-        async with AsyncSessionLocal() as db:
-            from sqlalchemy import select, func
-            from app.models.strategy_access import UserStrategyAccess
+        from sqlalchemy import select, func
+        from app.models.strategy_access import UserStrategyAccess
 
-            # Get access record counts
-            access_count = await db.execute(
-                select(func.count(UserStrategyAccess.id)).where(
-                    UserStrategyAccess.user_id == current_user.id
-                )
+        # Get access record counts
+        access_count = await db.execute(
+            select(func.count(UserStrategyAccess.id)).where(
+                UserStrategyAccess.user_id == current_user.id
             )
-            total_access_records = access_count.scalar()
+        )
+        total_access_records = access_count.scalar()
 
         return {
             "success": True,
