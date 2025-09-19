@@ -23,15 +23,25 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
-# Demo mode feature flag - set via environment variable
-# In production, this should be False and use database-backed storage
-DEMO_MODE = os.getenv("AB_TESTING_DEMO_MODE", "true").lower() == "true"
+# Enterprise A/B Testing Configuration
+from app.core.config import get_settings
+settings = get_settings()
+DEMO_MODE = settings.AB_TESTING_DEMO_MODE
 
 if DEMO_MODE:
     logger.warning(
         "ab_testing.demo_mode_enabled",
         message="A/B Testing is running in DEMO MODE with in-memory storage. "
                 "This is UNSAFE for production multi-worker deployments!"
+    )
+    logger.info(
+        "ab_testing.demo_storage_initialized",
+        message="Demo mode storage initialized - use AB_TESTING_DEMO_MODE=false for production"
+    )
+else:
+    logger.info(
+        "ab_testing.production_mode_enabled",
+        message="A/B Testing running in PRODUCTION MODE with Redis-backed storage for multi-worker safety"
     )
 
 # Enums for validation

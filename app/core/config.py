@@ -47,9 +47,11 @@ class Settings(BaseSettings):
     
     # Database settings
     DATABASE_URL: str = Field(..., env="DATABASE_URL", description="Database connection URL")
+    DATABASE_QUERY_TIMEOUT: int = Field(default=10, env="DATABASE_QUERY_TIMEOUT", description="Database query timeout in seconds")
     
     # Redis settings
     REDIS_URL: str = Field(default="redis://localhost:6379", env="REDIS_URL", description="Redis connection URL")
+    REDIS_HEALTH_CHECK_INTERVAL: int = Field(default=30, env="REDIS_HEALTH_CHECK_INTERVAL", description="Redis health check interval in seconds")
     
     # CORS settings
     BACKEND_CORS_ORIGINS: str = Field(default="*", env="BACKEND_CORS_ORIGINS", description="Allowed CORS origins (comma-separated or JSON list)")
@@ -84,6 +86,14 @@ class Settings(BaseSettings):
         if len([o for o in origins if o != "*"]) > 0:
             origins = [o for o in origins if o != "*"]
         return origins
+    
+    # Enterprise Feature Flags
+    CIRCUIT_BREAKER_ENABLED: bool = Field(default=True, env="CIRCUIT_BREAKER_ENABLED", description="Enable circuit breaker protection for external APIs")
+    PARALLEL_EXCHANGE_FETCHING: bool = Field(default=True, env="PARALLEL_EXCHANGE_FETCHING", description="Enable parallel exchange balance fetching")
+    AB_TESTING_DEMO_MODE: bool = Field(default=False, env="AB_TESTING_DEMO_MODE", description="Enable A/B testing demo mode (unsafe for production)")
+    
+    # Enterprise Performance Settings
+    EXCHANGE_API_TIMEOUT: int = Field(default=15, env="EXCHANGE_API_TIMEOUT", description="Exchange API timeout in seconds")
     
     @computed_field
     @property
