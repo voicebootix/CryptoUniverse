@@ -447,7 +447,20 @@ class StrategyMarketplaceService(LoggerMixin):
                             strategy_function=strategy_func,
                             data_quality=real_metrics.get('data_quality')
                         )
-                        return real_metrics
+                        try:
+                            # Apply same normalization as other paths
+                            normalized_metrics = self._normalize_performance_data(real_metrics, strategy_func)
+                            if normalized_metrics:
+                                return normalized_metrics
+                        except Exception as e:
+                            self.logger.warning(
+                                "Real metrics normalization failed",
+                                strategy_function=strategy_func,
+                                normalization_error=str(e)
+                            )
+                            # Fall back to raw data
+
+                        return real_metrics  # Fallback to raw data if normalization fails
                 except Exception as e:
                     self.logger.warning(
                         "Performance tracker failed, using fallback",
