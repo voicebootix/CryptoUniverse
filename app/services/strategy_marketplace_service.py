@@ -546,23 +546,27 @@ class StrategyMarketplaceService(LoggerMixin):
                     performance_data.get("last_30_days_pnl", 0)
                 )
 
-            # Trading activity metrics
-            winning_trades = performance_data.get("winning_trades",
-                int(normalized["total_trades"] * normalized["win_rate"]))
-            normalized["winning_trades"] = self._safe_int(winning_trades)
+            # Trading activity metrics - no optimistic defaults
+            winning_trades = performance_data.get("winning_trades")
+            if winning_trades is not None:
+                normalized["winning_trades"] = self._safe_int(winning_trades)
+            else:
+                # Only calculate from actual data if both values are present and > 0
+                if normalized["total_trades"] > 0 and normalized["win_rate"] > 0:
+                    normalized["winning_trades"] = int(normalized["total_trades"] * normalized["win_rate"])
+                else:
+                    normalized["winning_trades"] = 0
 
-            # Risk metrics
+            # Risk metrics - explicit neutral defaults only
             normalized["best_trade_pnl"] = self._safe_float(
-                performance_data.get("best_trade_pnl", normalized["total_pnl"] * 0.15)
+                performance_data.get("best_trade_pnl", 0.0)
             )
             normalized["worst_trade_pnl"] = self._safe_float(
-                performance_data.get("worst_trade_pnl", -abs(normalized["total_pnl"]) * 0.08)
+                performance_data.get("worst_trade_pnl", 0.0)
             )
 
-            # Support ALL major trading pairs - no limitations
-            normalized["supported_symbols"] = performance_data.get("supported_symbols",
-                ["BTC", "ETH", "BNB", "SOL", "ADA", "DOT", "MATIC", "LINK",
-                 "AVAX", "ATOM", "UNI", "XRP", "DOGE", "LTC", "TRX", "NEAR"])
+            # Supported symbols - no optimistic defaults
+            normalized["supported_symbols"] = performance_data.get("supported_symbols", [])
 
             self.logger.info(f"Performance data normalized successfully for {strategy_func}",
                            strategy=strategy_func,
@@ -701,10 +705,10 @@ class StrategyMarketplaceService(LoggerMixin):
         # Strategy-specific realistic performance profiles
         strategy_profiles = {
             "spot_momentum_strategy": {
-                "total_return": 45.2,
+                "total_pnl": 45.2,  # Changed from total_return to total_pnl
                 "max_drawdown": 18.7,
                 "sharpe_ratio": 1.34,
-                "win_rate": 62.3,
+                "win_rate": 0.623,  # Convert from percentage to normalized fraction (0-1)
                 "total_trades": 89,
                 "best_month": 12.4,
                 "worst_month": -15.2,
@@ -712,10 +716,10 @@ class StrategyMarketplaceService(LoggerMixin):
                 "calmar_ratio": 2.42
             },
             "risk_management": {
-                "total_return": 12.8,
+                "total_pnl": 12.8,  # Changed from total_return to total_pnl
                 "max_drawdown": 4.2,
                 "sharpe_ratio": 2.87,
-                "win_rate": 78.9,
+                "win_rate": 0.789,  # Convert from percentage to normalized fraction (0-1)
                 "total_trades": 156,
                 "best_month": 3.2,
                 "worst_month": -2.1,
@@ -723,10 +727,10 @@ class StrategyMarketplaceService(LoggerMixin):
                 "calmar_ratio": 3.05
             },
             "pairs_trading": {
-                "total_return": 23.6,
+                "total_pnl": 23.6,  # Changed from total_return to total_pnl
                 "max_drawdown": 8.9,
                 "sharpe_ratio": 1.89,
-                "win_rate": 71.2,
+                "win_rate": 0.712,  # Convert from percentage to normalized fraction (0-1)
                 "total_trades": 234,
                 "best_month": 6.8,
                 "worst_month": -4.3,
@@ -734,10 +738,10 @@ class StrategyMarketplaceService(LoggerMixin):
                 "calmar_ratio": 2.65
             },
             "statistical_arbitrage": {
-                "total_return": 31.4,
+                "total_pnl": 31.4,  # Changed from total_return to total_pnl
                 "max_drawdown": 11.2,
                 "sharpe_ratio": 2.12,
-                "win_rate": 68.7,
+                "win_rate": 0.687,  # Convert from percentage to normalized fraction (0-1)
                 "total_trades": 412,
                 "best_month": 8.9,
                 "worst_month": -6.7,
@@ -745,10 +749,10 @@ class StrategyMarketplaceService(LoggerMixin):
                 "calmar_ratio": 2.80
             },
             "market_making": {
-                "total_return": 18.9,
+                "total_pnl": 18.9,  # Changed from total_return to total_pnl
                 "max_drawdown": 3.8,
                 "sharpe_ratio": 3.21,
-                "win_rate": 84.2,
+                "win_rate": 0.842,  # Convert from percentage to normalized fraction (0-1)
                 "total_trades": 1847,
                 "best_month": 2.1,
                 "worst_month": -1.9,
@@ -759,10 +763,10 @@ class StrategyMarketplaceService(LoggerMixin):
         
         # Get strategy-specific profile or use conservative default
         profile = strategy_profiles.get(strategy_func, {
-            "total_return": 15.3,
+            "total_pnl": 15.3,  # Changed from total_return to total_pnl
             "max_drawdown": 8.5,
             "sharpe_ratio": 1.45,
-            "win_rate": 65.8,
+            "win_rate": 0.658,  # Convert from percentage to normalized fraction (0-1)
             "total_trades": 127,
             "best_month": 4.2,
             "worst_month": -3.8,
@@ -930,10 +934,10 @@ class StrategyMarketplaceService(LoggerMixin):
             
             return {
                 "backtest_period": f"{min(h[0]['date'] for h in historical_data.values())} to {max(h[-1]['date'] for h in historical_data.values())}",
-                "total_return": round(total_return, 1),
+                "total_pnl": round(total_return, 1),  # Changed from total_return to total_pnl
                 "max_drawdown": round(max_drawdown * 100, 1),
                 "sharpe_ratio": round(sharpe_ratio, 2),
-                "win_rate": round(win_rate, 1),
+                "win_rate": round(win_rate / 100, 3),  # Convert percentage to normalized fraction (0-1)
                 "total_trades": len(trades),
                 "final_portfolio_value": round(portfolio_value, 2),
                 "best_trade": max([t.get("pnl", 0) for t in trades], default=0),
