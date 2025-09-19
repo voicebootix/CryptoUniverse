@@ -139,7 +139,7 @@ async def grant_admin_full_strategy_access(
                 })
 
             logger.info(
-                "📊 Fast admin strategy list generated",
+                "📊 Fast admin strategy list generated successfully",
                 operation_id=operation_id,
                 ai_strategies=len(ai_catalog),
                 community_strategies=len(community_strategies),
@@ -180,43 +180,47 @@ async def grant_admin_full_strategy_access(
             strategy_type=request.strategy_type
         )
 
-        # Step 5: Grant strategies via Redis (enterprise batch operation)
-        redis_key = f"user_strategies:{target_user_id}"
+        # Step 5: Grant strategies via existing working service (enterprise batch operation)
         strategies_granted = []
 
         try:
-            # Use Redis pipeline for atomic batch operation
-            async with redis.pipeline(transaction=True) as pipe:
-                # Clear existing strategies (admin gets fresh full access)
-                pipe.delete(redis_key)
+            # Clear existing strategies first
+            redis_key = f"user_strategies:{target_user_id}"
+            await redis.delete(redis_key)
 
-                # Add all strategies
-                for strategy_id in strategies_to_grant:
-                    pipe.sadd(redis_key, strategy_id)
+            # Add each strategy using the same method as the working service
+            for strategy_id in strategies_to_grant:
+                try:
+                    # Use the same safe Redis operation as the working service
+                    result = await redis.sadd(redis_key, strategy_id)
+                    if result is not None:
+                        strategies_granted.append(strategy_id)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to add strategy",
+                        operation_id=operation_id,
+                        strategy_id=strategy_id,
+                        error=str(e)
+                    )
 
-                # Set expiry (1 year for admin access)
-                pipe.expire(redis_key, 86400 * 365)
-
-                # Execute pipeline
-                results = await pipe.execute()
+            # Set reasonable expiry (1 year for admin access)
+            if len(strategies_granted) > 0:
+                await redis.expire(redis_key, 86400 * 365)
 
             # Verify the operation
             final_strategies = await redis.smembers(redis_key)
-            strategies_granted = [
-                s.decode() if isinstance(s, bytes) else s
-                for s in final_strategies
-            ]
+            verified_count = len(final_strategies) if final_strategies else 0
 
             logger.info(
                 "✅ Admin strategy grant completed",
                 operation_id=operation_id,
                 strategies_granted_count=len(strategies_granted),
-                verification_count=len(final_strategies)
+                verified_count=verified_count
             )
 
         except Exception as e:
             logger.error(
-                "❌ Redis batch operation failed",
+                "❌ Redis strategy grant failed",
                 operation_id=operation_id,
                 error=str(e)
             )
