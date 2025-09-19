@@ -234,7 +234,7 @@ class UnifiedStrategyService(LoggerMixin):
                 if user_role == UserRole.ADMIN:
                     portfolio = await self._get_admin_full_portfolio(user_id, db)
                 else:
-                    portfolio = await self._get_user_owned_portfolio(user_id, db)
+                    portfolio = await self._get_user_owned_portfolio(user_id, db, user_role)
 
                 # Add metadata and performance tracking
                 execution_time = (datetime.utcnow() - operation_start).total_seconds()
@@ -329,7 +329,8 @@ class UnifiedStrategyService(LoggerMixin):
     async def _get_user_owned_portfolio(
         self,
         user_id: str,
-        db: AsyncSession
+        db: AsyncSession,
+        user_role: UserRole
     ) -> UnifiedStrategyPortfolio:
         """Regular users get only their owned/purchased strategies"""
 
@@ -366,7 +367,7 @@ class UnifiedStrategyService(LoggerMixin):
 
         return UnifiedStrategyPortfolio(
             user_id=user_id,
-            user_role=UserRole.USER,
+            user_role=user_role,
             strategies=strategies,
             summary=summary,
             metadata={
@@ -382,7 +383,9 @@ class UnifiedStrategyService(LoggerMixin):
         strategy_key: str,
         config: Dict[str, Any],
         user_id: str,
-        is_admin: bool = False
+        is_admin: bool = False,
+        access_type: Optional[str] = None,
+        subscription_type: Optional[str] = None
     ) -> Dict[str, Any]:
         """Build AI strategy record with performance data"""
 
@@ -400,8 +403,8 @@ class UnifiedStrategyService(LoggerMixin):
 
             # Access information
             "is_active": True,
-            "subscription_type": "admin_grant" if is_admin else "purchased",
-            "access_type": "admin_grant" if is_admin else "purchased",
+            "subscription_type": subscription_type if subscription_type else ("admin_grant" if is_admin else "purchased"),
+            "access_type": access_type if access_type else ("admin_grant" if is_admin else "purchased"),
             "activated_at": datetime.utcnow().isoformat(),
 
             # Pricing
@@ -597,7 +600,12 @@ class UnifiedStrategyService(LoggerMixin):
 
         config = self._ai_strategy_catalog[strategy_key]
         return await self._build_ai_strategy_record(
-            strategy_key, config, str(access.user_id), is_admin=False
+            strategy_key,
+            config,
+            str(access.user_id),
+            is_admin=False,
+            access_type=access.access_type.value if access.access_type else None,
+            subscription_type=access.subscription_type
         )
 
     async def _build_community_strategy_from_access(
@@ -768,7 +776,7 @@ class UnifiedStrategyService(LoggerMixin):
                 existing_access.credits_paid = credits_paid
                 existing_access.expires_at = expires_at
                 existing_access.is_active = True
-                existing_access.metadata = metadata or {}
+                existing_access.metadata_json = metadata or {}
                 existing_access.updated_at = datetime.utcnow()
 
                 await db.commit()
@@ -791,7 +799,7 @@ class UnifiedStrategyService(LoggerMixin):
                     subscription_type=subscription_type,
                     credits_paid=credits_paid,
                     expires_at=expires_at,
-                    metadata=metadata or {},
+                    metadata_json=metadata or {},
                     is_active=True
                 )
 
@@ -860,7 +868,7 @@ class UnifiedStrategyService(LoggerMixin):
                     subscription_type="permanent",
                     credits_paid=0,
                     expires_at=None,
-                    metadata={"auto_granted": True, "admin_privilege": True}
+                    metadata_json={"auto_granted": True, "admin_privilege": True}
                 )
                 granted_access.append(access)
 

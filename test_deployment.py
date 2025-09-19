@@ -7,10 +7,22 @@ from requests.exceptions import RequestException, Timeout
 def test_enterprise_deployment():
     """Test if the enterprise admin endpoint is deployed and working."""
 
-    # Get configuration from environment
-    base_url = os.environ.get("CRYPTOUNIVERSE_BASE_URL", "https://cryptouniverse.onrender.com")
+    # Get configuration from environment - require explicit opt-in
+    base_url = os.environ.get("CRYPTOUNIVERSE_BASE_URL")
     admin_email = os.environ.get("CRYPTOUNIVERSE_ADMIN_EMAIL")
     admin_password = os.environ.get("CRYPTOUNIVERSE_ADMIN_PASSWORD")
+    test_enabled = os.environ.get("CRYPTOUNIVERSE_TEST_ENABLE")
+
+    # Require explicit opt-in to prevent accidental production calls
+    if not base_url:
+        print("ERROR: CRYPTOUNIVERSE_BASE_URL environment variable is required")
+        print("Set this to explicitly specify the target environment")
+        return False
+
+    if test_enabled not in ["1", "true"]:
+        print("ERROR: CRYPTOUNIVERSE_TEST_ENABLE must be set to '1' or 'true'")
+        print("This prevents accidental execution against production systems")
+        return False
 
     if not admin_email or not admin_password:
         print("ERROR: Missing CRYPTOUNIVERSE_ADMIN_EMAIL or CRYPTOUNIVERSE_ADMIN_PASSWORD environment variables")

@@ -103,7 +103,71 @@ async def restore_user_strategies(
             strategies=strategies_to_restore
         )
 
-        # Step 3: Get Redis connection with timeout
+        # Step 3: Persist access in DB via unified service (DB-first)
+        from app.services.unified_strategy_service import UnifiedStrategyService
+        unified_service = UnifiedStrategyService()
+
+        if not request.dry_run:
+            # Use unified service to grant access in database first
+            from app.models.strategy_access import StrategyAccessType, StrategyType
+
+            db_granted = []
+            db_failed = []
+
+            for strategy_id in strategies_to_restore:
+                try:
+                    # Determine strategy type based on ID
+                    strategy_type = StrategyType.AI if strategy_id.startswith("ai_") else StrategyType.COMMUNITY
+
+                    await unified_service.grant_strategy_access(
+                        user_id=request.user_id,
+                        strategy_id=strategy_id,
+                        strategy_type=strategy_type,
+                        access_type=StrategyAccessType.ADMIN_GRANT,
+                        subscription_type="recovery_grant",
+                        credits_paid=0,
+                        expires_at=None,  # Permanent access for recovery
+                        metadata={
+                            "recovery_operation": True,
+                            "operation_id": operation_id,
+                            "granted_by": current_user.email,
+                            "recovery_reason": "enterprise_recovery_operation"
+                        }
+                    )
+                    db_granted.append(strategy_id)
+
+                except Exception as e:
+                    logger.warning(
+                        "⚠️ Failed to grant strategy access in database",
+                        strategy_id=strategy_id,
+                        error=str(e)
+                    )
+                    db_failed.append(strategy_id)
+
+            if db_granted:
+                logger.info(
+                    "✅ Database access granted successfully",
+                    operation_id=operation_id,
+                    strategies_granted=len(db_granted),
+                    granted_strategies=db_granted
+                )
+
+            if db_failed:
+                logger.error(
+                    "❌ Some database grants failed",
+                    operation_id=operation_id,
+                    failed_count=len(db_failed),
+                    failed_strategies=db_failed
+                )
+
+                if not db_granted:
+                    # If all database grants failed, this is a serious error
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"All database recovery operations failed. Failed strategies: {db_failed}"
+                    )
+
+        # Step 4: Optional cache refresh in Redis (best-effort)
         redis = None
         try:
             redis = await asyncio.wait_for(get_redis_client(), timeout=3.0)
@@ -170,8 +234,11 @@ async def restore_user_strategies(
             for strategy in strategies_to_add:
                 redis_operations.append(f"SADD {redis_key} {strategy}")
 
-        # Step 6: Execute Redis operations (if not dry run)
-        if not request.dry_run and strategies_to_add:
+        # Step 5: Best-effort Redis cache refresh (if not dry run and Redis available)
+        redis_operations_successful = False
+        final_strategies = []
+
+        if not request.dry_run and strategies_to_add and redis:
             try:
                 # Start Redis transaction
                 async with redis.pipeline(transaction=True) as pipe:
@@ -191,28 +258,26 @@ async def restore_user_strategies(
                     for s in verification_set
                 ]
 
-                missing_strategies = set(strategies_to_restore) - set(final_strategies)
-                if missing_strategies:
-                    strategies_failed.extend(missing_strategies)
-                    logger.error(
-                        "❌ Strategy restoration incomplete",
-                        operation_id=operation_id,
-                        missing_strategies=list(missing_strategies)
-                    )
-
+                redis_operations_successful = True
                 logger.info(
-                    "✅ Redis operations completed successfully",
+                    "✅ Redis cache refresh completed",
                     operation_id=operation_id,
                     final_strategies_count=len(final_strategies),
                     final_strategies=final_strategies
                 )
 
             except Exception as e:
-                logger.error(
-                    "❌ Redis transaction failed",
+                logger.warning(
+                    "⚠️ Redis cache refresh failed (not critical - DB is source of truth)",
                     operation_id=operation_id,
                     error=str(e)
                 )
+
+        elif not redis:
+            logger.info(
+                "ℹ️ Redis cache refresh skipped - Redis unavailable (not critical)",
+                operation_id=operation_id
+            )
                 strategies_failed = strategies_to_add.copy()
                 strategies_to_add = []
 
@@ -228,34 +293,38 @@ async def restore_user_strategies(
             dry_run=request.dry_run
         )
 
-        # Step 8: Calculate execution time and prepare response
+        # Step 6: Calculate execution time and prepare response
         execution_time = (datetime.utcnow() - start_time).total_seconds()
 
-        success = len(strategies_failed) == 0 and len(strategies_to_add) > 0
+        # Success is based on database operations, not Redis
+        db_success = len(db_granted) > 0 if not request.dry_run else len(strategies_to_add) > 0
+        total_restored = len(db_granted) if not request.dry_run else len(strategies_to_add)
 
         if request.dry_run:
-            message = f"DRY RUN: Would restore {len(strategies_to_add)} strategies"
-        elif success:
-            message = f"Successfully restored {len(strategies_to_add)} strategies"
-        elif len(strategies_failed) > 0:
-            message = f"Partial failure: {len(strategies_failed)} strategies failed"
+            message = f"DRY RUN: Would restore {len(strategies_to_add)} strategies in database"
+        elif db_success:
+            redis_status = " (Redis cache also updated)" if redis_operations_successful else " (Redis cache update failed - not critical)"
+            message = f"Successfully restored {total_restored} strategies in database{redis_status}"
+        elif len(db_failed) > 0:
+            message = f"Database recovery failed: {len(db_failed)} strategies failed to be granted"
         else:
             message = "No strategies needed restoration"
 
         logger.info(
             "🏁 Strategy restoration completed",
             operation_id=operation_id,
-            success=success,
+            db_success=db_success,
             execution_time_seconds=execution_time,
-            strategies_restored_count=len(strategies_to_add),
-            strategies_failed_count=len(strategies_failed)
+            database_granted_count=len(db_granted) if not request.dry_run else len(strategies_to_add),
+            database_failed_count=len(db_failed) if not request.dry_run else 0,
+            redis_cache_updated=redis_operations_successful
         )
 
         return StrategyRestoreResponse(
-            success=success,
+            success=db_success,
             user_id=request.user_id,
-            strategies_restored=strategies_to_add,
-            strategies_failed=strategies_failed,
+            strategies_restored=db_granted if not request.dry_run else strategies_to_add,
+            strategies_failed=db_failed if not request.dry_run else [],
             redis_operations=redis_operations,
             execution_time_seconds=execution_time,
             dry_run=request.dry_run,

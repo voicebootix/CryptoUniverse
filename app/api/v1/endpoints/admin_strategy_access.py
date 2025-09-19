@@ -197,8 +197,7 @@ async def grant_admin_full_strategy_access(
                     result = await strategy_marketplace_service.purchase_strategy_access(
                         user_id=target_user_id,
                         strategy_id=strategy_id,
-                        subscription_type="permanent",  # Admin gets permanent access
-                        db_session=db
+                        subscription_type="monthly"  # Use supported subscription type
                     )
 
                     if result.get("success"):

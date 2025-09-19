@@ -116,7 +116,8 @@ class UserStrategyAccess(Base):
     )
 
     # Strategy-specific configuration
-    metadata = Column(
+    metadata_json = Column(
+        'metadata',  # Keep DB column name as 'metadata'
         JSONB,
         nullable=True,
         comment="Strategy-specific settings, parameters, and configuration"
@@ -177,7 +178,7 @@ class UserStrategyAccess(Base):
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
             "is_active": self.is_active,
             "is_valid": self.is_valid(),
-            "metadata": self.metadata or {},
+            "metadata": self.metadata_json or {},
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat()
         }

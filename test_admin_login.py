@@ -1,13 +1,24 @@
+import os
 import requests
 import json
 
-# Login endpoint
-url = "https://cryptouniverse.onrender.com/api/v1/auth/login"
+# Configuration from environment variables
+base_url = os.environ.get("CRYPTOUNIVERSE_BASE_URL", "https://cryptouniverse.onrender.com")
+admin_email = os.environ.get("CRYPTOUNIVERSE_ADMIN_EMAIL")
+admin_password = os.environ.get("CRYPTOUNIVERSE_ADMIN_PASSWORD")
 
-# Admin credentials
+if not admin_email or not admin_password:
+    print("ERROR: Missing CRYPTOUNIVERSE_ADMIN_EMAIL or CRYPTOUNIVERSE_ADMIN_PASSWORD environment variables")
+    print("Please set these environment variables for secure authentication")
+    exit(1)
+
+# Login endpoint
+url = f"{base_url}/api/v1/auth/login"
+
+# Admin credentials from environment
 payload = {
-    "email": "admin@cryptouniverse.com",
-    "password": "AdminPass123!"
+    "email": admin_email,
+    "password": admin_password
 }
 
 # Make the login request
@@ -26,7 +37,7 @@ if response.status_code == 200:
         headers = {"Authorization": f"Bearer {token}"}
 
         # Get user strategies
-        strategies_url = "https://cryptouniverse.onrender.com/api/v1/strategies/user"
+        strategies_url = f"{base_url}/api/v1/strategies/user"
         strategies_response = requests.get(strategies_url, headers=headers)
 
         print("\n=== User Strategies ===")
