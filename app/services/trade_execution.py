@@ -625,7 +625,85 @@ class TradeExecutionService(LoggerMixin):
         self.circuit_breaker = TradingCircuitBreaker()
         self.exchange_connector = ExchangeConnector()
         self.daily_trade_count = {}
-    
+
+    async def validate_trade(
+        self,
+        trade_request: Dict[str, Any],
+        user_id: str
+    ) -> Dict[str, Any]:
+        """Validate trade parameters before execution."""
+
+        filtered_request = {
+            key: value
+            for key, value in trade_request.items()
+            if key not in {"validation_required", "user_id"}
+        }
+
+        errors: List[str] = []
+
+        symbol = filtered_request.get("symbol")
+        if not symbol or not isinstance(symbol, str):
+            errors.append("Trade symbol is required")
+
+        action_value = filtered_request.get("action") or filtered_request.get("side")
+        if not action_value or not isinstance(action_value, str):
+            errors.append("Trade action is required")
+            action_upper = None
+        else:
+            action_upper = action_value.upper()
+            if action_upper not in {"BUY", "SELL"}:
+                errors.append(f"Unsupported trade action: {action_value}")
+            else:
+                filtered_request["action"] = action_upper
+                filtered_request["side"] = action_upper.lower()
+
+        # Normalize quantity from amount or quantity fields
+        normalized_quantity: Optional[float] = None
+        quantity_value = filtered_request.get("quantity")
+        amount_value = filtered_request.get("amount")
+        position_size_value = filtered_request.get("position_size_usd")
+
+        def _convert_to_float(raw_value: Any, field_name: str) -> Optional[float]:
+            if raw_value is None:
+                return None
+            try:
+                return float(raw_value)
+            except (TypeError, ValueError):
+                errors.append(f"Invalid {field_name} value")
+                return None
+
+        normalized_quantity = _convert_to_float(quantity_value, "quantity")
+        if normalized_quantity is None:
+            normalized_quantity = _convert_to_float(amount_value, "amount")
+        if normalized_quantity is None and position_size_value is not None:
+            normalized_quantity = _convert_to_float(position_size_value, "position_size_usd")
+
+        if normalized_quantity is None:
+            errors.append("Trade quantity is required")
+        elif normalized_quantity <= 0:
+            errors.append("Trade quantity must be greater than zero")
+        else:
+            filtered_request["quantity"] = normalized_quantity
+            filtered_request.setdefault("amount", normalized_quantity)
+
+        order_type = filtered_request.get("order_type", "MARKET")
+        if isinstance(order_type, str):
+            filtered_request["order_type"] = order_type.upper()
+        else:
+            errors.append("Invalid order type")
+
+        if errors:
+            return {
+                "valid": False,
+                "reason": "; ".join(errors),
+                "trade_request": filtered_request
+            }
+
+        return {
+            "valid": True,
+            "trade_request": filtered_request
+        }
+
     async def execute_trade(
         self,
         trade_request: Dict[str, Any],
