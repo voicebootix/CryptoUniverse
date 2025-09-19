@@ -38,20 +38,23 @@ export const usePaperModeStore = create<PaperModeState>()(
 
       setPaperMode: async (enabled: boolean) => {
         set({ isLoading: true });
-        
+
         try {
           if (enabled) {
             // Initialize paper trading account if needed
             const response = await apiClient.post('/paper-trading/setup');
-            
+
             if (response.data.success) {
-              set({ 
+              const portfolio =
+                response.data.virtual_portfolio || response.data.paper_portfolio || response.data.portfolio || {};
+
+              set({
                 isPaperMode: true,
-                paperBalance: response.data.data.balance || 10000
+                paperBalance: portfolio.cash_balance ?? portfolio.balance ?? 10000
               });
-              
+
               // Toast notification handled in component
-              
+
               // Fetch initial stats
               await get().fetchPaperStats();
             }
@@ -71,11 +74,22 @@ export const usePaperModeStore = create<PaperModeState>()(
       fetchPaperStats: async () => {
         try {
           const response = await apiClient.get('/paper-trading/stats');
-          
+
           if (response.data.success) {
-            set({ 
-              paperStats: response.data.data,
-              paperBalance: response.data.data.currentBalance || get().paperBalance
+            const portfolio = response.data.virtual_portfolio || response.data.paper_portfolio || {};
+            const stats = response.data.stats || {};
+            const performance = portfolio.performance_metrics || {};
+
+            set({
+              paperStats: {
+                totalTrades: stats.total_trades ?? performance.total_trades ?? 0,
+                winRate: stats.win_rate ?? performance.win_rate ?? 0,
+                totalProfit: stats.total_profit ?? performance.total_profit_loss ?? 0,
+                bestTrade: stats.best_trade ?? performance.best_trade ?? 0,
+                worstTrade: stats.worst_trade ?? performance.worst_trade ?? 0,
+                readyForLive: response.data.ready_for_live_trading ?? false
+              },
+              paperBalance: portfolio.cash_balance ?? get().paperBalance
             });
           }
         } catch (error) {
@@ -85,18 +99,20 @@ export const usePaperModeStore = create<PaperModeState>()(
 
       resetPaperAccount: async () => {
         set({ isLoading: true });
-        
+
         try {
           const response = await apiClient.post('/paper-trading/reset');
-          
+
           if (response.data.success) {
+            const portfolio = response.data.virtual_portfolio || {};
+
             set({
-              paperBalance: 10000,
+              paperBalance: portfolio.cash_balance ?? 10000,
               paperStats: null
             });
-            
+
             // Toast notification handled in component
-            
+
             await get().fetchPaperStats();
           }
         } catch (error) {
