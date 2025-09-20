@@ -205,8 +205,15 @@ class User(Base):
     @property
     def display_name(self) -> str:
         """Get user's display name from profile or email."""
-        if self.profile:
-            return self.profile.display_name
+        try:
+            # Check if profile is already loaded without triggering lazy loading
+            if hasattr(self, '_sa_instance_state') and 'profile' in self.__dict__:
+                profile = self.__dict__['profile']
+                if profile and hasattr(profile, 'display_name'):
+                    return profile.display_name
+        except Exception:
+            # Fallback to email-based display name if profile access fails
+            pass
         return self.email.split('@')[0]
     
 
