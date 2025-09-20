@@ -774,7 +774,8 @@ class UnifiedStrategyService(LoggerMixin):
         subscription_type: str = "monthly",
         credits_paid: int = 0,
         expires_at: Optional[datetime] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        db: Optional[AsyncSession] = None
     ) -> UserStrategyAccess:
         """
         Grant strategy access to user with race condition handling.
@@ -783,10 +784,34 @@ class UnifiedStrategyService(LoggerMixin):
         without IntegrityError on unique constraint violations.
         """
 
-        async with AsyncSessionLocal() as db:
-            try:
-                # First attempt: Try to create new access record
-                new_access = UserStrategyAccess(
+        if db is None:
+            async with AsyncSessionLocal() as db:
+                return await self._grant_strategy_access_with_db(
+                    user_id, strategy_id, strategy_type, access_type,
+                    subscription_type, credits_paid, expires_at, metadata, db
+                )
+        else:
+            return await self._grant_strategy_access_with_db(
+                user_id, strategy_id, strategy_type, access_type,
+                subscription_type, credits_paid, expires_at, metadata, db
+            )
+
+    async def _grant_strategy_access_with_db(
+        self,
+        user_id: str,
+        strategy_id: str,
+        strategy_type: StrategyType,
+        access_type: StrategyAccessType,
+        subscription_type: str,
+        credits_paid: int,
+        expires_at: Optional[datetime],
+        metadata: Optional[Dict[str, Any]],
+        db: AsyncSession
+    ) -> UserStrategyAccess:
+        """Helper method to grant strategy access with provided database session"""
+        try:
+            # First attempt: Try to create new access record
+            new_access = UserStrategyAccess(
                     user_id=UUID(user_id),
                     strategy_id=strategy_id,
                     strategy_type=strategy_type,
@@ -857,36 +882,49 @@ class UnifiedStrategyService(LoggerMixin):
     async def revoke_strategy_access(
         self,
         user_id: str,
-        strategy_id: str
+        strategy_id: str,
+        db: Optional[AsyncSession] = None
     ) -> bool:
         """Revoke strategy access"""
 
-        async with AsyncSessionLocal() as db:
-            result = await db.execute(
-                select(UserStrategyAccess).where(
-                    and_(
-                        UserStrategyAccess.user_id == UUID(user_id),
-                        UserStrategyAccess.strategy_id == strategy_id
-                    )
+        if db is None:
+            async with AsyncSessionLocal() as db:
+                return await self._revoke_strategy_access_with_db(user_id, strategy_id, db)
+        else:
+            return await self._revoke_strategy_access_with_db(user_id, strategy_id, db)
+
+    async def _revoke_strategy_access_with_db(
+        self,
+        user_id: str,
+        strategy_id: str,
+        db: AsyncSession
+    ) -> bool:
+        """Helper method to revoke strategy access with provided database session"""
+        result = await db.execute(
+            select(UserStrategyAccess).where(
+                and_(
+                    UserStrategyAccess.user_id == UUID(user_id),
+                    UserStrategyAccess.strategy_id == strategy_id
                 )
             )
-            access = result.scalar_one_or_none()
+        )
+        access = result.scalar_one_or_none()
 
-            if access:
-                access.is_active = False
-                access.updated_at = datetime.utcnow()
-                await db.commit()
+        if access:
+            access.is_active = False
+            access.updated_at = datetime.utcnow()
+            await db.commit()
 
-                self.logger.info(
-                    "Revoked strategy access",
-                    user_id=user_id,
-                    strategy_id=strategy_id,
-                    access_id=str(access.id)
-                )
+            self.logger.info(
+                "Revoked strategy access",
+                user_id=user_id,
+                strategy_id=strategy_id,
+                access_id=str(access.id)
+            )
 
-                return True
+            return True
 
-            return False
+        return False
 
     async def bulk_grant_admin_access(self, admin_user_id: str) -> List[UserStrategyAccess]:
         """Grant admin access to all AI strategies"""
