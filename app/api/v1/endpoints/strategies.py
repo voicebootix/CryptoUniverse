@@ -257,7 +257,7 @@ async def execute_strategy(
             stmt = select(ExchangeAccount).where(
                 and_(
                     ExchangeAccount.user_id == current_user.id,
-                    ExchangeAccount.status == ExchangeStatus.ACTIVE,
+                    ExchangeAccount.status == ExchangeStatus.ACTIVE.value,
                     ExchangeAccount.trading_enabled.is_(True)
                 )
             )
@@ -490,7 +490,7 @@ async def activate_strategy(
             exchange_stmt = select(ExchangeAccount).where(
                 and_(
                     ExchangeAccount.user_id == current_user.id,
-                    ExchangeAccount.status == ExchangeStatus.ACTIVE,
+                    ExchangeAccount.status == ExchangeStatus.ACTIVE.value,
                     ExchangeAccount.trading_enabled.is_(True)
                 )
             )

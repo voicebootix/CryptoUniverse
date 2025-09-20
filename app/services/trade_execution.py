@@ -1001,9 +1001,9 @@ class TradeExecutionService(LoggerMixin):
                 ).where(
                     and_(
                         ExchangeAccount.user_id == user_id,
-                        ExchangeAccount.status == ExchangeStatus.ACTIVE,
+                        ExchangeAccount.status == ExchangeStatus.ACTIVE.value,
                         ExchangeAccount.trading_enabled.is_(True),
-                        ExchangeApiKey.status == ApiKeyStatus.ACTIVE,
+                        ExchangeApiKey.status == ApiKeyStatus.ACTIVE.value,
                         ExchangeApiKey.is_validated.is_(True)
                     )
                 )
