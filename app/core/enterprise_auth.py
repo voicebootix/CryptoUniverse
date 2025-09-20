@@ -95,9 +95,9 @@ class EnterpriseAuthService:
         self.max_login_attempts = 5
         self.lockout_duration_minutes = 15
         
-        # Initialize Redis for session management
+        # Redis client will be initialized asynchronously
         self.redis_client = None
-        self._initialize_redis()
+        self._redis_initialized = False
         
         # Authentication metrics
         self.auth_metrics = {
@@ -109,14 +109,19 @@ class EnterpriseAuthService:
             "token_refreshes": 0
         }
     
-    def _initialize_redis(self):
-        """Initialize Redis connection with error handling."""
+    async def _initialize_redis(self):
+        """Initialize Redis connection asynchronously with error handling."""
+        if self._redis_initialized:
+            return
+        
         try:
-            self.redis_client = get_redis_client()
+            self.redis_client = await get_redis_client()
+            self._redis_initialized = True
             logger.info("Redis connection initialized for authentication")
         except Exception as e:
             logger.warning("Redis initialization failed, using fallback", error=str(e))
             self.redis_client = None
+            self._redis_initialized = True  # Mark as attempted
     
     async def authenticate_user(
         self,
@@ -144,6 +149,9 @@ class EnterpriseAuthService:
         )
         
         try:
+            # Ensure Redis is initialized
+            await self._initialize_redis()
+            
             # Step 1: Rate limiting check
             await self._check_rate_limits(email, ip_address)
             
@@ -228,8 +236,16 @@ class EnterpriseAuthService:
     
     async def _check_rate_limits(self, email: str, ip_address: str):
         """Check rate limits for login attempts."""
+        # Ensure Redis connection is available
         if not self.redis_client:
             return  # Skip if Redis unavailable
+        
+        try:
+            # Test Redis connection
+            await self.redis_client.ping()
+        except Exception as e:
+            logger.warning("Redis connection failed during rate limit check", error=str(e))
+            return  # Skip rate limiting if Redis is unavailable
         
         try:
             # Check IP-based rate limiting

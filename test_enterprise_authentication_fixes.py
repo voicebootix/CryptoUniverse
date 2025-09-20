@@ -214,10 +214,8 @@ def test_authentication_endpoint_structure():
         # Check TokenResponse model has required fields
         response_fields = ['access_token', 'refresh_token', 'token_type', 'expires_in', 'user_id', 'session_id']
         
-        # Create a test instance to check fields
-        import inspect
-        response_signature = inspect.signature(TokenResponse)
-        available_params = list(response_signature.parameters.keys())
+        # Use Pydantic v2 model_fields for field detection
+        available_params = list(TokenResponse.model_fields.keys())
         
         for field in response_fields:
             if field in available_params:

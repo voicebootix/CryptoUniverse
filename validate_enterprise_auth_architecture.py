@@ -12,12 +12,29 @@ Date: September 20, 2025
 import os
 import sys
 import re
+from pathlib import Path
+
+def _p(relative_path: str) -> str:
+    """Resolve path relative to repository root."""
+    # Find the repository root by looking for common markers
+    current_dir = Path(__file__).parent
+    
+    # Look for repository root markers
+    root_markers = ['.git', 'requirements.txt', 'main.py', 'app']
+    
+    while current_dir != current_dir.parent:
+        if any((current_dir / marker).exists() for marker in root_markers):
+            return str(current_dir / relative_path)
+        current_dir = current_dir.parent
+    
+    # Fallback: assume current directory is repo root
+    return str(Path.cwd() / relative_path)
 
 def validate_enterprise_database_service():
     """Validate enterprise database service architecture."""
     print("🗄️ Validating Enterprise Database Service...")
     
-    file_path = "/workspace/app/core/database_service.py"
+    file_path = _p("app/core/database_service.py")
     if not os.path.exists(file_path):
         print("❌ Enterprise database service file missing")
         return False
@@ -53,7 +70,7 @@ def validate_enterprise_auth_service():
     """Validate enterprise authentication service architecture."""
     print("\n🔐 Validating Enterprise Authentication Service...")
     
-    file_path = "/workspace/app/core/enterprise_auth.py"
+    file_path = _p("app/core/enterprise_auth.py")
     if not os.path.exists(file_path):
         print("❌ Enterprise authentication service file missing")
         return False
@@ -92,7 +109,7 @@ def validate_updated_auth_endpoints():
     """Validate that auth endpoints use enterprise services."""
     print("\n🌐 Validating Updated Authentication Endpoints...")
     
-    file_path = "/workspace/app/api/v1/endpoints/auth.py"
+    file_path = _p("app/api/v1/endpoints/auth.py")
     if not os.path.exists(file_path):
         print("❌ Authentication endpoints file missing")
         return False
@@ -125,9 +142,9 @@ def validate_error_handling_patterns():
     print("\n⚠️ Validating Error Handling Patterns...")
     
     files_to_check = [
-        "/workspace/app/core/database_service.py",
-        "/workspace/app/core/enterprise_auth.py",
-        "/workspace/app/api/v1/endpoints/auth.py"
+        _p("app/core/database_service.py",
+        _p("app/core/enterprise_auth.py",
+        _p("app/api/v1/endpoints/auth.py"
     ]
     
     error_patterns = [
@@ -164,7 +181,7 @@ def validate_security_features():
     """Validate security features implementation."""
     print("\n🔒 Validating Security Features...")
     
-    file_path = "/workspace/app/core/enterprise_auth.py"
+    file_path = _p("app/core/enterprise_auth.py"
     with open(file_path, 'r') as f:
         content = f.read()
     
@@ -197,7 +214,7 @@ def validate_model_consistency():
     print("\n📊 Validating Model Consistency...")
     
     # Check Trade model
-    trade_file = "/workspace/app/models/trading.py"
+    trade_file = _p("app/models/trading.py"
     if os.path.exists(trade_file):
         with open(trade_file, 'r') as f:
             trade_content = f.read()
@@ -222,7 +239,7 @@ def validate_model_consistency():
             return False
     
     # Check CreditTransaction model
-    credit_file = "/workspace/app/models/credit.py"
+    credit_file = _p("app/models/credit.py"
     if os.path.exists(credit_file):
         with open(credit_file, 'r') as f:
             credit_content = f.read()
@@ -248,8 +265,8 @@ def validate_async_patterns():
     print("\n⚡ Validating Async Patterns...")
     
     files_to_check = [
-        "/workspace/app/core/database_service.py",
-        "/workspace/app/core/enterprise_auth.py"
+        _p("app/core/database_service.py",
+        _p("app/core/enterprise_auth.py"
     ]
     
     async_patterns = [
@@ -284,11 +301,11 @@ def validate_enterprise_architecture():
     
     # Check file structure
     required_files = [
-        "/workspace/app/core/database_service.py",
-        "/workspace/app/core/enterprise_auth.py", 
-        "/workspace/app/api/v1/endpoints/auth.py",
-        "/workspace/app/models/trading.py",
-        "/workspace/app/models/credit.py"
+        _p("app/core/database_service.py",
+        _p("app/core/enterprise_auth.py", 
+        _p("app/api/v1/endpoints/auth.py",
+        _p("app/models/trading.py",
+        _p("app/models/credit.py"
     ]
     
     for file_path in required_files:
@@ -299,7 +316,7 @@ def validate_enterprise_architecture():
             return False
     
     # Check enterprise patterns in code
-    database_service = "/workspace/app/core/database_service.py"
+    database_service = _p("app/core/database_service.py"
     with open(database_service, 'r') as f:
         db_content = f.read()
     
