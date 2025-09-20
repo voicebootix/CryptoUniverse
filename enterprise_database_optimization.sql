@@ -173,23 +173,54 @@ WHERE resolved = false;
 -- PHASE 7: ENTERPRISE CONSTRAINTS AND DATA INTEGRITY
 -- ===============================================================================
 
--- 7.1 UNIQUE CONSTRAINTS - PREVENT DATA DUPLICATION
--- Ensures data integrity for exchange balances
-ALTER TABLE exchange_balances 
-ADD CONSTRAINT IF NOT EXISTS unique_account_symbol_balance 
-UNIQUE (account_id, symbol);
+-- 7.1 UNIQUE CONSTRAINTS - PREVENT DATA DUPLICATION (PostgreSQL Compatible)
+-- Create concurrent unique indexes first, then attach constraints
 
--- 7.2 UNIQUE CONSTRAINTS - API KEY INTEGRITY
--- Prevents duplicate API keys per user/exchange
-ALTER TABLE exchange_api_keys 
-ADD CONSTRAINT IF NOT EXISTS unique_user_exchange_key 
-UNIQUE (user_id, key_hash);
+-- Exchange balances unique constraint
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_exchange_balances_account_symbol_unique 
+ON exchange_balances (account_id, symbol);
 
--- 7.3 UNIQUE CONSTRAINTS - SESSION INTEGRITY
--- Prevents session token conflicts
-ALTER TABLE user_sessions 
-ADD CONSTRAINT IF NOT EXISTS unique_session_token 
-UNIQUE (session_token);
+-- API keys unique constraint  
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_exchange_api_keys_user_key_unique 
+ON exchange_api_keys (user_id, key_hash);
+
+-- Session token unique constraint
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_user_sessions_token_unique 
+ON user_sessions (session_token);
+
+-- Attach constraints using the indexes (idempotent)
+DO $$
+BEGIN
+    -- Add exchange_balances constraint if not exists
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'unique_account_symbol_balance'
+    ) THEN
+        ALTER TABLE exchange_balances 
+        ADD CONSTRAINT unique_account_symbol_balance 
+        UNIQUE USING INDEX idx_exchange_balances_account_symbol_unique;
+    END IF;
+    
+    -- Add api_keys constraint if not exists
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'unique_user_exchange_key'
+    ) THEN
+        ALTER TABLE exchange_api_keys 
+        ADD CONSTRAINT unique_user_exchange_key 
+        UNIQUE USING INDEX idx_exchange_api_keys_user_key_unique;
+    END IF;
+    
+    -- Add session constraint if not exists
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'unique_session_token'
+    ) THEN
+        ALTER TABLE user_sessions 
+        ADD CONSTRAINT unique_session_token 
+        UNIQUE USING INDEX idx_user_sessions_token_unique;
+    END IF;
+END $$;
 
 -- ===============================================================================
 -- PHASE 8: PERFORMANCE STATISTICS UPDATE

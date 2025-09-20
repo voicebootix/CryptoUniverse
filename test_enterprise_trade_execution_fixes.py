@@ -260,6 +260,7 @@ class EnterpriseTradeExecutionTester:
         
         try:
             from app.services.trade_execution import TradeExecutionService
+            from unittest.mock import AsyncMock, patch
             
             trade_execution_service = TradeExecutionService()
             
@@ -269,18 +270,31 @@ class EnterpriseTradeExecutionTester:
             health_result = await trade_execution_service.health_check()
             service_healthy = health_result.get("status") == "healthy"
             
-            # Test 2: Test trade execution method exists and can be called
-            logger.info("Test 2: Trade execution method availability")
+            # Test 2: Test trade execution method with stubbed real order execution
+            logger.info("Test 2: Trade execution method availability (stubbed)")
             
-            # Test with simulation mode to avoid actual trades
-            test_trade_result = await trade_execution_service.execute_real_trade(
-                symbol="BTC/USDT",
-                side="BUY",
-                quantity=0.001,
-                order_type="market",
-                exchange="auto",
-                user_id="test_user_execution"
-            )
+            # Stub the real order execution to prevent actual trades
+            fake_order_result = {
+                "success": True,
+                "order_id": "test_order_123",
+                "status": "filled",
+                "filled_quantity": 0.001,
+                "filled_price": 50000.0,
+                "exchange": "binance"
+            }
+            
+            # Mock the internal _execute_real_order method to return fake result
+            with patch.object(trade_execution_service, '_execute_real_order', new_callable=AsyncMock) as mock_execute:
+                mock_execute.return_value = fake_order_result
+                
+                test_trade_result = await trade_execution_service.execute_real_trade(
+                    symbol="BTC/USDT",
+                    side="BUY",
+                    quantity=0.001,
+                    order_type="market",
+                    exchange="auto",
+                    user_id="test_user_execution"
+                )
             
             method_available = isinstance(test_trade_result, dict)
             

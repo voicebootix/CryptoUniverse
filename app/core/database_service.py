@@ -26,7 +26,7 @@ from uuid import UUID
 import structlog
 
 from sqlalchemy import select, update, delete, func, text
-from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncEngine, async_sessionmaker
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy.exc import (
     SQLAlchemyError, 
@@ -38,7 +38,7 @@ from sqlalchemy.exc import (
 from sqlalchemy.sql import Select
 from pydantic import BaseModel
 
-from app.core.database import get_database, Base
+from app.core.database import get_database, Base, engine
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
 
@@ -78,6 +78,12 @@ class EnterpriseDatabase:
     """
     
     def __init__(self):
+        # Create async session factory bound to the existing engine
+        self.async_session = async_sessionmaker(
+            bind=engine,
+            class_=AsyncSession,
+            expire_on_commit=False
+        )
         self.query_metrics: List[QueryMetrics] = []
         self.connection_pool_stats = {
             "total_queries": 0,
@@ -89,22 +95,17 @@ class EnterpriseDatabase:
     @asynccontextmanager
     async def get_session(self) -> AsyncSession:
         """Get database session with bulletproof error handling."""
-        session = None
-        try:
-            session = await anext(get_database())
-            yield session
-        except Exception as e:
-            if session:
+        async with self.async_session() as session:
+            try:
+                yield session
+            except Exception as e:
                 await session.rollback()
-            logger.error("Database session error", error=str(e))
-            raise DatabaseError(
-                message=f"Database session error: {str(e)}",
-                operation="session_management",
-                context={"error_type": type(e).__name__}
-            )
-        finally:
-            if session:
-                await session.close()
+                logger.exception("Database session error", error=str(e))
+                raise DatabaseError(
+                    message=f"Database session error: {str(e)}",
+                    operation="session_management",
+                    context={"error_type": type(e).__name__}
+                ) from e
     
     async def execute_query(
         self,
@@ -114,7 +115,7 @@ class EnterpriseDatabase:
         session: AsyncSession = None
     ) -> Any:
         """Execute query with bulletproof error handling and metrics."""
-        start_time = time.time()
+        start_time = time.perf_counter()
         rows_affected = 0
         success = False
         error_message = None
@@ -126,10 +127,11 @@ class EnterpriseDatabase:
                 async with self.get_session() as db:
                     result = await db.execute(query)
             
-            if operation == "select":
-                rows_affected = len(result.all()) if hasattr(result, 'all') else 1
+            # Don't consume results - let callers handle them
+            if getattr(result, "returns_rows", False):
+                rows_affected = -1  # unknown without consumption
             else:
-                rows_affected = result.rowcount if hasattr(result, 'rowcount') else 0
+                rows_affected = getattr(result, "rowcount", 0) or 0
             
             success = True
             self.connection_pool_stats["successful_queries"] += 1
@@ -137,58 +139,58 @@ class EnterpriseDatabase:
             
         except (IntegrityError, DataError) as e:
             error_message = f"Data integrity error: {str(e)}"
-            logger.error("Database integrity error", 
-                        model=model_name, 
-                        operation=operation,
-                        error=str(e))
+            logger.exception("Database integrity error", 
+                           model=model_name, 
+                           operation=operation,
+                           error=str(e))
             raise DatabaseError(
                 message=error_message,
                 operation=operation,
                 model=model_name,
                 context={"error_type": "integrity", "original_error": str(e)}
-            )
+            ) from e
             
         except (OperationalError, SQLTimeoutError) as e:
             error_message = f"Database operational error: {str(e)}"
-            logger.error("Database operational error", 
-                        model=model_name, 
-                        operation=operation,
-                        error=str(e))
+            logger.exception("Database operational error", 
+                           model=model_name, 
+                           operation=operation,
+                           error=str(e))
             raise DatabaseError(
                 message=error_message,
                 operation=operation,
                 model=model_name,
                 context={"error_type": "operational", "original_error": str(e)}
-            )
+            ) from e
             
         except SQLAlchemyError as e:
             error_message = f"SQLAlchemy error: {str(e)}"
-            logger.error("SQLAlchemy error", 
-                        model=model_name, 
-                        operation=operation,
-                        error=str(e))
+            logger.exception("SQLAlchemy error", 
+                           model=model_name, 
+                           operation=operation,
+                           error=str(e))
             raise DatabaseError(
                 message=error_message,
                 operation=operation,
                 model=model_name,
                 context={"error_type": "sqlalchemy", "original_error": str(e)}
-            )
+            ) from e
             
         except Exception as e:
             error_message = f"Unexpected database error: {str(e)}"
-            logger.error("Unexpected database error", 
-                        model=model_name, 
-                        operation=operation,
-                        error=str(e))
+            logger.exception("Unexpected database error", 
+                           model=model_name, 
+                           operation=operation,
+                           error=str(e))
             raise DatabaseError(
                 message=error_message,
                 operation=operation,
                 model=model_name,
                 context={"error_type": "unexpected", "original_error": str(e)}
-            )
+            ) from e
             
         finally:
-            execution_time = (time.time() - start_time) * 1000
+            execution_time = (time.perf_counter() - start_time) * 1000
             
             # Record metrics
             metric = QueryMetrics(
@@ -231,7 +233,7 @@ class EnterpriseDatabase:
                 operation="get_by_id",
                 model=model.__name__,
                 context={"id": str(id_value)}
-            )
+            ) from e
     
     async def get_by_field(
         self,
@@ -263,7 +265,7 @@ class EnterpriseDatabase:
                 operation="get_by_field",
                 model=model.__name__,
                 context={"field": field_name, "value": str(field_value)}
-            )
+            ) from e
     
     async def list_with_filters(
         self,
@@ -333,7 +335,7 @@ class EnterpriseDatabase:
                 operation="list_with_filters",
                 model=model.__name__,
                 context={"filters": filters, "order_by": order_by}
-            )
+            ) from e
     
     async def create_record(
         self,
@@ -376,7 +378,7 @@ class EnterpriseDatabase:
                 operation="create_record",
                 model=model.__name__,
                 context={"data": data}
-            )
+            ) from e
     
     async def update_record(
         self,
@@ -422,7 +424,7 @@ class EnterpriseDatabase:
                 operation="update_record",
                 model=model.__name__,
                 context={"id": str(id_value), "data": data}
-            )
+            ) from e
     
     async def delete_record(
         self,
@@ -456,7 +458,7 @@ class EnterpriseDatabase:
                 operation="delete_record",
                 model=model.__name__,
                 context={"id": str(id_value)}
-            )
+            ) from e
     
     async def execute_raw_query(
         self,
@@ -494,7 +496,7 @@ class EnterpriseDatabase:
                 message=f"Failed to execute raw query: {str(e)}",
                 operation="execute_raw_query",
                 context={"query": query[:100], "params": params}
-            )
+            ) from e
     
     @asynccontextmanager
     async def transaction(self):
@@ -506,7 +508,7 @@ class EnterpriseDatabase:
                 logger.debug("Transaction committed successfully")
             except Exception as e:
                 await session.rollback()
-                logger.error("Transaction rolled back due to error", error=str(e))
+                logger.exception("Transaction rolled back due to error", error=str(e))
                 raise
     
     def get_performance_metrics(self) -> Dict[str, Any]:

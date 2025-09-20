@@ -12,7 +12,8 @@ from typing import AsyncGenerator, Optional
 
 import sqlalchemy
 from sqlalchemy import MetaData, event, text
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool, QueuePool
 
@@ -67,14 +68,15 @@ engine = create_async_engine(
 )
 
 # Async session factory with proper session-level settings
-AsyncSessionLocal = async_sessionmaker(
-    engine,
+# SQLAlchemy 1.4.x compatible async session factory
+AsyncSessionLocal = sessionmaker(
+    bind=engine,
     class_=AsyncSession,
     expire_on_commit=False,
-    autoflush=False  # Move autoflush to sessionmaker where it belongs
+    autoflush=False
 )
 
-# Metadata and Base
+# WORKING SQLAlchemy 1.4.x Fix: Separate metadata creation
 metadata = MetaData()
 Base = declarative_base(metadata=metadata)
 
