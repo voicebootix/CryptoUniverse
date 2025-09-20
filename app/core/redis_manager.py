@@ -116,7 +116,7 @@ class EnterpriseRedisManager(LoggerMixin):
             bool: True if initialization successful, False otherwise
         """
         try:
-            self.logger.info("🔧 Initializing Enterprise Redis Manager...")
+            self.logger.info("Initializing Enterprise Redis Manager...")
             
             # Configure connection pool
             await self._setup_connection_pool()
@@ -136,7 +136,7 @@ class EnterpriseRedisManager(LoggerMixin):
             return True
             
         except Exception as e:
-            self.logger.error("❌ Failed to initialize Redis Manager", error=str(e))
+            self.logger.error(" Failed to initialize Redis Manager", error=str(e))
             self._health_status = RedisHealthStatus.UNHEALTHY
             return False
     
@@ -167,11 +167,11 @@ class EnterpriseRedisManager(LoggerMixin):
             )
             
             self._metrics['connection_pool_size'] = pool_config['max_connections']
-            self.logger.info("🔗 Redis connection pool configured", 
+            self.logger.info(" Redis connection pool configured", 
                            max_connections=pool_config['max_connections'])
             
         except Exception as e:
-            self.logger.error("❌ Failed to setup connection pool", error=str(e))
+            self.logger.error(" Failed to setup connection pool", error=str(e))
             raise
     
     async def _establish_connection(self):
@@ -320,7 +320,7 @@ class EnterpriseRedisManager(LoggerMixin):
                 self.logger.info("🛑 Health monitoring stopped")
                 break
             except Exception as e:
-                self.logger.error("❌ Health monitoring error", error=str(e))
+                self.logger.error(" Health monitoring error", error=str(e))
                 await asyncio.sleep(self._health_check_interval)
     
     async def _perform_health_check(self):
@@ -425,5 +425,5 @@ async def get_redis_client() -> Optional[Redis]:
         manager = await get_redis_manager()
         return await manager.get_client()
     except Exception as e:
-        logger.error("❌ Failed to get Redis client", error=str(e))
+        logger.error(" Failed to get Redis client", error=str(e))
         return None

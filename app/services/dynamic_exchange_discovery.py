@@ -80,7 +80,7 @@ class DynamicExchangeDiscovery:
         # Exchange health tracking
         self.exchange_health = {}
         
-        logger.info("✅ Dynamic Exchange Discovery initialized")
+        logger.info("Dynamic Exchange Discovery initialized")
     
     async def async_init(self):
         """Initialize async components."""

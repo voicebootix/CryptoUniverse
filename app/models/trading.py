@@ -149,11 +149,7 @@ class TradingStrategy(Base):
     category = column_property(literal(None).cast(String(50)))  # READ-ONLY placeholder; remove after migration
     meta_data = column_property(literal(None).cast(JSON))  # READ-ONLY placeholder; remove after migration
 
-    # API compatibility property
-    @property
-    def metadata(self):
-        """Alias for meta_data to maintain API compatibility."""
-        return self.meta_data or {}
+    # Note: No metadata property to avoid SQLAlchemy conflict - use meta_data directly
     
     # Timestamps
     created_at = Column(DateTime, default=func.now(), nullable=False)

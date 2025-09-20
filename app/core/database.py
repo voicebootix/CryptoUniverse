@@ -12,7 +12,8 @@ from typing import AsyncGenerator, Optional
 
 import sqlalchemy
 from sqlalchemy import MetaData, event, text
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool, QueuePool
 
@@ -67,32 +68,17 @@ engine = create_async_engine(
 )
 
 # Async session factory with proper session-level settings
-AsyncSessionLocal = async_sessionmaker(
-    engine,
+# SQLAlchemy 1.4.x compatible async session factory
+AsyncSessionLocal = sessionmaker(
+    bind=engine,
     class_=AsyncSession,
     expire_on_commit=False,
-    autoflush=False  # Move autoflush to sessionmaker where it belongs
+    autoflush=False
 )
 
-# Enterprise SQLAlchemy 2.x Compatible Architecture
-# CRITICAL FIX: Use the correct SQLAlchemy 2.x pattern that avoids metadata.schema property issues
-
-# Create metadata with enterprise naming conventions
-metadata = MetaData(
-    naming_convention={
-        "ix": "ix_%(column_0_label)s",
-        "uq": "uq_%(table_name)s_%(column_0_name)s", 
-        "ck": "ck_%(table_name)s_%(constraint_name)s",
-        "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-        "pk": "pk_%(table_name)s"
-    }
-)
-
-# CRITICAL FIX: Use declarative_base() without metadata parameter to avoid schema property conflicts
-Base = declarative_base()
-
-# ENTERPRISE: Assign metadata after Base creation to avoid property conflicts
-Base.metadata = metadata
+# WORKING SQLAlchemy 1.4.x Fix: Separate metadata creation
+metadata = MetaData()
+Base = declarative_base(metadata=metadata)
 
 
 # Database connection events for async engine

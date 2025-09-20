@@ -8,7 +8,7 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 
 # Database and ORM
-sqlalchemy==2.0.23
+sqlalchemy==1.4.53
 alembic==1.13.1
 asyncpg==0.29.0  # PostgreSQL async driver (supports SQLAlchemy 2.x natively)
 

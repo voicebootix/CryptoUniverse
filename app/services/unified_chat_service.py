@@ -201,7 +201,7 @@ class UnifiedChatService(LoggerMixin):
         # Intent patterns from original chat engine
         self.intent_patterns = self._initialize_intent_patterns()
         
-        self.logger.info("🧠 UNIFIED CHAT SERVICE INITIALIZED - All features preserved")
+        self.logger.info("UNIFIED CHAT SERVICE INITIALIZED - All features preserved")
     
     async def _ensure_redis(self):
         """Ensure Redis connection for caching."""

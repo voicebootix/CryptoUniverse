@@ -74,16 +74,16 @@ class BackgroundServiceManager(LoggerMixin):
             self.redis = await redis_manager.get_client()
             
             if self.redis:
-                self.logger.info("✅ Redis client initialized through enterprise manager")
+                self.logger.info("Redis client initialized through enterprise manager")
             else:
-                self.logger.warning("⚠️ Redis client unavailable - circuit breaker may be open")
+                self.logger.warning("Redis client unavailable - circuit breaker may be open")
         except Exception as e:
-            self.logger.warning("⚠️ Redis manager initialization failed - services will run without Redis", error=str(e))
+            self.logger.warning("Redis manager initialization failed - services will run without Redis", error=str(e))
             self.redis = None
     
     async def start_essential_services(self):
         """Start only essential services for quick startup."""
-        self.logger.info("🚀 Starting essential background services...")
+        self.logger.info("Starting essential background services...")
         self.running = True
         self.start_time = datetime.utcnow()
         
@@ -91,7 +91,7 @@ class BackgroundServiceManager(LoggerMixin):
         try:
             await self.async_init()
         except Exception as e:
-            self.logger.warning("⚠️ Redis initialization failed - services will run in degraded mode", error=str(e))
+            self.logger.warning(" Redis initialization failed - services will run in degraded mode", error=str(e))
             self.redis = None
         
         # Start only critical services
@@ -147,7 +147,7 @@ class BackgroundServiceManager(LoggerMixin):
         try:
             await self.async_init()
         except Exception as e:
-            self.logger.warning("⚠️ Redis initialization failed - services will run in degraded mode", error=str(e))
+            self.logger.warning(" Redis initialization failed - services will run in degraded mode", error=str(e))
             self.redis = None
         
         # Start individual services with error isolation
@@ -208,7 +208,7 @@ class BackgroundServiceManager(LoggerMixin):
                     
         # If we get here, service ended normally
         self.services[service_name] = "stopped"
-        self.logger.warning(f"⚠️ {service_name} service stopped unexpectedly")
+        self.logger.warning(f" {service_name} service stopped unexpectedly")
     
     async def stop_all(self):
         """Stop all background services gracefully."""
@@ -372,7 +372,7 @@ class BackgroundServiceManager(LoggerMixin):
                 
                 # Log alerts
                 if alerts:
-                    self.logger.warning("⚠️ System health alerts", alerts=alerts)
+                    self.logger.warning(" System health alerts", alerts=alerts)
                 
                 # Store health status
                 health_data = {
@@ -989,7 +989,7 @@ class BackgroundServiceManager(LoggerMixin):
     
     async def _risk_monitor_service(self):
         """Monitor risk levels and trigger alerts."""
-        self.logger.info("⚠️ Risk monitor service started")
+        self.logger.info(" Risk monitor service started")
         
         while self.running:
             try:
