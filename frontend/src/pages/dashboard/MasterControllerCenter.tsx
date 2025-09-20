@@ -133,6 +133,7 @@ interface SystemStatus {
   current_mode: string;
   autonomous_enabled: boolean;
   simulation_mode: boolean;
+  simulation_balance?: number;
   performance_metrics: {
     cycles_executed: number;
     trades_executed: number;
@@ -162,6 +163,8 @@ interface MarketOverview {
   total_volume_24h: number;
   arbitrage_opportunities: number;
 }
+
+const DEFAULT_SIMULATION_BALANCE = 10000;
 
 const MasterControllerCenter: React.FC = () => {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
@@ -259,15 +262,46 @@ const MasterControllerCenter: React.FC = () => {
     }
   };
 
-  const handleToggleSimulation = async () => {
+  const handleToggleSimulation = async (enable: boolean) => {
     try {
       setIsLoading(true);
-      const response = await apiClient.post('/trading/simulation/toggle');
-      if (response.data.success) {
+      setError(null);
+
+      const desiredBalance = systemStatus?.simulation_balance ?? DEFAULT_SIMULATION_BALANCE;
+      const payload: {
+        enable: boolean;
+        virtual_balance?: number;
+        reset_portfolio: boolean;
+      } = {
+        enable,
+        reset_portfolio: enable && !systemStatus?.simulation_mode
+      };
+
+      if (enable) {
+        payload.virtual_balance = desiredBalance;
+      }
+
+      const response = await apiClient.post('/trading/simulation/toggle', payload);
+      const { data } = response;
+      const toggleSucceeded = data?.success === true || typeof data?.status === 'string';
+
+      if (toggleSucceeded) {
+        setSystemStatus(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            simulation_mode: enable,
+            simulation_balance: payload.virtual_balance ?? prev.simulation_balance
+          };
+        });
         await fetchSystemStatus();
+      } else {
+        throw new Error('Unexpected response from simulation toggle');
       }
     } catch (err: any) {
-      setError('Failed to toggle simulation mode');
+      console.error('Failed to toggle simulation mode:', err);
+      const message = err.response?.data?.detail || err.message || 'Failed to toggle simulation mode';
+      setError(`Simulation Toggle Error: ${message}`);
     } finally {
       setIsLoading(false);
     }

@@ -83,7 +83,7 @@ class EnterpriseRedisManager(LoggerMixin):
         # Health monitoring
         self._health_status = RedisHealthStatus.UNKNOWN
         self._last_health_check = 0
-        self._health_check_interval = 30  # seconds
+        self._health_check_interval = settings.REDIS_HEALTH_CHECK_INTERVAL
         
         # Configuration
         self._max_failures = 5
@@ -335,14 +335,28 @@ class EnterpriseRedisManager(LoggerMixin):
             # Ping test
             await asyncio.wait_for(self._redis.ping(), timeout=self._command_timeout)
             
-            # Basic operation test
-            test_key = "health_check_test"
-            await self._redis.set(test_key, "test_value", ex=10)
+            # Basic operation test with enterprise data integrity verification
+            # Use high-resolution unique key to prevent worker collisions
+            import uuid
+            unique_suffix = f"{time.time_ns()}_{uuid.uuid4().hex[:8]}"
+            test_key = f"health_check_{unique_suffix}"
+            test_value = f"test_value_{unique_suffix}"
+            expected_bytes = test_value.encode('utf-8')
+            
+            # Set test data with expiration
+            await self._redis.set(test_key, test_value, ex=10)
+            
+            # Retrieve and verify data integrity
             result = await self._redis.get(test_key)
+            
+            # Clean up test data
             await self._redis.delete(test_key)
             
-            if result != b"test_value":
-                raise ValueError("Health check data integrity failure")
+            # Verify data integrity with proper byte comparison
+            if result is None:
+                raise ValueError("Health check data retrieval failure - key not found")
+            elif result != expected_bytes:
+                raise ValueError(f"Health check data integrity failure - expected {expected_bytes}, got {result}")
             
             # Calculate response time
             response_time = (time.time() - start_time) * 1000  # milliseconds

@@ -244,7 +244,7 @@ class StrategyPerformanceHistory(Base):
     total_trades = Column(Integer, default=0)
     winning_trades = Column(Integer, default=0)
     losing_trades = Column(Integer, default=0)
-    win_rate = Column(Numeric(5, 2), CheckConstraint('win_rate >= 0 AND win_rate <= 100', name='check_strategy_win_rate_range'))
+    win_rate = Column(Numeric(5, 2), CheckConstraint('win_rate >= 0 AND win_rate <= 100', name='check_strategy_win_rate_range'))  # Stored as 0-100%, use win_rate_fraction for 0-1
 
     # Financial metrics
     starting_balance = Column(Numeric(20, 8), nullable=False)
@@ -288,6 +288,51 @@ class StrategyPerformanceHistory(Base):
     )
 
 
+
+    @property
+    def win_rate_fraction(self) -> float:
+        """Get win rate as 0-1 fraction (canonical internal unit)."""
+        if self.win_rate is None:
+            return 0.0
+        return float(self.win_rate) / 100.0
+    
+    @win_rate_fraction.setter
+    def win_rate_fraction(self, value: float):
+        """Set win rate from 0-1 fraction."""
+        from decimal import Decimal, ROUND_HALF_UP
+
+        # Clamp to valid range (0.0-1.0)
+        clamped_value = max(0.0, min(value, 1.0))
+
+        # Convert to percentage and then to Decimal with proper rounding
+        percentage = clamped_value * 100.0
+        decimal_percentage = Decimal(str(percentage)).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+
+        self.win_rate = float(decimal_percentage)
+    
+    @property
+    def win_rate_percent(self) -> float:
+        """Get win rate as 0-100 percentage (for backward compatibility)."""
+        return float(self.win_rate or 0.0)
+    
+    @win_rate_percent.setter
+    def win_rate_percent(self, value: float):
+        """Set win rate from 0-100 percentage."""
+        from decimal import Decimal, ROUND_HALF_UP
+
+        # Clamp to valid range (0.0-100.0)
+        clamped_value = max(0.0, min(value, 100.0))
+
+        # Convert to Decimal with proper rounding
+        decimal_percentage = Decimal(str(clamped_value)).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP
+        )
+
+        self.win_rate = float(decimal_percentage)
+
+
 class BacktestResult(Base):
     """
     Backtest results storage with real market data.
@@ -323,7 +368,7 @@ class BacktestResult(Base):
     total_trades = Column(Integer, default=0)
     winning_trades = Column(Integer, default=0)
     losing_trades = Column(Integer, default=0)
-    win_rate = Column(Numeric(5, 2), CheckConstraint('win_rate >= 0 AND win_rate <= 100', name='check_backtest_win_rate_range'))
+    win_rate = Column(Numeric(5, 2), CheckConstraint('win_rate >= 0 AND win_rate <= 100', name='check_backtest_win_rate_range'))  # Stored as 0-100%, use win_rate_fraction for 0-1
     profit_factor = Column(Numeric(10, 4))
     expectancy = Column(Numeric(20, 8))
 
@@ -391,7 +436,7 @@ class LiveStrategyPerformance(Base):
     total_trades = Column(Integer, nullable=False, default=0)
     winning_trades = Column(Integer, nullable=False, default=0)
     losing_trades = Column(Integer, nullable=False, default=0)
-    win_rate = Column(Numeric(5, 2), nullable=False, default=0)  # Fixed: 0-100% with 2 decimals
+    win_rate = Column(Numeric(5, 2), nullable=False, default=0)  # Stored as 0-100%, use win_rate_fraction for 0-1
 
     # Risk metrics
     max_drawdown = Column(Numeric(6, 4), nullable=False, default=0)

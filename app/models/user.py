@@ -17,6 +17,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     JSON,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -28,6 +29,9 @@ from sqlalchemy.sql import func
 import enum
 
 from app.core.database import Base
+
+# Import for relationship resolution
+from app.models.strategy_access import UserStrategyAccess
 
 
 class UserRole(str, enum.Enum):
@@ -96,7 +100,7 @@ class User(Base):
     
     # Trading preferences
     simulation_mode = Column(Boolean, default=True, nullable=False)  # Default to simulation for safety
-    simulation_balance = Column(Integer, default=10000, nullable=False)  # Virtual balance in USD
+    simulation_balance = Column(Numeric(20, 2), default=10000.00, nullable=False)  # Virtual balance in USD
     last_simulation_reset = Column(DateTime, nullable=True)
 
     # Referral system
@@ -119,6 +123,7 @@ class User(Base):
     credit_account = relationship("CreditAccount", back_populates="user", uselist=False, cascade="all, delete-orphan")
     exchange_accounts = relationship("ExchangeAccount", back_populates="user", cascade="all, delete-orphan")
     portfolios = relationship("Portfolio", back_populates="user", cascade="all, delete-orphan")
+    strategy_access = relationship("UserStrategyAccess", back_populates="user", cascade="all, delete-orphan")
     trades = relationship("Trade", back_populates="user", cascade="all, delete-orphan")
     positions = relationship("Position", back_populates="user", cascade="all, delete-orphan")
     orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")
@@ -171,6 +176,13 @@ class User(Base):
         """Get user's full name from profile or email."""
         if self.profile:
             return self.profile.full_name
+        return self.email.split('@')[0]
+
+    @property
+    def display_name(self) -> str:
+        """Get user's display name from profile or email."""
+        if self.profile:
+            return self.profile.display_name
         return self.email.split('@')[0]
     
 

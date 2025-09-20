@@ -372,25 +372,7 @@ class DatabaseUtils:
 db_utils = DatabaseUtils()
 
 
-# ENTERPRISE: Database session dependencies
-async def get_database() -> AsyncSession:
-    """
-    Dependency to get database session.
-    
-    Provides async database session with automatic cleanup and error handling.
-    """
-    async with AsyncSessionLocal() as session:
-        try:
-            # ENTERPRISE: Connection-level timeouts are now set via event listeners
-            # No need for per-session timeout settings
-            
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+# ENTERPRISE: Database session dependencies removed - use the main get_database function above
 
 
 async def get_optimized_database() -> AsyncSession:

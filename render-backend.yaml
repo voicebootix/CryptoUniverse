@@ -44,6 +44,16 @@ services:
         value: "20.0"
       - key: AB_TESTING_DEMO_MODE
         value: "false"
+      - key: CIRCUIT_BREAKER_ENABLED
+        value: "true"
+      - key: REDIS_HEALTH_CHECK_INTERVAL
+        value: "30"
+      - key: DATABASE_QUERY_TIMEOUT
+        value: "10"
+      - key: EXCHANGE_API_TIMEOUT
+        value: "15"
+      - key: PARALLEL_EXCHANGE_FETCHING
+        value: "true"
 
   # Redis Cache Service
   - type: redis

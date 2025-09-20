@@ -7,13 +7,16 @@ Based on production crypto trading system patterns.
 import asyncio
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Callable, Union
+from typing import Dict, List, Optional, Any, Callable, Union, TypeVar, Awaitable
+
+T = TypeVar('T')
 from enum import Enum
 from dataclasses import dataclass, field
 from collections import deque
 
 import structlog
 from app.core.config import get_settings
+from app.core.redis_manager import get_redis_client
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -41,7 +44,27 @@ class CircuitBreakerConfig:
     max_timeout_seconds: int = 300     # Maximum timeout (exponential backoff)
     failure_window_seconds: int = 60   # Time window for failure counting
     slow_request_threshold_ms: int = 5000  # Requests slower than this count as failures
+    excluded_exceptions: tuple = ()     # Exceptions to exclude from failure counting
+
+    @property
+    def recovery_timeout(self) -> int:
+        return self.timeout_seconds
+
+    @property
+    def failure_timeout(self) -> int:
+        return self.failure_window_seconds
     
+
+@dataclass
+class CircuitMetrics:
+    """Metrics for circuit breaker state."""
+    failures: int = 0
+    successes: int = 0
+    consecutive_failures: int = 0
+    consecutive_successes: int = 0
+    last_failure: Optional[datetime] = None
+    last_success: Optional[datetime] = None
+
 
 @dataclass
 class BackpressureConfig:
@@ -83,7 +106,7 @@ class CircuitBreaker:
     def __init__(
         self,
         name: str,
-        config: Optional[CircuitConfig] = None,
+        config: Optional[CircuitBreakerConfig] = None,
         redis_prefix: str = "circuit:",
         enabled: bool = True
     ):
@@ -97,7 +120,7 @@ class CircuitBreaker:
             enabled: Whether the circuit breaker is enabled
         """
         self.name = name
-        self.config = config or CircuitConfig()
+        self.config = config or CircuitBreakerConfig()
         self.redis_prefix = redis_prefix
         self.enabled = enabled and not settings.DEBUG
         self._state = CircuitState.CLOSED
@@ -317,7 +340,7 @@ _circuit_breakers: Dict[str, CircuitBreaker] = {}
 
 def get_circuit_breaker(
     name: str,
-    config: Optional[CircuitConfig] = None,
+    config: Optional[CircuitBreakerConfig] = None,
     **kwargs: Any
 ) -> CircuitBreaker:
     """
@@ -336,11 +359,11 @@ def get_circuit_breaker(
     return _circuit_breakers[name]
 
 # Common circuit breaker configurations
-DEFAULT_CIRCUIT_CONFIG = CircuitConfig(
+DEFAULT_CIRCUIT_CONFIG = CircuitBreakerConfig(
     failure_threshold=5,
-    recovery_timeout=30,
+    timeout_seconds=30,
     success_threshold=3,
-    failure_timeout=60
+    failure_window_seconds=60
 )
 
 # Example usage:
