@@ -271,7 +271,6 @@ LIMIT 10;
 */
 
 -- ===============================================================================
->>>>>>> 39700dda78d9d2c9500419b735fead578967f89f
 -- DEPLOYMENT VERIFICATION
 -- ===============================================================================
 
@@ -328,4 +327,3 @@ TOTAL SYSTEM IMPACT:
    - Use pg_stat_statements to identify new slow queries
    - Set log_min_duration_statement = 100ms in production
 */
->>>>>>> 39700dda78d9d2c9500419b735fead578967f89f
