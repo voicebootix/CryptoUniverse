@@ -2956,15 +2956,35 @@ class MasterSystemController(LoggerMixin):
                 self.logger.info("⚡ Phase 5: Trade Execution Starting", cycle_id=cycle_id)
                 
                 try:
-                    from app.services.trading_strategies import trading_strategies_service
+                    from app.services.trade_execution import TradeExecutionService
                     
-                    execution_result = await trading_strategies_service.execute_validated_trade(
-                        action=trade_signal.get("signal", {}).get("action", "HOLD"),
-                        symbol=pipeline_result["phases"]["phase_2"]["symbol"],
-                        position_size_usd=sized_position.get("position_size_usd", 0),
-                        ai_validation_token=validation.get("validation_token", ""),
-                        user_id=user_id
-                    )
+                    trade_execution_service = TradeExecutionService()
+                    
+                    # Extract trade parameters from pipeline data
+                    symbol = pipeline_result["phases"]["phase_2"]["symbol"]
+                    action = trade_signal.get("signal", {}).get("action", "HOLD")
+                    position_size_usd = sized_position.get("position_size_usd", 0)
+                    
+                    # Convert action to side
+                    side = "BUY" if action in ["BUY", "LONG"] else "SELL" if action in ["SELL", "SHORT"] else None
+                    
+                    if side and position_size_usd > 0:
+                        # Execute real trade with proper integration
+                        execution_result = await trade_execution_service.execute_real_trade(
+                            symbol=symbol,
+                            side=side,
+                            quantity=position_size_usd / 50000,  # Convert USD to approximate quantity
+                            order_type="market",
+                            exchange="auto",
+                            user_id=user_id
+                        )
+                    else:
+                        # Skip execution if no valid trade signal
+                        execution_result = {
+                            "success": False,
+                            "error": f"Invalid trade signal: action={action}, position_size_usd={position_size_usd}",
+                            "skipped": True
+                        }
                     
                     phase_5_time = (time.time() - phase_5_start) * 1000
                     pipeline_result["phases"]["phase_5"] = {
