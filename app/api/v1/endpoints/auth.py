@@ -86,9 +86,10 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     user_id: str
-    role: str
-    tenant_id: str
-    permissions: list
+    session_id: Optional[str] = None
+    role: Optional[str] = None
+    tenant_id: Optional[str] = None
+    permissions: Optional[list] = None
 
 
 class UserResponse(BaseModel):
@@ -178,55 +179,59 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_database)
 ) -> User:
-    """Get current authenticated user."""
-    token = credentials.credentials
-    payload = auth_service.verify_token(token)
+    """Get current authenticated user with enterprise-grade validation."""
+    from app.core.enterprise_auth import enterprise_auth, AuthenticationError
+    from app.core.database_service import enterprise_db
     
-    if payload.get("type") != "access":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token type"
-        )
-    
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload"
-        )
-    
-    # Check if token is blacklisted
-    # ENTERPRISE REDIS RESILIENCE
-    redis = await get_redis_client()
-    if redis:
-        # SECURITY: Use same SHA-256 hash as logout writes
-        token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
-        blacklisted = await redis.get(f"blacklist:{token_hash}")
-        if blacklisted:
-            logger.info("Blacklisted token access blocked", token_hash=token_hash[:16])
+    try:
+        token = credentials.credentials
+        
+        # Use enterprise authentication service for token validation
+        payload = await enterprise_auth.validate_token(token, "access")
+        
+        user_id = payload.get("sub")
+        if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has been revoked"
+                detail="Invalid token payload"
             )
-        logger.debug("Token blacklist check passed", token_hash=token_hash[:16])
-    else:
-        logger.warning("Redis unavailable for blacklist check, proceeding without")
-    
-    result = await db.execute(select(User).filter(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
+        
+        # Get user with bulletproof database handling
+        user = await enterprise_db.get_by_id(User, user_id, db)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found"
+            )
+        
+        # Validate user is still active
+        if not user.is_active or user.status != UserStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User account is not active"
+            )
+        
+        return user
+        
+    except AuthenticationError as e:
+        if e.error_code in ["TOKEN_EXPIRED", "INVALID_TOKEN", "SESSION_EXPIRED"]:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=e.message
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication validation error"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Unexpected error in get_current_user", error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User validation error"
         )
-    
-    if user.status != UserStatus.ACTIVE:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is not active"
-        )
-    
-    return user
 
 
 # Role-based access control
@@ -249,80 +254,75 @@ async def login(
     client_request: Request,
     db: AsyncSession = Depends(get_database)
 ):
-    """Authenticate user and return JWT tokens."""
+    """
+    Enterprise-grade authentication with bulletproof error handling.
     
-    # Rate limiting
+    Features:
+    - Comprehensive error analysis
+    - Rate limiting and brute force protection
+    - Session management
+    - Audit logging
+    - Database resilience
+    """
+    
+    from app.core.enterprise_auth import enterprise_auth, AuthenticationError
+    
     client_ip = client_request.client.host
+    user_agent = client_request.headers.get("user-agent", "unknown")
+    
     try:
-        await rate_limiter.check_rate_limit(
-            key=f"login:{client_ip}",
-            limit=5,
-            window=300  # 5 attempts per 5 minutes
+        # Use enterprise authentication service
+        auth_token = await enterprise_auth.authenticate_user(
+            email=request.email,
+            password=request.password,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            session=db
         )
-    except Exception as e:
-        logger.warning(f"Rate limiting check failed: {e}, proceeding without rate limit")
-    
-    logger.info("Login attempt", email=request.email, ip=client_ip)
-    
-    try:
-        # Find user
-        result = await db.execute(select(User).filter(User.email == request.email))
-        user = result.scalar_one_or_none()
-        if not user:
-            await asyncio.sleep(1)  # Prevent timing attacks
+        
+        # Handle MFA if enabled (TODO: Implement MFA validation)
+        if request.mfa_code:
+            logger.info("MFA code provided but validation not yet implemented")
+        
+        # Return standardized response
+        return TokenResponse(
+            access_token=auth_token.access_token,
+            refresh_token=auth_token.refresh_token,
+            token_type=auth_token.token_type,
+            expires_in=auth_token.expires_in,
+            user_id=auth_token.user_id,
+            session_id=auth_token.session_id
+        )
+        
+    except AuthenticationError as e:
+        # Map authentication errors to HTTP exceptions
+        if e.error_code == "INVALID_CREDENTIALS":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials"
+                detail=e.message
             )
-        
-        # Verify password
-        if not auth_service.verify_password(request.password, user.hashed_password):
-            await asyncio.sleep(1)  # Prevent timing attacks
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials"
-            )
-        
-        # Check if account is active (deactivated/blocked check)
-        if not user.is_active:
+        elif e.error_code in ["ACCOUNT_DEACTIVATED", "EMAIL_VERIFICATION_REQUIRED", "ACCOUNT_SUSPENDED"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Account is deactivated. Please contact admin."
+                detail=e.message
             )
-        
-        # Check user status and verification
-        if user.status == UserStatus.PENDING_VERIFICATION:
+        elif e.error_code in ["IP_RATE_LIMITED", "ACCOUNT_LOCKED"]:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Account pending admin verification. Please wait for admin approval to login."
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=e.message
             )
-        elif not user.is_verified:
+        elif e.error_code == "SERVICE_UNAVAILABLE":
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Account not verified. Please contact admin for verification."
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=e.message
             )
-        elif user.status != UserStatus.ACTIVE:
+        else:
+            # Generic server error for unexpected cases
+            logger.error("Unhandled authentication error", error_code=e.error_code, message=e.message)
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Account is {user.status.value}. Please contact admin."
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication service error"
             )
-        
-        # Handle MFA if enabled
-        if user.two_factor_enabled and not request.mfa_code:
-            raise HTTPException(
-                status_code=status.HTTP_202_ACCEPTED,
-                detail="MFA code required",
-                headers={"X-MFA-Required": "true"}
-            )
-        
-        # Verify MFA code if provided
-        if user.two_factor_enabled and request.mfa_code:
-            # TODO: Implement TOTP verification
-            pass
-        
-        # Create tokens
-        access_token = auth_service.create_access_token(user)
-        refresh_token = auth_service.create_refresh_token(user)
         
         # Batch operations for better performance
         current_time = datetime.utcnow()
