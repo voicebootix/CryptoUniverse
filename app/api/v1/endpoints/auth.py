@@ -173,6 +173,30 @@ class AuthService:
 auth_service = AuthService()
 
 
+def get_user_permissions(role: UserRole) -> list:
+    """Get permissions based on user role."""
+    permissions_map = {
+        UserRole.ADMIN: [
+            "admin:read", "admin:write", "admin:delete",
+            "trading:read", "trading:write", "trading:execute",
+            "portfolio:read", "portfolio:write",
+            "users:read", "users:write", "users:delete",
+            "system:read", "system:write"
+        ],
+        UserRole.TRADER: [
+            "trading:read", "trading:write", "trading:execute",
+            "portfolio:read", "portfolio:write"
+        ],
+        UserRole.VIEWER: [
+            "trading:read", "portfolio:read"
+        ],
+        UserRole.API_ONLY: [
+            "api:trading:execute", "api:portfolio:read"
+        ]
+    }
+    return permissions_map.get(role, [])
+
+
 # Dependency for getting current user
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -220,7 +244,7 @@ async def get_current_user(
             detail="User not found"
         )
     
-    if user.status != UserStatus.ACTIVE:
+    if user.get_status_safe() != UserStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is not active"
@@ -283,40 +307,41 @@ async def login(
                 detail="Invalid credentials"
             )
         
-        # Check if account is active (deactivated/blocked check)
-        if not user.is_active:
+        # Check if account is active (deactivated/blocked check) - use safe method
+        if not user.get_is_active_safe():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is deactivated. Please contact admin."
             )
-        
-        # Check user status and verification
-        if user.status == UserStatus.PENDING_VERIFICATION:
+
+        # Check user status and verification - use safe methods
+        user_status = user.get_status_safe()
+        if user_status == UserStatus.PENDING_VERIFICATION:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account pending admin verification. Please wait for admin approval to login."
             )
-        elif not user.is_verified:
+        elif not user.get_is_verified_safe():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account not verified. Please contact admin for verification."
             )
-        elif user.status != UserStatus.ACTIVE:
+        elif user_status != UserStatus.ACTIVE:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Account is {user.status.value}. Please contact admin."
+                detail=f"Account is {user_status.value}. Please contact admin."
             )
         
-        # Handle MFA if enabled
-        if user.two_factor_enabled and not request.mfa_code:
+        # Handle MFA if enabled - use safe method
+        if user.get_two_factor_enabled_safe() and not request.mfa_code:
             raise HTTPException(
                 status_code=status.HTTP_202_ACCEPTED,
                 detail="MFA code required",
                 headers={"X-MFA-Required": "true"}
             )
-        
+
         # Verify MFA code if provided
-        if user.two_factor_enabled and request.mfa_code:
+        if user.get_two_factor_enabled_safe() and request.mfa_code:
             # TODO: Implement TOTP verification
             pass
         
@@ -351,9 +376,9 @@ async def login(
             token_type="bearer",
             expires_in=int(auth_service.access_token_expire.total_seconds()),
             user_id=str(user.id),
-            role=user.role.value,
+            role=user.get_role_safe().value,
             tenant_id=str(user.tenant_id) if user.tenant_id else "",
-            permissions=get_user_permissions(user.role)
+            permissions=get_user_permissions(user.get_role_safe())
         )
     except InvalidTokenError as je:
         logger.exception("JWT error during login")
@@ -906,37 +931,13 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         id=str(current_user.id),
         email=current_user.email,
         full_name=current_user.full_name,
-        role=current_user.role.value,
-        status=current_user.status.value,
+        role=current_user.get_role_safe().value,
+        status=current_user.get_status_safe().value,
         tenant_id=str(current_user.tenant_id) if current_user.tenant_id else "",
         created_at=current_user.created_at,
         last_login=current_user.last_login,
-        mfa_enabled=current_user.two_factor_enabled
+        mfa_enabled=current_user.get_two_factor_enabled_safe()
     )
-
-
-def get_user_permissions(role: UserRole) -> list:
-    """Get permissions based on user role."""
-    permissions_map = {
-        UserRole.ADMIN: [
-            "admin:read", "admin:write", "admin:delete",
-            "trading:read", "trading:write", "trading:execute",
-            "portfolio:read", "portfolio:write",
-            "users:read", "users:write", "users:delete",
-            "system:read", "system:write"
-        ],
-        UserRole.TRADER: [
-            "trading:read", "trading:write", "trading:execute",
-            "portfolio:read", "portfolio:write"
-        ],
-        UserRole.VIEWER: [
-            "trading:read", "portfolio:read"
-        ],
-        UserRole.API_ONLY: [
-            "api:trading:execute", "api:portfolio:read"
-        ]
-    }
-    return permissions_map.get(role, [])
 
 
 # OAuth Request/Response Models

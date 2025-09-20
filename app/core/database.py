@@ -40,30 +40,36 @@ def get_async_database_url() -> str:
 
 # ENTERPRISE SQLAlchemy async engine optimized for Render production
 # Environment configurable pool size for proper scaling under load
+
+# Configure execution options based on database type
+async_db_url = get_async_database_url()
+execution_options = {"compiled_cache": {}}  # Enable query compilation cache
+
+# Only set isolation level for PostgreSQL (not supported by SQLite)
+if "postgresql" in async_db_url:
+    execution_options["isolation_level"] = "READ_COMMITTED"
+
 engine = create_async_engine(
-    get_async_database_url(),
+    async_db_url,
     poolclass=NullPool,   # ASYNC COMPATIBLE: Required for async engines
     # NullPool doesn't support pool_size, max_overflow, pool_timeout parameters
-    pool_pre_ping=True,   # ENTERPRISE: Health check connections  
+    pool_pre_ping=True,   # ENTERPRISE: Health check connections
     pool_recycle=1800,    # PRODUCTION: Faster recycle for cloud (30 min)
     echo=getattr(settings, 'DATABASE_ECHO', False),
     future=True,
     # ENTERPRISE: Production performance settings
-    execution_options={
-        "isolation_level": "READ_COMMITTED",
-        "compiled_cache": {},  # Enable query compilation cache
-    },
+    execution_options=execution_options,
     # PRODUCTION: Optimized settings for asyncpg driver
     connect_args={
         "command_timeout": 30,  # Command timeout in seconds
         "timeout": 60,  # Connection timeout in seconds
-        "ssl": "require" if "supabase" in get_async_database_url().lower() else None,  # SSL for Supabase
+        "ssl": "require" if "supabase" in async_db_url.lower() else None,  # SSL for Supabase
         # Server settings for asyncpg
         "server_settings": {
             "application_name": "cryptouniverse_production",
             "jit": "off"
         }
-    } if "postgresql" in get_async_database_url() else {}
+    } if "postgresql" in async_db_url else {}
 )
 
 # Async session factory with proper session-level settings

@@ -74,33 +74,36 @@ class User(Base):
     
     # Authentication fields
     email = Column(String(255), unique=True, nullable=False, index=True)
-    hashed_password = Column(String(255), nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False)
-    is_verified = Column(Boolean, default=False, nullable=False)
-    
+    hashed_password = Column("password_hash", String(255), nullable=False)  # Map to actual DB column
+    is_active = Column(Boolean, default=True, nullable=True)  # Make nullable to match DB
+    is_verified = Column(Boolean, default=False, nullable=True)  # Make nullable to match DB
+
+    # User profile fields
+    _full_name = Column("full_name", String(255), nullable=True)  # Map to existing DB column
+
     # Role and permissions
-    role = Column(Enum(UserRole), default=UserRole.TRADER, nullable=False)
-    status = Column(Enum(UserStatus), default=UserStatus.PENDING_VERIFICATION, nullable=False)
+    role = Column(Enum(UserRole), default=UserRole.TRADER, nullable=True)  # Make nullable to match DB
+    status = Column(Enum(UserStatus), default=UserStatus.ACTIVE, nullable=True)  # Make nullable, default to active
     
     # Multi-tenant association
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True, index=True)
-    
-    # Security fields
-    two_factor_enabled = Column(Boolean, default=False, nullable=False)
+
+    # Security fields (make nullable to match existing DB schema)
+    two_factor_enabled = Column(Boolean, default=False, nullable=True)
     two_factor_secret = Column(String(32), nullable=True)
-    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    failed_login_attempts = Column(Integer, default=0, nullable=True)
     locked_until = Column(DateTime, nullable=True)
     last_login = Column(DateTime, nullable=True)
     last_login_ip = Column(String(45), nullable=True)
-    
-    # KYC fields
-    kyc_status = Column(Enum(KYCStatus), default=KYCStatus.NOT_STARTED, nullable=False)
+
+    # KYC fields (make nullable to match existing DB schema)
+    kyc_status = Column(Enum(KYCStatus), default=KYCStatus.NOT_STARTED, nullable=True)
     kyc_verified_at = Column(DateTime, nullable=True)
     kyc_data = Column(JSON, nullable=True)
-    
-    # Trading preferences
-    simulation_mode = Column(Boolean, default=True, nullable=False)  # Default to simulation for safety
-    simulation_balance = Column(Numeric(20, 2), default=10000.00, nullable=False)  # Virtual balance in USD
+
+    # Trading preferences (make nullable to match existing DB schema)
+    simulation_mode = Column(Boolean, default=True, nullable=True)  # Default to simulation for safety
+    simulation_balance = Column(Numeric(20, 2), default=10000.00, nullable=True)  # Virtual balance in USD
     last_simulation_reset = Column(DateTime, nullable=True)
 
     # Referral system
@@ -112,36 +115,37 @@ class User(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     deleted_at = Column(DateTime, nullable=True)
     
-    # Relationships
-    profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
-    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
-    login_history = relationship("LoginHistory", back_populates="user", cascade="all, delete-orphan")
-    oauth_connections = relationship("UserOAuthConnection", back_populates="user", cascade="all, delete-orphan")
-    activities = relationship("UserActivity", back_populates="user", cascade="all, delete-orphan")
-    tenant = relationship("Tenant", back_populates="users")
-    subscription = relationship("Subscription", back_populates="user", uselist=False, cascade="all, delete-orphan")
-    credit_account = relationship("CreditAccount", back_populates="user", uselist=False, cascade="all, delete-orphan")
-    exchange_accounts = relationship("ExchangeAccount", back_populates="user", cascade="all, delete-orphan")
-    portfolios = relationship("Portfolio", back_populates="user", cascade="all, delete-orphan")
-    strategy_access = relationship("UserStrategyAccess", back_populates="user", cascade="all, delete-orphan")
-    trades = relationship("Trade", back_populates="user", cascade="all, delete-orphan")
-    positions = relationship("Position", back_populates="user", cascade="all, delete-orphan")
-    orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")
-    trading_strategies = relationship("TradingStrategy", back_populates="user", cascade="all, delete-orphan")
-    telegram_connections = relationship("UserTelegramConnection", back_populates="user", cascade="all, delete-orphan")
-    ab_tests = relationship("ABTest", back_populates="creator", cascade="all, delete-orphan")
-    strategy_performance_history = relationship("StrategyPerformanceHistory", back_populates="user", cascade="all, delete-orphan")
-    backtest_results = relationship("BacktestResult", back_populates="user", cascade="all, delete-orphan")
+    # Relationships - make all optional to avoid schema conflicts
+    # profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    # sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+    # login_history = relationship("LoginHistory", back_populates="user", cascade="all, delete-orphan")
+    # oauth_connections = relationship("UserOAuthConnection", back_populates="user", cascade="all, delete-orphan")
+    # activities = relationship("UserActivity", back_populates="user", cascade="all, delete-orphan")
+    # tenant = relationship("Tenant", back_populates="users")
+    # subscription = relationship("Subscription", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    # credit_account = relationship("CreditAccount", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    # exchange_accounts = relationship("ExchangeAccount", back_populates="user", cascade="all, delete-orphan")
+    # portfolios = relationship("Portfolio", back_populates="user", cascade="all, delete-orphan")
+    # strategy_access = relationship("UserStrategyAccess", back_populates="user", cascade="all, delete-orphan")
+    # trades = relationship("Trade", back_populates="user", cascade="all, delete-orphan")
+    # positions = relationship("Position", back_populates="user", cascade="all, delete-orphan")
+    # orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")
+    # trading_strategies = relationship("TradingStrategy", back_populates="user", cascade="all, delete-orphan")
+    # telegram_connections = relationship("UserTelegramConnection", back_populates="user", cascade="all, delete-orphan")
+    # ab_tests = relationship("ABTest", back_populates="creator", cascade="all, delete-orphan")
+    # strategy_performance_history = relationship("StrategyPerformanceHistory", back_populates="user", cascade="all, delete-orphan")
+    # backtest_results = relationship("BacktestResult", back_populates="user", cascade="all, delete-orphan")
+
+    # Self-referential relationship for referrals - commented out to avoid schema conflicts
+    # referred_users = relationship("User", backref="referrer", remote_side=[id])
     
-    # Self-referential relationship for referrals
-    referred_users = relationship("User", backref="referrer", remote_side=[id])
-    
-    # Indexes for performance
+    # Indexes for performance - include extend_existing to handle schema conflicts
     __table_args__ = (
         Index("idx_user_email_active", "email", "is_active"),
         Index("idx_user_tenant_role", "tenant_id", "role"),
         Index("idx_user_status", "status"),
         Index("idx_user_created", "created_at"),
+        {'extend_existing': True}
     )
     
     def __repr__(self) -> str:
@@ -173,10 +177,33 @@ class User(Base):
     
     @property
     def full_name(self) -> str:
-        """Get user's full name from profile or email."""
-        if self.profile:
+        """Get user's full name from database field or email."""
+        if self._full_name:
+            return self._full_name
+        if hasattr(self, 'profile') and self.profile:
             return self.profile.full_name
         return self.email.split('@')[0]
+
+    # Add property methods to handle None values for fields that might not exist in DB
+    def get_role_safe(self) -> UserRole:
+        """Get user role with safe default."""
+        return self.role or UserRole.TRADER
+
+    def get_status_safe(self) -> UserStatus:
+        """Get user status with safe default."""
+        return self.status or UserStatus.ACTIVE
+
+    def get_is_active_safe(self) -> bool:
+        """Get is_active with safe default."""
+        return self.is_active if self.is_active is not None else True
+
+    def get_is_verified_safe(self) -> bool:
+        """Get is_verified with safe default."""
+        return self.is_verified if self.is_verified is not None else True
+
+    def get_two_factor_enabled_safe(self) -> bool:
+        """Get two_factor_enabled with safe default."""
+        return self.two_factor_enabled if self.two_factor_enabled is not None else False
 
     @property
     def display_name(self) -> str:
