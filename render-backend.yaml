@@ -54,6 +54,11 @@ services:
         value: "15"
       - key: PARALLEL_EXCHANGE_FETCHING
         value: "true"
+      # TEMPORARY: SSL configuration for production database with self-signed cert
+      - key: DATABASE_SSL_REQUIRE
+        value: "true"
+      - key: DATABASE_SSL_INSECURE
+        value: "true"  # TEMPORARY: Remove when proper CA certificate is configured
 
   # Redis Cache Service
   - type: redis
