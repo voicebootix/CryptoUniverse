@@ -823,11 +823,11 @@ class UnifiedStrategyService(LoggerMixin):
                     is_active=True
                 )
 
-                db.add(new_access)
-                await db.commit()
-                await db.refresh(new_access)
+            db.add(new_access)
+            await db.commit()
+            await db.refresh(new_access)
 
-                self.logger.info(
+            self.logger.info(
                     "Granted new strategy access",
                     user_id=user_id,
                     strategy_id=strategy_id,
@@ -835,9 +835,9 @@ class UnifiedStrategyService(LoggerMixin):
                     access_id=str(new_access.id)
                 )
 
-                return new_access
+            return new_access
 
-            except IntegrityError:
+        except IntegrityError:
                 # Concurrent insert detected - rollback and update existing record
                 await db.rollback()
 
