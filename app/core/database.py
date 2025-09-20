@@ -83,7 +83,7 @@ engine = create_async_engine(
     connect_args={
         "command_timeout": 30,  # Command timeout in seconds
         "timeout": 60,  # Connection timeout in seconds
-        **({"ssl": create_ssl_context()} if "supabase" in get_async_database_url().lower() or getattr(settings, 'DATABASE_SSL_REQUIRE', False) else {}),
+        **({"ssl": create_ssl_context()} if ("supabase" in get_async_database_url().lower() or getattr(settings, 'DATABASE_SSL_REQUIRE', False) or getattr(settings, 'DATABASE_SSL_ROOT_CERT', None)) else {}),
         # Server settings for asyncpg (keeping only safe settings)
         "server_settings": {
             "application_name": "cryptouniverse_production"

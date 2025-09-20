@@ -177,7 +177,22 @@ class Settings(BaseSettings):
         description="OAuth redirect URL"
     )
     API_V1_PREFIX: str = Field(default="https://cryptouniverse.onrender.com/api/v1", description="API v1 prefix URL")
-    
+
+    # Validator to prevent insecure SSL in production
+    @model_validator(mode="after")
+    def _validate_ssl_policy(self):
+        """Prevent DATABASE_SSL_INSECURE=true in production unless explicitly acknowledged."""
+        if (getattr(self, "ENVIRONMENT", "development") == "production" and
+            getattr(self, "DATABASE_SSL_INSECURE", False) and
+            not getattr(self, "SSL_INSECURE_OVERRIDE_ACKNOWLEDGED", False)):
+            raise ValueError(
+                "DATABASE_SSL_INSECURE=true is not allowed in production environment. "
+                "This setting disables certificate verification and exposes connections to MITM attacks. "
+                "For production, use DATABASE_SSL_ROOT_CERT with proper CA certificate instead. "
+                "If you absolutely must override this (emergency only), set SSL_INSECURE_OVERRIDE_ACKNOWLEDGED=true"
+            )
+        return self
+
     class Config:
         case_sensitive = True
         env_file = ".env"

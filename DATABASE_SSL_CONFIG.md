@@ -21,8 +21,16 @@ CryptoUniverse Enterprise supports secure SSL/TLS connections to PostgreSQL data
 ### `DATABASE_SSL_INSECURE`
 - **Type**: Boolean
 - **Default**: `false`
-- **Description**: Disable SSL certificate verification (⚠️ **Use only for development/testing**)
+- **Description**: Disable SSL certificate verification (⚠️ **BLOCKED IN PRODUCTION**)
 - **Example**: `DATABASE_SSL_INSECURE=true`
+- **Production**: Requires `SSL_INSECURE_OVERRIDE_ACKNOWLEDGED=true` to override security validation
+
+### `SSL_INSECURE_OVERRIDE_ACKNOWLEDGED`
+- **Type**: Boolean
+- **Default**: `false`
+- **Description**: Emergency override to allow insecure SSL in production (⚠️ **EMERGENCY USE ONLY**)
+- **Example**: `SSL_INSECURE_OVERRIDE_ACKNOWLEDGED=true`
+- **Purpose**: Acknowledges security risk for temporary emergency deployments
 
 ## Configuration Examples
 
@@ -52,9 +60,9 @@ DATABASE_SSL_INSECURE=true
 ## Automatic SSL Detection
 
 The system automatically enables SSL for:
-- Supabase database URLs
+- Supabase database URLs (contains "supabase" in URL)
 - When `DATABASE_SSL_REQUIRE=true` is set
-- When `DATABASE_SSL_ROOT_CERT` is provided
+- When `DATABASE_SSL_ROOT_CERT` is provided (auto-enables SSL)
 
 ## Troubleshooting
 

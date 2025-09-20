@@ -182,7 +182,10 @@ class DatabaseConnectionManager:
                 "command_timeout": 60,
                 "timeout": 120,
             }
-            if "supabase" in database_url.lower() or getattr(settings, "DATABASE_SSL_REQUIRE", False):
+            # Enable SSL for Supabase, explicit requirement, or when root cert is provided
+            if ("supabase" in database_url.lower() or
+                getattr(settings, "DATABASE_SSL_REQUIRE", False) or
+                getattr(settings, "DATABASE_SSL_ROOT_CERT", None)):
                 connect_args["ssl"] = create_ssl_context()
         else:
             # Default configuration
