@@ -1179,7 +1179,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     async def _get_community_strategies(self, user_id: str) -> List[StrategyMarketplaceItem]:
         """Get community-published strategies."""
         try:
-            async for db in get_database():
+            async with get_database() as db:
                 # Get published strategies from community
                 stmt = select(TradingStrategy, StrategyPublisher).join(
                     StrategyPublisher, TradingStrategy.user_id == StrategyPublisher.user_id
@@ -1292,7 +1292,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     async def _get_live_performance(self, strategy_id: str) -> Dict[str, Any]:
         """Get live performance metrics for strategy."""
         try:
-            async for db in get_database():
+            async with get_database() as db:
                 # Get recent trades for this strategy
                 stmt = select(Trade).where(
                     and_(
@@ -1350,7 +1350,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     ) -> Dict[str, Any]:
         """Purchase access to strategy using credits."""
         try:
-            async for db in get_database():
+            async with get_database() as db:
                 # Get user's credit account
                 credit_stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
                 credit_result = await db.execute(credit_stmt)
