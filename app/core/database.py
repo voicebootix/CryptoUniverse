@@ -26,6 +26,14 @@ def create_ssl_context() -> ssl.SSLContext:
     import logging
     logger = logging.getLogger(__name__)
 
+    # Debug logging to see what environment variables are being read
+    ssl_require = getattr(settings, "DATABASE_SSL_REQUIRE", False)
+    ssl_insecure = getattr(settings, "DATABASE_SSL_INSECURE", False)
+    ssl_override = getattr(settings, "SSL_INSECURE_OVERRIDE_ACKNOWLEDGED", False)
+    environment = getattr(settings, "ENVIRONMENT", "unknown")
+
+    logger.warning(f"SSL Configuration Debug - ENV: {environment}, SSL_REQUIRE: {ssl_require}, SSL_INSECURE: {ssl_insecure}, SSL_OVERRIDE: {ssl_override}")
+
     cafile = getattr(settings, "DATABASE_SSL_ROOT_CERT", None)
     context = ssl.create_default_context(cafile=cafile) if cafile else ssl.create_default_context()
 
@@ -38,10 +46,13 @@ def create_ssl_context() -> ssl.SSLContext:
     context.verify_mode = ssl.CERT_REQUIRED
 
     # Explicit, opt-in insecure mode (avoid in prod)
-    if getattr(settings, "DATABASE_SSL_INSECURE", False):
+    if ssl_insecure:
         logger.warning("DATABASE_SSL_INSECURE=true: disabling certificate and hostname verification")
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
+        logger.warning("SSL context configured for insecure mode")
+    else:
+        logger.warning("SSL context using secure mode (certificate verification enabled)")
 
     return context
 
