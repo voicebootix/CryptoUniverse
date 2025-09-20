@@ -78,8 +78,7 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=True)  # Make nullable to match DB
     is_verified = Column(Boolean, default=False, nullable=True)  # Make nullable to match DB
 
-    # User profile fields
-    full_name = Column(String(255), nullable=True)  # Database column is full_name
+    # User profile fields - removed full_name as it doesn't exist in database
 
     # Role and permissions
     role = Column(Enum(UserRole), default=UserRole.TRADER, nullable=True)  # Make nullable to match DB
@@ -177,9 +176,7 @@ class User(Base):
     
     @property
     def full_name_display(self) -> str:
-        """Get user's full name from database field or email."""
-        if self.full_name:
-            return self.full_name
+        """Get user's full name from profile or email."""
         if hasattr(self, 'profile') and self.profile:
             return self.profile.full_name
         return self.email.split('@')[0]
