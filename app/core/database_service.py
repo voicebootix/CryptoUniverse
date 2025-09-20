@@ -479,7 +479,11 @@ class EnterpriseDatabase:
                         result = await db.execute(sql_query, params)
                     else:
                         result = await db.execute(sql_query)
-            
+
+                    # Commit if this is a DML statement (doesn't return rows)
+                    if not result.returns_rows:
+                        await db.commit()
+
             logger.info("Executed raw query", query=query[:100])
             return result
             

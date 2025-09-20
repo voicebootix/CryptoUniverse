@@ -140,7 +140,8 @@ class EnterpriseTradeExecutionTester:
             start_time = time.time()
             
             opportunities = await discovery_service.discover_opportunities_for_user(
-                user_profile=test_user_profile,
+                user_id=test_user_profile.user_id,
+                flags={},
                 max_opportunities=10
             )
             
