@@ -523,7 +523,7 @@ class UnifiedStrategyService(LoggerMixin):
                 # Performance from database
                 "total_trades": strategy.total_trades or 0,
                 "win_rate": float(strategy.win_rate) if strategy.win_rate else 0.0,
-                "total_pnl_usd": float(strategy.total_return) if strategy.total_return else 0.0,
+                "total_pnl_usd": float(strategy.total_pnl) if strategy.total_pnl else 0.0,
                 "max_drawdown": float(strategy.max_drawdown) if strategy.max_drawdown else 0.0,
                 "sharpe_ratio": float(strategy.sharpe_ratio) if strategy.sharpe_ratio else None,
 
@@ -584,7 +584,7 @@ class UnifiedStrategyService(LoggerMixin):
                 # Performance from database
                 "total_trades": strategy.total_trades or 0,
                 "win_rate": float(strategy.win_rate) if strategy.win_rate else 0.0,
-                "total_pnl_usd": float(strategy.total_return) if strategy.total_return else 0.0,
+                "total_pnl_usd": float(strategy.total_pnl) if strategy.total_pnl else 0.0,
                 "max_drawdown": float(strategy.max_drawdown) if strategy.max_drawdown else 0.0,
                 "sharpe_ratio": float(strategy.sharpe_ratio) if strategy.sharpe_ratio else None,
 
@@ -667,7 +667,7 @@ class UnifiedStrategyService(LoggerMixin):
                 # Performance from strategy
                 "total_trades": strategy.total_trades or 0,
                 "win_rate": float(strategy.win_rate) if strategy.win_rate else 0.0,
-                "total_pnl_usd": float(strategy.total_return) if strategy.total_return else 0.0,
+                "total_pnl_usd": float(strategy.total_pnl) if strategy.total_pnl else 0.0,
 
                 # Configuration
                 "risk_level": "medium",

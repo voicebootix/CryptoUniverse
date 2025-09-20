@@ -20,7 +20,7 @@ from app.core.config import get_settings
 from app.core.database import get_database
 from app.core.logging import LoggerMixin
 from app.models.user import User
-from app.models.trading import Trade, TradingStrategy
+from app.models.trading import Trade, TradingStrategy, TradeStatus
 from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.models.subscription import Subscription
 
@@ -231,7 +231,7 @@ class ProfitSharingService(LoggerMixin):
                 stmt = select(Trade).where(
                     and_(
                         Trade.user_id == user_id,
-                        Trade.status == "completed",
+                        Trade.status == TradeStatus.COMPLETED,
                         Trade.is_simulation == False,  # Only real trades
                         Trade.completed_at >= period_start,
                         Trade.completed_at <= period_end
