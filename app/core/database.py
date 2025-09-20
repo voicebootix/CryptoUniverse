@@ -13,7 +13,7 @@ from typing import AsyncGenerator, Optional
 import sqlalchemy
 from sqlalchemy import MetaData, event, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import declarative_base, DeclarativeBase, declared_attr
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool, QueuePool
 
 from app.core.config import get_settings
@@ -74,32 +74,25 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False  # Move autoflush to sessionmaker where it belongs
 )
 
-# Enterprise SQLAlchemy 2.x Declarative Base Architecture
+# Enterprise SQLAlchemy 2.x Compatible Architecture
+# CRITICAL FIX: Use the correct SQLAlchemy 2.x pattern that avoids metadata.schema property issues
 
-class EnterpriseBase(DeclarativeBase):
-    """
-    Enterprise SQLAlchemy 2.x Declarative Base
-    
-    Modern SQLAlchemy 2.x pattern that resolves metadata schema property issues
-    and provides enterprise-grade features.
-    """
-    
-    # Enterprise metadata with naming conventions
-    metadata = MetaData(
-        naming_convention={
-            "ix": "ix_%(column_0_label)s",
-            "uq": "uq_%(table_name)s_%(column_0_name)s", 
-            "ck": "ck_%(table_name)s_%(constraint_name)s",
-            "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-            "pk": "pk_%(table_name)s"
-        }
-    )
+# Create metadata with enterprise naming conventions
+metadata = MetaData(
+    naming_convention={
+        "ix": "ix_%(column_0_label)s",
+        "uq": "uq_%(table_name)s_%(column_0_name)s", 
+        "ck": "ck_%(table_name)s_%(constraint_name)s",
+        "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+        "pk": "pk_%(table_name)s"
+    }
+)
 
-# Use the enterprise base
-Base = EnterpriseBase
+# CRITICAL FIX: Use declarative_base() without metadata parameter to avoid schema property conflicts
+Base = declarative_base()
 
-# Backward compatibility for existing code
-metadata = Base.metadata
+# ENTERPRISE: Assign metadata after Base creation to avoid property conflicts
+Base.metadata = metadata
 
 
 # Database connection events for async engine
