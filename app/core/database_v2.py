@@ -159,14 +159,9 @@ class DatabaseConnectionManager:
             connect_args = {
                 "command_timeout": 60,
                 "timeout": 120,
-                "ssl": "require" if "supabase" in database_url.lower() else None,
-                "server_settings": {
-                    "application_name": f"cryptouniverse_{settings.ENVIRONMENT}",
-                    "jit": "off",  # Disable JIT for consistent performance
-                    "shared_preload_libraries": "pg_stat_statements",
-                    "log_statement": "none"  # Reduce log noise
-                }
             }
+            if "supabase" in database_url.lower() or getattr(settings, "DB_SSL", False):
+                connect_args["ssl"] = True
         else:
             # Default configuration
             poolclass = NullPool
@@ -187,10 +182,7 @@ class DatabaseConnectionManager:
                 "compiled_cache": {},
                 "schema_translate_map": None  # Enterprise: Support for schema translation
             },
-            connect_args=connect_args,
-            # Enterprise: JSON serializer for complex data types
-            json_serializer=lambda obj: obj,
-            json_deserializer=lambda obj: obj
+            connect_args=connect_args
         )
         
         # Set up connection event handlers
@@ -272,8 +264,7 @@ class DatabaseConnectionManager:
                 self.engine,
                 class_=AsyncSession,
                 expire_on_commit=False,
-                autoflush=False,
-                autocommit=False
+                autoflush=False
             )
             
             # Create sync engine for migrations
@@ -433,14 +424,12 @@ async def get_session() -> AsyncSession:
 
 
 # Engine access for backward compatibility
-@property
 def engine() -> AsyncEngine:
     """Get the async engine."""
     return db_manager.engine
 
 
 # Session factory access
-@property 
 def AsyncSessionLocal():
     """Get the session factory for backward compatibility."""
     return db_manager.session_factory

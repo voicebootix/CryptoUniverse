@@ -58,11 +58,10 @@ engine = create_async_engine(
     connect_args={
         "command_timeout": 30,  # Command timeout in seconds
         "timeout": 60,  # Connection timeout in seconds
-        "ssl": "require" if "supabase" in get_async_database_url().lower() else None,  # SSL for Supabase
-        # Server settings for asyncpg
+        "ssl": True if "supabase" in get_async_database_url().lower() else False,  # SSL for Supabase
+        # Server settings for asyncpg (keeping only safe settings)
         "server_settings": {
-            "application_name": "cryptouniverse_production",
-            "jit": "off"
+            "application_name": "cryptouniverse_production"
         }
     } if "postgresql" in get_async_database_url() else {}
 )

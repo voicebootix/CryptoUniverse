@@ -214,17 +214,22 @@ class EnterpriseDatabase:
             self.connection_pool_stats["avg_execution_time"] = total_time / self.connection_pool_stats["total_queries"]
     
     async def get_by_id(
-        self, 
-        model: Type[ModelType], 
+        self,
+        model: Type[ModelType],
         id_value: Union[UUID, str, int],
         session: AsyncSession = None
     ) -> Optional[ModelType]:
         """Get single record by ID with bulletproof error handling."""
         query = select(model).where(model.id == id_value)
-        
+
         try:
-            result = await self.execute_query(query, model.__name__, "get_by_id", session)
-            return result.scalar_one_or_none()
+            if session is None:
+                async with self.get_session() as db:
+                    result = await self.execute_query(query, model.__name__, "get_by_id", db)
+                    return result.scalar_one_or_none()
+            else:
+                result = await self.execute_query(query, model.__name__, "get_by_id", session)
+                return result.scalar_one_or_none()
         except DatabaseError:
             raise
         except Exception as e:
@@ -255,8 +260,13 @@ class EnterpriseDatabase:
         query = select(model).where(field == field_value)
         
         try:
-            result = await self.execute_query(query, model.__name__, "get_by_field", session)
-            return result.scalar_one_or_none()
+            if session is None:
+                async with self.get_session() as db:
+                    result = await self.execute_query(query, model.__name__, "get_by_field", db)
+                    return result.scalar_one_or_none()
+            else:
+                result = await self.execute_query(query, model.__name__, "get_by_field", session)
+                return result.scalar_one_or_none()
         except DatabaseError:
             raise
         except Exception as e:
@@ -325,8 +335,13 @@ class EnterpriseDatabase:
             query = query.offset(offset)
         
         try:
-            result = await self.execute_query(query, model.__name__, "list_with_filters", session)
-            return result.scalars().all()
+            if session is None:
+                async with self.get_session() as db:
+                    result = await self.execute_query(query, model.__name__, "list_with_filters", db)
+                    return result.scalars().all()
+            else:
+                result = await self.execute_query(query, model.__name__, "list_with_filters", session)
+                return result.scalars().all()
         except DatabaseError:
             raise
         except Exception as e:
