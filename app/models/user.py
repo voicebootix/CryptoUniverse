@@ -74,12 +74,12 @@ class User(Base):
     
     # Authentication fields
     email = Column(String(255), unique=True, nullable=False, index=True)
-    hashed_password = Column("password_hash", String(255), nullable=False)  # Map to actual DB column
+    hashed_password = Column(String(255), nullable=False)  # Database column is hashed_password
     is_active = Column(Boolean, default=True, nullable=True)  # Make nullable to match DB
     is_verified = Column(Boolean, default=False, nullable=True)  # Make nullable to match DB
 
     # User profile fields
-    _full_name = Column("full_name", String(255), nullable=True)  # Map to existing DB column
+    full_name = Column(String(255), nullable=True)  # Database column is full_name
 
     # Role and permissions
     role = Column(Enum(UserRole), default=UserRole.TRADER, nullable=True)  # Make nullable to match DB
@@ -176,10 +176,10 @@ class User(Base):
         )
     
     @property
-    def full_name(self) -> str:
+    def full_name_display(self) -> str:
         """Get user's full name from database field or email."""
-        if self._full_name:
-            return self._full_name
+        if self.full_name:
+            return self.full_name
         if hasattr(self, 'profile') and self.profile:
             return self.profile.full_name
         return self.email.split('@')[0]
