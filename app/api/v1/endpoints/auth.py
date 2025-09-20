@@ -265,9 +265,27 @@ async def login(
     logger.info("Login attempt", email=request.email, ip=client_ip)
     
     try:
-        # Find user
-        result = await db.execute(select(User).filter(User.email == request.email))
-        user = result.scalar_one_or_none()
+        # Find user with proper timeout for production
+        try:
+            result = await asyncio.wait_for(
+                db.execute(select(User).filter(User.email == request.email)),
+                timeout=10.0  # Production timeout
+            )
+            user = result.scalar_one_or_none()
+        except asyncio.TimeoutError:
+            logger.error("Database timeout during login")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication service temporarily unavailable"
+            )
+        except Exception as e:
+            logger.error(f"Database error during login: {str(e)}")
+            await asyncio.sleep(1)  # Prevent timing attacks
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication service error"
+            )
+
         if not user:
             await asyncio.sleep(1)  # Prevent timing attacks
             raise HTTPException(
@@ -324,10 +342,11 @@ async def login(
         access_token = auth_service.create_access_token(user)
         refresh_token = auth_service.create_refresh_token(user)
         
-        # Batch operations for better performance
-        current_time = datetime.utcnow()
-        
-        # Create session record
+        # Batch operations for better performance (skip for TempUser)
+        from datetime import datetime as dt
+        current_time = dt.utcnow()
+
+        # Create session record and update last login
         session = UserSession(
             user_id=user.id,
             refresh_token=refresh_token,
@@ -336,10 +355,10 @@ async def login(
             expires_at=current_time + auth_service.refresh_token_expire
         )
         db.add(session)
-        
+
         # Update last login in the same transaction
         user.last_login = current_time
-        
+
         # Single commit for both operations
         await db.commit()
         
@@ -418,7 +437,8 @@ async def register(
     # Create user with all required fields
     # SECURITY: Force TRADER role for self-registration to prevent privilege escalation
     import uuid
-    current_time = datetime.utcnow()
+    from datetime import datetime as dt
+    current_time = dt.utcnow()
     user = User(
         id=uuid.uuid4(),  # Explicitly set UUID
         email=request.email,

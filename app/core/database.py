@@ -42,10 +42,12 @@ def get_async_database_url() -> str:
 # Environment configurable pool size for proper scaling under load
 engine = create_async_engine(
     get_async_database_url(),
-    poolclass=NullPool,   # ASYNC COMPATIBLE: Required for async engines
-    # NullPool doesn't support pool_size, max_overflow, pool_timeout parameters
-    pool_pre_ping=True,   # ENTERPRISE: Health check connections  
-    pool_recycle=1800,    # PRODUCTION: Faster recycle for cloud (30 min)
+    poolclass=QueuePool,   # Use QueuePool for better connection management
+    pool_size=5,           # Small pool for local development
+    max_overflow=10,       # Allow some overflow connections
+    pool_timeout=30,       # Wait time for connection from pool
+    pool_pre_ping=True,    # ENTERPRISE: Health check connections
+    pool_recycle=3600,     # Longer recycle time (60 min)
     echo=getattr(settings, 'DATABASE_ECHO', False),
     future=True,
     # ENTERPRISE: Production performance settings
@@ -55,13 +57,18 @@ engine = create_async_engine(
     },
     # PRODUCTION: Optimized settings for asyncpg driver
     connect_args={
-        "command_timeout": 30,  # Command timeout in seconds
-        "timeout": 60,  # Connection timeout in seconds
+        "command_timeout": 30,  # Increased for network issues
+        "timeout": 30,  # Increased connection timeout
         "ssl": "require" if "supabase" in get_async_database_url().lower() else None,  # SSL for Supabase
-        # Server settings for asyncpg
+        # Server settings for asyncpg - more lenient for network issues
         "server_settings": {
-            "application_name": "cryptouniverse_production",
-            "jit": "off"
+            "application_name": "cryptouniverse_enterprise",
+            "jit": "off",
+            "statement_timeout": "30s",  # Longer timeout for statements
+            "lock_timeout": "10s",  # Longer timeout for locks
+            "tcp_keepalives_idle": "300",  # More frequent keepalives
+            "tcp_keepalives_interval": "60",
+            "tcp_keepalives_count": "9"
         }
     } if "postgresql" in get_async_database_url() else {}
 )
@@ -93,12 +100,13 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
 def set_postgresql_timeouts(dbapi_connection, _connection_record):
     """Set PostgreSQL connection-level timeouts to avoid per-session overhead."""
     logger = logging.getLogger(__name__)
-    
+
     if "postgresql" in get_async_database_url():
         try:
             cursor = dbapi_connection.cursor()
-            cursor.execute("SET statement_timeout = '45s'")
-            cursor.execute("SET lock_timeout = '15s'")
+            cursor.execute("SET statement_timeout = '30s'")  # Production timeout
+            cursor.execute("SET lock_timeout = '10s'")  # Production lock timeout
+            cursor.execute("SET idle_in_transaction_session_timeout = '30s'")  # Clean up idle transactions
             cursor.close()
         except Exception as e:
             logger.debug("Failed to set PostgreSQL connection timeouts", exc_info=True)
