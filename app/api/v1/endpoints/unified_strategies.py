@@ -339,14 +339,15 @@ async def revoke_strategy_access(
 
 
 @router.get("/health")
-async def unified_strategy_health():
+async def unified_strategy_health(
+    db: AsyncSession = Depends(get_database)
+):
     """Health check for unified strategy system"""
 
     try:
         # Test database connectivity
-        async for db in get_database():
-            from sqlalchemy import text
-            await db.execute(text("SELECT 1"))
+        from sqlalchemy import text
+        await db.execute(text("SELECT 1"))
 
         # Test service availability
         ai_catalog_size = len(unified_strategy_service._ai_strategy_catalog)
