@@ -8,6 +8,7 @@ for the multi-tenant cryptocurrency trading platform.
 import asyncio
 import logging
 import os
+import ssl
 from typing import AsyncGenerator, Optional
 
 import sqlalchemy
@@ -19,6 +20,30 @@ from sqlalchemy.pool import NullPool, QueuePool
 from app.core.config import get_settings
 
 settings = get_settings()
+
+def create_ssl_context() -> ssl.SSLContext:
+    """Create SSL context with secure defaults; trust a provided root CA; optional break-glass disable via flag."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    cafile = getattr(settings, "DATABASE_SSL_ROOT_CERT", None)
+    context = ssl.create_default_context(cafile=cafile) if cafile else ssl.create_default_context()
+
+    # Secure defaults
+    try:
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+    except Exception:
+        pass
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+
+    # Explicit, opt-in insecure mode (avoid in prod)
+    if getattr(settings, "DATABASE_SSL_INSECURE", False):
+        logger.warning("DATABASE_SSL_INSECURE=true: disabling certificate and hostname verification")
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+
+    return context
 
 # Convert sync DATABASE_URL to async if needed
 def get_async_database_url() -> str:
@@ -63,11 +88,10 @@ engine = create_async_engine(
     connect_args={
         "command_timeout": 30,  # Command timeout in seconds
         "timeout": 60,  # Connection timeout in seconds
-        "ssl": "require" if "supabase" in async_db_url.lower() else None,  # SSL for Supabase
-        # Server settings for asyncpg
+        **({"ssl": create_ssl_context()} if ("supabase" in get_async_database_url().lower() or getattr(settings, 'DATABASE_SSL_REQUIRE', False) or getattr(settings, 'DATABASE_SSL_ROOT_CERT', None)) else {}),
+        # Server settings for asyncpg (keeping only safe settings)
         "server_settings": {
-            "application_name": "cryptouniverse_production",
-            "jit": "off"
+            "application_name": "cryptouniverse_production"
         }
     } if "postgresql" in async_db_url else {}
 )
