@@ -18,6 +18,7 @@ Date: September 20, 2025
 import asyncio
 import logging
 import os
+import ssl
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -47,6 +48,15 @@ from app.core.config import get_settings
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
+
+def create_ssl_context() -> ssl.SSLContext:
+    """Create SSL context for database connections that handles self-signed certificates in production."""
+    context = ssl.create_default_context()
+    if settings.ENVIRONMENT == "production":
+        # In production, allow self-signed certificates for cloud databases
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
 
 
 class EnterpriseBase(DeclarativeBase):
@@ -161,7 +171,7 @@ class DatabaseConnectionManager:
                 "timeout": 120,
             }
             if "supabase" in database_url.lower() or getattr(settings, "DB_SSL", False):
-                connect_args["ssl"] = True
+                connect_args["ssl"] = create_ssl_context()
         else:
             # Default configuration
             poolclass = NullPool

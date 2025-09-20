@@ -8,6 +8,7 @@ for the multi-tenant cryptocurrency trading platform.
 import asyncio
 import logging
 import os
+import ssl
 from typing import AsyncGenerator, Optional
 
 import sqlalchemy
@@ -20,6 +21,15 @@ from sqlalchemy.pool import NullPool, QueuePool
 from app.core.config import get_settings
 
 settings = get_settings()
+
+def create_ssl_context() -> ssl.SSLContext:
+    """Create SSL context for database connections that handles self-signed certificates in production."""
+    context = ssl.create_default_context()
+    if settings.ENVIRONMENT == "production":
+        # In production, allow self-signed certificates for cloud databases
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
 
 # Convert sync DATABASE_URL to async if needed
 def get_async_database_url() -> str:
@@ -58,7 +68,7 @@ engine = create_async_engine(
     connect_args={
         "command_timeout": 30,  # Command timeout in seconds
         "timeout": 60,  # Connection timeout in seconds
-        **({"ssl": True} if "supabase" in get_async_database_url().lower() else {}),
+        **({"ssl": create_ssl_context()} if "supabase" in get_async_database_url().lower() or getattr(settings, 'DATABASE_SSL_REQUIRE', False) else {}),
         # Server settings for asyncpg (keeping only safe settings)
         "server_settings": {
             "application_name": "cryptouniverse_production"
