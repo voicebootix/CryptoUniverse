@@ -5052,7 +5052,7 @@ class TradingStrategiesService(LoggerMixin):
                 })
             
             # Win rate optimization
-            if total_trades > 0 and perf_result["performance_metrics"]["winning_trades_pct"] < 55:
+            if strategy_data.get("total_trades", 0) > 0 and perf_result["performance_metrics"]["winning_trades_pct"] < 55:
                 optimization_recommendations.append({
                     "type": "WIN_RATE_IMPROVEMENT",
                     "recommendation": "Improve trade selection",

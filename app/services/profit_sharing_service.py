@@ -231,7 +231,7 @@ class ProfitSharingService(LoggerMixin):
                 stmt = select(Trade).where(
                     and_(
                         Trade.user_id == user_id,
-                        Trade.status == TradeStatus.COMPLETED,
+                        Trade.status == TradeStatus.COMPLETED.value,
                         Trade.is_simulation == False,  # Only real trades
                         Trade.completed_at >= period_start,
                         Trade.completed_at <= period_end

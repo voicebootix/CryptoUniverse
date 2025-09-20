@@ -196,7 +196,7 @@ async def get_credit_balance(
             profit_stmt = select(func.sum(Trade.profit_realized_usd)).where(
                 and_(
                     Trade.user_id == current_user.id,
-                    Trade.status == TradeStatus.COMPLETED,
+                    Trade.status == TradeStatus.COMPLETED.value,
                     Trade.is_simulation == False,  # Use == for boolean comparison
                     Trade.profit_realized_usd > 0
                 )
