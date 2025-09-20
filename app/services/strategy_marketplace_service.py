@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.database import get_database
 from app.core.logging import LoggerMixin
+from app.core.async_session_manager import DatabaseSessionMixin
 from app.models.trading import TradingStrategy, Trade
 from app.models.user import User
 from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
@@ -76,7 +77,7 @@ class StrategyMarketplaceItem:
     tier: str  # free, basic, pro, enterprise
 
 
-class StrategyMarketplaceService(LoggerMixin):
+class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     """
     Unified strategy marketplace service.
     
@@ -426,6 +427,7 @@ class StrategyMarketplaceService(LoggerMixin):
             strategy_uuid = await trading_strategies_service.get_platform_strategy_id(strategy_func)
 
             if strategy_uuid:
+                # The performance tracker now uses the managed session from context
                 real_metrics = await real_performance_tracker.track_strategy_performance(
                     strategy_id=strategy_uuid,
                     user_id=user_id,
