@@ -100,6 +100,7 @@ class MasterSystemController(LoggerMixin):
         self.start_time = datetime.utcnow()
         self.redis = None  # Will be initialized lazily
         self._redis_initialized = False
+        self._autonomous_configs = {}  # In-memory storage for autonomous configs when Redis unavailable
         
         # Trading mode configurations with AI model weights and autonomous frequency
         self.mode_configs = {
@@ -1450,23 +1451,34 @@ class MasterSystemController(LoggerMixin):
             # Generate session ID
             session_id = f"auto_{user_id}_{int(time.time())}"
             
-            # Store user config
-            await self.redis.hset(
-                f"autonomous_config:{user_id}",
-                mapping={
+            # Store user config (check Redis availability)
+            if self.redis:
+                await self.redis.hset(
+                    f"autonomous_config:{user_id}",
+                    mapping={
+                        "session_id": session_id,
+                        "mode": mode,
+                        "started_at": datetime.utcnow().isoformat(),
+                        "max_daily_loss_pct": config.get("max_daily_loss_pct", 5.0),
+                        "max_position_size_pct": config.get("max_position_size_pct", 10.0),
+                        "allowed_symbols": json.dumps(config.get("allowed_symbols", ["BTC", "ETH", "SOL"])),
+                        "excluded_symbols": json.dumps(config.get("excluded_symbols", [])),
+                        "trading_hours": json.dumps(config.get("trading_hours", {"start": "00:00", "end": "23:59"}))
+                    }
+                )
+            else:
+                self.logger.warning("Redis unavailable - storing autonomous config in memory")
+                # Store in memory as fallback
+                self._autonomous_configs[user_id] = {
                     "session_id": session_id,
                     "mode": mode,
                     "started_at": datetime.utcnow().isoformat(),
-                    "max_daily_loss_pct": config.get("max_daily_loss_pct", 5.0),
-                    "max_position_size_pct": config.get("max_position_size_pct", 10.0),
-                    "allowed_symbols": json.dumps(config.get("allowed_symbols", ["BTC", "ETH", "SOL"])),
-                    "excluded_symbols": json.dumps(config.get("excluded_symbols", [])),
-                    "trading_hours": json.dumps(config.get("trading_hours", {"start": "00:00", "end": "23:59"}))
+                    "config": config
                 }
-            )
             
             # Mark as active
-            await self.redis.set(f"autonomous_active:{user_id}", "true", ex=86400)
+            if self.redis:
+                await self.redis.set(f"autonomous_active:{user_id}", "true", ex=86400)
             
             # Estimate trades based on mode
             trade_estimates = {
