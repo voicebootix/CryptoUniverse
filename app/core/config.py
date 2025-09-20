@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # Database settings
     DATABASE_URL: str = Field(..., env="DATABASE_URL", description="Database connection URL")
     DATABASE_QUERY_TIMEOUT: int = Field(default=10, env="DATABASE_QUERY_TIMEOUT", description="Database query timeout in seconds")
+
+    # Database SSL settings
+    DATABASE_SSL_REQUIRE: bool = Field(default=False, env="DATABASE_SSL_REQUIRE", description="Force SSL connection to database")
+    DATABASE_SSL_ROOT_CERT: Optional[str] = Field(default=None, env="DATABASE_SSL_ROOT_CERT", description="Path to custom CA certificate file for database SSL")
+    DATABASE_SSL_INSECURE: bool = Field(default=False, env="DATABASE_SSL_INSECURE", description="Disable SSL certificate verification (use only for development/testing)")
     
     # Redis settings
     REDIS_URL: str = Field(default="redis://localhost:6379", env="REDIS_URL", description="Redis connection URL")

@@ -50,12 +50,24 @@ settings = get_settings()
 logger = structlog.get_logger(__name__)
 
 def create_ssl_context() -> ssl.SSLContext:
-    """Create SSL context for database connections that handles self-signed certificates in production."""
-    context = ssl.create_default_context()
-    if settings.ENVIRONMENT == "production":
-        # In production, allow self-signed certificates for cloud databases
+    """Create SSL context with secure defaults; trust a provided root CA; optional break-glass disable via flag."""
+    cafile = getattr(settings, "DATABASE_SSL_ROOT_CERT", None)
+    context = ssl.create_default_context(cafile=cafile) if cafile else ssl.create_default_context()
+
+    # Secure defaults
+    try:
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+    except Exception:
+        pass
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+
+    # Explicit, opt-in insecure mode (avoid in prod)
+    if getattr(settings, "DATABASE_SSL_INSECURE", False):
+        logger.warning("DATABASE_SSL_INSECURE=true: disabling certificate and hostname verification")
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
+
     return context
 
 
@@ -170,7 +182,7 @@ class DatabaseConnectionManager:
                 "command_timeout": 60,
                 "timeout": 120,
             }
-            if "supabase" in database_url.lower() or getattr(settings, "DB_SSL", False):
+            if "supabase" in database_url.lower() or getattr(settings, "DATABASE_SSL_REQUIRE", False):
                 connect_args["ssl"] = create_ssl_context()
         else:
             # Default configuration

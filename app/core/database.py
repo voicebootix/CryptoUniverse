@@ -23,12 +23,27 @@ from app.core.config import get_settings
 settings = get_settings()
 
 def create_ssl_context() -> ssl.SSLContext:
-    """Create SSL context for database connections that handles self-signed certificates in production."""
-    context = ssl.create_default_context()
-    if settings.ENVIRONMENT == "production":
-        # In production, allow self-signed certificates for cloud databases
+    """Create SSL context with secure defaults; trust a provided root CA; optional break-glass disable via flag."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    cafile = getattr(settings, "DATABASE_SSL_ROOT_CERT", None)
+    context = ssl.create_default_context(cafile=cafile) if cafile else ssl.create_default_context()
+
+    # Secure defaults
+    try:
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+    except Exception:
+        pass
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+
+    # Explicit, opt-in insecure mode (avoid in prod)
+    if getattr(settings, "DATABASE_SSL_INSECURE", False):
+        logger.warning("DATABASE_SSL_INSECURE=true: disabling certificate and hostname verification")
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
+
     return context
 
 # Convert sync DATABASE_URL to async if needed
