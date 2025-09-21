@@ -1125,41 +1125,98 @@ I encountered an error during the 5-phase execution. The trade was not completed
             return {"content": f"Portfolio analysis error: {str(e)}", "confidence": 0.3}
     
     async def _handle_strategy_discussion(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
-        """Handle strategy discussion using REAL trading strategies service."""
-        
+        """Handle strategy discussion using user's actual strategies."""
+
         try:
-            # Use real trading strategies service - fallback if service unavailable
-            if self.trading_strategies:
-                strategies = await self.trading_strategies.futures_trade(
-                    symbol="BTC", action="analyze", amount=0, leverage=1
-                )
+            # Import chat adapters to get user strategies
+            from app.services.chat_service_adapters import chat_adapters
+
+            # Get user's actual strategy summary
+            strategy_summary = await chat_adapters.get_user_strategies_summary(user_id)
+
+            # Check if we have an error or no strategies
+            if strategy_summary.get('error'):
+                return {
+                    "content": f"⚠️ Unable to load your strategies: {strategy_summary['error']}\n\nPlease try again in a moment.",
+                    "confidence": 0.5
+                }
+
+            total_strategies = strategy_summary.get('total_strategies', 0)
+            active_strategies = strategy_summary.get('active_strategies', 0)
+
+            # Handle case where user has strategies
+            if total_strategies > 0:
+                performance = strategy_summary.get('performance', {})
+                total_pnl = performance.get('total_pnl', 0)
+                total_trades = performance.get('total_trades', 0)
+                avg_win_rate = performance.get('average_win_rate', 0)
+
+                # Build detailed response about user's strategies
+                response_content = f"""📊 **Your Strategy Portfolio Summary**
+
+**Strategy Count:**
+• Total Strategies: **{total_strategies}**
+• Currently Active: **{active_strategies}**
+• Inactive: **{total_strategies - active_strategies}**
+
+**Performance Overview:**
+• Combined P&L: **${total_pnl:,.2f}**
+• Total Trades: **{total_trades}**
+• Average Win Rate: **{avg_win_rate:.1f}%**
+"""
+
+                # Add top performing strategies if available
+                recent_strategies = strategy_summary.get('recent_strategies', [])[:3]
+                if recent_strategies:
+                    response_content += "\n**Recent Top Strategies:**\n"
+                    for i, strategy in enumerate(recent_strategies, 1):
+                        status_icon = "🟢" if strategy.get('is_active') else "🔴"
+                        name = strategy.get('name', 'Unknown Strategy')
+                        pnl = strategy.get('total_pnl_usd', 0)
+                        win_rate = strategy.get('win_rate', 0)
+                        trades = strategy.get('total_trades', 0)
+
+                        response_content += f"{i}. {name} ({status_icon})\n"
+                        response_content += f"   • P&L: ${pnl:,.2f} | Win Rate: {win_rate:.1f}% | Trades: {trades}\n"
+
             else:
-                strategies = {"available_strategies": ["momentum", "mean_reversion", "arbitrage"]}
-            
-            strategy_prompt = f"""
-            AVAILABLE TRADING STRATEGIES:
-            {json.dumps(strategies, indent=2)}
-            
-            USER REQUEST: {message}
-            
-            Recommend appropriate strategies and explain their benefits.
-            """
-            
-            ai_recommendation = await self.ai_consensus.consensus_decision(
-                decision_request=strategy_prompt,
-                confidence_threshold=70.0,
-                ai_models="all",
-                user_id=user_id
-            )
-            
+                # User has no strategies - provide helpful guidance
+                response_content = f"""📊 **Your Strategy Portfolio**
+
+You currently have **0 active trading strategies**.
+
+🚀 **Get Started with Professional Strategies:**
+• **AI-Powered Strategies**: Let our AI create personalized strategies based on your risk profile
+• **Copy Trading**: Follow successful traders automatically
+• **DCA Strategies**: Dollar-cost average into your favorite assets
+• **Technical Analysis**: Automated strategies using indicators and patterns
+
+📈 **Popular Strategy Types:**
+• **Momentum Trading**: Capitalize on trending assets
+• **Mean Reversion**: Buy low, sell high on oversold/overbought conditions
+• **Arbitrage**: Profit from price differences across exchanges
+• **Risk Management**: Automated stop-losses and position sizing
+
+💡 **Ready to start?** Ask me about any specific strategy type or trading approach!
+"""
+
             return {
-                "content": f"📈 **Trading Strategy Recommendations**\n\n{ai_recommendation.get('final_recommendation', 'Strategies available')}",
-                "confidence": ai_recommendation.get("consensus_score", 0.8),
-                "metadata": {"service_used": "trading_strategies", "real_data": True}
+                "content": response_content,
+                "confidence": 0.9 if total_strategies > 0 else 0.8,
+                "metadata": {
+                    "service_used": "strategy_marketplace",
+                    "real_data": True,
+                    "total_strategies": total_strategies,
+                    "active_strategies": active_strategies
+                }
             }
-            
+
         except Exception as e:
-            return {"content": f"Strategy service error: {str(e)}", "confidence": 0.3}
+            self.logger.error("Strategy discussion handler failed", error=str(e), user_id=user_id)
+            return {
+                "content": f"⚠️ Strategy service temporarily unavailable. Please try again in a moment.\n\nError: {str(e)}",
+                "confidence": 0.3
+            }
     
     async def _handle_risk_assessment(self, message: str, context: Dict, user_id: str) -> Dict[str, Any]:
         """Handle risk assessment using REAL risk service."""
