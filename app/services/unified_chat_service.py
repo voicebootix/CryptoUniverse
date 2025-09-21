@@ -616,8 +616,12 @@ class UnifiedChatService(LoggerMixin):
         intent = intent_analysis["intent"]
         context_data = {}
         
-        # Always get basic portfolio data
-        context_data["portfolio"] = await self.adapters.get_portfolio_summary(user_id)
+        # Always get basic portfolio data with error handling
+        try:
+            context_data["portfolio"] = await self.adapters.get_portfolio_summary(user_id)
+        except Exception as e:
+            self.logger.error("Failed to get portfolio summary", error=str(e), user_id=user_id)
+            context_data["portfolio"] = {"error": "Portfolio data unavailable"}
         
         # Intent-specific data gathering
         if intent == ChatIntent.PORTFOLIO_ANALYSIS:
@@ -638,12 +642,20 @@ class UnifiedChatService(LoggerMixin):
             context_data["technical_analysis"] = await self.adapters.get_technical_analysis()
             
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-            # Get real opportunities
-            context_data["opportunities"] = await self.opportunity_discovery.discover_opportunities_for_user(
-                user_id=user_id,
-                force_refresh=False,
-                include_strategy_recommendations=True
-            )
+            # Get real opportunities with error handling
+            try:
+                context_data["opportunities"] = await self.opportunity_discovery.discover_opportunities_for_user(
+                    user_id=user_id,
+                    force_refresh=False,
+                    include_strategy_recommendations=True
+                )
+            except Exception as e:
+                self.logger.error("Failed to discover opportunities", error=str(e), user_id=user_id)
+                context_data["opportunities"] = {
+                    "success": False,
+                    "error": "Opportunity discovery temporarily unavailable",
+                    "opportunities": []
+                }
             
         elif intent == ChatIntent.RISK_ASSESSMENT:
             # Get comprehensive risk metrics
@@ -651,9 +663,18 @@ class UnifiedChatService(LoggerMixin):
             context_data["market_risk"] = await self.adapters.get_market_risk_factors(user_id)
             
         elif intent == ChatIntent.STRATEGY_RECOMMENDATION:
-            # Get strategy recommendations
-            context_data["active_strategy"] = await self.trading_strategies.get_active_strategy(user_id)
-            context_data["available_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
+            # Get strategy recommendations with error handling
+            try:
+                context_data["active_strategy"] = await self.trading_strategies.get_active_strategy(user_id)
+            except Exception as e:
+                self.logger.error("Failed to get active strategy", error=str(e), user_id=user_id)
+                context_data["active_strategy"] = None
+
+            try:
+                context_data["available_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
+            except Exception as e:
+                self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
+                context_data["available_strategies"] = {"strategies": []}
             
         elif intent == ChatIntent.REBALANCING:
             # Get rebalancing analysis
@@ -676,8 +697,20 @@ class UnifiedChatService(LoggerMixin):
         Generate complete response using ChatAI with personality.
         """
         intent = intent_analysis["intent"]
-        personality = self.personalities[session.trading_mode]
-        
+
+        # Get personality for response style with fallback
+        try:
+            personality = self.personalities[session.trading_mode]
+        except KeyError:
+            self.logger.warning(f"Unknown trading mode: {session.trading_mode}, using default")
+            personality = self.personalities.get("balanced", {
+                "name": "Balanced Assistant",
+                "style": "professional",
+                "greeting": "I'm here to help with your cryptocurrency trading.",
+                "approach": "Data-driven analysis with clear explanations",
+                "vocabulary": ["analysis", "recommend", "consider"]
+            })
+
         # Build system message with personality
         system_message = f"""You are {personality['name']}, a {personality['style']} cryptocurrency trading AI assistant.
         
