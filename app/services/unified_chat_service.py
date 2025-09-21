@@ -66,13 +66,16 @@ class ChatMessageType(str, Enum):
 
 
 class ChatIntent(str, Enum):
-    """All supported chat intents - PRESERVED from original."""
+    """All supported chat intents - ENTERPRISE GRADE with proper classification."""
     GREETING = "greeting"
     PORTFOLIO_ANALYSIS = "portfolio_analysis"
     TRADE_EXECUTION = "trade_execution"
     MARKET_ANALYSIS = "market_analysis"
     RISK_ASSESSMENT = "risk_assessment"
     STRATEGY_RECOMMENDATION = "strategy_recommendation"
+    STRATEGY_MANAGEMENT = "strategy_management"      # NEW: Managing user's active strategies
+    CREDIT_INQUIRY = "credit_inquiry"                # NEW: Credit balance, profit potential queries
+    CREDIT_MANAGEMENT = "credit_management"          # NEW: Credit purchase, usage tracking
     REBALANCING = "rebalancing"
     PERFORMANCE_REVIEW = "performance_review"
     POSITION_MANAGEMENT = "position_management"
@@ -244,8 +247,9 @@ class UnifiedChatService(LoggerMixin):
                 "how are you", "what's up", "greetings"
             ],
             ChatIntent.PORTFOLIO_ANALYSIS: [
-                "portfolio", "balance", "holdings", "positions", "worth",
-                "how much", "value", "total", "summary", "overview", "assets"
+                "portfolio", "holdings", "positions", "worth", "assets",
+                "how much", "value", "total", "summary", "overview",
+                "portfolio balance", "my portfolio", "portfolio value"
             ],
             ChatIntent.TRADE_EXECUTION: [
                 "buy", "sell", "trade", "exchange", "swap", "convert",
@@ -260,10 +264,25 @@ class UnifiedChatService(LoggerMixin):
                 "var", "sharpe", "protection", "hedge", "safe"
             ],
             ChatIntent.STRATEGY_RECOMMENDATION: [
-                "strategy", "recommend", "suggest", "advice", "what should",
-                "best approach", "plan", "tactics", "methodology",
-                "how many strategies", "count strategies", "my strategies",
-                "strategies do I have", "what strategies", "strategy portfolio"
+                "recommend strategy", "suggest strategy", "best strategy", "strategy advice",
+                "what strategy", "which strategy", "strategy recommendation",
+                "best approach", "recommended plan", "tactics", "methodology"
+            ],
+            ChatIntent.STRATEGY_MANAGEMENT: [
+                "my strategies", "strategies do I have", "how many strategies",
+                "count strategies", "strategy portfolio", "active strategies",
+                "purchased strategies", "strategy list", "strategy status",
+                "strategy subscription", "strategy access", "available strategies"
+            ],
+            ChatIntent.CREDIT_INQUIRY: [
+                "credit balance", "credits", "credit status", "how many credits",
+                "credits do I have", "available credits", "credit remaining",
+                "profit potential", "credit account", "credit summary"
+            ],
+            ChatIntent.CREDIT_MANAGEMENT: [
+                "buy credits", "purchase credits", "credit purchase", "add credits",
+                "credit payment", "credit transaction", "credit history",
+                "credit usage", "spend credits", "credit cost"
             ],
             ChatIntent.REBALANCING: [
                 "rebalance", "redistribute", "adjust", "optimize portfolio",
@@ -453,6 +472,9 @@ class UnifiedChatService(LoggerMixin):
                     "market": ChatIntent.MARKET_ANALYSIS,
                     "risk": ChatIntent.RISK_ASSESSMENT,
                     "strategy": ChatIntent.STRATEGY_RECOMMENDATION,
+                    "strategies": ChatIntent.STRATEGY_MANAGEMENT,
+                    "credits": ChatIntent.CREDIT_INQUIRY,
+                    "credit": ChatIntent.CREDIT_INQUIRY,
                     "rebalance": ChatIntent.REBALANCING,
                     "performance": ChatIntent.PERFORMANCE_REVIEW,
                     "opportunity": ChatIntent.OPPORTUNITY_DISCOVERY,
@@ -489,7 +511,7 @@ class UnifiedChatService(LoggerMixin):
             return {"allowed": True, "message": "Paper trading mode active"}
         
         # Check credit requirements for paid operations
-        if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.STRATEGY_RECOMMENDATION]:
+        if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
             if conversation_mode == ConversationMode.LIVE_TRADING:
                 # Real credit check - NO MOCKS
                 credit_check = await self._check_user_credits(user_id)
@@ -507,10 +529,10 @@ class UnifiedChatService(LoggerMixin):
                         }
                     }
         
-        # Check strategy access
-        if intent == ChatIntent.STRATEGY_RECOMMENDATION:
+        # Check strategy access for strategy-related operations
+        if intent in [ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
             strategy_check = await self._check_strategy_access(user_id)
-            if not strategy_check["has_access"]:
+            if not strategy_check["has_access"] and intent == ChatIntent.STRATEGY_RECOMMENDATION:
                 return {
                     "allowed": False,
                     "message": f"You need to purchase strategy access. "
@@ -522,6 +544,7 @@ class UnifiedChatService(LoggerMixin):
                         "available_strategies": strategy_check['available_strategies']
                     }
                 }
+            # For STRATEGY_MANAGEMENT, we allow access even without purchased strategies (show what they can buy)
         
         # Check trading limits
         if intent == ChatIntent.TRADE_EXECUTION:
@@ -675,7 +698,50 @@ class UnifiedChatService(LoggerMixin):
             except Exception as e:
                 self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
                 context_data["available_strategies"] = {"strategies": []}
-            
+
+        elif intent == ChatIntent.STRATEGY_MANAGEMENT:
+            # Get user's purchased/active strategies
+            try:
+                context_data["user_strategies"] = await self.strategy_marketplace.get_user_strategy_portfolio(user_id)
+            except Exception as e:
+                self.logger.error("Failed to get user strategy portfolio", error=str(e), user_id=user_id)
+                context_data["user_strategies"] = {
+                    "success": False,
+                    "active_strategies": [],
+                    "total_strategies": 0,
+                    "error": str(e)
+                }
+
+            try:
+                context_data["marketplace_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
+            except Exception as e:
+                self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
+                context_data["marketplace_strategies"] = {"strategies": []}
+
+        elif intent in [ChatIntent.CREDIT_INQUIRY, ChatIntent.CREDIT_MANAGEMENT]:
+            # Get credit account information
+            try:
+                from app.core.database import get_database
+                from app.api.v1.endpoints.credits import get_or_create_credit_account
+
+                async with get_database() as db:
+                    credit_account = await get_or_create_credit_account(user_id, db)
+                    context_data["credit_account"] = {
+                        "available_credits": float(credit_account.available_credits),
+                        "total_credits": float(credit_account.total_credits),
+                        "profit_potential": float(credit_account.calculate_profit_potential()),
+                        "account_tier": credit_account.tier or "standard"
+                    }
+            except Exception as e:
+                self.logger.error("Failed to get credit account", error=str(e), user_id=user_id)
+                context_data["credit_account"] = {
+                    "available_credits": 0,
+                    "total_credits": 0,
+                    "profit_potential": 0,
+                    "account_tier": "standard",
+                    "error": str(e)
+                }
+
         elif intent == ChatIntent.REBALANCING:
             # Get rebalancing analysis
             context_data["rebalance_analysis"] = await self.adapters.analyze_rebalancing_needs(user_id)
@@ -979,10 +1045,100 @@ INSTRUCTIONS FOR AI MONEY MANAGER:
 Remember: You are the AI Money Manager providing personalized advice based on real analysis.""")
             
             return "\n".join(prompt_parts)
-        
+
+        elif intent == ChatIntent.STRATEGY_MANAGEMENT:
+            user_strategies = context_data.get("user_strategies", {})
+            marketplace_strategies = context_data.get("marketplace_strategies", {})
+
+            if user_strategies.get("success", False):
+                active_strategies = user_strategies.get("active_strategies", [])
+                total_strategies = user_strategies.get("total_strategies", 0)
+                total_monthly_cost = user_strategies.get("total_monthly_cost", 0)
+
+                return f"""User asked: "{message}"
+
+CURRENT STRATEGY PORTFOLIO:
+- Total Active Strategies: {total_strategies}
+- Monthly Cost: {total_monthly_cost} credits
+- Active Strategies: {[s.get('name', 'Unknown') for s in active_strategies[:10]]}
+
+STRATEGY DETAILS:
+{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - {s.get('credit_cost_monthly', 0)} credits/month" for s in active_strategies[:10]])}
+
+MARKETPLACE SUMMARY:
+- Available Strategies: {len(marketplace_strategies.get('strategies', []))} total strategies
+
+Provide a comprehensive overview of the user's strategy portfolio, subscription status, and actionable recommendations for strategy management."""
+            else:
+                error = user_strategies.get("error", "Unknown error")
+                return f"""User asked: "{message}"
+
+STRATEGY ACCESS STATUS:
+- Current Access: Limited or None
+- Error: {error}
+- Available Marketplace Strategies: {len(marketplace_strategies.get('strategies', []))}
+
+Explain that strategy access requires subscription/purchase and guide the user on how to get started with strategies."""
+
+        elif intent == ChatIntent.STRATEGY_RECOMMENDATION:
+            active_strategy = context_data.get("active_strategy", {})
+            available_strategies = context_data.get("available_strategies", {})
+
+            return f"""User asked: "{message}"
+
+CURRENT STRATEGY STATUS:
+- Active Strategy: {active_strategy.get('name', 'None') if active_strategy else 'None'}
+- Risk Level: {active_strategy.get('risk_level', 'Unknown') if active_strategy else 'Not Set'}
+- Strategy Active: {'Yes' if active_strategy and active_strategy.get('active') else 'No'}
+
+AVAILABLE STRATEGIES:
+- Total Strategies in Marketplace: {len(available_strategies.get('strategies', []))}
+- Strategy Categories: {list(set([s.get('category', 'Unknown') for s in available_strategies.get('strategies', [])]))}
+
+Top Recommended Strategies:
+{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - Expected Return: {s.get('expected_return', 0)*100:.1f}%" for s in available_strategies.get('strategies', [])[:5]])}
+
+Provide personalized strategy recommendations based on the user's current setup and available strategies."""
+
+        elif intent == ChatIntent.CREDIT_INQUIRY:
+            credit_account = context_data.get("credit_account", {})
+
+            return f"""User asked: "{message}"
+
+CREDIT ACCOUNT SUMMARY:
+- Available Credits: {credit_account.get('available_credits', 0):,.0f} credits
+- Total Credits Purchased: {credit_account.get('total_credits', 0):,.0f} credits
+- Profit Potential: ${credit_account.get('profit_potential', 0):,.2f}
+- Account Tier: {credit_account.get('account_tier', 'standard').title()}
+
+CREDIT CONVERSION RATE:
+- Platform converts credits to trading capital based on performance
+- Higher tier accounts get better conversion rates
+- Credits unlock profit potential in live trading mode
+
+Provide a clear explanation of the user's credit balance, what it means for their profit potential, and how they can use or purchase more credits."""
+
+        elif intent == ChatIntent.CREDIT_MANAGEMENT:
+            credit_account = context_data.get("credit_account", {})
+
+            return f"""User asked: "{message}"
+
+CREDIT MANAGEMENT OVERVIEW:
+- Current Balance: {credit_account.get('available_credits', 0):,.0f} credits
+- Account Tier: {credit_account.get('account_tier', 'standard').title()}
+- Profit Potential: ${credit_account.get('profit_potential', 0):,.2f}
+
+CREDIT OPTIONS:
+- Purchase additional credits for more profit potential
+- Credits are used for strategy subscriptions and live trading
+- Different tiers offer different conversion rates
+- Credits enable access to premium AI strategies
+
+Guide the user on credit purchase options, usage optimization, and tier benefits."""
+
         # Default prompt for other intents
         return f"""User asked: "{message}"
-        
+
 Intent: {intent.value}
 Available Data: {list(context_data.keys())}
 
