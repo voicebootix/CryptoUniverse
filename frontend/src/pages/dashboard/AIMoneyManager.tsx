@@ -288,9 +288,9 @@ const AIMoneyManager: React.FC = () => {
     try {
       const newState = !isAutonomousEnabled;
       
-      const response = await apiClient.post('/autonomous/toggle', {
-        enabled: newState,
-        paperMode: isPaperMode
+      const response = await apiClient.post('/trading/autonomous/toggle', {
+        enable: newState,
+        mode: 'balanced'
       });
 
       if (response.data.success) {

@@ -634,7 +634,7 @@ const StrategyIDE: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-x-auto">
         {/* Sidebar */}
         <div className="w-80 border-r bg-muted/20 flex flex-col">
           <Tabs defaultValue="templates" className="flex-1">
@@ -844,7 +844,7 @@ const StrategyIDE: React.FC = () => {
         </div>
 
         {/* Main Editor Area */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col min-w-[600px]">
           <div className="flex-1 relative">
             <Editor
               height="100%"
@@ -934,7 +934,7 @@ const StrategyIDE: React.FC = () => {
 
         {/* Results Panel */}
         {backtestResult && (
-          <div className="w-96 border-l bg-muted/20 overflow-auto">
+          <div className="w-[600px] border-l bg-muted/20 overflow-auto">
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold">Backtest Results</h3>
@@ -987,11 +987,11 @@ const StrategyIDE: React.FC = () => {
                   </CardHeader>
                   <CardContent className="p-4">
                     <div className="space-y-2">
-                      {backtestResult.trade_history.slice(0, 5).map((trade, i) => (
+                      {backtestResult.trades.slice(0, 5).map((trade, i) => (
                         <div key={i} className="flex justify-between text-sm">
-                          <span>{trade.symbol}</span>
-                          <span className={trade.pnl >= 0 ? 'text-green-500' : 'text-red-500'}>
-                            {formatPercentage(trade.return_pct)}
+                          <span>{trade.action} @ ${trade.price}</span>
+                          <span className={trade.return >= 0 ? 'text-green-500' : 'text-red-500'}>
+                            {formatPercentage(trade.return)}
                           </span>
                         </div>
                       ))}

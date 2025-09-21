@@ -812,72 +812,72 @@ class UnifiedStrategyService(LoggerMixin):
         try:
             # First attempt: Try to create new access record
             new_access = UserStrategyAccess(
-                    user_id=UUID(user_id),
-                    strategy_id=strategy_id,
-                    strategy_type=strategy_type,
-                    access_type=access_type,
-                    subscription_type=subscription_type,
-                    credits_paid=credits_paid,
-                    expires_at=expires_at,
-                    metadata_json=metadata or {},
-                    is_active=True
-                )
+                user_id=UUID(user_id),
+                strategy_id=strategy_id,
+                strategy_type=strategy_type,
+                access_type=access_type,
+                subscription_type=subscription_type,
+                credits_paid=credits_paid,
+                expires_at=expires_at,
+                metadata_json=metadata or {},
+                is_active=True
+            )
 
             db.add(new_access)
             await db.commit()
             await db.refresh(new_access)
 
             self.logger.info(
-                    "Granted new strategy access",
-                    user_id=user_id,
-                    strategy_id=strategy_id,
-                    access_type=access_type.value,
-                    access_id=str(new_access.id)
-                )
+                "Granted new strategy access",
+                user_id=user_id,
+                strategy_id=strategy_id,
+                access_type=access_type.value,
+                access_id=str(new_access.id)
+            )
 
             return new_access
 
         except IntegrityError:
-                # Concurrent insert detected - rollback and update existing record
-                await db.rollback()
+            # Concurrent insert detected - rollback and update existing record
+            await db.rollback()
 
-                self.logger.debug(
-                    "Concurrent grant detected, updating existing access",
-                    user_id=user_id,
-                    strategy_id=strategy_id
-                )
+            self.logger.debug(
+                "Concurrent grant detected, updating existing access",
+                user_id=user_id,
+                strategy_id=strategy_id
+            )
 
-                # Re-query to get existing record
-                existing = await db.execute(
-                    select(UserStrategyAccess).where(
-                        and_(
-                            UserStrategyAccess.user_id == UUID(user_id),
-                            UserStrategyAccess.strategy_id == strategy_id
-                        )
+            # Re-query to get existing record
+            existing = await db.execute(
+                select(UserStrategyAccess).where(
+                    and_(
+                        UserStrategyAccess.user_id == UUID(user_id),
+                        UserStrategyAccess.strategy_id == strategy_id
                     )
                 )
-                existing_access = existing.scalar_one()  # Must exist due to integrity error
+            )
+            existing_access = existing.scalar_one()  # Must exist due to integrity error
 
-                # Update existing access with new values
-                existing_access.access_type = access_type
-                existing_access.subscription_type = subscription_type
-                existing_access.credits_paid = credits_paid
-                existing_access.expires_at = expires_at
-                existing_access.is_active = True
-                existing_access.metadata_json = metadata or {}
-                existing_access.updated_at = datetime.utcnow()
+            # Update existing access with new values
+            existing_access.access_type = access_type
+            existing_access.subscription_type = subscription_type
+            existing_access.credits_paid = credits_paid
+            existing_access.expires_at = expires_at
+            existing_access.is_active = True
+            existing_access.metadata_json = metadata or {}
+            existing_access.updated_at = datetime.utcnow()
 
-                await db.commit()
+            await db.commit()
 
-                self.logger.info(
-                    "Updated existing strategy access (race condition resolved)",
-                    user_id=user_id,
-                    strategy_id=strategy_id,
-                    access_type=access_type.value,
-                    access_id=str(existing_access.id)
-                )
+            self.logger.info(
+                "Updated existing strategy access (race condition resolved)",
+                user_id=user_id,
+                strategy_id=strategy_id,
+                access_type=access_type.value,
+                access_id=str(existing_access.id)
+            )
 
-                return existing_access
+            return existing_access
 
     async def revoke_strategy_access(
         self,
