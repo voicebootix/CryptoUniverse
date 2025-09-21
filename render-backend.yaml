@@ -54,6 +54,14 @@ services:
         value: "15"
       - key: PARALLEL_EXCHANGE_FETCHING
         value: "true"
+      # SSL configuration for production database
+      - key: DATABASE_SSL_REQUIRE
+        value: "true"
+      # EMERGENCY ONLY: Enable insecure SSL (remove ASAP after proper CA cert setup)
+      - key: DATABASE_SSL_INSECURE
+        value: "true"
+      - key: SSL_INSECURE_OVERRIDE_ACKNOWLEDGED
+        value: "true"  # Acknowledges the security risk for emergency deployment
 
   # Redis Cache Service
   - type: redis

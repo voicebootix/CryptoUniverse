@@ -4646,7 +4646,7 @@ class TradingStrategiesService(LoggerMixin):
                 trade_time = func.coalesce(Trade.completed_at, Trade.executed_at, Trade.created_at)
 
                 trade_filters = [
-                    Trade.status == TradeStatus.COMPLETED,
+                    Trade.status == TradeStatus.COMPLETED.value,
                     Trade.is_simulation.is_(False),
                     trade_time >= period_start,
                     trade_time <= period_end
@@ -4664,6 +4664,10 @@ class TradingStrategiesService(LoggerMixin):
 
                 trade_result = await db.execute(trade_stmt)
                 trade_row = trade_result.first()
+
+                # Initialize variables to avoid NameError
+                total_trades = 0
+                winning_trades = 0
 
                 if trade_row and trade_row.total_trades:
                     total_trades = safe_int(trade_row.total_trades, 0)
@@ -5048,7 +5052,7 @@ class TradingStrategiesService(LoggerMixin):
                 })
             
             # Win rate optimization
-            if total_trades > 0 and perf_result["performance_metrics"]["winning_trades_pct"] < 55:
+            if strategy_data.get("total_trades", 0) > 0 and perf_result["performance_metrics"]["winning_trades_pct"] < 55:
                 optimization_recommendations.append({
                     "type": "WIN_RATE_IMPROVEMENT",
                     "recommendation": "Improve trade selection",

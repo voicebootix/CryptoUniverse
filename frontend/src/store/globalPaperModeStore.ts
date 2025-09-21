@@ -48,7 +48,7 @@ export const useGlobalPaperModeStore = create<GlobalPaperModeState>()(
 
               set({
                 isPaperMode: true,
-                paperBalance: portfolio.cash_balance ?? portfolio.balance ?? 10000
+                paperBalance: portfolio?.cash_balance ?? portfolio?.balance ?? 10000
               });
 
               // Fetch initial stats
@@ -84,7 +84,7 @@ export const useGlobalPaperModeStore = create<GlobalPaperModeState>()(
           if (response.data.success) {
             const portfolio = response.data.virtual_portfolio || response.data.paper_portfolio || {};
             const stats = response.data.stats || {};
-            const performance = portfolio.performance_metrics || {};
+            const performance = portfolio?.performance_metrics || {};
 
             set({
               paperStats: {
@@ -95,7 +95,7 @@ export const useGlobalPaperModeStore = create<GlobalPaperModeState>()(
                 worstTrade: stats.worst_trade ?? performance.worst_trade ?? 0,
                 readyForLive: response.data.ready_for_live_trading ?? false
               },
-              paperBalance: portfolio.cash_balance ?? get().paperBalance
+              paperBalance: portfolio?.cash_balance ?? get().paperBalance
             });
           }
         } catch (error) {
@@ -113,7 +113,7 @@ export const useGlobalPaperModeStore = create<GlobalPaperModeState>()(
             const portfolio = response.data.virtual_portfolio || {};
 
             set({
-              paperBalance: portfolio.cash_balance ?? 10000,
+              paperBalance: portfolio?.cash_balance ?? 10000,
               paperStats: null
             });
 

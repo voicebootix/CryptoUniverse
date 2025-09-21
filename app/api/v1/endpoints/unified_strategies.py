@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_database, AsyncSessionLocal
+from app.core.async_session_manager import with_managed_db_session
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User, UserRole
 from app.models.strategy_access import StrategyAccessType, StrategyType
@@ -68,6 +69,7 @@ class BulkAccessResponse(BaseModel):
 
 
 @router.get("/portfolio", response_model=Dict[str, Any])
+@with_managed_db_session
 async def get_unified_portfolio(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_database)

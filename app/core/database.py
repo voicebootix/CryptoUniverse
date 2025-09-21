@@ -8,6 +8,7 @@ for the multi-tenant cryptocurrency trading platform.
 import asyncio
 import logging
 import os
+import ssl
 from typing import AsyncGenerator, Optional
 
 import sqlalchemy
@@ -19,6 +20,41 @@ from sqlalchemy.pool import NullPool, QueuePool
 from app.core.config import get_settings
 
 settings = get_settings()
+
+def create_ssl_context() -> ssl.SSLContext:
+    """Create SSL context with secure defaults; trust a provided root CA; optional break-glass disable via flag."""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Debug logging to see what environment variables are being read
+    ssl_require = getattr(settings, "DATABASE_SSL_REQUIRE", False)
+    ssl_insecure = getattr(settings, "DATABASE_SSL_INSECURE", False)
+    ssl_override = getattr(settings, "SSL_INSECURE_OVERRIDE_ACKNOWLEDGED", False)
+    environment = getattr(settings, "ENVIRONMENT", "unknown")
+
+    logger.warning(f"SSL Configuration Debug - ENV: {environment}, SSL_REQUIRE: {ssl_require}, SSL_INSECURE: {ssl_insecure}, SSL_OVERRIDE: {ssl_override}")
+
+    cafile = getattr(settings, "DATABASE_SSL_ROOT_CERT", None)
+    context = ssl.create_default_context(cafile=cafile) if cafile else ssl.create_default_context()
+
+    # Secure defaults
+    try:
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+    except Exception:
+        pass
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+
+    # Explicit, opt-in insecure mode (avoid in prod)
+    if ssl_insecure:
+        logger.warning("DATABASE_SSL_INSECURE=true: disabling certificate and hostname verification")
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        logger.warning("SSL context configured for insecure mode")
+    else:
+        logger.warning("SSL context using secure mode (certificate verification enabled)")
+
+    return context
 
 # Convert sync DATABASE_URL to async if needed
 def get_async_database_url() -> str:
@@ -40,37 +76,35 @@ def get_async_database_url() -> str:
 
 # ENTERPRISE SQLAlchemy async engine optimized for Render production
 # Environment configurable pool size for proper scaling under load
+
+# Configure execution options based on database type
+async_db_url = get_async_database_url()
+execution_options = {"compiled_cache": {}}  # Enable query compilation cache
+
+# Only set isolation level for PostgreSQL (not supported by SQLite)
+if "postgresql" in async_db_url:
+    execution_options["isolation_level"] = "READ_COMMITTED"
+
 engine = create_async_engine(
-    get_async_database_url(),
-    poolclass=QueuePool,   # Use QueuePool for better connection management
-    pool_size=5,           # Small pool for local development
-    max_overflow=10,       # Allow some overflow connections
-    pool_timeout=30,       # Wait time for connection from pool
-    pool_pre_ping=True,    # ENTERPRISE: Health check connections
-    pool_recycle=3600,     # Longer recycle time (60 min)
+    async_db_url,
+    poolclass=NullPool,   # ASYNC COMPATIBLE: Required for async engines
+    # NullPool doesn't support pool_size, max_overflow, pool_timeout parameters
+    pool_pre_ping=True,   # ENTERPRISE: Health check connections
+    pool_recycle=1800,    # PRODUCTION: Faster recycle for cloud (30 min)
     echo=getattr(settings, 'DATABASE_ECHO', False),
     future=True,
     # ENTERPRISE: Production performance settings
-    execution_options={
-        "isolation_level": "READ_COMMITTED",
-        "compiled_cache": {},  # Enable query compilation cache
-    },
+    execution_options=execution_options,
     # PRODUCTION: Optimized settings for asyncpg driver
     connect_args={
-        "command_timeout": 30,  # Increased for network issues
-        "timeout": 30,  # Increased connection timeout
-        "ssl": "require" if "supabase" in get_async_database_url().lower() else None,  # SSL for Supabase
-        # Server settings for asyncpg - more lenient for network issues
+        "command_timeout": 30,  # Command timeout in seconds
+        "timeout": 60,  # Connection timeout in seconds
+        **({"ssl": create_ssl_context()} if ("supabase" in get_async_database_url().lower() or getattr(settings, 'DATABASE_SSL_REQUIRE', False) or getattr(settings, 'DATABASE_SSL_ROOT_CERT', None)) else {}),
+        # Server settings for asyncpg (keeping only safe settings)
         "server_settings": {
-            "application_name": "cryptouniverse_enterprise",
-            "jit": "off",
-            "statement_timeout": "30s",  # Longer timeout for statements
-            "lock_timeout": "10s",  # Longer timeout for locks
-            "tcp_keepalives_idle": "300",  # More frequent keepalives
-            "tcp_keepalives_interval": "60",
-            "tcp_keepalives_count": "9"
+            "application_name": "cryptouniverse_production"
         }
-    } if "postgresql" in get_async_database_url() else {}
+    } if "postgresql" in async_db_url else {}
 )
 
 # Async session factory with proper session-level settings

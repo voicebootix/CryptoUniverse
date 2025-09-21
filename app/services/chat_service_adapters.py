@@ -509,6 +509,81 @@ class ChatServiceAdapters:
                 "error": str(e)
             }
 
+    async def get_user_strategies_summary(self, user_id: str) -> Dict[str, Any]:
+        """Get comprehensive user strategies summary for chat responses."""
+        try:
+            # Import here to avoid circular imports
+            import asyncio
+            from app.core.database import get_database
+            from app.services.strategy_marketplace_service import strategy_marketplace_service
+
+            # Get user strategy portfolio with timeout protection
+            async with asyncio.timeout(15.0):  # 15 second timeout
+                portfolio_data = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+
+            if not portfolio_data.get('success', False):
+                return {
+                    "total_strategies": 0,
+                    "active_strategies": 0,
+                    "inactive_strategies": 0,
+                    "strategies": [],
+                    "summary": "No strategies found",
+                    "error": portfolio_data.get('error', 'Failed to load strategies')
+                }
+
+            strategies = portfolio_data.get('active_strategies', [])
+            total_strategies = len(strategies)
+            active_strategies = sum(1 for s in strategies if s.get('is_active', False))
+            inactive_strategies = total_strategies - active_strategies
+
+            # Calculate performance summary
+            total_pnl = sum(s.get('total_pnl_usd', 0) for s in strategies)
+            total_trades = sum(s.get('total_trades', 0) for s in strategies)
+            avg_win_rate = sum(s.get('win_rate', 0) for s in strategies) / max(1, total_strategies)
+
+            # Get recent top performing strategies
+            recent_strategies = sorted(
+                strategies,
+                key=lambda x: x.get('total_pnl_usd', 0),
+                reverse=True
+            )[:5]
+
+            return {
+                "total_strategies": total_strategies,
+                "active_strategies": active_strategies,
+                "inactive_strategies": inactive_strategies,
+                "strategies": strategies,
+                "recent_strategies": recent_strategies,
+                "performance": {
+                    "total_pnl": total_pnl,
+                    "total_trades": total_trades,
+                    "average_win_rate": avg_win_rate
+                },
+                "summary": f"Found {total_strategies} strategies ({active_strategies} active)",
+                "last_updated": portfolio_data.get('last_updated')
+            }
+
+        except asyncio.TimeoutError:
+            return {
+                "total_strategies": 0,
+                "active_strategies": 0,
+                "inactive_strategies": 0,
+                "strategies": [],
+                "summary": "Strategy loading timed out",
+                "error": "Database timeout - please try again"
+            }
+
+        except Exception as e:
+            logger.error("Failed to get user strategies summary", error=str(e), user_id=user_id)
+            return {
+                "total_strategies": 0,
+                "active_strategies": 0,
+                "inactive_strategies": 0,
+                "strategies": [],
+                "summary": "Error loading strategies",
+                "error": str(e)
+            }
+
 
 # Global adapter instance
 chat_adapters = ChatServiceAdapters()

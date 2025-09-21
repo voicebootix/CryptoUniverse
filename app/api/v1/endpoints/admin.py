@@ -154,7 +154,7 @@ async def get_system_overview(
         # Count active users
         result = await db.execute(
             select(func.count(User.id)).where(
-                User.status == UserStatus.ACTIVE,
+                User.status == UserStatus.ACTIVE.value,
                 User.last_login >= datetime.utcnow() - timedelta(days=7)
             )
         )
@@ -559,12 +559,12 @@ async def get_pending_verification_users(
         if include_unverified:
             # Include all unverified users
             base_conditions = or_(
-                User.status == UserStatus.PENDING_VERIFICATION,
+                User.status == UserStatus.PENDING_VERIFICATION.value,
                 ~User.is_verified  # Using NOT operator instead of == False
             )
         else:
             # Only pending verification status (default behavior)
-            base_conditions = User.status == UserStatus.PENDING_VERIFICATION
+            base_conditions = User.status == UserStatus.PENDING_VERIFICATION.value
         
         # SECURITY: Apply tenant isolation
         # Global admins (tenant_id=None) can see all users
@@ -714,7 +714,7 @@ async def list_users(
             active_count_result = await db.execute(
                 select(func.count()).select_from(User).where(
                     and_(
-                        User.status == UserStatus.ACTIVE,
+                        User.status == UserStatus.ACTIVE.value,
                         User.tenant_id == current_user.tenant_id
                     )
                 )
@@ -724,7 +724,7 @@ async def list_users(
             trading_count_result = await db.execute(
                 select(func.count()).select_from(User).where(
                     and_(
-                        User.status == UserStatus.ACTIVE,
+                        User.status == UserStatus.ACTIVE.value,
                         User.role.in_([UserRole.TRADER, UserRole.ADMIN]),
                         User.tenant_id == current_user.tenant_id
                     )
@@ -734,14 +734,14 @@ async def list_users(
         else:
             # Global admin - count all users
             active_count_result = await db.execute(
-                select(func.count()).select_from(User).where(User.status == UserStatus.ACTIVE)
+                select(func.count()).select_from(User).where(User.status == UserStatus.ACTIVE.value)
             )
             active_count = active_count_result.scalar_one()
             
             trading_count_result = await db.execute(
                 select(func.count()).select_from(User).where(
                     and_(
-                        User.status == UserStatus.ACTIVE,
+                        User.status == UserStatus.ACTIVE.value,
                         User.role.in_([UserRole.TRADER, UserRole.ADMIN])
                     )
                 )
@@ -857,7 +857,7 @@ async def verify_user(
             )
         
         # Check if already verified
-        if target_user.status == UserStatus.ACTIVE and target_user.is_verified:
+        if target_user.status == UserStatus.ACTIVE.value and target_user.is_verified:
             return {
                 "status": "already_verified",
                 "message": "User is already verified and active",
@@ -1003,7 +1003,7 @@ async def verify_users_batch(
                     continue
                 
                 # Check if already verified
-                if target_user.status == UserStatus.ACTIVE and target_user.is_verified:
+                if target_user.status == UserStatus.ACTIVE.value and target_user.is_verified:
                     already_verified.append({
                         "user_id": str(target_user.id),
                         "email": target_user.email

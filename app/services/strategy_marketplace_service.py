@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.database import get_database
 from app.core.logging import LoggerMixin
+from app.core.async_session_manager import DatabaseSessionMixin
 from app.models.trading import TradingStrategy, Trade
 from app.models.user import User
 from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
@@ -76,7 +77,7 @@ class StrategyMarketplaceItem:
     tier: str  # free, basic, pro, enterprise
 
 
-class StrategyMarketplaceService(LoggerMixin):
+class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     """
     Unified strategy marketplace service.
     
@@ -137,9 +138,30 @@ class StrategyMarketplaceService(LoggerMixin):
         return fraction * 100.0
 
     async def ensure_pricing_loaded(self):
-        """Ensure strategy pricing is loaded from admin settings."""
+        """Ensure strategy pricing is loaded from admin settings with timeout."""
         if self.strategy_pricing is None:
-            await self._load_dynamic_strategy_pricing()
+            try:
+                # Add timeout to prevent hanging
+                import asyncio
+                await asyncio.wait_for(
+                    self._load_dynamic_strategy_pricing(),
+                    timeout=5.0  # 5 second timeout
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Pricing loading timed out, using fallback")
+                # Use fallback pricing immediately
+                fallback_pricing = {
+                    "futures_trade": 50, "options_trade": 45, "perpetual_trade": 40,
+                    "leverage_position": 35, "complex_strategy": 60, "margin_status": 15,
+                    "funding_arbitrage": 30, "basis_trade": 25, "options_chain": 20,
+                    "calculate_greeks": 15, "liquidation_price": 10, "hedge_position": 25,
+                    "spot_momentum_strategy": 30, "spot_breakout_strategy": 25,
+                    "algorithmic_trading": 35, "pairs_trading": 30, "statistical_arbitrage": 40,
+                    "scalping_strategy": 20, "swing_trading": 25, "position_management": 15,
+                    "risk_management": 20, "portfolio_optimization": 35, "strategy_performance": 10,
+                    "spot_mean_reversion": 20, "market_making": 25
+                }
+                self.strategy_pricing = fallback_pricing
     
     async def _load_dynamic_strategy_pricing(self) -> Dict[str, int]:
         """Load strategy pricing from admin configuration."""
@@ -405,6 +427,7 @@ class StrategyMarketplaceService(LoggerMixin):
             strategy_uuid = await trading_strategies_service.get_platform_strategy_id(strategy_func)
 
             if strategy_uuid:
+                # The performance tracker now uses the managed session from context
                 real_metrics = await real_performance_tracker.track_strategy_performance(
                     strategy_id=strategy_uuid,
                     user_id=user_id,
@@ -1156,7 +1179,7 @@ class StrategyMarketplaceService(LoggerMixin):
     async def _get_community_strategies(self, user_id: str) -> List[StrategyMarketplaceItem]:
         """Get community-published strategies."""
         try:
-            async for db in get_database():
+            async with get_database() as db:
                 # Get published strategies from community
                 stmt = select(TradingStrategy, StrategyPublisher).join(
                     StrategyPublisher, TradingStrategy.user_id == StrategyPublisher.user_id
@@ -1269,7 +1292,7 @@ class StrategyMarketplaceService(LoggerMixin):
     async def _get_live_performance(self, strategy_id: str) -> Dict[str, Any]:
         """Get live performance metrics for strategy."""
         try:
-            async for db in get_database():
+            async with get_database() as db:
                 # Get recent trades for this strategy
                 stmt = select(Trade).where(
                     and_(
@@ -1327,7 +1350,7 @@ class StrategyMarketplaceService(LoggerMixin):
     ) -> Dict[str, Any]:
         """Purchase access to strategy using credits."""
         try:
-            async for db in get_database():
+            async with get_database() as db:
                 # Get user's credit account
                 credit_stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
                 credit_result = await db.execute(credit_stmt)

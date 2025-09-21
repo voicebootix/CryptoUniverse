@@ -48,7 +48,13 @@ class Settings(BaseSettings):
     # Database settings
     DATABASE_URL: str = Field(..., env="DATABASE_URL", description="Database connection URL")
     DATABASE_QUERY_TIMEOUT: int = Field(default=10, env="DATABASE_QUERY_TIMEOUT", description="Database query timeout in seconds")
-    
+
+    # Database SSL settings
+    DATABASE_SSL_REQUIRE: bool = Field(default=False, env="DATABASE_SSL_REQUIRE", description="Force SSL connection to database")
+    DATABASE_SSL_ROOT_CERT: Optional[str] = Field(default=None, env="DATABASE_SSL_ROOT_CERT", description="Path to custom CA certificate file for database SSL")
+    DATABASE_SSL_INSECURE: bool = Field(default=False, env="DATABASE_SSL_INSECURE", description="Disable SSL certificate verification (use only for development/testing)")
+    SSL_INSECURE_OVERRIDE_ACKNOWLEDGED: bool = Field(default=False, env="SSL_INSECURE_OVERRIDE_ACKNOWLEDGED", description="Acknowledge security risk for insecure SSL override")
+
     # Redis settings
     REDIS_URL: str = Field(default="redis://localhost:6379", env="REDIS_URL", description="Redis connection URL")
     REDIS_HEALTH_CHECK_INTERVAL: int = Field(default=30, env="REDIS_HEALTH_CHECK_INTERVAL", description="Redis health check interval in seconds")
@@ -172,7 +178,22 @@ class Settings(BaseSettings):
         description="OAuth redirect URL"
     )
     API_V1_PREFIX: str = Field(default="https://cryptouniverse.onrender.com/api/v1", description="API v1 prefix URL")
-    
+
+    # Validator to prevent insecure SSL in production
+    @model_validator(mode="after")
+    def _validate_ssl_policy(self):
+        """Prevent DATABASE_SSL_INSECURE=true in production unless explicitly acknowledged."""
+        if (getattr(self, "ENVIRONMENT", "development") == "production" and
+            getattr(self, "DATABASE_SSL_INSECURE", False) and
+            not getattr(self, "SSL_INSECURE_OVERRIDE_ACKNOWLEDGED", False)):
+            raise ValueError(
+                "DATABASE_SSL_INSECURE=true is not allowed in production environment. "
+                "This setting disables certificate verification and exposes connections to MITM attacks. "
+                "For production, use DATABASE_SSL_ROOT_CERT with proper CA certificate instead. "
+                "If you absolutely must override this (emergency only), set SSL_INSECURE_OVERRIDE_ACKNOWLEDGED=true"
+            )
+        return self
+
     class Config:
         case_sensitive = True
         env_file = ".env"

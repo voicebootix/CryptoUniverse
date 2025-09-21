@@ -530,13 +530,13 @@ async def list_exchange_connections(
                     exchange=account.exchange_name,
                     nickname=api_key.key_name,  # Use key_name as nickname
                     api_key_masked=mask_api_key(decrypted_api_key),
-                    is_active=account.status == ExchangeStatus.ACTIVE,
+                    is_active=account.status == ExchangeStatus.ACTIVE.value,
                     trading_enabled=account.trading_enabled,
                     sandbox=account.is_simulation,  # Use is_simulation as sandbox
                     created_at=api_key.created_at,
                     last_used=api_key.last_used_at,
                     permissions=api_key.permissions or [],
-                    connection_status="connected" if api_key.status == ApiKeyStatus.ACTIVE else "inactive",
+                    connection_status="connected" if api_key.status == ApiKeyStatus.ACTIVE.value else "inactive",
                     daily_volume_limit=None,  # Set to None for now
                     daily_volume_used=daily_volume
                 )
@@ -763,7 +763,7 @@ async def get_exchange_balances(
             .filter(
                 ExchangeAccount.user_id == current_user.id,
                 ExchangeAccount.exchange_name == exchange,
-                ExchangeAccount.status == ExchangeStatus.ACTIVE
+                ExchangeAccount.status == ExchangeStatus.ACTIVE.value
             )
         )
         api_key = result.scalar_one_or_none()
@@ -1686,8 +1686,8 @@ async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> D
         ).where(
             and_(
                 ExchangeAccount.user_id == user_id,
-                ExchangeAccount.status == ExchangeStatus.ACTIVE,
-                ExchangeApiKey.status == ApiKeyStatus.ACTIVE,
+                ExchangeAccount.status == ExchangeStatus.ACTIVE.value,
+                ExchangeApiKey.status == ApiKeyStatus.ACTIVE.value,
                 ExchangeApiKey.is_validated == True
             )
         )

@@ -20,6 +20,7 @@ from sqlalchemy import select, and_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_database
+from app.core.async_session_manager import DatabaseSessionMixin
 from app.core.logging import LoggerMixin
 from app.models.trading import Trade, TradingStrategy
 from app.models.market_data import StrategyPerformanceHistory
@@ -28,7 +29,7 @@ from app.models.user import User
 logger = structlog.get_logger(__name__)
 
 
-class RealPerformanceTracker(LoggerMixin):
+class RealPerformanceTracker(DatabaseSessionMixin, LoggerMixin):
     """
     Enterprise performance tracking service.
 
@@ -59,139 +60,17 @@ class RealPerformanceTracker(LoggerMixin):
             Real performance metrics
         """
         try:
-            async for db in get_database():
-                if not strategy_id:
-                    return self._empty_performance_metrics("unknown", "missing_strategy_id")
+            # Try to get request session first, fallback to creating new session for background services
+            try:
+                db = self.get_db_session()
+            except RuntimeError:
+                # No request context - create new session for background services
+                from app.core.database import AsyncSessionLocal
+                async with AsyncSessionLocal() as db:
+                    return await self._track_performance_with_session(db, strategy_id, user_id, period_days, include_simulations)
 
-                try:
-                    strategy_uuid = uuid.UUID(str(strategy_id))
-                except (ValueError, TypeError) as exc:
-                    self.logger.warning(
-                        "Invalid strategy_id for performance tracking",
-                        strategy_id=strategy_id,
-                        error=str(exc),
-                    )
-                    return self._empty_performance_metrics(str(strategy_id), "invalid_strategy_id")
-
-                try:
-                    user_uuid = uuid.UUID(str(user_id))
-                except (ValueError, TypeError) as exc:
-                    self.logger.warning(
-                        "Invalid user_id for performance tracking",
-                        strategy_id=strategy_id,
-                        user_id=user_id,
-                        error=str(exc),
-                    )
-                    return self._empty_performance_metrics(str(strategy_uuid), "invalid_user_id")
-
-                strategy_id_str = str(strategy_uuid)
-                user_id_str = str(user_uuid)
-
-                # Get actual trades for this strategy
-                end_date = datetime.utcnow()
-                start_date = end_date - timedelta(days=period_days)
-
-                base_conditions = [
-                    Trade.strategy_id == strategy_uuid,
-                    Trade.user_id == user_uuid,
-                    Trade.created_at >= start_date,
-                    Trade.created_at <= end_date,
-                ]
-
-                stmt = select(Trade).where(*base_conditions).order_by(Trade.created_at)
-
-                if not include_simulations:
-                    stmt = stmt.where(Trade.is_simulation.is_(False))
-
-                result = await db.execute(stmt)
-                trades = result.scalars().all()
-
-                if not trades:
-                    if not include_simulations:
-                        # Check if simulation trades exist for transparency
-                        sim_stmt = select(func.count()).where(
-                            *base_conditions,
-                            Trade.is_simulation.is_(True),
-                        )
-                        sim_count = (await db.execute(sim_stmt)).scalar() or 0
-
-                        if sim_count:
-                            empty_metrics = self._empty_performance_metrics(strategy_id_str, "no_real_trades")
-                            empty_metrics["simulation_trades"] = int(sim_count)
-                            return empty_metrics
-
-                    return self._empty_performance_metrics(strategy_id_str, "no_trades_yet")
-
-                real_trades = [t for t in trades if not getattr(t, "is_simulation", False)]
-                simulation_trades = [t for t in trades if getattr(t, "is_simulation", False)]
-
-                metrics: Dict[str, Any]
-                if real_trades:
-                    metrics = await self._calculate_real_metrics(
-                        real_trades,
-                        strategy_id_str,
-                        user_id_str,
-                        period_days,
-                    )
-                    metrics.setdefault("status", "live")
-                    metrics["data_quality"] = "real"
-                    metrics["real_trades"] = len(real_trades)
-                    metrics["simulation_trades"] = len(simulation_trades)
-
-                    await self._store_performance_history(
-                        db,
-                        strategy_id_str,
-                        user_id_str,
-                        metrics,
-                        start_date,
-                        end_date,
-                        is_live=True,
-                        data_source="real_trades",
-                    )
-                    self.logger.info(
-                        "✅ Calculated performance metrics",
-                        strategy_id=strategy_id_str,
-                        total_trades=len(real_trades),
-                        include_simulations=include_simulations,
-                        data_quality="real",
-                    )
-                    return metrics
-
-                if include_simulations and simulation_trades:
-                    metrics = await self._calculate_real_metrics(
-                        simulation_trades,
-                        strategy_id_str,
-                        user_id_str,
-                        period_days,
-                    )
-                    metrics["status"] = "simulation_only"
-                    metrics["data_quality"] = "simulation"
-                    metrics["real_trades"] = 0
-                    metrics["simulation_trades"] = len(simulation_trades)
-
-                    await self._store_performance_history(
-                        db,
-                        strategy_id_str,
-                        user_id_str,
-                        metrics,
-                        start_date,
-                        end_date,
-                        is_live=False,
-                        data_source="simulation_trades",
-                    )
-                    self.logger.info(
-                        "✅ Calculated performance metrics",
-                        strategy_id=strategy_id_str,
-                        total_trades=len(simulation_trades),
-                        include_simulations=include_simulations,
-                        data_quality="simulation",
-                    )
-                    return metrics
-
-                # No qualifying trades found
-                empty_metrics = self._empty_performance_metrics(strategy_id_str, "no_real_trades")
-                empty_metrics["simulation_trades"] = len(simulation_trades)
-                return empty_metrics
+            # Request context available - use the session
+            return await self._track_performance_with_session(db, strategy_id, user_id, period_days, include_simulations)
 
         except Exception as e:
             self.logger.exception(
@@ -202,6 +81,151 @@ class RealPerformanceTracker(LoggerMixin):
                 error=str(e)
             )
             return self._empty_performance_metrics(str(strategy_id), "error")
+
+    async def _track_performance_with_session(
+        self,
+        db,
+        strategy_id: str,
+        user_id: str,
+        period_days: int = 30,
+        include_simulations: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Track strategy performance with a provided database session.
+        This method contains the core logic extracted from track_strategy_performance.
+        """
+        if not strategy_id:
+            return self._empty_performance_metrics("unknown", "missing_strategy_id")
+
+        try:
+            strategy_uuid = uuid.UUID(str(strategy_id))
+        except (ValueError, TypeError) as exc:
+            self.logger.warning(
+                "Invalid strategy_id for performance tracking",
+                strategy_id=strategy_id,
+                error=str(exc),
+            )
+            return self._empty_performance_metrics(str(strategy_id), "invalid_strategy_id")
+
+        try:
+            user_uuid = uuid.UUID(str(user_id))
+        except (ValueError, TypeError) as exc:
+            self.logger.warning(
+                "Invalid user_id for performance tracking",
+                strategy_id=strategy_id,
+                user_id=user_id,
+                error=str(exc),
+            )
+            return self._empty_performance_metrics(str(strategy_uuid), "invalid_user_id")
+
+        strategy_id_str = str(strategy_uuid)
+        user_id_str = str(user_uuid)
+
+        # Get actual trades for this strategy
+        end_date = datetime.utcnow()
+        start_date = end_date - timedelta(days=period_days)
+
+        base_conditions = [
+            Trade.strategy_id == strategy_uuid,
+            Trade.user_id == user_uuid,
+            Trade.created_at >= start_date,
+            Trade.created_at <= end_date,
+        ]
+
+        stmt = select(Trade).where(*base_conditions).order_by(Trade.created_at)
+
+        if not include_simulations:
+            stmt = stmt.where(Trade.is_simulation.is_(False))
+
+        result = await db.execute(stmt)
+        trades = result.scalars().all()
+
+        if not trades:
+            if not include_simulations:
+                # Check if simulation trades exist for transparency
+                sim_stmt = select(func.count()).where(
+                    *base_conditions,
+                    Trade.is_simulation.is_(True),
+                )
+                sim_count = (await db.execute(sim_stmt)).scalar() or 0
+
+                if sim_count:
+                    empty_metrics = self._empty_performance_metrics(strategy_id_str, "no_real_trades")
+                    empty_metrics["simulation_trades"] = int(sim_count)
+                    return empty_metrics
+
+            return self._empty_performance_metrics(strategy_id_str, "no_trades_yet")
+
+        real_trades = [t for t in trades if not getattr(t, "is_simulation", False)]
+        simulation_trades = [t for t in trades if getattr(t, "is_simulation", False)]
+
+        metrics: Dict[str, Any]
+        if real_trades:
+            metrics = await self._calculate_real_metrics(
+                real_trades,
+                strategy_id_str,
+                user_id_str,
+                period_days,
+            )
+            metrics.setdefault("status", "live")
+            metrics["data_quality"] = "real"
+            metrics["real_trades"] = len(real_trades)
+            metrics["simulation_trades"] = len(simulation_trades)
+
+            await self._store_performance_history(
+                db,
+                strategy_id_str,
+                user_id_str,
+                metrics,
+                start_date,
+                end_date,
+                is_live=True,
+                data_source="real_trades",
+            )
+            self.logger.info(
+                "✅ Calculated performance metrics",
+                strategy_id=strategy_id_str,
+                total_trades=len(real_trades),
+                include_simulations=include_simulations,
+                data_quality="real",
+            )
+            return metrics
+
+        if include_simulations and simulation_trades:
+            metrics = await self._calculate_real_metrics(
+                simulation_trades,
+                strategy_id_str,
+                user_id_str,
+                period_days,
+            )
+            metrics["status"] = "simulation_only"
+            metrics["data_quality"] = "simulation"
+            metrics["real_trades"] = 0
+            metrics["simulation_trades"] = len(simulation_trades)
+
+            await self._store_performance_history(
+                db,
+                strategy_id_str,
+                user_id_str,
+                metrics,
+                start_date,
+                end_date,
+                is_live=False,
+                data_source="simulation_trades",
+            )
+            self.logger.info(
+                "✅ Calculated performance metrics",
+                strategy_id=strategy_id_str,
+                total_trades=len(simulation_trades),
+                include_simulations=include_simulations,
+                data_quality="simulation",
+            )
+            return metrics
+
+        # No qualifying trades found
+        empty_metrics = self._empty_performance_metrics(strategy_id_str, "no_real_trades")
+        empty_metrics["simulation_trades"] = len(simulation_trades)
+        return empty_metrics
 
     async def _calculate_real_metrics(
         self,

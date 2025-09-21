@@ -257,7 +257,7 @@ async def execute_strategy(
             stmt = select(ExchangeAccount).where(
                 and_(
                     ExchangeAccount.user_id == current_user.id,
-                    ExchangeAccount.status == ExchangeStatus.ACTIVE,
+                    ExchangeAccount.status == ExchangeStatus.ACTIVE.value,
                     ExchangeAccount.trading_enabled.is_(True)
                 )
             )
@@ -490,7 +490,7 @@ async def activate_strategy(
             exchange_stmt = select(ExchangeAccount).where(
                 and_(
                     ExchangeAccount.user_id == current_user.id,
-                    ExchangeAccount.status == ExchangeStatus.ACTIVE,
+                    ExchangeAccount.status == ExchangeStatus.ACTIVE.value,
                     ExchangeAccount.trading_enabled.is_(True)
                 )
             )
@@ -582,31 +582,58 @@ async def get_strategy_marketplace(
     include_ai: bool = True,
     include_community: bool = True
 ):
-    """Get unified strategy marketplace with AI strategies and community strategies."""
-    
+    """Get unified strategy marketplace with AI strategies and community strategies (cached)."""
+
     await rate_limiter.check_rate_limit(
         key="strategies:marketplace",
         limit=100,
         window=60,
         user_id=str(current_user.id)
     )
-    
+
     try:
-        # Get marketplace strategies using the new unified service
+        # Import cache manager for performance
+        from app.core.redis import cache_manager
+
+        # Create cache key based on user and filters
+        cache_key = f"marketplace:{str(current_user.id)}:ai_{include_ai}:community_{include_community}"
+
+        # Try cache first (10 minute TTL for marketplace)
+        cached_result = await cache_manager.redis.get(cache_key)
+        if cached_result:
+            try:
+                # Normalize cached result to dict for FastAPI serialization
+                if isinstance(cached_result, bytes):
+                    cached_result = cached_result.decode('utf-8')
+                if isinstance(cached_result, str):
+                    import json
+                    cached_result = json.loads(cached_result)
+
+                logger.debug("Returning cached marketplace data", user_id=str(current_user.id))
+                return cached_result
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                logger.warning("Failed to decode cached marketplace data, regenerating", error=str(e))
+                # Continue to regenerate cache
+
+        # Get fresh marketplace data
         marketplace_result = await strategy_marketplace_service.get_marketplace_strategies(
             user_id=str(current_user.id),
             include_ai_strategies=include_ai,
             include_community_strategies=include_community
         )
-        
+
         if not marketplace_result.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=marketplace_result.get("error", "Failed to get marketplace strategies")
             )
-        
+
+        # Only cache successful responses
+        if marketplace_result.get("success", False):
+            await cache_manager.redis.set(cache_key, marketplace_result, expire=600)
+
         return marketplace_result
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -662,15 +689,35 @@ async def purchase_strategy_access(
 async def get_user_strategy_portfolio(
     current_user: User = Depends(get_current_user)
 ):
-    """Get user's purchased strategy portfolio."""
-    
+    """Get user's purchased strategy portfolio with caching."""
+
     try:
+        # Import cache manager for performance
+        from app.core.redis import cache_manager
+
+        # Try cache first (5 minute TTL)
+        cache_key = f"user_portfolio:{str(current_user.id)}"
+        cached_result = await cache_manager.get_portfolio_data(str(current_user.id))
+
+        if cached_result:
+            logger.debug("Returning cached portfolio data", user_id=str(current_user.id))
+            return cached_result
+
+        # Get fresh data
         portfolio_result = await strategy_marketplace_service.get_user_strategy_portfolio(
             user_id=str(current_user.id)
         )
-        
+
+        # Only cache successful responses
+        if portfolio_result.get("success", False):
+            await cache_manager.cache_portfolio_data(
+                str(current_user.id),
+                portfolio_result,
+                expire=300
+            )
+
         return portfolio_result
-        
+
     except Exception as e:
         logger.error("Failed to get user strategy portfolio", error=str(e))
         raise HTTPException(
