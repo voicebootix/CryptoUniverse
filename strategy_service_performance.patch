@@ -1,0 +1,54 @@
+
+"""
+Add this to app/services/strategy_marketplace_service.py
+"""
+
+import asyncio
+from functools import lru_cache
+from datetime import datetime, timedelta
+from app.core.redis import cache_manager
+
+class StrategyMarketplaceService:
+    def __init__(self):
+        self._cache_ttl = 300  # 5 minutes
+        self._user_portfolio_cache = {}
+        self._marketplace_cache = {}
+
+    async def get_user_strategy_portfolio_cached(self, user_id: str) -> Dict[str, Any]:
+        """Get user portfolio with Redis caching"""
+        cache_key = f"user_portfolio:{user_id}"
+
+        # Try Redis cache first
+        cached_result = await cache_manager.get_portfolio_data(user_id)
+        if cached_result:
+            return cached_result
+
+        # Get fresh data
+        result = await self.get_user_strategy_portfolio_original(user_id)
+
+        # Cache the result
+        await cache_manager.cache_portfolio_data(user_id, result, expire=300)
+
+        return result
+
+    async def get_marketplace_strategies_cached(self, user_id: str = None) -> Dict[str, Any]:
+        """Get marketplace strategies with caching"""
+        cache_key = f"marketplace_strategies:{user_id or 'all'}"
+
+        # Check Redis cache
+        cached = await cache_manager.redis.get(cache_key)
+        if cached:
+            return cached
+
+        # Get fresh data
+        result = await self.get_marketplace_strategies_original(user_id)
+
+        # Cache for 5 minutes
+        await cache_manager.redis.set(cache_key, result, expire=300)
+
+        return result
+
+    @lru_cache(maxsize=100)
+    def get_ai_strategy_catalog_cached(self):
+        """Cache AI strategy catalog in memory"""
+        return self.ai_strategy_catalog

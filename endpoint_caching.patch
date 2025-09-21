@@ -1,0 +1,44 @@
+
+"""
+Add this to app/api/v1/endpoints/strategies.py
+"""
+
+from functools import wraps
+from app.core.redis import cache_manager
+
+def cache_response(ttl: int = 300):
+    """Decorator to cache API responses"""
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Create cache key from function name and args
+            import hashlib
+            key_parts = [func.__name__] + [str(arg) for arg in args] + [f"{k}:{v}" for k, v in kwargs.items()]
+            cache_key = "api:" + hashlib.md5("|".join(key_parts).encode()).hexdigest()
+
+            # Try cache first
+            cached = await cache_manager.redis.get(cache_key)
+            if cached:
+                return cached
+
+            # Execute function
+            result = await func(*args, **kwargs)
+
+            # Cache result
+            await cache_manager.redis.set(cache_key, result, expire=ttl)
+
+            return result
+        return wrapper
+    return decorator
+
+@router.get("/my-portfolio")
+@cache_response(ttl=300)  # Cache for 5 minutes
+async def get_user_strategy_portfolio_cached(current_user: User = Depends(get_current_user)):
+    """Get user portfolio with caching"""
+    return await strategy_marketplace_service.get_user_strategy_portfolio_cached(str(current_user.id))
+
+@router.get("/marketplace")
+@cache_response(ttl=600)  # Cache for 10 minutes
+async def get_marketplace_strategies_cached(current_user: User = Depends(get_current_user)):
+    """Get marketplace with caching"""
+    return await strategy_marketplace_service.get_marketplace_strategies_cached(str(current_user.id))
