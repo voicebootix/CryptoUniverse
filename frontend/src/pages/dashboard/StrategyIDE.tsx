@@ -987,14 +987,17 @@ const StrategyIDE: React.FC = () => {
                   </CardHeader>
                   <CardContent className="p-4">
                     <div className="space-y-2">
-                      {backtestResult.trade_history.slice(0, 5).map((trade: any, i: number) => (
-                        <div key={i} className="flex justify-between text-sm">
-                          <span>{trade.side} {trade.symbol} @ {trade.entry_time}</span>
-                          <span className={trade.return_pct >= 0 ? 'text-green-500' : 'text-red-500'}>
-                            {formatPercentage(trade.return_pct)}
-                          </span>
-                        </div>
-                      ))}
+                      {backtestResult.trade_history && backtestResult.trade_history.length > 0
+                        ? backtestResult.trade_history.slice(0, 5).map((trade: any, i: number) => (
+                          <div key={i} className="flex justify-between text-sm">
+                            <span>{trade.side} {trade.symbol} @ {trade.entry_time}</span>
+                            <span className={trade.return_pct >= 0 ? 'text-green-500' : 'text-red-500'}>
+                              {formatPercentage(trade.return_pct)}
+                            </span>
+                          </div>
+                        ))
+                        : <div className="text-sm text-gray-500">No trade history available</div>
+                      }
                     </div>
                   </CardContent>
                 </Card>
