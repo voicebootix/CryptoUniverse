@@ -182,7 +182,13 @@ const StrategyIDE: React.FC = () => {
   const saveStrategyMutation = useMutation({
     mutationFn: async (data: { code: string; metadata: StrategyMetadata; is_draft: boolean }) => {
       const response = await apiClient.post('/strategies/save', {
+        name: data.metadata.name || 'Untitled Strategy',
+        description: data.metadata.description || `Generated on ${new Date().toLocaleString()}`,
         code: data.code,
+        parameters: data.metadata.parameters || {},
+        risk_parameters: data.metadata.riskParameters || null,
+        entry_conditions: data.metadata.entryConditions || null,
+        exit_conditions: data.metadata.exitConditions || null,
         metadata: data.metadata,
         is_draft: data.is_draft
       });
