@@ -167,6 +167,12 @@ class EnhancedAIChatEngine(LoggerMixin):
                 r'\b(new|emerging|potential|promising)\b',
                 r'\b(invest|investment|recommendation)\b'
             ],
+            ChatIntent.STRATEGY_DISCUSSION: [
+                r'\b(strategy|strategies|how many.*strateg|count.*strateg)\b',
+                r'\b(trading.*strateg|strateg.*perform|strateg.*details)\b',
+                r'\b(activate.*strateg|deactivate.*strateg|manage.*strateg)\b',
+                r'\b(my.*strateg|strateg.*have|what.*strateg)\b'
+            ],
             ChatIntent.EMERGENCY_COMMAND: [
                 r'\b(stop|halt|emergency|urgent|panic)\b',
                 r'\b(sell all|liquidate all|exit all)\b',
