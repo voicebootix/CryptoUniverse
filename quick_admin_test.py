@@ -1,3 +1,4 @@
+import os
 import requests
 
 # Quick test with timeout
@@ -5,9 +6,15 @@ BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
 
 print("Testing login endpoint...")
 
+admin_email = os.getenv("ADMIN_EMAIL")
+admin_password = os.getenv("ADMIN_PASSWORD")
+
+if not admin_email or not admin_password:
+    raise ValueError("ADMIN_EMAIL and ADMIN_PASSWORD environment variables are required")
+
 login_data = {
-    "email": "admin@cryptouniverse.com",
-    "password": "AdminPass123!"
+    "email": admin_email,
+    "password": admin_password
 }
 
 try:

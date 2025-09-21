@@ -617,8 +617,9 @@ async def get_strategy_marketplace(
                 detail=marketplace_result.get("error", "Failed to get marketplace strategies")
             )
 
-        # Cache the result for 10 minutes
-        await cache_manager.redis.set(cache_key, marketplace_result, expire=600)
+        # Only cache successful responses
+        if marketplace_result.get("success", False):
+            await cache_manager.redis.set(cache_key, marketplace_result, expire=600)
 
         return marketplace_result
 
@@ -696,12 +697,13 @@ async def get_user_strategy_portfolio(
             user_id=str(current_user.id)
         )
 
-        # Cache the result for 5 minutes
-        await cache_manager.cache_portfolio_data(
-            str(current_user.id),
-            portfolio_result,
-            expire=300
-        )
+        # Only cache successful responses
+        if portfolio_result.get("success", False):
+            await cache_manager.cache_portfolio_data(
+                str(current_user.id),
+                portfolio_result,
+                expire=300
+            )
 
         return portfolio_result
 

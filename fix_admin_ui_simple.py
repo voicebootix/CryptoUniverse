@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 """Fix Admin UI Strategy Display Issue - Simple Version"""
 
+import os
 import requests
 from datetime import datetime
 
-BASE_URL = "https://cryptouniverse.onrender.com"
+BASE_URL = os.getenv("BASE_URL", "https://cryptouniverse.onrender.com")
 
 def get_admin_token():
     """Get admin authentication token"""
+    admin_email = os.getenv("ADMIN_EMAIL")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+
+    if not admin_email or not admin_password:
+        raise ValueError("ADMIN_EMAIL and ADMIN_PASSWORD environment variables are required")
+
     response = requests.post(f"{BASE_URL}/api/v1/auth/login",
                            json={
-                               "email": "admin@cryptouniverse.com",
-                               "password": "AdminPass123!"
-                           })
+                               "email": admin_email,
+                               "password": admin_password
+                           },
+                           timeout=10)
 
     if response.status_code != 200:
         print(f"Login failed: {response.status_code}")

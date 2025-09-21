@@ -1,3 +1,4 @@
+import os
 import requests
 import time
 
@@ -5,7 +6,13 @@ def grant_admin_strategies():
     BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
 
     print("Step 1: Login...")
-    login_data = {"email": "admin@cryptouniverse.com", "password": "AdminPass123!"}
+    admin_email = os.getenv("ADMIN_EMAIL")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+
+    if not admin_email or not admin_password:
+        raise ValueError("ADMIN_EMAIL and ADMIN_PASSWORD environment variables are required")
+
+    login_data = {"email": admin_email, "password": admin_password}
 
     try:
         response = requests.post(f"{BASE_URL}/auth/login", json=login_data, timeout=30)

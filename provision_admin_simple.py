@@ -5,13 +5,17 @@ Provision Admin User Strategies - Simple Version
 Manually provision strategies for the admin user.
 """
 
+import os
 import requests
 import json
 
-# Configuration
-BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
-ADMIN_EMAIL = "admin@cryptouniverse.com"
-ADMIN_PASSWORD = "AdminPass123!"
+# Configuration from environment
+BASE_URL = os.getenv("BASE_URL", "https://cryptouniverse.onrender.com/api/v1")
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+
+if not ADMIN_EMAIL or not ADMIN_PASSWORD:
+    raise ValueError("ADMIN_EMAIL and ADMIN_PASSWORD environment variables are required")
 
 def provision_strategies():
     """Provision strategies for admin user."""
