@@ -261,7 +261,9 @@ class UnifiedChatService(LoggerMixin):
             ],
             ChatIntent.STRATEGY_RECOMMENDATION: [
                 "strategy", "recommend", "suggest", "advice", "what should",
-                "best approach", "plan", "tactics", "methodology"
+                "best approach", "plan", "tactics", "methodology",
+                "how many strategies", "count strategies", "my strategies",
+                "strategies do I have", "what strategies", "strategy portfolio"
             ],
             ChatIntent.REBALANCING: [
                 "rebalance", "redistribute", "adjust", "optimize portfolio",
