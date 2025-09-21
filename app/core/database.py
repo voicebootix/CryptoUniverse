@@ -134,12 +134,13 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
 def set_postgresql_timeouts(dbapi_connection, _connection_record):
     """Set PostgreSQL connection-level timeouts to avoid per-session overhead."""
     logger = logging.getLogger(__name__)
-    
+
     if "postgresql" in get_async_database_url():
         try:
             cursor = dbapi_connection.cursor()
-            cursor.execute("SET statement_timeout = '45s'")
-            cursor.execute("SET lock_timeout = '15s'")
+            cursor.execute("SET statement_timeout = '30s'")  # Production timeout
+            cursor.execute("SET lock_timeout = '10s'")  # Production lock timeout
+            cursor.execute("SET idle_in_transaction_session_timeout = '30s'")  # Clean up idle transactions
             cursor.close()
         except Exception as e:
             logger.debug("Failed to set PostgreSQL connection timeouts", exc_info=True)

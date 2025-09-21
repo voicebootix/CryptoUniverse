@@ -83,6 +83,16 @@ async def check_rate_limit(key: str, limit: int, window: int, user_id: str):
 trade_executor = TradeExecutionService()
 
 
+# Helper functions
+def sanitize_nan(value):
+    """Convert NaN, inf, -inf values to JSON-safe values."""
+    import pandas as pd
+    import numpy as np
+    if pd.isna(value) or np.isinf(value):
+        return 0.0
+    return float(value)
+
+
 # Request/Response Models
 class StrategyExecuteRequest(BaseModel):
     function: str  # Strategy function name (e.g., "spot_momentum_strategy", "futures_trade")
@@ -1575,8 +1585,8 @@ async def backtest_strategy(
             daily_returns = data['strategy_returns'].dropna()
 
             # Avoid division by zero
-            sharpe_ratio = daily_returns.mean() / daily_returns.std() * np.sqrt(252) if daily_returns.std() > 0 else 0
-            max_drawdown = ((data['cumulative_returns'] / data['cumulative_returns'].expanding().max()) - 1).min() * 100
+            sharpe_ratio = sanitize_nan(daily_returns.mean() / daily_returns.std() * np.sqrt(252) if daily_returns.std() > 0 else 0)
+            max_drawdown = sanitize_nan(((data['cumulative_returns'] / data['cumulative_returns'].expanding().max()) - 1).min() * 100)
 
             total_trades = len(data[data['signal'] != 0])
             winning_trades = len(data[(data['signal'] != 0) & (data['strategy_returns'] > 0)])
@@ -1584,7 +1594,7 @@ async def backtest_strategy(
 
             # Safe annualized return calculation
             safe_days = max(1, days)
-            annualized_return = total_return * 365 / safe_days
+            annualized_return = sanitize_nan(total_return * 365 / safe_days)
 
             return {
                 "success": True,
@@ -1593,17 +1603,17 @@ async def backtest_strategy(
                     "symbol": request.symbol,
                     "period": f"{request.start_date} to {request.end_date}",
                     "initial_capital": request.initial_capital,
-                    "final_capital": request.initial_capital * data['cumulative_returns'].iloc[-1],
-                    "total_return": round(total_return, 2),
-                    "annualized_return": round(annualized_return, 2),
-                    "sharpe_ratio": round(sharpe_ratio, 2),
-                    "max_drawdown": round(max_drawdown, 2),
-                    "volatility": round(daily_returns.std() * np.sqrt(252) * 100, 2),
+                    "final_capital": sanitize_nan(sanitize_nan(request.initial_capital * data['cumulative_returns'].iloc[-1])),
+                    "total_return": round(sanitize_nan(total_return), 2),
+                    "annualized_return": round(sanitize_nan(annualized_return), 2),
+                    "sharpe_ratio": round(sanitize_nan(sharpe_ratio), 2),
+                    "max_drawdown": round(sanitize_nan(max_drawdown), 2),
+                    "volatility": round(sanitize_nan(daily_returns.std() * np.sqrt(252) * 100), 2),
                     "total_trades": total_trades,
                     "winning_trades": winning_trades,
                     "losing_trades": total_trades - winning_trades,
                     "win_rate": round(win_rate * 100, 2),
-                    "profit_factor": round(abs(daily_returns[daily_returns > 0].sum() / daily_returns[daily_returns < 0].sum()) if daily_returns[daily_returns < 0].sum() != 0 else 0, 2),
+                    "profit_factor": round(sanitize_nan(abs(daily_returns[daily_returns > 0].sum() / daily_returns[daily_returns < 0].sum()) if daily_returns[daily_returns < 0].sum() != 0 else 0), 2),
                     "trades": [
                         {
                             "date": row['timestamp'].strftime('%Y-%m-%d'),
@@ -1616,8 +1626,8 @@ async def backtest_strategy(
                     "equity_curve": [
                         {
                             "date": row['timestamp'].strftime('%Y-%m-%d'),
-                            "equity": round(request.initial_capital * row['cumulative_returns'], 2),
-                            "drawdown": round(((row['cumulative_returns'] / data['cumulative_returns'][:idx+1].max()) - 1) * 100, 2)
+                            "equity": round(sanitize_nan(request.initial_capital * row['cumulative_returns']), 2),
+                            "drawdown": round(sanitize_nan(((row['cumulative_returns'] / data['cumulative_returns'][:idx+1].max()) - 1) * 100), 2)
                         }
                         for idx, (_, row) in enumerate(data[::max(1, len(data)//100)].iterrows())  # Sample data points
                     ]
@@ -3029,4 +3039,4 @@ async def update_strategy_configuration(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update strategy configuration"
-        ) from e
+        ) from e# Force reload

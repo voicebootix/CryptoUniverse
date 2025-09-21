@@ -53,6 +53,7 @@ class PaperTradingEngine(LoggerMixin):
     def __init__(self):
         self.redis = None
         self.initial_virtual_balance = 10000.0  # $10K virtual starting balance
+        self.in_memory_storage = {}  # Fallback storage when Redis is unavailable
     # Lua script for atomic portfolio reset - prevents race conditions
     ATOMIC_RESET_LUA_SCRIPT = """
     local portfolio_key = KEYS[1]
@@ -82,13 +83,20 @@ class PaperTradingEngine(LoggerMixin):
     async def setup_paper_trading_account(self, user_id: str) -> Dict[str, Any]:
         """Setup paper trading account for new user."""
         try:
-            # Check if already exists
             portfolio_key = f"paper_portfolio:{user_id}"
-            existing = await self.redis.get(portfolio_key)
-            
+
+            # Check if already exists (use in-memory storage if Redis unavailable)
+            if self.redis:
+                existing = await self.redis.get(portfolio_key)
+            else:
+                existing = self.in_memory_storage.get(portfolio_key)
+
             if existing:
                 try:
-                    existing_portfolio = json.loads(existing)
+                    if isinstance(existing, str):
+                        existing_portfolio = json.loads(existing)
+                    else:
+                        existing_portfolio = existing
                     return {
                         "success": True,
                         "message": "Paper trading account already exists",
@@ -120,12 +128,15 @@ class PaperTradingEngine(LoggerMixin):
                 "last_updated": datetime.utcnow().isoformat()
             }
             
-            # Store in Redis
-            await self.redis.set(
-                portfolio_key,
-                json.dumps(virtual_portfolio, default=str),
-                ex=365 * 24 * 3600  # 1 year expiry
-            )
+            # Store in Redis or in-memory storage
+            if self.redis:
+                await self.redis.set(
+                    portfolio_key,
+                    json.dumps(virtual_portfolio, default=str),
+                    ex=365 * 24 * 3600  # 1 year expiry
+                )
+            else:
+                self.in_memory_storage[portfolio_key] = virtual_portfolio
             
             self.logger.info(
                 f"📝 Paper trading account created for {user_id}",
@@ -170,17 +181,26 @@ class PaperTradingEngine(LoggerMixin):
             
             # Get virtual portfolio
             portfolio_key = f"paper_portfolio:{user_id}"
-            portfolio_data = await self.redis.get(portfolio_key)
+            if self.redis:
+                portfolio_data = await self.redis.get(portfolio_key)
+            else:
+                portfolio_data = self.in_memory_storage.get(portfolio_key)
             
             if not portfolio_data:
                 # Auto-create portfolio if doesn't exist
                 setup_result = await self.setup_paper_trading_account(user_id)
                 if not setup_result.get("success"):
                     return {"success": False, "error": "Failed to setup paper trading account"}
-                portfolio_data = await self.redis.get(portfolio_key)
-            
+                if self.redis:
+                    portfolio_data = await self.redis.get(portfolio_key)
+                else:
+                    portfolio_data = self.in_memory_storage.get(portfolio_key)
+
             try:
-                portfolio = json.loads(portfolio_data)
+                if isinstance(portfolio_data, str):
+                    portfolio = json.loads(portfolio_data)
+                else:
+                    portfolio = portfolio_data
             except (json.JSONDecodeError, TypeError) as e:
                 self.logger.error(f"Failed to parse portfolio data for user {user_id}", error=str(e))
                 return {"success": False, "error": "Portfolio data corrupted, please reset your paper trading account"}
@@ -232,29 +252,37 @@ class PaperTradingEngine(LoggerMixin):
             updated_portfolio = await self._update_virtual_portfolio(portfolio, paper_trade, "open")
             
             # Store updated portfolio
-            await self.redis.set(
-                portfolio_key,
-                json.dumps(updated_portfolio, default=str),
-                ex=365 * 24 * 3600
-            )
+            if self.redis:
+                await self.redis.set(
+                    portfolio_key,
+                    json.dumps(updated_portfolio, default=str),
+                    ex=365 * 24 * 3600
+                )
+            else:
+                self.in_memory_storage[portfolio_key] = updated_portfolio
             
             # Store individual trade
             trade_key = f"paper_trade:{user_id}:{trade_id}"
-            await self.redis.set(
-                trade_key,
-                json.dumps({
-                    "trade_id": trade_id,
-                    "user_id": user_id,
-                    "symbol": symbol,
-                    "side": side.lower(),
-                    "quantity": quantity,
-                    "entry_price": current_price,
-                    "entry_time": datetime.utcnow().isoformat(),
-                    "strategy_used": strategy_used,
-                    "is_open": True
-                }, default=str),
-                ex=30 * 24 * 3600  # 30 days
-            )
+            trade_data = {
+                "trade_id": trade_id,
+                "user_id": user_id,
+                "symbol": symbol,
+                "side": side.lower(),
+                "quantity": quantity,
+                "entry_price": current_price,
+                "entry_time": datetime.utcnow().isoformat(),
+                "strategy_used": strategy_used,
+                "is_open": True
+            }
+
+            if self.redis:
+                await self.redis.set(
+                    trade_key,
+                    json.dumps(trade_data, default=str),
+                    ex=30 * 24 * 3600  # 30 days
+                )
+            else:
+                self.in_memory_storage[trade_key] = trade_data
             
             self.logger.info(
                 f"📝 Paper trade executed for {user_id}",
@@ -422,17 +450,23 @@ class PaperTradingEngine(LoggerMixin):
         """Get comprehensive paper trading performance analysis."""
         try:
             portfolio_key = f"paper_portfolio:{user_id}"
-            portfolio_data = await self.redis.get(portfolio_key)
-            
+            if self.redis:
+                portfolio_data = await self.redis.get(portfolio_key)
+            else:
+                portfolio_data = self.in_memory_storage.get(portfolio_key)
+
             if not portfolio_data:
                 return {
                     "success": False,
                     "error": "No paper trading account found",
                     "needs_setup": True
                 }
-            
+
             try:
-                portfolio = json.loads(portfolio_data)
+                if isinstance(portfolio_data, str):
+                    portfolio = json.loads(portfolio_data)
+                else:
+                    portfolio = portfolio_data
             except (json.JSONDecodeError, TypeError) as e:
                 self.logger.error(f"Failed to parse portfolio data for user {user_id}", error=str(e))
                 return {"success": False, "error": "Portfolio data corrupted, please reset your paper trading account"}

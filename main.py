@@ -90,20 +90,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             from app.core.database import engine, Base
             from sqlalchemy import inspect
-            
-            async with engine.connect() as conn:
-                # Check if tables exist
-                def check_tables(connection):
-                    inspector = inspect(connection)
-                    return len(inspector.get_table_names()) > 0
-                
-                tables_exist = await conn.run_sync(check_tables)
-                
-                if not tables_exist:
+
+            # Add timeout to avoid hanging on table check - use wait_for for Python 3.10 compatibility
+            async def check_tables_with_timeout():
+                async with engine.connect() as conn:
+                    # Check if tables exist
+                    def check_tables(connection):
+                        inspector = inspect(connection)
+                        return len(inspector.get_table_names()) > 0
+
+                    return await conn.run_sync(check_tables)
+
+            tables_exist = await asyncio.wait_for(check_tables_with_timeout(), timeout=30)
+
+            if not tables_exist:
+                async with engine.connect() as conn:
                     logger.warning("⚠️ No database tables found - creating now...")
                     await conn.run_sync(Base.metadata.create_all)
                     logger.info("✅ Database tables created")
-                    
+
                     # Also create admin user
                     from app.models.user import User, UserRole, UserStatus
                     from sqlalchemy.ext.asyncio import AsyncSession
@@ -111,7 +116,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     import bcrypt
                     import uuid
                     from datetime import datetime
-                    
+
                     async with AsyncSession(engine) as session:
                         result = await session.execute(
                             select(User).where(User.email == "admin@cryptouniverse.com")

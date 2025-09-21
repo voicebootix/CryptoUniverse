@@ -96,6 +96,15 @@ interface StrategyMetadata {
   license: string;
 }
 
+interface Trade {
+  entry_time: string;
+  exit_time: string;
+  symbol: string;
+  side: string;
+  pnl: number;
+  return_pct: number;
+}
+
 interface BacktestResult {
   strategy_id: string;
   period_days: number;
@@ -111,14 +120,7 @@ interface BacktestResult {
     return: number;
     cumulative_return: number;
   }>;
-  trade_history: Array<{
-    entry_time: string;
-    exit_time: string;
-    symbol: string;
-    side: string;
-    pnl: number;
-    return_pct: number;
-  }>;
+  trade_history?: Trade[] | null;
 }
 
 const StrategyIDE: React.FC = () => {
@@ -634,7 +636,7 @@ const StrategyIDE: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-x-auto">
         {/* Sidebar */}
         <div className="w-80 border-r bg-muted/20 flex flex-col">
           <Tabs defaultValue="templates" className="flex-1">
@@ -844,7 +846,7 @@ const StrategyIDE: React.FC = () => {
         </div>
 
         {/* Main Editor Area */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col min-w-[600px]">
           <div className="flex-1 relative">
             <Editor
               height="100%"
@@ -934,7 +936,7 @@ const StrategyIDE: React.FC = () => {
 
         {/* Results Panel */}
         {backtestResult && (
-          <div className="w-96 border-l bg-muted/20 overflow-auto">
+          <div className="w-[600px] border-l bg-muted/20 overflow-auto">
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold">Backtest Results</h3>
@@ -987,14 +989,18 @@ const StrategyIDE: React.FC = () => {
                   </CardHeader>
                   <CardContent className="p-4">
                     <div className="space-y-2">
-                      {backtestResult.trade_history.slice(0, 5).map((trade, i) => (
+                      {(backtestResult.trade_history ?? []).slice(0, 5).map((trade: Trade, i: number) => (
                         <div key={i} className="flex justify-between text-sm">
-                          <span>{trade.symbol}</span>
-                          <span className={trade.pnl >= 0 ? 'text-green-500' : 'text-red-500'}>
+                          <span>{trade.side} {trade.symbol} @ {trade.entry_time}</span>
+                          <span className={trade.return_pct >= 0 ? 'text-green-500' : 'text-red-500'}>
                             {formatPercentage(trade.return_pct)}
                           </span>
                         </div>
-                      ))}
+                      )).concat(
+                        (backtestResult.trade_history ?? []).length === 0
+                          ? [<div key="no-trades" className="text-sm text-gray-500">No trade history available</div>]
+                          : []
+                      )}
                     </div>
                   </CardContent>
                 </Card>

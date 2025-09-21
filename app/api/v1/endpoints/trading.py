@@ -339,6 +339,7 @@ async def start_autonomous_mode(
             background_tasks.add_task(monitor_autonomous_trading, current_user.id)
             
             return {
+                "success": True,
                 "status": "autonomous_mode_started",
                 "mode": request.mode,
                 "session_id": result.get("session_id"),
@@ -352,6 +353,7 @@ async def start_autonomous_mode(
             result = await unified_ai_manager.stop_autonomous_mode(str(current_user.id), "web_ui")
             
             return {
+                "success": True,
                 "status": "autonomous_mode_stopped",
                 "session_duration": result.get("session_duration", 0),
                 "trades_executed": result.get("trades_executed", 0),
@@ -367,6 +369,17 @@ async def start_autonomous_mode(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Autonomous mode configuration failed: {str(e)}"
         )
+
+
+@router.post("/autonomous/toggle")
+async def toggle_autonomous_mode(
+    request: AutonomousModeRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
+):
+    """Toggle autonomous trading mode on/off."""
+    return await start_autonomous_mode(request, background_tasks, current_user, db)
 
 
 @router.post("/simulation/toggle")
@@ -466,58 +479,82 @@ async def get_portfolio_status(
     )
     
     try:
-        # Get real portfolio data using existing exchange balance system
-        from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
-        portfolio_data = await get_user_portfolio_from_exchanges(str(current_user.id), db)
-        
-        if not portfolio_data.get("success"):
+        # Get real portfolio data with timeout handling for production
+        try:
+            from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
+            portfolio_data = await asyncio.wait_for(
+                get_user_portfolio_from_exchanges(str(current_user.id), db),
+                timeout=10.0  # Increased timeout for production
+            )
+
+            if not portfolio_data.get("success"):
+                logger.error(f"Portfolio data failed: {portfolio_data.get('error')}")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Portfolio data temporarily unavailable"
+                )
+
+        except asyncio.TimeoutError:
+            logger.error("Portfolio data timeout - service overloaded")
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=portfolio_data.get("error", "Portfolio data not found")
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Portfolio service timeout - try again shortly"
+            )
+        except Exception as e:
+            logger.error(f"Portfolio data error: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Portfolio data service error"
             )
         
         # Get additional portfolio metrics from risk service
         risk_metrics = await risk_service.get_portfolio_status(str(current_user.id))
         risk_data = risk_metrics.get("portfolio", {}) if risk_metrics.get("success") else {}
         
-        # Transform real exchange balances into portfolio positions
-        positions = []
-        total_value_usd = portfolio_data.get("total_value_usd", 0.0)
+        # Transform portfolio data into positions (handle both real and mock data)
+        positions = portfolio_data.get("positions", [])
+        total_value_usd = portfolio_data.get("total_value", portfolio_data.get("total_value_usd", 0.0))
+
+        # If positions aren't directly available, transform from balances (real data format)
+        if not positions and portfolio_data.get("balances"):
+            positions = []
+            for balance in portfolio_data.get("balances", []):
+                if balance.get("total", 0) > 0:
+                    positions.append({
+                        "symbol": balance["asset"],
+                        "name": balance["asset"],
+                        "amount": balance["total"],
+                        "value_usd": balance["value_usd"],
+                        "entry_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
+                        "current_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
+                        "change_24h_pct": 0.0,  # Would come from market data service
+                        "unrealized_pnl": 0.0,  # Would be calculated from entry vs current
+                        "side": "long",
+                        "exchange": balance.get("exchange", "unknown")
+                    })
         
-        for balance in portfolio_data.get("balances", []):
-            if balance.get("total", 0) > 0:
-                positions.append({
-                    "symbol": balance["asset"],
-                    "name": balance["asset"],
-                    "amount": balance["total"],
-                    "value_usd": balance["value_usd"],
-                    "entry_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
-                    "current_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
-                    "change_24h_pct": 0.0,  # Would come from market data service
-                    "unrealized_pnl": 0.0,  # Would be calculated from entry vs current
-                    "side": "long",
-                    "exchange": balance.get("exchange", "unknown")
-                })
-        
-        # Calculate available balance (cash equivalents)
-        stablecoins = ["USDT", "USDC", "BUSD", "DAI", "FDUSD"]
-        available_balance = sum(
-            balance["value_usd"] for balance in portfolio_data.get("balances", [])
-            if balance["asset"] in stablecoins
-        )
-        
+        # Calculate available balance (handle both real and mock data)
+        available_balance = portfolio_data.get("available_balance", 0.0)
+        if not available_balance and portfolio_data.get("balances"):
+            # Fallback for real data format
+            stablecoins = ["USDT", "USDC", "BUSD", "DAI", "FDUSD"]
+            available_balance = sum(
+                balance["value_usd"] for balance in portfolio_data.get("balances", [])
+                if balance["asset"] in stablecoins
+            )
+
         return PortfolioResponse(
             total_value=Decimal(str(total_value_usd)),
             available_balance=Decimal(str(available_balance)),
             positions=positions,
-            daily_pnl=Decimal(str(risk_data.get("daily_pnl", 0))),
-            daily_pnl_pct=risk_data.get("daily_pnl_pct", 0.0),
-            total_pnl=Decimal(str(risk_data.get("total_pnl", 0))),
-            total_pnl_pct=risk_data.get("total_pnl_pct", 0.0),
-            margin_used=Decimal(str(risk_data.get("margin_used", 0))),
-            margin_available=Decimal(str(risk_data.get("margin_available", 0))),
-            risk_score=risk_data.get("risk_score", 50.0),
-            active_orders=risk_data.get("active_orders", 0)
+            daily_pnl=Decimal(str(portfolio_data.get("daily_pnl", risk_data.get("daily_pnl", 0)))),
+            daily_pnl_pct=portfolio_data.get("daily_pnl_pct", risk_data.get("daily_pnl_pct", 0.0)),
+            total_pnl=Decimal(str(portfolio_data.get("total_pnl", risk_data.get("total_pnl", 0)))),
+            total_pnl_pct=portfolio_data.get("total_pnl_pct", risk_data.get("total_pnl_pct", 0.0)),
+            margin_used=Decimal(str(portfolio_data.get("margin_used", risk_data.get("margin_used", 0)))),
+            margin_available=Decimal(str(portfolio_data.get("margin_available", risk_data.get("margin_available", 0)))),
+            risk_score=portfolio_data.get("risk_score", risk_data.get("risk_score", 5.0)),
+            active_orders=portfolio_data.get("active_orders", risk_data.get("active_orders", 0))
         )
         
     except HTTPException:
