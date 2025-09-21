@@ -987,11 +987,11 @@ const StrategyIDE: React.FC = () => {
                   </CardHeader>
                   <CardContent className="p-4">
                     <div className="space-y-2">
-                      {backtestResult.trades.slice(0, 5).map((trade, i) => (
+                      {backtestResult.trade_history.slice(0, 5).map((trade: any, i: number) => (
                         <div key={i} className="flex justify-between text-sm">
-                          <span>{trade.action} @ ${trade.price}</span>
-                          <span className={trade.return >= 0 ? 'text-green-500' : 'text-red-500'}>
-                            {formatPercentage(trade.return)}
+                          <span>{trade.side} {trade.symbol} @ {trade.entry_time}</span>
+                          <span className={trade.return_pct >= 0 ? 'text-green-500' : 'text-red-500'}>
+                            {formatPercentage(trade.return_pct)}
                           </span>
                         </div>
                       ))}
