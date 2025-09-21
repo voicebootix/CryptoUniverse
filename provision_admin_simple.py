@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Provision Admin User Strategies - Simple Version
 
@@ -23,23 +22,35 @@ def provision_strategies():
     print("PROVISIONING ADMIN STRATEGIES")
     print("=" * 60)
 
-    # Login
+    # Login with security settings
     session = requests.Session()
+    session.trust_env = False  # Disable proxy/credential inheritance
     login_data = {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
 
-    response = session.post(f"{BASE_URL}/auth/login", json=login_data)
+    response = session.post(f"{BASE_URL}/auth/login", json=login_data, timeout=30)
     if response.status_code != 200:
         print(f"Login failed: {response.status_code}")
         print(response.text)
         return False
 
-    token = response.json().get("access_token")
+    try:
+        response_data = response.json()
+        token = response_data.get("access_token")
+    except ValueError as e:
+        print(f"Failed to parse login response: {e}")
+        print(f"Response text: {response.text}")
+        return False
+
+    if not token:
+        print(f"No access token received. Response: {response_data}")
+        return False
+
     session.headers.update({"Authorization": f"Bearer {token}"})
     print("Authenticated successfully")
 
     # Test current portfolio status first
     print("\nChecking current portfolio status...")
-    portfolio_response = session.get(f"{BASE_URL}/strategies/my-portfolio")
+    portfolio_response = session.get(f"{BASE_URL}/strategies/my-portfolio", timeout=30)
     print(f"Portfolio status: {portfolio_response.status_code}")
     if portfolio_response.status_code == 200:
         portfolio_data = portfolio_response.json()
@@ -52,7 +63,7 @@ def provision_strategies():
         "grant_reason": "admin_testing"
     }
 
-    grant_response = session.post(f"{BASE_URL}/admin-strategy-access/grant-full-access", json=grant_payload)
+    grant_response = session.post(f"{BASE_URL}/admin-strategy-access/grant-full-access", json=grant_payload, timeout=45)
     print(f"Grant response: {grant_response.status_code}")
 
     if grant_response.status_code == 200:
@@ -64,7 +75,7 @@ def provision_strategies():
 
     # Check portfolio again
     print("\nChecking portfolio after grant...")
-    portfolio_response2 = session.get(f"{BASE_URL}/strategies/my-portfolio")
+    portfolio_response2 = session.get(f"{BASE_URL}/strategies/my-portfolio", timeout=30)
     print(f"Portfolio status: {portfolio_response2.status_code}")
     if portfolio_response2.status_code == 200:
         portfolio_data2 = portfolio_response2.json()

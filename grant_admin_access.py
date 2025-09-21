@@ -19,9 +19,22 @@ def grant_admin_strategies():
 
         if response.status_code != 200:
             print(f"Login failed: {response.status_code}")
+            print(f"Response: {response.text}")
             return
 
-        token = response.json().get("access_token")
+        try:
+            response_data = response.json()
+            token = response_data.get("access_token")
+        except ValueError as e:
+            print(f"Failed to parse login response JSON: {e}")
+            print(f"Response text: {response.text}")
+            return
+
+        if not token:
+            print(f"No access token in response. Status: {response.status_code}")
+            print(f"Response data: {response_data}")
+            return
+
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         print("Login successful!")
 

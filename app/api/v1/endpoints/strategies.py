@@ -601,8 +601,19 @@ async def get_strategy_marketplace(
         # Try cache first (10 minute TTL for marketplace)
         cached_result = await cache_manager.redis.get(cache_key)
         if cached_result:
-            logger.debug("Returning cached marketplace data", user_id=str(current_user.id))
-            return cached_result
+            try:
+                # Normalize cached result to dict for FastAPI serialization
+                if isinstance(cached_result, bytes):
+                    cached_result = cached_result.decode('utf-8')
+                if isinstance(cached_result, str):
+                    import json
+                    cached_result = json.loads(cached_result)
+
+                logger.debug("Returning cached marketplace data", user_id=str(current_user.id))
+                return cached_result
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                logger.warning("Failed to decode cached marketplace data, regenerating", error=str(e))
+                # Continue to regenerate cache
 
         # Get fresh marketplace data
         marketplace_result = await strategy_marketplace_service.get_marketplace_strategies(
