@@ -11,13 +11,29 @@ import requests
 import json
 from datetime import datetime
 
-# Use environment variables for security
-BASE_URL = os.getenv("BASE_URL", "https://cryptouniverse.onrender.com")
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@cryptouniverse.com")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "AdminPass123!")
+# Use environment variables for security - no defaults to prevent accidental production use
+BASE_URL = os.getenv("BASE_URL")
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 
 def fix_admin_auto_mode():
     """Fix admin Auto Mode by ensuring strategies are provisioned"""
+
+    # Fail-fast validation of required environment variables
+    missing_vars = []
+    if not BASE_URL:
+        missing_vars.append("BASE_URL")
+    if not ADMIN_EMAIL:
+        missing_vars.append("ADMIN_EMAIL")
+    if not ADMIN_PASSWORD:
+        missing_vars.append("ADMIN_PASSWORD")
+
+    if missing_vars:
+        print(f"ERROR: Missing required environment variables: {', '.join(missing_vars)}")
+        print("Please set these environment variables before running the script:")
+        for var in missing_vars:
+            print(f"  export {var}=<your_value>")
+        exit(1)
 
     print("FIXING ADMIN AUTO MODE - PROVISIONING STRATEGIES")
     print("=" * 60)
@@ -39,8 +55,11 @@ def fix_admin_auto_mode():
         )
 
         if login_response.status_code != 200:
+            # Sanitize response for logging (no sensitive data leakage)
+            sanitized_response = login_response.text[:200].replace('\n', ' ').replace('\r', ' ') if login_response.text else "No response body"
             print(f"FAILED: Login failed with status {login_response.status_code}")
-            print(f"Response: {login_response.text}")
+            print(f"Reason: {getattr(login_response, 'reason', 'Unknown')}")
+            print(f"Response snippet: {sanitized_response}")
             return False
 
         # Parse response safely
@@ -66,19 +85,22 @@ def fix_admin_auto_mode():
             timeout=30
         )
 
+        portfolio_ok = False
         current_strategies = 0
+
         if portfolio_response.status_code == 200:
             try:
                 portfolio_data = portfolio_response.json()
                 current_strategies = len(portfolio_data.get("active_strategies", []))
+                portfolio_ok = True
                 print(f"Current active strategies: {current_strategies}")
             except ValueError:
-                print("Could not parse portfolio response")
+                print("Could not parse portfolio response - skipping grant operation")
         else:
-            print(f"Portfolio check failed: {portfolio_response.status_code}")
+            print(f"Portfolio check failed: {portfolio_response.status_code} - skipping grant operation")
 
-        # Step 3: Grant admin full strategy access if needed
-        if current_strategies < 3:
+        # Step 3: Grant admin full strategy access if needed (only if portfolio check succeeded)
+        if portfolio_ok and current_strategies < 3:
             print(f"\nStep 3: Granting admin full strategy access...")
 
             grant_payload = {
@@ -104,8 +126,10 @@ def fix_admin_auto_mode():
                     print("Grant succeeded but could not parse response")
             else:
                 print(f"Grant failed: {grant_response.text[:300]}")
-        else:
+        elif portfolio_ok:
             print(f"Admin already has {current_strategies} strategies - skipping grant")
+        else:
+            print("Portfolio status unknown - skipping grant operation for safety")
 
         # Step 4: Verify portfolio after grant
         print(f"\nStep 4: Verifying admin portfolio...")
