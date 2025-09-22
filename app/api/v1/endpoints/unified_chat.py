@@ -151,10 +151,27 @@ async def send_message(
                 timestamp=result["timestamp"]
             )
         else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result.get("error", "Chat processing failed")
-            )
+            # Check if this is a requirements failure (credit/access) rather than a system error
+            error_detail = result.get("error", "Chat processing failed")
+            content_detail = result.get("content", "")
+
+            # Credit/access failures should return 402/403, not 500
+            if "insufficient credits" in content_detail.lower() or "credits" in content_detail.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail=content_detail
+                )
+            elif "access" in content_detail.lower() or "permission" in content_detail.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=content_detail
+                )
+            else:
+                # True system errors remain 500
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=error_detail
+                )
             
     except HTTPException:
         raise

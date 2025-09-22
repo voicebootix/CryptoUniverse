@@ -157,6 +157,9 @@ class UnifiedChatService(LoggerMixin):
         self.trading_strategies = TradingStrategiesService()
         self.strategy_marketplace = strategy_marketplace_service
         self.paper_trading = paper_trading_engine
+
+        # Enterprise configuration
+        self.live_trading_credit_requirement = 10  # Credits required for live trading operations
         self.opportunity_discovery = user_opportunity_discovery
         self.onboarding_service = user_onboarding_service
         
@@ -560,29 +563,65 @@ class UnifiedChatService(LoggerMixin):
     
     async def _check_user_credits(self, user_id: str) -> Dict[str, Any]:
         """
-        REAL credit check - NO MOCKS.
+        Enterprise-grade credit check with proper database session management.
         """
         try:
-            # This would connect to your actual credit service
-            # For now, returning structure that matches your system
             from app.core.database import get_database
-            db = await get_database()
-            
-            # Real query to get user's credit balance
-            # Implementation depends on your actual credit model
-            return {
-                "has_credits": True,  # This should be real check
-                "available_credits": 100,  # Real balance
-                "required_credits": 10,  # Real requirement
-                "credit_tier": "standard"
-            }
+            from app.models.credit import CreditAccount
+            from sqlalchemy import select
+            import uuid
+
+            # Convert user_id to proper UUID format for database query
+            try:
+                user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+            except ValueError:
+                self.logger.warning("Invalid user_id format for credit check", user_id=user_id)
+                return {
+                    "has_credits": False,
+                    "available_credits": 0,
+                    "required_credits": self.live_trading_credit_requirement,
+                    "error": "Invalid user ID format"
+                }
+
+            # FIXED: Proper async context manager usage
+            async with get_database() as db:
+                # Query actual credit account
+                stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
+                result = await db.execute(stmt)
+                credit_account = result.scalar_one_or_none()
+
+                if credit_account:
+                    available_credits = max(0, credit_account.available_credits or 0)
+                    required_credits = self.live_trading_credit_requirement
+
+                    return {
+                        "has_credits": available_credits >= required_credits,
+                        "available_credits": available_credits,
+                        "required_credits": required_credits,
+                        "credit_tier": credit_account.tier or "standard",
+                        "account_status": "active"
+                    }
+                else:
+                    # No credit account found - create graceful response
+                    self.logger.info("No credit account found for user", user_id=user_id)
+                    return {
+                        "has_credits": False,
+                        "available_credits": 0,
+                        "required_credits": self.live_trading_credit_requirement,
+                        "credit_tier": "none",
+                        "account_status": "no_account",
+                        "message": "Credit account not found. Please contact support."
+                    }
+
         except Exception as e:
-            self.logger.error("Credit check failed", error=str(e))
+            self.logger.error("Credit check failed", error=str(e), user_id=user_id)
+            # Enterprise pattern: Always return structured response, never crash
             return {
                 "has_credits": False,
                 "available_credits": 0,
-                "required_credits": 10,
-                "error": str(e)
+                "required_credits": self.live_trading_credit_requirement,
+                "error": str(e),
+                "account_status": "error"
             }
     
     async def _check_strategy_access(self, user_id: str) -> Dict[str, Any]:
