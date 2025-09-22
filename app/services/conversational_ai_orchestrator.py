@@ -405,60 +405,27 @@ class ConversationalAIOrchestrator(LoggerMixin):
     async def _get_credit_status(self, user_id: str) -> Dict[str, Any]:
         """Get user's credit account status and transaction history."""
         try:
-            # FIXED: Use same credit lookup logic as unified_chat_service
+            # FIXED: Use EXACT same logic as credit API endpoint
             from app.core.database import get_database
-            from app.models.credit import CreditAccount
-            from sqlalchemy import select
+            from app.api.v1.endpoints.credits import get_or_create_credit_account
             import uuid
 
-            self.logger.info(f"ORCHESTRATOR CREDIT DEBUG: Looking up user_id={user_id}, type={type(user_id)}, len={len(user_id)}")
+            # Convert string user_id to UUID (same as credit API)
+            if isinstance(user_id, str):
+                user_uuid = uuid.UUID(user_id)
+            else:
+                user_uuid = user_id
 
             async with get_database() as db:
-                # Try multiple lookup methods to find existing account
-                credit_account = None
+                # Use the EXACT same function as credit API
+                credit_account = await get_or_create_credit_account(user_uuid, db)
 
-                # First try: search by string user_id (as passed in)
-                stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
-                result = await db.execute(stmt)
-                credit_account = result.scalar_one_or_none()
-                self.logger.info(f"ORCHESTRATOR CREDIT DEBUG: String lookup result: {credit_account}")
-
-                # Second try: if user_id looks like UUID, try UUID conversion
-                if not credit_account and len(user_id) == 36:  # UUID length
-                    try:
-                        user_uuid = uuid.UUID(user_id)
-                        stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
-                        result = await db.execute(stmt)
-                        credit_account = result.scalar_one_or_none()
-                        self.logger.info(f"ORCHESTRATOR CREDIT DEBUG: UUID lookup result: {credit_account}")
-                    except ValueError as ve:
-                        self.logger.info(f"ORCHESTRATOR CREDIT DEBUG: UUID conversion failed: {ve}")
-
-                # Third try: Check all accounts and see what user_ids exist
-                all_stmt = select(CreditAccount)
-                all_result = await db.execute(all_stmt)
-                all_accounts = all_result.scalars().all()
-                self.logger.info(f"ORCHESTRATOR CREDIT DEBUG: All accounts in DB: {[(acc.user_id, type(acc.user_id), acc.available_credits) for acc in all_accounts]}")
-
-                if credit_account:
-                    result = {
-                        "available_credits": float(credit_account.available_credits),
-                        "total_earned": float(credit_account.total_credits),
-                        "monthly_usage": 0,  # Could be calculated if needed
-                        "credit_tier": "premium" if credit_account.available_credits > 100 else "basic"
-                    }
-                    self.logger.info(f"ORCHESTRATOR CREDIT DEBUG: Returning credits: {result}")
-                    return result
-                else:
-                    # No account found - return 0 but don't create one
-                    result = {
-                        "available_credits": 0,
-                        "total_earned": 0,
-                        "monthly_usage": 0,
-                        "credit_tier": "basic"
-                    }
-                    self.logger.warning(f"ORCHESTRATOR CREDIT DEBUG: No account found for {user_id}, returning: {result}")
-                    return result
+                return {
+                    "available_credits": float(credit_account.available_credits),
+                    "total_earned": float(credit_account.total_credits),
+                    "monthly_usage": 0,  # Could be calculated if needed
+                    "credit_tier": "premium" if credit_account.available_credits > 100 else "basic"
+                }
 
         except Exception as e:
             self.logger.warning("Failed to get credit status", error=str(e))
