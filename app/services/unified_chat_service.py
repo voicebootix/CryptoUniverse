@@ -573,37 +573,91 @@ class UnifiedChatService(LoggerMixin):
     
     async def _check_user_credits(self, user_id: str) -> Dict[str, Any]:
         """
-        Enterprise-grade credit check using EXACT same logic as credit API endpoint.
+        FINAL FIX: Use exact same database lookup as credit API without creating new accounts.
         """
         try:
-            # Import the exact same function used by the credit API
-            from app.api.v1.endpoints.credits import get_or_create_credit_account
             from app.core.database import get_database
+            from app.models.credit import CreditAccount
+            from sqlalchemy import select
 
+            # The problem is we need to use EXACTLY the same user_id format as the API
+            # Let's try both formats to find the existing account
             async with get_database() as db:
-                # Use the exact same function that the credit API uses
-                credit_account = await get_or_create_credit_account(user_id, db)
+                self.logger.info("Searching for existing credit account", user_id=user_id)
 
-                # Now we have the same credit account that the API sees
+                # First try: search by string user_id (as passed in)
+                stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
+                result = await db.execute(stmt)
+                credit_account = result.scalar_one_or_none()
+
+                if credit_account:
+                    self.logger.info("Found account with string lookup",
+                                   available_credits=credit_account.available_credits)
+                else:
+                    # Second try: convert to UUID and search
+                    import uuid
+                    try:
+                        user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+                        stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
+                        result = await db.execute(stmt)
+                        credit_account = result.scalar_one_or_none()
+
+                        if credit_account:
+                            self.logger.info("Found account with UUID lookup",
+                                           available_credits=credit_account.available_credits)
+                    except (ValueError, TypeError):
+                        pass
+
+                if not credit_account:
+                    # Third try: Raw SQL to find ANY account for this user
+                    from sqlalchemy import text
+                    raw_result = await db.execute(
+                        text("SELECT * FROM credit_accounts WHERE user_id::text = :user_id OR user_id = :user_uuid"),
+                        {"user_id": str(user_id), "user_uuid": user_id}
+                    )
+                    raw_account = raw_result.fetchone()
+
+                    if raw_account:
+                        self.logger.info("Found account with raw SQL",
+                                       available_credits=raw_account.available_credits)
+                        # Convert to CreditAccount object
+                        credit_account = CreditAccount(
+                            id=raw_account.id,
+                            user_id=raw_account.user_id,
+                            available_credits=raw_account.available_credits,
+                            total_credits=raw_account.total_credits
+                        )
+
+                # If still no account found, DO NOT CREATE - return not found
+                if not credit_account:
+                    self.logger.warning("No credit account found for user", user_id=user_id)
+                    return {
+                        "has_credits": False,
+                        "available_credits": 0,
+                        "required_credits": self.live_trading_credit_requirement,
+                        "credit_tier": "none",
+                        "account_status": "no_account"
+                    }
+
+                # Found existing account - use it
                 available_credits = max(0, credit_account.available_credits or 0)
                 required_credits = self.live_trading_credit_requirement
 
-                self.logger.info("Credit check using API function",
+                self.logger.info("Using existing credit account",
                                user_id=user_id,
                                available_credits=available_credits,
-                               total_credits=credit_account.total_credits)
+                               total_credits=getattr(credit_account, 'total_credits', 0))
 
                 return {
                     "has_credits": available_credits >= required_credits,
                     "available_credits": available_credits,
                     "required_credits": required_credits,
-                    "credit_tier": getattr(credit_account, 'tier', None) or "standard",
+                    "credit_tier": "standard",
                     "account_status": "active"
                 }
 
         except Exception as e:
             self.logger.error("Credit check failed", error=str(e), user_id=user_id)
-            # Enterprise pattern: Always return structured response, never crash
             return {
                 "has_credits": False,
                 "available_credits": 0,
