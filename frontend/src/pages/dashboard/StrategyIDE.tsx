@@ -94,6 +94,20 @@ interface StrategyMetadata {
   tags: string[];
   is_public: boolean;
   license: string;
+  // Optional fields for backend compatibility
+  parameters?: Record<string, any>;
+  risk_parameters?: Record<string, any>;
+  entry_conditions?: Array<Record<string, any>>;
+  exit_conditions?: Array<Record<string, any>>;
+}
+
+interface Trade {
+  entry_time: string;
+  exit_time: string;
+  symbol: string;
+  side: string;
+  pnl: number;
+  return_pct: number;
 }
 
 interface Trade {
@@ -184,8 +198,13 @@ const StrategyIDE: React.FC = () => {
   const saveStrategyMutation = useMutation({
     mutationFn: async (data: { code: string; metadata: StrategyMetadata; is_draft: boolean }) => {
       const response = await apiClient.post('/strategies/save', {
+        name: (data.metadata.name || 'Untitled Strategy').trim(),
+        description: (data.metadata.description || `Generated on ${new Date().toISOString()}`).trim(),
         code: data.code,
-        metadata: data.metadata,
+        parameters: data.metadata.parameters || {},
+        risk_parameters: data.metadata.risk_parameters || null,
+        entry_conditions: data.metadata.entry_conditions || null,
+        exit_conditions: data.metadata.exit_conditions || null,
         is_draft: data.is_draft
       });
       return response.data;
