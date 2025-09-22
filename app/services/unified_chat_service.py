@@ -573,93 +573,25 @@ class UnifiedChatService(LoggerMixin):
     
     async def _check_user_credits(self, user_id: str) -> Dict[str, Any]:
         """
-        Enterprise-grade credit check using same logic as credit API endpoint.
+        Enterprise-grade credit check using EXACT same logic as credit API endpoint.
         """
         try:
+            # Import the exact same function used by the credit API
+            from app.api.v1.endpoints.credits import get_or_create_credit_account
             from app.core.database import get_database
-            from app.models.credit import CreditAccount
-            from app.models.user import User, UserRole
-            from app.core.config import get_settings
-            from sqlalchemy import select
-            from sqlalchemy.exc import IntegrityError
-            import uuid
 
-            # Convert user_id to proper UUID format for database query
-            try:
-                user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
-            except ValueError:
-                self.logger.warning("Invalid user_id format for credit check", user_id=user_id)
-                return {
-                    "has_credits": False,
-                    "available_credits": 0,
-                    "required_credits": self.live_trading_credit_requirement,
-                    "error": "Invalid user ID format"
-                }
-
-            # Use same get_or_create_credit_account logic as credits API
             async with get_database() as db:
-                # Try to find existing account
-                stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
-                result = await db.execute(stmt)
-                credit_account = result.scalar_one_or_none()
+                # Use the exact same function that the credit API uses
+                credit_account = await get_or_create_credit_account(user_id, db)
 
-                if not credit_account:
-                    # Load user to determine initial credits (same as credits API)
-                    user_stmt = select(User).where(User.id == user_uuid)
-                    user_result = await db.execute(user_stmt)
-                    user = user_result.scalar_one_or_none()
-
-                    # Determine initial credits based on user role
-                    initial_credits = 0
-                    if user and user.role == UserRole.ADMIN:
-                        settings = get_settings()
-                        auto_grant_enabled = getattr(settings, 'auto_grant_admin_credits', False)
-                        if auto_grant_enabled:
-                            initial_credits = getattr(settings, 'admin_initial_credits', 0)
-                        else:
-                            # For existing admin users, grant 1000 initial credits
-                            initial_credits = 1000
-
-                    # Create new account with role-based initial credits
-                    credit_account = CreditAccount(
-                        user_id=user_uuid,
-                        total_credits=initial_credits,
-                        available_credits=initial_credits,
-                        used_credits=0,
-                        expired_credits=0
-                    )
-
-                    db.add(credit_account)
-
-                    try:
-                        await db.commit()
-                        await db.refresh(credit_account)
-                        self.logger.info("Created credit account for chat service",
-                                       user_id=str(user_uuid),
-                                       initial_credits=initial_credits)
-                    except IntegrityError:
-                        # Handle race condition - another process created the account
-                        await db.rollback()
-                        self.logger.info("Account creation race condition detected, re-fetching",
-                                       user_id=str(user_uuid))
-
-                        # Re-fetch the existing account
-                        result = await db.execute(stmt)
-                        credit_account = result.scalar_one_or_none()
-
-                        if not credit_account:
-                            # This should not happen, but fail safely
-                            return {
-                                "has_credits": False,
-                                "available_credits": 0,
-                                "required_credits": self.live_trading_credit_requirement,
-                                "error": "Failed to create or retrieve credit account",
-                                "account_status": "error"
-                            }
-
-                # Now we have a credit account - check credits
+                # Now we have the same credit account that the API sees
                 available_credits = max(0, credit_account.available_credits or 0)
                 required_credits = self.live_trading_credit_requirement
+
+                self.logger.info("Credit check using API function",
+                               user_id=user_id,
+                               available_credits=available_credits,
+                               total_credits=credit_account.total_credits)
 
                 return {
                     "has_credits": available_credits >= required_credits,
