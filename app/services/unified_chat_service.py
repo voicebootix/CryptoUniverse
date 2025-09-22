@@ -563,12 +563,15 @@ class UnifiedChatService(LoggerMixin):
     
     async def _check_user_credits(self, user_id: str) -> Dict[str, Any]:
         """
-        Enterprise-grade credit check with proper database session management.
+        Enterprise-grade credit check using same logic as credit API endpoint.
         """
         try:
             from app.core.database import get_database
             from app.models.credit import CreditAccount
+            from app.models.user import User, UserRole
+            from app.core.config import get_settings
             from sqlalchemy import select
+            from sqlalchemy.exc import IntegrityError
             import uuid
 
             # Convert user_id to proper UUID format for database query
@@ -583,35 +586,78 @@ class UnifiedChatService(LoggerMixin):
                     "error": "Invalid user ID format"
                 }
 
-            # FIXED: Proper async context manager usage
+            # Use same get_or_create_credit_account logic as credits API
             async with get_database() as db:
-                # Query actual credit account
+                # Try to find existing account
                 stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
                 result = await db.execute(stmt)
                 credit_account = result.scalar_one_or_none()
 
-                if credit_account:
-                    available_credits = max(0, credit_account.available_credits or 0)
-                    required_credits = self.live_trading_credit_requirement
+                if not credit_account:
+                    # Load user to determine initial credits (same as credits API)
+                    user_stmt = select(User).where(User.id == user_uuid)
+                    user_result = await db.execute(user_stmt)
+                    user = user_result.scalar_one_or_none()
 
-                    return {
-                        "has_credits": available_credits >= required_credits,
-                        "available_credits": available_credits,
-                        "required_credits": required_credits,
-                        "credit_tier": credit_account.tier or "standard",
-                        "account_status": "active"
-                    }
-                else:
-                    # No credit account found - create graceful response
-                    self.logger.info("No credit account found for user", user_id=user_id)
-                    return {
-                        "has_credits": False,
-                        "available_credits": 0,
-                        "required_credits": self.live_trading_credit_requirement,
-                        "credit_tier": "none",
-                        "account_status": "no_account",
-                        "message": "Credit account not found. Please contact support."
-                    }
+                    # Determine initial credits based on user role
+                    initial_credits = 0
+                    if user and user.role == UserRole.ADMIN:
+                        settings = get_settings()
+                        auto_grant_enabled = getattr(settings, 'auto_grant_admin_credits', False)
+                        if auto_grant_enabled:
+                            initial_credits = getattr(settings, 'admin_initial_credits', 0)
+                        else:
+                            # For existing admin users, grant 1000 initial credits
+                            initial_credits = 1000
+
+                    # Create new account with role-based initial credits
+                    credit_account = CreditAccount(
+                        user_id=user_uuid,
+                        total_credits=initial_credits,
+                        available_credits=initial_credits,
+                        used_credits=0,
+                        expired_credits=0
+                    )
+
+                    db.add(credit_account)
+
+                    try:
+                        await db.commit()
+                        await db.refresh(credit_account)
+                        self.logger.info("Created credit account for chat service",
+                                       user_id=str(user_uuid),
+                                       initial_credits=initial_credits)
+                    except IntegrityError:
+                        # Handle race condition - another process created the account
+                        await db.rollback()
+                        self.logger.info("Account creation race condition detected, re-fetching",
+                                       user_id=str(user_uuid))
+
+                        # Re-fetch the existing account
+                        result = await db.execute(stmt)
+                        credit_account = result.scalar_one_or_none()
+
+                        if not credit_account:
+                            # This should not happen, but fail safely
+                            return {
+                                "has_credits": False,
+                                "available_credits": 0,
+                                "required_credits": self.live_trading_credit_requirement,
+                                "error": "Failed to create or retrieve credit account",
+                                "account_status": "error"
+                            }
+
+                # Now we have a credit account - check credits
+                available_credits = max(0, credit_account.available_credits or 0)
+                required_credits = self.live_trading_credit_requirement
+
+                return {
+                    "has_credits": available_credits >= required_credits,
+                    "available_credits": available_credits,
+                    "required_credits": required_credits,
+                    "credit_tier": getattr(credit_account, 'tier', None) or "standard",
+                    "account_status": "active"
+                }
 
         except Exception as e:
             self.logger.error("Credit check failed", error=str(e), user_id=user_id)
@@ -764,58 +810,30 @@ class UnifiedChatService(LoggerMixin):
                 context_data["marketplace_strategies"] = {"strategies": []}
 
         elif intent in [ChatIntent.CREDIT_INQUIRY, ChatIntent.CREDIT_MANAGEMENT]:
-            # Get credit account information directly with proper UUID handling
+            # Get credit account information using same logic as _check_user_credits
             try:
-                from app.core.database import get_database
-                from app.models.credit import CreditAccount
-                from sqlalchemy import select
-                import uuid
+                credit_check_result = await self._check_user_credits(user_id)
 
-                # Convert string user_id to UUID if needed
-                try:
-                    user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
-                except ValueError:
-                    user_uuid = user_id
-
-                async with get_database() as db:
-                    # Try UUID first (proper format)
-                    stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
-                    result = await db.execute(stmt)
-                    credit_account = result.scalar_one_or_none()
-
-                    if credit_account:
-                        context_data["credit_account"] = {
-                            "available_credits": float(credit_account.available_credits),
-                            "total_credits": float(credit_account.total_credits),
-                            "profit_potential": float(credit_account.calculate_profit_potential()),
-                            "account_tier": credit_account.tier or "standard"
-                        }
-                    else:
-                        # If not found with UUID, try string format (fallback)
-                        if isinstance(user_uuid, uuid.UUID):
-                            stmt = select(CreditAccount).where(CreditAccount.user_id == str(user_uuid))
-                            result = await db.execute(stmt)
-                            credit_account = result.scalar_one_or_none()
-
-                            if credit_account:
-                                context_data["credit_account"] = {
-                                    "available_credits": float(credit_account.available_credits),
-                                    "total_credits": float(credit_account.total_credits),
-                                    "profit_potential": float(credit_account.calculate_profit_potential()),
-                                    "account_tier": credit_account.tier or "standard"
-                                }
-
-                        if "credit_account" not in context_data:
-                            context_data["credit_account"] = {
-                                "available_credits": 0,
-                                "total_credits": 0,
-                                "profit_potential": 0,
-                                "account_tier": "standard",
-                                "error": "No credit account found"
-                            }
+                if credit_check_result.get("account_status") == "active":
+                    # Use the credit check results
+                    context_data["credit_account"] = {
+                        "available_credits": float(credit_check_result.get("available_credits", 0)),
+                        "total_credits": float(credit_check_result.get("available_credits", 0)),  # Use available as approximation
+                        "profit_potential": float(credit_check_result.get("available_credits", 0) * 4),  # 1 credit = $4 profit potential
+                        "account_tier": credit_check_result.get("credit_tier", "standard")
+                    }
+                else:
+                    # Account creation or error
+                    context_data["credit_account"] = {
+                        "available_credits": float(credit_check_result.get("available_credits", 0)),
+                        "total_credits": float(credit_check_result.get("available_credits", 0)),
+                        "profit_potential": float(credit_check_result.get("available_credits", 0) * 4),
+                        "account_tier": credit_check_result.get("credit_tier", "standard"),
+                        "error": credit_check_result.get("error", "Account access issue")
+                    }
 
             except Exception as e:
-                self.logger.error("Failed to get credit account", error=str(e), user_id=user_id)
+                self.logger.error("Failed to get credit account via credit check", error=str(e), user_id=user_id)
                 context_data["credit_account"] = {
                     "available_credits": 0,
                     "total_credits": 0,
