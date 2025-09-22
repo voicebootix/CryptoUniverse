@@ -15,11 +15,13 @@ import json
 import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, AsyncGenerator, Union
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from enum import Enum
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
@@ -48,9 +50,11 @@ from app.services.user_opportunity_discovery import user_opportunity_discovery
 from app.services.user_onboarding_service import user_onboarding_service
 
 # Models
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.trading import TradingStrategy, Trade, Position
 from app.models.credit import CreditAccount
+from app.models.chat import ChatSession as ChatSessionModel
+from app.models.analytics import PerformanceMetric, MetricType, UserAnalytics
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -328,12 +332,13 @@ class UnifiedChatService(LoggerMixin):
         start_time = datetime.utcnow()
         
         # Get or create session
-        if not session_id:
-            session_id = str(uuid.uuid4())
-        
         session = await self._get_or_create_session(
-            session_id, user_id, interface, conversation_mode
+            session_id,
+            user_id,
+            interface,
+            conversation_mode
         )
+        session_id = session.session_id
         
         # Log the request
         self.logger.info(
@@ -406,34 +411,178 @@ class UnifiedChatService(LoggerMixin):
             else:
                 return error_response
     
-    async def _get_or_create_session(
+    async def _resolve_trading_mode(self, user_id: str) -> TradingMode:
+        """Determine the user's trading mode from stored preferences."""
+        user_config = await self._get_user_config(user_id)
+        mode_value = str(user_config.get("trading_mode", TradingMode.BALANCED.value)).lower()
+        try:
+            return TradingMode(mode_value)
+        except ValueError:
+            self.logger.warning("Unknown trading mode in user config, defaulting to balanced", mode=mode_value)
+            return TradingMode.BALANCED
+
+    async def _load_persisted_session(
+        self,
+        session_id: Optional[str],
+        user_id: str,
+        interface: InterfaceType,
+        conversation_mode: ConversationMode,
+        trading_mode: TradingMode
+    ) -> Optional[ChatSession]:
+        """Load session state from the database if it already exists."""
+        if not session_id:
+            return None
+
+        try:
+            session_uuid = uuid.UUID(str(session_id))
+            user_uuid = uuid.UUID(str(user_id))
+        except ValueError:
+            self.logger.warning("Invalid UUID provided for session lookup", session_id=session_id, user_id=user_id)
+            return None
+
+        async with AsyncSessionLocal() as db:
+            try:
+                stmt = select(ChatSessionModel).where(
+                    ChatSessionModel.session_id == session_uuid,
+                    ChatSessionModel.user_id == user_uuid
+                )
+                result = await db.execute(stmt)
+                record = result.scalar_one_or_none()
+                if not record:
+                    return None
+
+                created_at = record.created_at
+                last_activity = record.last_activity
+                if created_at and created_at.tzinfo:
+                    created_at = created_at.astimezone(tz=None).replace(tzinfo=None)
+                if last_activity and last_activity.tzinfo:
+                    last_activity = last_activity.astimezone(tz=None).replace(tzinfo=None)
+
+                context = record.context or {}
+                context.setdefault("conversation_mode", conversation_mode.value)
+                context.setdefault("interface", interface.value)
+                context["trading_mode"] = trading_mode.value
+
+                hydrated = ChatSession(
+                    session_id=str(record.session_id),
+                    user_id=user_id,
+                    interface=interface,
+                    conversation_mode=conversation_mode,
+                    trading_mode=trading_mode,
+                    created_at=created_at or datetime.utcnow(),
+                    last_activity=last_activity or datetime.utcnow(),
+                    context=context,
+                    messages=[]
+                )
+
+                self.sessions[str(record.session_id)] = hydrated
+                return hydrated
+            except SQLAlchemyError as exc:
+                self.logger.error("Failed to load persisted session", error=str(exc), session_id=session_id)
+                return None
+
+    async def _initialize_session_context(
         self,
         session_id: str,
+        trading_mode: TradingMode,
+        conversation_mode: ConversationMode,
+        interface: InterfaceType
+    ) -> Dict[str, Any]:
+        """Persist and return the base session context."""
+        context = {
+            "trading_mode": trading_mode.value,
+            "conversation_mode": conversation_mode.value,
+            "interface": interface.value,
+        }
+
+        try:
+            await self.memory_service.update_session_context(session_id, context)
+        except Exception as exc:
+            self.logger.warning("Failed to persist initial session context", session_id=session_id, error=str(exc))
+
+        return context
+
+    async def _get_or_create_session(
+        self,
+        session_id: Optional[str],
         user_id: str,
         interface: InterfaceType,
         conversation_mode: ConversationMode
     ) -> ChatSession:
-        """Get existing session or create new one."""
-        if session_id not in self.sessions:
-            # Get user's trading mode
-            user_config = await self._get_user_config(user_id)
-            trading_mode = TradingMode(user_config.get("trading_mode", "balanced").lower())
-            
-            self.sessions[session_id] = ChatSession(
-                session_id=session_id,
+        """Get existing session or create new one with persistent backing."""
+
+        trading_mode = await self._resolve_trading_mode(user_id)
+
+        cached_session = None
+        if session_id:
+            cached_session = self.sessions.get(session_id)
+
+        if cached_session:
+            cached_session.last_activity = datetime.utcnow()
+            cached_session.conversation_mode = conversation_mode
+            cached_session.trading_mode = trading_mode
+            return cached_session
+
+        persisted_session = await self._load_persisted_session(
+            session_id,
+            user_id,
+            interface,
+            conversation_mode,
+            trading_mode
+        )
+        if persisted_session:
+            return persisted_session
+
+        # Create a brand new session in persistent storage
+        try:
+            session_identifier = await self.memory_service.create_session(
                 user_id=user_id,
-                interface=interface,
-                conversation_mode=conversation_mode,
-                trading_mode=trading_mode,
-                created_at=datetime.utcnow(),
-                last_activity=datetime.utcnow(),
-                context={},
-                messages=[]
+                session_type=conversation_mode.value,
+                context={
+                    "interface": interface.value,
+                    "conversation_mode": conversation_mode.value,
+                    "trading_mode": trading_mode.value,
+                }
             )
-        else:
-            self.sessions[session_id].last_activity = datetime.utcnow()
-        
-        return self.sessions[session_id]
+        except Exception as exc:
+            self.logger.error("Failed to create chat session in memory service", error=str(exc))
+            session_identifier = str(uuid.uuid4())
+
+        context = await self._initialize_session_context(
+            session_identifier,
+            trading_mode,
+            conversation_mode,
+            interface
+        )
+
+        session_state = ChatSession(
+            session_id=session_identifier,
+            user_id=user_id,
+            interface=interface,
+            conversation_mode=conversation_mode,
+            trading_mode=trading_mode,
+            created_at=datetime.utcnow(),
+            last_activity=datetime.utcnow(),
+            context=context,
+            messages=[]
+        )
+
+        self.sessions[session_identifier] = session_state
+        return session_state
+
+    async def create_session(
+        self,
+        user_id: str,
+        interface: InterfaceType,
+        conversation_mode: ConversationMode
+    ) -> ChatSession:
+        """Public helper to create a brand new chat session."""
+        return await self._get_or_create_session(
+            None,
+            user_id,
+            interface,
+            conversation_mode
+        )
     
     async def _analyze_intent_unified(
         self,
@@ -563,27 +712,69 @@ class UnifiedChatService(LoggerMixin):
         REAL credit check - NO MOCKS.
         """
         try:
-            # This would connect to your actual credit service
-            # For now, returning structure that matches your system
-            from app.core.database import get_database
-            db = await get_database()
-            
-            # Real query to get user's credit balance
-            # Implementation depends on your actual credit model
-            return {
-                "has_credits": True,  # This should be real check
-                "available_credits": 100,  # Real balance
-                "required_credits": 10,  # Real requirement
-                "credit_tier": "standard"
-            }
-        except Exception as e:
-            self.logger.error("Credit check failed", error=str(e))
+            user_uuid = uuid.UUID(str(user_id))
+        except ValueError:
+            self.logger.error("Invalid user ID for credit lookup", user_id=user_id)
             return {
                 "has_credits": False,
                 "available_credits": 0,
-                "required_credits": 10,
-                "error": str(e)
+                "required_credits": 0,
+                "error": "invalid_user_id"
             }
+
+        async with AsyncSessionLocal() as db:
+            try:
+                stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
+                result = await db.execute(stmt)
+                account = result.scalar_one_or_none()
+
+                if not account:
+                    return {
+                        "has_credits": False,
+                        "available_credits": 0,
+                        "required_credits": 0,
+                        "credit_tier": "standard",
+                        "profit_potential_usd": 0.0,
+                        "current_profit_limit_usd": 0.0,
+                        "message": "No credit account found"
+                    }
+
+                available = int(account.available_credits or 0)
+                total = int(account.total_credits or 0)
+                low_alert = int(account.low_balance_alert_threshold or 0)
+                auto_threshold = int(account.auto_purchase_threshold or 0)
+                base_requirement = max(low_alert * 0.1, auto_threshold * 0.05, 1)
+                required = max(1, int(base_requirement))
+
+                if total >= 5000:
+                    tier = "enterprise"
+                elif account.is_vip:
+                    tier = "vip"
+                elif total >= 1000:
+                    tier = "pro"
+                else:
+                    tier = "standard"
+
+                return {
+                    "has_credits": available >= required,
+                    "available_credits": available,
+                    "total_credits": total,
+                    "required_credits": required,
+                    "credit_tier": tier,
+                    "profit_potential_usd": float(account.calculate_profit_potential()),
+                    "current_profit_limit_usd": float(account.current_profit_limit_usd or 0),
+                    "commission_ratio": float(account.credit_to_usd_ratio or 1),
+                    "auto_purchase_threshold": auto_threshold,
+                    "low_balance_alert": low_alert,
+                }
+            except SQLAlchemyError as exc:
+                self.logger.error("Credit check failed", error=str(exc), user_id=user_id)
+                return {
+                    "has_credits": False,
+                    "available_credits": 0,
+                    "required_credits": 0,
+                    "error": str(exc)
+                }
     
     async def _check_strategy_access(self, user_id: str) -> Dict[str, Any]:
         """Check user's strategy access - REAL check."""
@@ -609,16 +800,62 @@ class UnifiedChatService(LoggerMixin):
     async def _check_trading_limits(self, user_id: str) -> Dict[str, Any]:
         """Check trading limits - REAL validation."""
         try:
-            # Get user's current positions and limits
-            # Get portfolio via existing service - will be implemented when needed
-            portfolio = {"total_value": 0, "positions": []}
-            risk_limits = await self.portfolio_risk.calculate_position_limits(user_id)
-            
+            trading_mode = await self._resolve_trading_mode(user_id)
+            mode_config = self.master_controller.mode_configs.get(trading_mode, None)
+
+            portfolio_response = await self.portfolio_risk.get_portfolio(user_id)
+            portfolio = {}
+            if isinstance(portfolio_response, dict):
+                portfolio = portfolio_response.get("portfolio") or portfolio_response.get("data") or {}
+
+            if not portfolio:
+                return {
+                    "within_limits": False,
+                    "message": "Portfolio data unavailable",
+                    "current_exposure": 0,
+                    "max_position_size": None
+                }
+
+            total_value = float(portfolio.get("total_value_usd") or portfolio.get("total_value") or 0)
+            positions = portfolio.get("positions", [])
+
+            largest_position_pct = 0.0
+            largest_position_symbol = None
+            for position in positions:
+                value = float(position.get("value_usd") or position.get("value") or 0)
+                if total_value > 0:
+                    pct = (value / total_value) * 100
+                else:
+                    pct = 0.0
+                if pct > largest_position_pct:
+                    largest_position_pct = pct
+                    largest_position_symbol = position.get("symbol")
+
+            max_position_pct_allowed = mode_config.max_position_pct if mode_config else 10.0
+            within_limits = largest_position_pct <= max_position_pct_allowed
+
+            try:
+                portfolio_heat = self.portfolio_risk.position_sizing_engine._calculate_portfolio_heat(portfolio)
+            except Exception:
+                portfolio_heat = None
+
+            message = "Trading limits OK"
+            if not within_limits:
+                message = (
+                    f"{largest_position_symbol or 'Portfolio'} exceeds configured position limit "
+                    f"({largest_position_pct:.2f}% > {max_position_pct_allowed:.2f}%)"
+                )
+
             return {
-                "within_limits": True,  # Real calculation needed
-                "message": "Trading limits OK",
-                "current_exposure": portfolio.get("total_value", 0),
-                "max_position_size": risk_limits.get("max_position_size", 10000)
+                "within_limits": within_limits,
+                "message": message,
+                "current_exposure": total_value,
+                "max_position_size": max_position_pct_allowed,
+                "largest_position_pct": largest_position_pct,
+                "largest_position_symbol": largest_position_symbol,
+                "portfolio_heat": portfolio_heat,
+                "cash_target_pct": getattr(mode_config, "cash_target_pct", None) if mode_config else None,
+                "max_drawdown_pct": getattr(mode_config, "max_drawdown_pct", None) if mode_config else None,
             }
         except Exception as e:
             self.logger.error("Limit check failed", error=str(e))
@@ -638,39 +875,102 @@ class UnifiedChatService(LoggerMixin):
         ONLY REAL DATA - No mocks, no placeholders.
         """
         intent = intent_analysis["intent"]
-        context_data = {}
-        
-        # Always get basic portfolio data with error handling
+        context_data: Dict[str, Any] = {}
+        portfolio_snapshot: Dict[str, Any] = {}
+
+        # Always attempt to load the current portfolio
         try:
-            # Portfolio data will be implemented when needed - using placeholder
-            context_data["portfolio"] = {"total_value": 0, "positions": [], "error": "Portfolio service integration pending"}
-        except Exception as e:
-            self.logger.error("Failed to get portfolio summary", error=str(e), user_id=user_id)
-            context_data["portfolio"] = {"error": "Portfolio data unavailable"}
-        
-        # Intent-specific data gathering
+            portfolio_response = await self.portfolio_risk.get_portfolio(user_id)
+            if isinstance(portfolio_response, dict):
+                if portfolio_response.get("success"):
+                    portfolio_snapshot = portfolio_response.get("portfolio", {})
+                    if portfolio_snapshot:
+                        context_data["portfolio_metadata"] = portfolio_response.get("metadata")
+                else:
+                    portfolio_snapshot = portfolio_response.get("portfolio", {})
+                if not portfolio_snapshot:
+                    portfolio_snapshot = portfolio_response if portfolio_response.get("positions") else {}
+        except Exception as exc:
+            self.logger.error("Failed to get portfolio summary", error=str(exc), user_id=user_id)
+
+        if portfolio_snapshot:
+            context_data["portfolio"] = portfolio_snapshot
+        else:
+            context_data["portfolio"] = {
+                "success": False,
+                "error": "Portfolio data unavailable"
+            }
+
+        # Trading limits are relevant for most intents
+        try:
+            context_data["trading_limits"] = await self._check_trading_limits(user_id)
+        except Exception as exc:
+            self.logger.error("Failed to evaluate trading limits", error=str(exc), user_id=user_id)
+
+        # Intent-specific enrichment
         if intent == ChatIntent.PORTFOLIO_ANALYSIS:
-            # Get comprehensive portfolio analysis
-            # Risk analysis integration pending
-            context_data["risk_analysis"] = {"overall_risk": "Medium", "error": "Risk analysis integration pending"}
+            try:
+                risk_response = await self.portfolio_risk.risk_analysis(user_id)
+                context_data["risk_analysis"] = risk_response
+            except Exception as exc:
+                self.logger.error("Risk analysis failed", error=str(exc), user_id=user_id)
+                context_data["risk_analysis"] = {"success": False, "error": str(exc)}
+
             context_data["performance"] = await self._get_performance_metrics(user_id)
-            
+
         elif intent == ChatIntent.TRADE_EXECUTION:
-            # Get market data for trade analysis
             entities = intent_analysis.get("entities", {})
             symbol = entities.get("symbol", "BTC")
-            # Market data integration pending
-            context_data["market_data"] = {"current_price": 0, "error": "Market data integration pending"}
-            context_data["trade_validation"] = await self._prepare_trade_validation(entities, user_id)
-            
+            try:
+                market_response = await self.market_analysis.realtime_price_tracking(symbol, user_id=user_id)
+                symbol_data = market_response.get("data", {}).get(symbol, {})
+                context_data["market_data"] = {
+                    "raw": market_response,
+                    "symbol_snapshot": symbol_data
+                }
+            except Exception as exc:
+                self.logger.error("Realtime price tracking failed", error=str(exc), user_id=user_id, symbol=symbol)
+                context_data["market_data"] = {"success": False, "error": str(exc)}
+
+            try:
+                tech_response = await self.market_analysis.technical_analysis(symbol, user_id=user_id)
+                context_data["technical_analysis"] = tech_response
+            except Exception as exc:
+                self.logger.error("Technical analysis failed", error=str(exc), user_id=user_id, symbol=symbol)
+                context_data["technical_analysis"] = {"success": False, "error": str(exc)}
+
+            context_data["trade_validation"] = await self._prepare_trade_validation(
+                entities,
+                user_id,
+                portfolio_snapshot=portfolio_snapshot,
+                trading_limits=context_data.get("trading_limits")
+            )
+
         elif intent == ChatIntent.MARKET_ANALYSIS:
-            # Get comprehensive market analysis
-            context_data["market_overview"] = await self.market_analysis.get_market_overview()
-            # Technical analysis integration pending
-            context_data["technical_analysis"] = {"signals": [], "error": "Technical analysis integration pending"}
-            
+            try:
+                symbols_for_assessment = ""
+                if portfolio_snapshot and portfolio_snapshot.get("positions"):
+                    unique_symbols = {pos.get("symbol") for pos in portfolio_snapshot.get("positions", []) if pos.get("symbol")}
+                    symbols_for_assessment = ",".join(list(unique_symbols)[:20])
+                if not symbols_for_assessment:
+                    symbols_for_assessment = "SMART_ADAPTIVE"
+
+                overview = await self.market_analysis.complete_market_assessment(
+                    symbols=symbols_for_assessment,
+                    user_id=user_id
+                )
+                context_data["market_overview"] = overview
+            except Exception as exc:
+                self.logger.error("Market overview failed", error=str(exc))
+                context_data["market_overview"] = {"success": False, "error": str(exc)}
+
+            try:
+                momentum = await self.market_analysis.momentum_indicators("BTC,ETH", user_id=user_id)
+                context_data["momentum"] = momentum
+            except Exception as exc:
+                self.logger.warning("Momentum indicator retrieval failed", error=str(exc))
+
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-            # Get real opportunities with error handling
             try:
                 context_data["opportunities"] = await self.opportunity_discovery.discover_opportunities_for_user(
                     user_id=user_id,
@@ -684,15 +984,16 @@ class UnifiedChatService(LoggerMixin):
                     "error": "Opportunity discovery temporarily unavailable",
                     "opportunities": []
                 }
-            
+
         elif intent == ChatIntent.RISK_ASSESSMENT:
-            # Get comprehensive risk metrics
-            context_data["risk_metrics"] = await self.portfolio_risk.risk_analysis(user_id)
-            # Market risk integration pending
-            context_data["market_risk"] = {"factors": [], "error": "Market risk integration pending"}
-            
+            try:
+                risk_response = await self.portfolio_risk.risk_analysis(user_id)
+                context_data["risk_metrics"] = risk_response
+            except Exception as exc:
+                self.logger.error("Risk metrics retrieval failed", error=str(exc), user_id=user_id)
+                context_data["risk_metrics"] = {"success": False, "error": str(exc)}
+
         elif intent == ChatIntent.STRATEGY_RECOMMENDATION:
-            # Get strategy recommendations with error handling
             try:
                 context_data["active_strategy"] = await self.trading_strategies.get_active_strategy(user_id)
             except Exception as e:
@@ -706,7 +1007,6 @@ class UnifiedChatService(LoggerMixin):
                 context_data["available_strategies"] = {"strategies": []}
 
         elif intent == ChatIntent.STRATEGY_MANAGEMENT:
-            # Get user's purchased/active strategies
             try:
                 context_data["user_strategies"] = await self.strategy_marketplace.get_user_strategy_portfolio(user_id)
             except Exception as e:
@@ -725,75 +1025,49 @@ class UnifiedChatService(LoggerMixin):
                 context_data["marketplace_strategies"] = {"strategies": []}
 
         elif intent in [ChatIntent.CREDIT_INQUIRY, ChatIntent.CREDIT_MANAGEMENT]:
-            # Get credit account information directly with proper UUID handling
-            try:
-                from app.core.database import get_database
-                from app.models.credit import CreditAccount
-                from sqlalchemy import select
-                import uuid
-
-                # Convert string user_id to UUID if needed
-                try:
-                    user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
-                except ValueError:
-                    user_uuid = user_id
-
-                async with get_database() as db:
-                    # Try UUID first (proper format)
-                    stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
-                    result = await db.execute(stmt)
-                    credit_account = result.scalar_one_or_none()
-
-                    if credit_account:
-                        context_data["credit_account"] = {
-                            "available_credits": float(credit_account.available_credits),
-                            "total_credits": float(credit_account.total_credits),
-                            "profit_potential": float(credit_account.calculate_profit_potential()),
-                            "account_tier": credit_account.tier or "standard"
-                        }
-                    else:
-                        # If not found with UUID, try string format (fallback)
-                        if isinstance(user_uuid, uuid.UUID):
-                            stmt = select(CreditAccount).where(CreditAccount.user_id == str(user_uuid))
-                            result = await db.execute(stmt)
-                            credit_account = result.scalar_one_or_none()
-
-                            if credit_account:
-                                context_data["credit_account"] = {
-                                    "available_credits": float(credit_account.available_credits),
-                                    "total_credits": float(credit_account.total_credits),
-                                    "profit_potential": float(credit_account.calculate_profit_potential()),
-                                    "account_tier": credit_account.tier or "standard"
-                                }
-
-                        if "credit_account" not in context_data:
-                            context_data["credit_account"] = {
-                                "available_credits": 0,
-                                "total_credits": 0,
-                                "profit_potential": 0,
-                                "account_tier": "standard",
-                                "error": "No credit account found"
-                            }
-
-            except Exception as e:
-                self.logger.error("Failed to get credit account", error=str(e), user_id=user_id)
-                context_data["credit_account"] = {
-                    "available_credits": 0,
-                    "total_credits": 0,
-                    "profit_potential": 0,
-                    "account_tier": "standard",
-                    "error": str(e)
-                }
+            context_data["credit_account"] = await self._check_user_credits(user_id)
 
         elif intent == ChatIntent.REBALANCING:
-            # Get rebalancing analysis
-            # Rebalancing integration pending
-            context_data["rebalance_analysis"] = {"needs_rebalancing": False, "error": "Rebalancing integration pending"}
-            
-        # Add user context
-        context_data["user_config"] = await self._get_user_config(user_id)
+            if portfolio_snapshot:
+                try:
+                    optimization = await self.portfolio_risk.optimize_allocation_with_portfolio_data(
+                        user_id,
+                        portfolio_snapshot
+                    )
+                    optimization_result = optimization.get("optimization_result")
+                    if optimization_result and hasattr(optimization_result, "__dict__"):
+                        optimization_payload = asdict(optimization_result)
+                    else:
+                        optimization_payload = optimization_result
+                    context_data["rebalance_analysis"] = {
+                        "success": optimization.get("success", False),
+                        "details": optimization_payload,
+                    }
+                except Exception as exc:
+                    self.logger.error("Rebalancing analysis failed", error=str(exc), user_id=user_id)
+                    context_data["rebalance_analysis"] = {
+                        "success": False,
+                        "error": str(exc)
+                    }
+
+        if intent == ChatIntent.PERFORMANCE_REVIEW:
+            context_data["performance"] = await self._get_performance_metrics(user_id)
+
+        # Add user context and persist for future turns
+        user_config = await self._get_user_config(user_id)
+        context_data["user_config"] = user_config
+        session.context.update({
+            "user_config": user_config,
+            "trading_limits": context_data.get("trading_limits"),
+        })
+
+        try:
+            await self.memory_service.update_session_context(session.session_id, session.context)
+        except Exception as exc:
+            self.logger.debug("Failed to update session context in storage", session_id=session.session_id, error=str(exc))
+
         context_data["session_context"] = session.context
-        
+
         return context_data
     
     async def _generate_complete_response(
@@ -913,7 +1187,8 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
         yield {
             "type": "processing",
             "content": "Analyzing your request...",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "session_id": session.session_id
         }
         
         intent = intent_analysis["intent"]
@@ -938,7 +1213,8 @@ Respond naturally using ONLY the real data provided."""
                 "type": "response",
                 "content": chunk,
                 "timestamp": datetime.utcnow().isoformat(),
-                "personality": personality["name"]
+                "personality": personality["name"],
+                "session_id": session.session_id
             }
         
         # Handle action requirements
@@ -957,7 +1233,8 @@ Respond naturally using ONLY the real data provided."""
                 "content": "This action requires your confirmation. Would you like to proceed?",
                 "action": "confirm_action",
                 "decision_id": decision_id,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
+                "session_id": session.session_id
             }
         
         # Save conversation
@@ -972,7 +1249,8 @@ Respond naturally using ONLY the real data provided."""
         
         yield {
             "type": "complete",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "session_id": session.session_id
         }
     
     def _build_response_prompt(
@@ -1191,44 +1469,178 @@ Provide a helpful response using the real data available. Never use placeholder 
     async def _get_user_config(self, user_id: str) -> Dict[str, Any]:
         """Get user configuration - REAL data only."""
         try:
-            # This would connect to your actual user service
-            # For now, returning structure that matches your system
+            user_uuid = uuid.UUID(str(user_id))
+        except ValueError:
+            self.logger.error("Invalid user ID for user config", user_id=user_id)
             return {
-                "trading_mode": "balanced",
-                "operation_mode": "assisted",
+                "trading_mode": TradingMode.BALANCED.value,
+                "operation_mode": OperationMode.ASSISTED.value,
                 "risk_tolerance": "medium",
                 "notification_preferences": {}
             }
-        except Exception as e:
-            self.logger.error("Failed to get user config", error=str(e))
-            return {"trading_mode": "balanced", "operation_mode": "assisted"}
+
+        async with AsyncSessionLocal() as db:
+            try:
+                stmt = (
+                    select(User)
+                    .options(selectinload(User.profile))
+                    .where(User.id == user_uuid)
+                )
+                result = await db.execute(stmt)
+                user = result.scalar_one_or_none()
+
+                if not user:
+                    return {
+                        "trading_mode": TradingMode.BALANCED.value,
+                        "operation_mode": OperationMode.ASSISTED.value,
+                        "risk_tolerance": "medium",
+                        "notification_preferences": {}
+                    }
+
+                profile = getattr(user, "profile", None)
+                risk_level = (profile.default_risk_level if profile and profile.default_risk_level else "medium").lower()
+                trading_mode_map = {
+                    "low": TradingMode.CONSERVATIVE.value,
+                    "medium": TradingMode.BALANCED.value,
+                    "balanced": TradingMode.BALANCED.value,
+                    "high": TradingMode.AGGRESSIVE.value,
+                    "very_high": TradingMode.BEAST_MODE.value,
+                }
+                trading_mode = trading_mode_map.get(risk_level, TradingMode.BALANCED.value)
+
+                operation_mode = OperationMode.ASSISTED.value
+                user_role = user.role or UserRole.TRADER
+                if user.simulation_mode is False and user_role in {UserRole.ADMIN, UserRole.TRADER}:
+                    operation_mode = OperationMode.AUTONOMOUS.value
+
+                notification_preferences = {
+                    "email": bool(profile.email_notifications) if profile else True,
+                    "sms": bool(profile.sms_notifications) if profile else False,
+                    "telegram": bool(profile.telegram_notifications) if profile else False,
+                    "push": bool(profile.push_notifications) if profile else True,
+                }
+
+                analytics_stmt = select(UserAnalytics).where(UserAnalytics.user_id == user_uuid)
+                analytics_result = await db.execute(analytics_stmt)
+                analytics = analytics_result.scalar_one_or_none()
+
+                analytics_payload = {
+                    "total_trades": int(analytics.total_trades) if analytics else 0,
+                    "total_volume_usd": float(analytics.total_volume_usd or 0) if analytics else 0.0,
+                    "total_pnl_usd": float(analytics.total_pnl_usd or 0) if analytics else 0.0,
+                    "favorite_symbols": analytics.favorite_symbols if analytics and analytics.favorite_symbols else [],
+                    "last_active": analytics.last_active.isoformat() if analytics and analytics.last_active else None,
+                }
+
+                return {
+                    "trading_mode": trading_mode,
+                    "operation_mode": operation_mode,
+                    "risk_tolerance": risk_level,
+                    "preferred_exchanges": profile.preferred_exchanges if profile else [],
+                    "favorite_symbols": profile.favorite_symbols if profile else [],
+                    "timezone": profile.timezone if profile else "UTC",
+                    "language": profile.language if profile else "en",
+                    "simulation_mode": bool(user.simulation_mode),
+                    "notification_preferences": notification_preferences,
+                    "analytics": analytics_payload,
+                }
+            except SQLAlchemyError as exc:
+                self.logger.error("Failed to get user config", error=str(exc), user_id=user_id)
+                return {
+                    "trading_mode": TradingMode.BALANCED.value,
+                    "operation_mode": OperationMode.ASSISTED.value,
+                    "risk_tolerance": "medium",
+                    "notification_preferences": {}
+                }
     
     async def _get_performance_metrics(self, user_id: str) -> Dict[str, Any]:
         """Get performance metrics - REAL data."""
         try:
-            # Connect to your performance tracking service
-            return {
-                "total_return": 0.0,
-                "win_rate": 0.0,
-                "sharpe_ratio": 0.0,
-                "max_drawdown": 0.0
-            }
-        except Exception as e:
-            self.logger.error("Failed to get performance metrics", error=str(e))
+            user_uuid = uuid.UUID(str(user_id))
+        except ValueError:
+            self.logger.error("Invalid user ID for performance metrics", user_id=user_id)
             return {}
+
+        async with AsyncSessionLocal() as db:
+            try:
+                stmt = (
+                    select(PerformanceMetric)
+                    .where(PerformanceMetric.user_id == user_uuid)
+                    .order_by(PerformanceMetric.period_end.desc())
+                    .limit(50)
+                )
+                result = await db.execute(stmt)
+                metrics = result.scalars().all()
+
+                aggregated: Dict[str, Dict[str, Any]] = {}
+                for metric in metrics:
+                    metric_key = metric.metric_type.value
+                    if metric_key in aggregated:
+                        continue  # keep most recent per metric type
+                    aggregated[metric_key] = {
+                        "value": float(metric.value),
+                        "period_start": metric.period_start.isoformat() if metric.period_start else None,
+                        "period_end": metric.period_end.isoformat() if metric.period_end else None,
+                        "meta": metric.meta_data or {},
+                    }
+
+                summary = {
+                    "total_return_pct": aggregated.get(MetricType.RETURN.value, {}).get("value"),
+                    "win_rate_pct": aggregated.get(MetricType.WIN_RATE.value, {}).get("value"),
+                    "sharpe_ratio": aggregated.get(MetricType.SHARPE_RATIO.value, {}).get("value"),
+                    "max_drawdown_pct": aggregated.get(MetricType.MAX_DRAWDOWN.value, {}).get("value"),
+                    "volatility_pct": aggregated.get(MetricType.VOLATILITY.value, {}).get("value"),
+                }
+
+                return {
+                    "summary": summary,
+                    "metrics": aggregated,
+                }
+            except SQLAlchemyError as exc:
+                self.logger.error("Failed to get performance metrics", error=str(exc), user_id=user_id)
+                return {}
     
     async def _prepare_trade_validation(
         self,
         entities: Dict[str, Any],
-        user_id: str
+        user_id: str,
+        portfolio_snapshot: Optional[Dict[str, Any]] = None,
+        trading_limits: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Prepare trade for 5-phase validation."""
+        symbol = entities.get("symbol", "BTC")
+        action = entities.get("action", "buy")
+        amount = entities.get("amount")
+
+        portfolio_data = portfolio_snapshot or {}
+        if not portfolio_data:
+            try:
+                portfolio_response = await self.portfolio_risk.get_portfolio(user_id)
+                if isinstance(portfolio_response, dict):
+                    portfolio_data = portfolio_response.get("portfolio") or portfolio_response
+            except Exception as exc:
+                self.logger.error("Failed to fetch portfolio for trade validation", error=str(exc), user_id=user_id)
+                portfolio_data = {}
+
+        if trading_limits is None:
+            trading_limits = await self._check_trading_limits(user_id)
+
+        credit_status = await self._check_user_credits(user_id)
+
+        total_value = float(portfolio_data.get("total_value_usd") or portfolio_data.get("total_value") or 0)
+        balances = portfolio_data.get("balances", {}) if isinstance(portfolio_data, dict) else {}
+
         return {
-            "symbol": entities.get("symbol", "BTC"),
-            "action": entities.get("action", "buy"),
-            "amount": entities.get("amount", 0),
+            "symbol": symbol,
+            "action": action,
+            "amount": amount,
             "user_id": user_id,
-            "validation_required": True
+            "validation_required": True,
+            "portfolio_value_usd": total_value,
+            "balances": balances,
+            "trading_limits": trading_limits,
+            "credit_status": credit_status,
+            "entities": entities,
         }
     
     async def _store_pending_decision(
@@ -1604,7 +2016,7 @@ Provide a helpful response using the real data available. Never use placeholder 
 
         action_value = trade_request.get("action")
         if isinstance(action_value, str) and action_value:
-            trade_request.setdefault("side", action_value.lower())
+            trade_request["side"] = action_value.lower()
 
         return trade_request
 
@@ -1724,23 +2136,28 @@ Provide a helpful response using the real data available. Never use placeholder 
     ):
         """Save conversation to memory service."""
         try:
-            # Save user message
-            await self.memory_service.add_message(
+            await self.memory_service.save_message(
                 session_id=session_id,
                 user_id=user_id,
-                message_type=ChatMessageType.USER,
                 content=user_message,
-                metadata={"intent": intent.value, "confidence": confidence}
+                message_type=ChatMessageType.USER.value,
+                intent=intent.value,
+                confidence=confidence,
+                metadata={"source": "user"}
             )
-            
-            # Save assistant response
-            await self.memory_service.add_message(
+
+            await self.memory_service.save_message(
                 session_id=session_id,
                 user_id=user_id,
-                message_type=ChatMessageType.ASSISTANT,
                 content=assistant_message,
-                metadata={"intent": intent.value}
+                message_type=ChatMessageType.ASSISTANT.value,
+                intent=intent.value,
+                metadata={"source": "assistant"}
             )
+
+            session_state = self.sessions.get(session_id)
+            if session_state:
+                session_state.last_activity = datetime.utcnow()
         except Exception as e:
             self.logger.error("Failed to save conversation", error=str(e))
     
@@ -1785,13 +2202,15 @@ Provide a helpful response using the real data available. Never use placeholder 
     
     async def get_active_sessions(self, user_id: str) -> List[str]:
         """Get active sessions for a user."""
-        active_sessions = []
-        for session_id, session in self.sessions.items():
-            if session.user_id == user_id:
-                # Consider session active if used in last 24 hours
-                if (datetime.utcnow() - session.last_activity).total_seconds() < 86400:
-                    active_sessions.append(session_id)
-        return active_sessions
+        try:
+            sessions = await self.memory_service.get_user_sessions(
+                user_id=user_id,
+                include_inactive=False
+            )
+            return [session["session_id"] for session in sessions]
+        except Exception as exc:
+            self.logger.error("Failed to retrieve active sessions", error=str(exc), user_id=user_id)
+            return []
     
     async def get_service_status(self) -> Dict[str, Any]:
         """Get comprehensive service status."""

@@ -190,21 +190,20 @@ async def stream_message(
         async def generate():
             """Generate SSE stream."""
             try:
-                # Generate session ID if not provided
-                actual_session_id = session_id or str(uuid.uuid4())
-                
-                async for chunk in unified_chat_service.process_message(
+                stream = await unified_chat_service.process_message(
                     message=message,
                     user_id=str(current_user.id),
-                    session_id=actual_session_id,
+                    session_id=session_id,
                     interface=InterfaceType.WEB_CHAT,
                     conversation_mode=validated_mode,
                     stream=True
-                ):
+                )
+
+                async for chunk in stream:
                     # Format as SSE
                     data = json.dumps(chunk)
                     yield f"data: {data}\n\n"
-                
+
                 # Send completion event
                 yield f"data: {json.dumps({'type': 'complete'})}\n\n"
                 
@@ -307,21 +306,25 @@ async def create_new_session(
     Returns a new session ID for starting a fresh conversation.
     """
     try:
-        session_id = str(uuid.uuid4())
-        
-        # Log session creation for the user
+        session_state = await unified_chat_service.create_session(
+            user_id=str(current_user.id),
+            interface=InterfaceType.WEB_CHAT,
+            conversation_mode=ConversationMode.LIVE_TRADING
+        )
+
         logger.info(
             "New chat session created",
-            session_id=session_id,
+            session_id=session_state.session_id,
             user_id=str(current_user.id)
         )
-        
+
         return {
             "success": True,
-            "session_id": session_id,
+            "session_id": session_state.session_id,
             "message": "New chat session created",
             "user_id": str(current_user.id),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "context": session_state.context,
         }
         
     except Exception as e:
