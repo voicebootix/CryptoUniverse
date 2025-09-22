@@ -826,23 +826,26 @@ class UnifiedChatService(LoggerMixin):
             try:
                 credit_check_result = await self._check_user_credits(user_id)
 
-                if credit_check_result.get("account_status") == "active":
-                    # Use the credit check results
-                    context_data["credit_account"] = {
-                        "available_credits": float(credit_check_result.get("available_credits", 0)),
-                        "total_credits": float(credit_check_result.get("available_credits", 0)),  # Use available as approximation
-                        "profit_potential": float(credit_check_result.get("available_credits", 0) * 4),  # 1 credit = $4 profit potential
-                        "account_tier": credit_check_result.get("credit_tier", "standard")
-                    }
-                else:
-                    # Account creation or error
-                    context_data["credit_account"] = {
-                        "available_credits": float(credit_check_result.get("available_credits", 0)),
-                        "total_credits": float(credit_check_result.get("available_credits", 0)),
-                        "profit_potential": float(credit_check_result.get("available_credits", 0) * 4),
-                        "account_tier": credit_check_result.get("credit_tier", "standard"),
-                        "error": credit_check_result.get("error", "Account access issue")
-                    }
+                # Debug logging to see what we get
+                self.logger.info("Credit inquiry context gathering",
+                               user_id=user_id,
+                               account_status=credit_check_result.get("account_status"),
+                               available_credits=credit_check_result.get("available_credits", 0),
+                               credit_check_keys=list(credit_check_result.keys()))
+
+                # Use the credit check results regardless of status (as long as we got credits)
+                available_credits = float(credit_check_result.get("available_credits", 0))
+                context_data["credit_account"] = {
+                    "available_credits": available_credits,
+                    "total_credits": available_credits,  # Use available as total approximation
+                    "profit_potential": available_credits * 4,  # 1 credit = $4 profit potential
+                    "account_tier": credit_check_result.get("credit_tier", "standard"),
+                    "account_status": credit_check_result.get("account_status", "unknown")
+                }
+
+                # Add error info if present but don't let it override the credits
+                if credit_check_result.get("error"):
+                    context_data["credit_account"]["error"] = credit_check_result["error"]
 
             except Exception as e:
                 self.logger.error("Failed to get credit account via credit check", error=str(e), user_id=user_id)
