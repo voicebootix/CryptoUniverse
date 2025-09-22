@@ -405,15 +405,47 @@ class ConversationalAIOrchestrator(LoggerMixin):
     async def _get_credit_status(self, user_id: str) -> Dict[str, Any]:
         """Get user's credit account status and transaction history."""
         try:
-            # This would connect to existing credit system
-            # Implementation depends on your credit service structure
-            return {
-                "available_credits": 0,
-                "total_earned": 0,
-                "monthly_usage": 0,
-                "credit_tier": "basic"
-            }
-            
+            # FIXED: Use same credit lookup logic as unified_chat_service
+            from app.core.database import get_database
+            from app.models.credit import CreditAccount
+            from sqlalchemy import select
+            import uuid
+
+            async with get_database() as db:
+                # Try multiple lookup methods to find existing account
+                credit_account = None
+
+                # First try: search by string user_id (as passed in)
+                stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
+                result = await db.execute(stmt)
+                credit_account = result.scalar_one_or_none()
+
+                # Second try: if user_id looks like UUID, try UUID conversion
+                if not credit_account and len(user_id) == 36:  # UUID length
+                    try:
+                        user_uuid = uuid.UUID(user_id)
+                        stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
+                        result = await db.execute(stmt)
+                        credit_account = result.scalar_one_or_none()
+                    except ValueError:
+                        pass
+
+                if credit_account:
+                    return {
+                        "available_credits": float(credit_account.available_credits),
+                        "total_earned": float(credit_account.total_credits),
+                        "monthly_usage": 0,  # Could be calculated if needed
+                        "credit_tier": "premium" if credit_account.available_credits > 100 else "basic"
+                    }
+                else:
+                    # No account found - return 0 but don't create one
+                    return {
+                        "available_credits": 0,
+                        "total_earned": 0,
+                        "monthly_usage": 0,
+                        "credit_tier": "basic"
+                    }
+
         except Exception as e:
             self.logger.warning("Failed to get credit status", error=str(e))
             return {"available_credits": 0}
