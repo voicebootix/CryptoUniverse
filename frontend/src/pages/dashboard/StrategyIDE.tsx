@@ -96,6 +96,15 @@ interface StrategyMetadata {
   license: string;
 }
 
+interface Trade {
+  entry_time: string;
+  exit_time: string;
+  symbol: string;
+  side: string;
+  pnl: number;
+  return_pct: number;
+}
+
 interface BacktestResult {
   strategy_id: string;
   period_days: number;
@@ -111,14 +120,7 @@ interface BacktestResult {
     return: number;
     cumulative_return: number;
   }>;
-  trade_history: Array<{
-    entry_time: string;
-    exit_time: string;
-    symbol: string;
-    side: string;
-    pnl: number;
-    return_pct: number;
-  }>;
+  trade_history?: Trade[] | null;
 }
 
 const StrategyIDE: React.FC = () => {
@@ -987,14 +989,18 @@ const StrategyIDE: React.FC = () => {
                   </CardHeader>
                   <CardContent className="p-4">
                     <div className="space-y-2">
-                      {backtestResult.trade_history.slice(0, 5).map((trade, i) => (
+                      {(backtestResult.trade_history ?? []).slice(0, 5).map((trade: Trade, i: number) => (
                         <div key={i} className="flex justify-between text-sm">
-                          <span>{trade.symbol}</span>
-                          <span className={trade.pnl >= 0 ? 'text-green-500' : 'text-red-500'}>
+                          <span>{trade.side} {trade.symbol} @ {trade.entry_time}</span>
+                          <span className={trade.return_pct >= 0 ? 'text-green-500' : 'text-red-500'}>
                             {formatPercentage(trade.return_pct)}
                           </span>
                         </div>
-                      ))}
+                      )).concat(
+                        (backtestResult.trade_history ?? []).length === 0
+                          ? [<div key="no-trades" className="text-sm text-gray-500">No trade history available</div>]
+                          : []
+                      )}
                     </div>
                   </CardContent>
                 </Card>
