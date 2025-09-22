@@ -518,6 +518,16 @@ class UnifiedChatService(LoggerMixin):
             if conversation_mode == ConversationMode.LIVE_TRADING:
                 # Real credit check - NO MOCKS
                 credit_check = await self._check_user_credits(user_id)
+
+                # Debug logging to understand the credit check results
+                self.logger.info("Credit check result for chat",
+                               user_id=user_id,
+                               intent=intent,
+                               available_credits=credit_check.get('available_credits', 0),
+                               required_credits=credit_check.get('required_credits', 0),
+                               has_credits=credit_check.get('has_credits', False),
+                               account_status=credit_check.get('account_status', 'unknown'))
+
                 if not credit_check["has_credits"]:
                     return {
                         "allowed": False,
@@ -671,16 +681,31 @@ class UnifiedChatService(LoggerMixin):
             }
     
     async def _check_strategy_access(self, user_id: str) -> Dict[str, Any]:
-        """Check user's strategy access - REAL check."""
+        """Check user's strategy access - REAL check with admin support."""
         try:
             portfolio = await self.strategy_marketplace.get_user_strategy_portfolio(user_id)
             available = await self.strategy_marketplace.get_marketplace_strategies(user_id)
-            
+
+            # Debug logging
+            self.logger.info("Strategy access check",
+                           user_id=user_id,
+                           portfolio_success=portfolio.get("success", False),
+                           active_strategies_count=len(portfolio.get("active_strategies", [])),
+                           available_count=len(available.get("strategies", [])))
+
+            # Check if portfolio fetch was successful (handles admin fast path and regular users)
+            portfolio_success = portfolio.get("success", True)  # Default to True for backward compatibility
+            active_strategies = portfolio.get("active_strategies", [])
+
+            # For admin users or successful portfolio fetch with strategies, grant access
+            has_access = portfolio_success and len(active_strategies) > 0
+
             return {
-                "has_access": len(portfolio.get("active_strategies", [])) > 0,
-                "active_strategies": portfolio.get("active_strategies", []),
+                "has_access": has_access,
+                "active_strategies": active_strategies,
                 "available_count": len(available.get("strategies", [])),
-                "available_strategies": available.get("strategies", [])[:5]  # Top 5
+                "available_strategies": available.get("strategies", [])[:5],  # Top 5
+                "portfolio_success": portfolio_success
             }
         except Exception as e:
             self.logger.error("Strategy check failed", error=str(e))
@@ -688,7 +713,8 @@ class UnifiedChatService(LoggerMixin):
                 "has_access": False,
                 "active_strategies": [],
                 "available_count": 0,
-                "error": str(e)
+                "error": str(e),
+                "portfolio_success": False
             }
     
     async def _check_trading_limits(self, user_id: str) -> Dict[str, Any]:
