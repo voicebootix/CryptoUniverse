@@ -94,6 +94,29 @@ interface StrategyMetadata {
   tags: string[];
   is_public: boolean;
   license: string;
+  // Optional fields for backend compatibility
+  parameters?: Record<string, any>;
+  risk_parameters?: Record<string, any>;
+  entry_conditions?: Array<Record<string, any>>;
+  exit_conditions?: Array<Record<string, any>>;
+}
+
+interface Trade {
+  entry_time: string;
+  exit_time: string;
+  symbol: string;
+  side: string;
+  pnl: number;
+  return_pct: number;
+}
+
+interface Trade {
+  entry_time: string;
+  exit_time: string;
+  symbol: string;
+  side: string;
+  pnl: number;
+  return_pct: number;
 }
 
 interface BacktestResult {
@@ -111,14 +134,7 @@ interface BacktestResult {
     return: number;
     cumulative_return: number;
   }>;
-  trade_history: Array<{
-    entry_time: string;
-    exit_time: string;
-    symbol: string;
-    side: string;
-    pnl: number;
-    return_pct: number;
-  }>;
+  trade_history?: Trade[] | null;
 }
 
 const StrategyIDE: React.FC = () => {
@@ -182,14 +198,13 @@ const StrategyIDE: React.FC = () => {
   const saveStrategyMutation = useMutation({
     mutationFn: async (data: { code: string; metadata: StrategyMetadata; is_draft: boolean }) => {
       const response = await apiClient.post('/strategies/save', {
-        name: data.metadata.name || 'Untitled Strategy',
-        description: data.metadata.description || `Generated on ${new Date().toLocaleString()}`,
+        name: (data.metadata.name || 'Untitled Strategy').trim(),
+        description: (data.metadata.description || `Generated on ${new Date().toISOString()}`).trim(),
         code: data.code,
         parameters: data.metadata.parameters || {},
-        risk_parameters: data.metadata.riskParameters || null,
-        entry_conditions: data.metadata.entryConditions || null,
-        exit_conditions: data.metadata.exitConditions || null,
-        metadata: data.metadata,
+        risk_parameters: data.metadata.risk_parameters || null,
+        entry_conditions: data.metadata.entry_conditions || null,
+        exit_conditions: data.metadata.exit_conditions || null,
         is_draft: data.is_draft
       });
       return response.data;
@@ -993,14 +1008,18 @@ const StrategyIDE: React.FC = () => {
                   </CardHeader>
                   <CardContent className="p-4">
                     <div className="space-y-2">
-                      {backtestResult.trades.slice(0, 5).map((trade, i) => (
+                      {(backtestResult.trade_history ?? []).slice(0, 5).map((trade: Trade, i: number) => (
                         <div key={i} className="flex justify-between text-sm">
-                          <span>{trade.action} @ ${trade.price}</span>
-                          <span className={trade.return >= 0 ? 'text-green-500' : 'text-red-500'}>
-                            {formatPercentage(trade.return)}
+                          <span>{trade.side} {trade.symbol} @ {trade.entry_time}</span>
+                          <span className={trade.return_pct >= 0 ? 'text-green-500' : 'text-red-500'}>
+                            {formatPercentage(trade.return_pct)}
                           </span>
                         </div>
-                      ))}
+                      )).concat(
+                        (backtestResult.trade_history ?? []).length === 0
+                          ? [<div key="no-trades" className="text-sm text-gray-500">No trade history available</div>]
+                          : []
+                      )}
                     </div>
                   </CardContent>
                 </Card>

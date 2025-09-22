@@ -70,6 +70,19 @@ interface BacktestConfiguration {
   parameters?: Record<string, any>;
 }
 
+interface BacktestTrade {
+  trade_id: string;
+  date: string;
+  symbol: string;
+  action: string;
+  quantity: number;
+  entry_price: number;
+  exit_price?: number;
+  pnl_usd: number;
+  confidence: number;
+  status: string;
+}
+
 interface BacktestResult {
   backtest_id: string;
   strategy_function: string;
@@ -95,18 +108,7 @@ interface BacktestResult {
     calmar_ratio: number;
     profit_factor: number;
   };
-  trade_history: Array<{
-    trade_id: string;
-    date: string;
-    symbol: string;
-    action: string;
-    quantity: number;
-    entry_price: number;
-    exit_price?: number;
-    pnl_usd: number;
-    confidence: number;
-    status: string;
-  }>;
+  trade_history?: BacktestTrade[] | null;
   daily_returns: number[];
   statistical_significance: {
     significant: boolean;
@@ -925,15 +927,15 @@ const BacktestingLab: React.FC = () => {
                   )}
 
                   {/* Recent Trades */}
-                  {selectedResult.trade_history && selectedResult.trade_history.length > 0 && (
+                  {(selectedResult.trade_history ?? []).length > 0 && (
                     <Card>
                       <CardHeader>
                         <CardTitle>Recent Trades Sample</CardTitle>
-                        <CardDescription>Last {selectedResult.trade_history.length} trades from the backtest</CardDescription>
+                        <CardDescription>Last {(selectedResult.trade_history ?? []).length} trades from the backtest</CardDescription>
                       </CardHeader>
                       <CardContent>
                         <div className="space-y-2">
-                          {selectedResult.trade_history.slice(0, 10).map((trade) => (
+                          {(selectedResult.trade_history ?? []).slice(0, 10).map((trade: BacktestTrade) => (
                             <div key={trade.trade_id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
                               <div className="flex items-center gap-3">
                                 <Badge variant="outline" className={trade.action === 'buy' ? 'text-green-600' : 'text-red-600'}>
