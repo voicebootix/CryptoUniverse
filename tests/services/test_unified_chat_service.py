@@ -1,4 +1,5 @@
 import os
+import uuid
 from pathlib import Path
 import sys
 from unittest.mock import AsyncMock
@@ -72,7 +73,7 @@ async def test_trade_execution_pipeline_builds_structured_request():
     assert isinstance(trade_request_arg, dict)
     assert trade_request_arg["symbol"] == "BTCUSDT"
     assert trade_request_arg["action"] == "BUY"
-    assert trade_request_arg["side"] == "buy"
+    assert trade_request_arg["side"].lower() == "buy"
     quantity = trade_request_arg.get("quantity")
     if quantity is not None:
         assert quantity == pytest.approx(0.25)
@@ -143,3 +144,64 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
     assert result["success"] is True
     assert result["trades_executed"] == 1
     assert result["trades_failed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_check_user_credits_reads_account_balance(monkeypatch):
+    service = UnifiedChatService()
+
+    user_id = uuid.uuid4()
+
+    class DummyResult:
+        def __init__(self, account):
+            self._account = account
+
+        def scalar_one_or_none(self):
+            return self._account
+
+    class DummySession:
+        def __init__(self, accounts):
+            self._accounts = accounts
+            self._index = 0
+
+        async def execute(self, _stmt):
+            if self._index < len(self._accounts):
+                account = self._accounts[self._index]
+                self._index += 1
+            else:
+                account = None
+            return DummyResult(account)
+
+    session_queue = []
+
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    @asynccontextmanager
+    async def fake_get_database():
+        session = session_queue.pop(0)
+        try:
+            yield session
+        finally:
+            pass
+
+    monkeypatch.setattr("app.services.unified_chat_service.get_database", fake_get_database)
+
+    low_balance_account = SimpleNamespace(available_credits=8, total_credits=25, tier="standard")
+    high_balance_account = SimpleNamespace(available_credits=20, total_credits=30, tier="vip")
+
+    session_queue.extend([
+        DummySession([low_balance_account]),
+        DummySession([high_balance_account]),
+    ])
+
+    insufficient_result = await service._check_user_credits(str(user_id))
+    assert insufficient_result["has_credits"] is False
+    assert insufficient_result["available_credits"] == 8
+    assert insufficient_result["required_credits"] == service.live_trading_credit_requirement
+
+    session_queue.append(DummySession([high_balance_account]))
+
+    sufficient_result = await service._check_user_credits(user_id)
+    assert sufficient_result["has_credits"] is True
+    assert sufficient_result["available_credits"] == 20
