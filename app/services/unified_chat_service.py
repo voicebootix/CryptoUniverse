@@ -23,7 +23,7 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, get_database
 from app.core.redis import get_redis_client
 
 # Import the new ChatAI service for conversations
@@ -169,6 +169,9 @@ class UnifiedChatService(LoggerMixin):
 
         # Intent patterns from original chat engine
         self.intent_patterns = self._initialize_intent_patterns()
+
+        # Enterprise default credit requirement for live trading operations
+        self.live_trading_credit_requirement = 10
 
         self.logger.info("🧠 UNIFIED CHAT SERVICE INITIALIZED - All features preserved")
 
@@ -562,26 +565,49 @@ class UnifiedChatService(LoggerMixin):
         """
         REAL credit check - NO MOCKS.
         """
+        required_credits = self.live_trading_credit_requirement
+
         try:
-            # This would connect to your actual credit service
-            # For now, returning structure that matches your system
-            from app.core.database import get_database
-            db = await get_database()
-            
-            # Real query to get user's credit balance
-            # Implementation depends on your actual credit model
+            normalized_identifiers: List[Any] = []
+
+            if isinstance(user_id, uuid.UUID):
+                normalized_identifiers = [user_id, str(user_id)]
+            elif isinstance(user_id, str):
+                try:
+                    parsed_uuid = uuid.UUID(user_id)
+                    normalized_identifiers = [parsed_uuid, user_id]
+                except ValueError:
+                    normalized_identifiers = [user_id]
+            else:
+                normalized_identifiers = [user_id]
+
+            credit_account = None
+            async with get_database() as db:
+                for identifier in normalized_identifiers:
+                    stmt = select(CreditAccount).where(CreditAccount.user_id == identifier)
+                    result = await db.execute(stmt)
+                    credit_account = result.scalar_one_or_none()
+                    if credit_account:
+                        break
+
+            available_credits = int(getattr(credit_account, "available_credits", 0) or 0)
+            total_credits = int(getattr(credit_account, "total_credits", 0) or 0)
+            credit_tier = getattr(credit_account, "tier", "standard") if credit_account else "standard"
+
             return {
-                "has_credits": True,  # This should be real check
-                "available_credits": 100,  # Real balance
-                "required_credits": 10,  # Real requirement
-                "credit_tier": "standard"
+                "has_credits": available_credits >= required_credits,
+                "available_credits": available_credits,
+                "total_credits": total_credits,
+                "required_credits": required_credits,
+                "credit_tier": credit_tier,
             }
         except Exception as e:
-            self.logger.error("Credit check failed", error=str(e))
+            self.logger.error("Credit check failed", error=str(e), user_id=user_id)
             return {
                 "has_credits": False,
                 "available_credits": 0,
-                "required_credits": 10,
+                "total_credits": 0,
+                "required_credits": required_credits,
                 "error": str(e)
             }
     
