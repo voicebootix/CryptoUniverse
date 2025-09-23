@@ -704,6 +704,16 @@ class UnifiedChatService(LoggerMixin):
                 # Get raw portfolio from exchanges
                 raw_portfolio = await get_user_portfolio_from_exchanges(user_id, db)
 
+                # Debug log the response
+                self.logger.info(
+                    "Portfolio fetch in chat",
+                    user_id=user_id,
+                    success=raw_portfolio.get("success"),
+                    total_value_usd=raw_portfolio.get("total_value_usd"),
+                    balance_count=len(raw_portfolio.get("balances", [])),
+                    message=raw_portfolio.get("message", "")
+                )
+
                 # Extract values (should now work with removed validation check)
                 total_value = float(raw_portfolio.get("total_value_usd", 0))
                 balances = raw_portfolio.get("balances", [])
