@@ -1519,30 +1519,9 @@ async def restart_background_services():
         logger.info("Background services restarted after configuration change")
     except Exception as e:
         logger.error("Background service restart failed", error=str(e))
-"""
-Extended Admin API with Strategy Approval functionality.
-This file adds the missing strategy approval endpoints.
-"""
 
-from datetime import datetime, timedelta
-from typing import Optional
-from uuid import UUID
 
-import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, field_validator
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-
-from app.core.database import get_database
-from app.api.v1.endpoints.auth import require_role
-from app.models.user import User, UserRole
-from app.models.system import AuditLog
-from app.services.rate_limit import rate_limiter
-
-logger = structlog.get_logger(__name__)
-
-router = APIRouter()
+# Strategy Approval functionality - integrated into main admin router
 
 
 # Strategy Approval Models
