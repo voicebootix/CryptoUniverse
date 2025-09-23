@@ -74,16 +74,16 @@ class BackgroundServiceManager(LoggerMixin):
             self.redis = await redis_manager.get_client()
             
             if self.redis:
-                self.logger.info("✅ Redis client initialized through enterprise manager")
+                self.logger.info("Redis client initialized through enterprise manager")
             else:
-                self.logger.warning("⚠️ Redis client unavailable - circuit breaker may be open")
+                self.logger.warning("Redis client unavailable - circuit breaker may be open")
         except Exception as e:
-            self.logger.warning("⚠️ Redis manager initialization failed - services will run without Redis", error=str(e))
+            self.logger.warning("Redis manager initialization failed - services will run without Redis", error=str(e))
             self.redis = None
     
     async def start_essential_services(self):
         """Start only essential services for quick startup."""
-        self.logger.info("🚀 Starting essential background services...")
+        self.logger.info(" Starting essential background services...")
         self.running = True
         self.start_time = datetime.utcnow()
         
@@ -91,7 +91,7 @@ class BackgroundServiceManager(LoggerMixin):
         try:
             await self.async_init()
         except Exception as e:
-            self.logger.warning("⚠️ Redis initialization failed - services will run in degraded mode", error=str(e))
+            self.logger.warning("Redis initialization failed - services will run in degraded mode", error=str(e))
             self.redis = None
         
         # Start only critical services
@@ -104,7 +104,7 @@ class BackgroundServiceManager(LoggerMixin):
             try:
                 self.tasks[service_name] = asyncio.create_task(self._safe_service_wrapper(service_name, service_func))
                 self.services[service_name] = "starting"
-                self.logger.info(f"🚀 {service_name} service started")
+                self.logger.info(f" {service_name} service started")
             except Exception as e:
                 self.logger.error(f"❌ Failed to start {service_name} service", error=str(e))
                 self.services[service_name] = "failed"
@@ -112,7 +112,7 @@ class BackgroundServiceManager(LoggerMixin):
     async def start_deferred_services(self, delay: int = 30):
         """Start heavy services after a delay to reduce initial memory load."""
         await asyncio.sleep(delay)
-        self.logger.info("🚀 Starting deferred background services...")
+        self.logger.info(" Starting deferred background services...")
         
         # Start resource-intensive services
         deferred_services = [
@@ -129,7 +129,7 @@ class BackgroundServiceManager(LoggerMixin):
                 try:
                     self.tasks[service_name] = asyncio.create_task(self._safe_service_wrapper(service_name, service_func))
                     self.services[service_name] = "starting"
-                    self.logger.info(f"🚀 {service_name} service started (deferred)")
+                    self.logger.info(f" {service_name} service started (deferred)")
                     
                     # Add small delay between starting heavy services
                     await asyncio.sleep(2)
@@ -139,7 +139,7 @@ class BackgroundServiceManager(LoggerMixin):
     
     async def start_all(self):
         """Start all background services with real functionality - NON-BLOCKING."""
-        self.logger.info("🚀 Starting enterprise background services...")
+        self.logger.info(" Starting enterprise background services...")
         self.running = True
         self.start_time = datetime.utcnow()
         
@@ -147,7 +147,7 @@ class BackgroundServiceManager(LoggerMixin):
         try:
             await self.async_init()
         except Exception as e:
-            self.logger.warning("⚠️ Redis initialization failed - services will run in degraded mode", error=str(e))
+            self.logger.warning("Redis initialization failed - services will run in degraded mode", error=str(e))
             self.redis = None
         
         # Start individual services with error isolation
@@ -166,14 +166,14 @@ class BackgroundServiceManager(LoggerMixin):
             try:
                 self.tasks[service_name] = asyncio.create_task(self._safe_service_wrapper(service_name, service_func))
                 self.services[service_name] = "starting"
-                self.logger.info(f"🚀 {service_name} service started")
+                self.logger.info(f" {service_name} service started")
             except Exception as e:
                 self.logger.error(f"❌ Failed to start {service_name} service", error=str(e))
                 self.services[service_name] = "failed"
         
         # Don't wait for services to initialize - let them start in background
         # This ensures startup doesn't hang on service failures
-        self.logger.info("✅ All background services initiated (starting in background)")
+        self.logger.info("All background services initiated (starting in background)")
     
     async def _safe_service_wrapper(self, service_name: str, service_func):
         """Wrap service functions with error handling and recovery."""
@@ -183,7 +183,7 @@ class BackgroundServiceManager(LoggerMixin):
         for attempt in range(max_retries):
             try:
                 self.services[service_name] = "running"
-                self.logger.info(f"✅ {service_name} service started successfully")
+                self.logger.info(f" {service_name} service started successfully")
                 
                 # Run the service function
                 await service_func()
@@ -208,7 +208,7 @@ class BackgroundServiceManager(LoggerMixin):
                     
         # If we get here, service ended normally
         self.services[service_name] = "stopped"
-        self.logger.warning(f"⚠️ {service_name} service stopped unexpectedly")
+        self.logger.warning(f" {service_name} service stopped unexpectedly")
     
     async def stop_all(self):
         """Stop all background services gracefully."""
@@ -222,11 +222,11 @@ class BackgroundServiceManager(LoggerMixin):
                 try:
                     await task
                 except asyncio.CancelledError:
-                    self.logger.info(f"✅ {service_name} stopped")
+                    self.logger.info(f" {service_name} stopped")
         
         self.tasks = {}
         self.services = {}
-        self.logger.info("✅ All background services stopped")
+        self.logger.info("All background services stopped")
     
     async def health_check(self) -> Dict[str, str]:
         """Get real health status of all services."""
@@ -341,7 +341,7 @@ class BackgroundServiceManager(LoggerMixin):
     # Background Service Implementations
     async def _health_monitor_service(self):
         """Monitor system health and alert on issues."""
-        self.logger.info("🏥 Health monitor service started")
+        self.logger.info("Health monitor service started")
         
         while self.running:
             try:
@@ -372,7 +372,7 @@ class BackgroundServiceManager(LoggerMixin):
                 
                 # Log alerts
                 if alerts:
-                    self.logger.warning("⚠️ System health alerts", alerts=alerts)
+                    self.logger.warning("System health alerts", alerts=alerts)
                 
                 # Store health status
                 health_data = {
@@ -397,7 +397,7 @@ class BackgroundServiceManager(LoggerMixin):
     
     async def _metrics_collector_service(self):
         """Collect and store system metrics."""
-        self.logger.info("📊 Metrics collector service started")
+        self.logger.info(" Metrics collector service started")
         
         while self.running:
             try:
@@ -427,7 +427,7 @@ class BackgroundServiceManager(LoggerMixin):
     
     async def _cleanup_service(self):
         """Clean up old data and optimize storage."""
-        self.logger.info("🧹 Cleanup service started")
+        self.logger.info("Cleanup service started")
         
         while self.running:
             try:
@@ -439,7 +439,7 @@ class BackgroundServiceManager(LoggerMixin):
                 # Clean old session data
                 await self._cleanup_expired_sessions()
                 
-                self.logger.info("✅ Cleanup cycle completed")
+                self.logger.info("Cleanup cycle completed")
                 
             except Exception as e:
                 self.logger.error("Cleanup service error", error=str(e))
@@ -448,7 +448,7 @@ class BackgroundServiceManager(LoggerMixin):
     
     async def _autonomous_cycles_service(self):
         """Manage autonomous trading cycles for all users."""
-        self.logger.info("🤖 Autonomous cycles service started")
+        self.logger.info(" Autonomous cycles service started")
         
         while self.running:
             try:
@@ -901,7 +901,7 @@ class BackgroundServiceManager(LoggerMixin):
     
     async def _balance_sync_service(self):
         """Sync exchange balances for all users."""
-        self.logger.info("💰 Balance sync service started")
+        self.logger.info(" Balance sync service started")
         
         while self.running:
             try:
@@ -989,7 +989,7 @@ class BackgroundServiceManager(LoggerMixin):
     
     async def _risk_monitor_service(self):
         """Monitor risk levels and trigger alerts."""
-        self.logger.info("⚠️ Risk monitor service started")
+        self.logger.info("Risk monitor service started")
         
         while self.running:
             try:
@@ -1006,7 +1006,7 @@ class BackgroundServiceManager(LoggerMixin):
     
     async def _rate_limit_cleanup_service(self):
         """Clean up rate limiting data."""
-        self.logger.info("🚦 Rate limit cleanup service started")
+        self.logger.info("Rate limit cleanup service started")
         
         while self.running:
             try:
@@ -1062,7 +1062,7 @@ class BackgroundServiceManager(LoggerMixin):
     async def _automated_disk_cleanup(self):
         """Automated disk cleanup for enterprise production environment - application-owned files only."""
         try:
-            self.logger.info("🧹 Starting automated disk cleanup")
+            self.logger.info("Starting automated disk cleanup")
             cleanup_actions = []
             
             # 1. Clean up old application log files (older than 7 days)
@@ -1208,9 +1208,9 @@ class BackgroundServiceManager(LoggerMixin):
                     self.logger.error(f"Failed to clean data directory {data_dir}", error=str(e), exc_info=True)
             
             if cleanup_actions:
-                self.logger.info(f"🧹 Disk cleanup completed: {len(cleanup_actions)} actions taken", actions=cleanup_actions[:5])  # Log first 5
+                self.logger.info(f"Disk cleanup completed: {len(cleanup_actions)} actions taken", actions=cleanup_actions[:5])  # Log first 5
             else:
-                self.logger.info("🧹 Disk cleanup completed: No cleanup needed")
+                self.logger.info("Disk cleanup completed: No cleanup needed")
             
         except Exception as e:
             self.logger.error("Automated disk cleanup failed", error=str(e))

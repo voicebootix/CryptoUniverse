@@ -59,7 +59,7 @@ async def start_monitoring_delayed(delay: int):
     try:
         from app.services.system_monitoring import system_monitoring_service
         await system_monitoring_service.start_monitoring()
-        logger.info("✅ System monitoring started (delayed)")
+        logger.info(" System monitoring started (delayed)")
     except Exception as e:
         logger.warning("System monitoring failed to start", error=str(e))
 
@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     # Startup
     logger.info(
-        "🚀 CryptoUniverse Enterprise starting up...",
+        "CryptoUniverse Enterprise starting up...",
         version="2.0.0",
         environment=settings.ENVIRONMENT,
         worker_id=worker_id,
@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         # Connect to database
         await db_manager.connect()
-        logger.info("✅ Database connected")
+        logger.info("Database connected")
         
         # Ensure tables exist (in case startup.py failed during build)
         try:
@@ -105,9 +105,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
             if not tables_exist:
                 async with engine.connect() as conn:
-                    logger.warning("⚠️ No database tables found - creating now...")
+                    logger.warning(" No database tables found - creating now...")
                     await conn.run_sync(Base.metadata.create_all)
-                    logger.info("✅ Database tables created")
+                    logger.info(" Database tables created")
 
                     # Also create admin user
                     from app.models.user import User, UserRole, UserStatus
@@ -137,18 +137,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                             )
                             session.add(admin_user)
                             await session.commit()
-                            logger.info("✅ Admin user created")
+                            logger.info(" Admin user created")
         except Exception as e:
-            logger.warning(f"⚠️ Table check/creation failed: {e}")
+            logger.warning(f" Table check/creation failed: {e}")
             # Continue anyway - tables might already exist
 
         # Connect to Redis
         try:
             redis = await get_redis_client()
             await redis.ping()
-            logger.info("✅ Redis connected")
+            logger.info("Redis connected")
         except Exception as e:
-            logger.warning("⚠️ Redis connection failed - running in degraded mode", error=str(e))
+            logger.warning("Redis connection failed - running in degraded mode", error=str(e))
 
         # Only start background services on the primary worker to avoid conflicts
         if is_primary_worker:
@@ -156,13 +156,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             try:
                 # Start only essential services initially
                 await background_manager.start_essential_services()
-                logger.info("✅ Essential background services started")
+                logger.info(" Essential background services started")
                 
                 # Schedule heavy services to start after 30 seconds
                 asyncio.create_task(background_manager.start_deferred_services(delay=30))
-                logger.info("📅 Heavy services scheduled for deferred startup")
+                logger.info(" Heavy services scheduled for deferred startup")
             except Exception as e:
-                logger.warning("⚠️ Background services failed to start - running without them", error=str(e)) 
+                logger.warning(" Background services failed to start - running without them", error=str(e)) 
 
             # Start lightweight system monitoring with delayed initialization
             try:
@@ -173,7 +173,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 
                 # Schedule monitoring to start after services are stable
                 asyncio.create_task(start_monitoring_delayed(45))  # Start after 45 seconds
-                logger.info("📊 System monitoring scheduled for delayed startup")
+                logger.info(" System monitoring scheduled for delayed startup")
             except Exception as e:
                 logger.warning("System monitoring scheduling failed", error=str(e))
         else:
@@ -181,7 +181,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
         logger.info(
-            "🎉 CryptoUniverse Enterprise is ready!",
+            " CryptoUniverse Enterprise is ready!",
             api_docs=f"{settings.BASE_URL}/api/docs" if settings.ENVIRONMENT == "development" else "Contact admin",
         )
 
@@ -206,11 +206,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         system_monitoring_service.stop_monitoring(),
                         timeout=5.0
                     )
-                    logger.info("📊 System monitoring stopped")
+                    logger.info(" System monitoring stopped")
             except asyncio.TimeoutError:
-                logger.warning("⚠️ System monitoring shutdown timed out")
+                logger.warning(" System monitoring shutdown timed out")
             except Exception as e:
-                logger.warning("⚠️ System monitoring shutdown failed", error=str(e))
+                logger.warning(" System monitoring shutdown failed", error=str(e))
 
             # Stop background services gracefully with timeout
             try:
@@ -218,14 +218,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     background_manager.stop_all(),
                     timeout=10.0  # 10 second timeout for all services
                 )
-                logger.info("✅ Background services stopped")
+                logger.info(" Background services stopped")
             except asyncio.TimeoutError:
-                logger.warning("⚠️ Background services shutdown timed out after 10s")
+                logger.warning(" Background services shutdown timed out after 10s")
             except Exception as e:
-                logger.warning("⚠️ Background services cleanup failed", error=str(e))
+                logger.warning(" Background services cleanup failed", error=str(e))
 
         # AI Manager was not started during temporary fixes
-        logger.info("🧠 AI Manager was not started - no shutdown needed")
+        logger.info(" AI Manager was not started - no shutdown needed")
 
         # Disconnect from database with timeout
         try:
@@ -233,11 +233,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 db_manager.disconnect(),
                 timeout=5.0
             )
-            logger.info("✅ Database disconnected")
+            logger.info(" Database disconnected")
         except asyncio.TimeoutError:
-            logger.warning("⚠️ Database disconnect timed out")
+            logger.warning(" Database disconnect timed out")
         except Exception as e:
-            logger.warning("⚠️ Database disconnect failed", error=str(e))
+            logger.warning(" Database disconnect failed", error=str(e))
 
         # Close Redis connection with timeout
         try:
@@ -245,11 +245,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 close_redis_client(),
                 timeout=3.0
             )
-            logger.info("✅ Redis disconnected")
+            logger.info(" Redis disconnected")
         except asyncio.TimeoutError:
-            logger.warning("⚠️ Redis disconnect timed out")
+            logger.warning(" Redis disconnect timed out")
         except Exception as e:
-            logger.warning("⚠️ Redis disconnect failed", error=str(e))
+            logger.warning(" Redis disconnect failed", error=str(e))
 
     except Exception as e:
         logger.error("❌ Critical error during shutdown", error=str(e))
@@ -281,8 +281,10 @@ def create_application() -> FastAPI:
     if settings.ENVIRONMENT == "development":
         dev_origins = [
             "http://localhost:3000",
-            "http://localhost:8000", 
+            "http://localhost:3001",  # Add port 3001 for Vite dev server
+            "http://localhost:8000",
             "http://127.0.0.1:3000",
+            "http://127.0.0.1:3001",  # Add port 3001 for Vite dev server
             "http://127.0.0.1:8000"
         ]
         cors_origins.extend(dev_origins)
@@ -303,6 +305,7 @@ def create_application() -> FastAPI:
         "https://cryptouniverse-frontend.onrender.com",
         "https://cryptouniverse.onrender.com",
         "http://localhost:3000",
+        "http://localhost:3001",  # Add port 3001 for Vite dev server
         "http://localhost:8000"
     ]
     
@@ -510,7 +513,7 @@ async def root():
     Welcome endpoint with API information and feature overview.
     """
     return {
-        "message": "🚀 Welcome to CryptoUniverse Enterprise",
+        "message": " Welcome to CryptoUniverse Enterprise",
         "version": "2.0.0",
         "description": "Multi-tenant AI-powered cryptocurrency trading platform",
         "features": {
@@ -703,7 +706,7 @@ async def global_websocket_endpoint(websocket: WebSocket, path: str):
 
 
 if __name__ == "__main__":
-    logger.info("🚀 Starting CryptoUniverse Enterprise in development mode...")
+    logger.info("Starting CryptoUniverse Enterprise in development mode...")
 
     uvicorn.run(
         "main:app",

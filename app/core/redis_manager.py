@@ -116,7 +116,7 @@ class EnterpriseRedisManager(LoggerMixin):
             bool: True if initialization successful, False otherwise
         """
         try:
-            self.logger.info("🔧 Initializing Enterprise Redis Manager...")
+            self.logger.info("Initializing Enterprise Redis Manager...")
             
             # Configure connection pool
             await self._setup_connection_pool()
@@ -130,13 +130,13 @@ class EnterpriseRedisManager(LoggerMixin):
             # Perform initial health check
             await self._perform_health_check()
             
-            self.logger.info("✅ Enterprise Redis Manager initialized successfully", 
+            self.logger.info("Enterprise Redis Manager initialized successfully", 
                            health_status=self._health_status.value,
                            circuit_state=self._circuit_state.value)
             return True
             
         except Exception as e:
-            self.logger.error("❌ Failed to initialize Redis Manager", error=str(e))
+            self.logger.error("Failed to initialize Redis Manager", error=str(e))
             self._health_status = RedisHealthStatus.UNHEALTHY
             return False
     
@@ -167,11 +167,11 @@ class EnterpriseRedisManager(LoggerMixin):
             )
             
             self._metrics['connection_pool_size'] = pool_config['max_connections']
-            self.logger.info("🔗 Redis connection pool configured", 
+            self.logger.info("Redis connection pool configured", 
                            max_connections=pool_config['max_connections'])
             
         except Exception as e:
-            self.logger.error("❌ Failed to setup connection pool", error=str(e))
+            self.logger.error("Failed to setup connection pool", error=str(e))
             raise
     
     async def _establish_connection(self):
@@ -197,7 +197,7 @@ class EnterpriseRedisManager(LoggerMixin):
             # Connection successful - update circuit breaker
             await self._handle_success()
             
-            self.logger.info("✅ Redis connection established successfully")
+            self.logger.info("Redis connection established successfully")
             
         except Exception as e:
             # Connection failed - update circuit breaker
@@ -215,7 +215,7 @@ class EnterpriseRedisManager(LoggerMixin):
             if self._success_count >= self._half_open_max_calls:
                 self._circuit_state = CircuitBreakerState.CLOSED
                 self._failure_count = 0
-                self.logger.info("✅ Circuit breaker CLOSED - Redis recovered")
+                self.logger.info("Circuit breaker CLOSED - Redis recovered")
         
         elif self._circuit_state == CircuitBreakerState.CLOSED:
             # Reset failure count on success
@@ -236,7 +236,7 @@ class EnterpriseRedisManager(LoggerMixin):
                 self._metrics['circuit_trips'] += 1
                 self._health_status = RedisHealthStatus.UNHEALTHY
                 
-                self.logger.error("⚠️ Circuit breaker OPENED - Redis marked unhealthy", 
+                self.logger.error("Circuit breaker OPENED - Redis marked unhealthy", 
                                failure_count=self._failure_count,
                                error=str(error))
     
@@ -289,7 +289,7 @@ class EnterpriseRedisManager(LoggerMixin):
         client = await self.get_client()
         
         if not client:
-            self.logger.warning(f"⚠️ Redis unavailable for {operation_name} - using fallback")
+            self.logger.warning(f"Redis unavailable for {operation_name} - using fallback")
             return fallback_value
         
         try:
@@ -299,7 +299,7 @@ class EnterpriseRedisManager(LoggerMixin):
             
         except Exception as e:
             await self._handle_failure(e)
-            self.logger.warning(f"⚠️ Redis operation failed for {operation_name}", 
+            self.logger.warning(f"Redis operation failed for {operation_name}", 
                               error=str(e))
             return fallback_value
     
@@ -320,7 +320,7 @@ class EnterpriseRedisManager(LoggerMixin):
                 self.logger.info("🛑 Health monitoring stopped")
                 break
             except Exception as e:
-                self.logger.error("❌ Health monitoring error", error=str(e))
+                self.logger.error("Health monitoring error", error=str(e))
                 await asyncio.sleep(self._health_check_interval)
     
     async def _perform_health_check(self):
@@ -373,7 +373,7 @@ class EnterpriseRedisManager(LoggerMixin):
             
         except Exception as e:
             self._health_status = RedisHealthStatus.UNHEALTHY
-            self.logger.warning("⚠️ Redis health check failed", error=str(e))
+            self.logger.warning("Redis health check failed", error=str(e))
     
     async def get_health_status(self) -> Dict[str, Any]:
         """Get comprehensive health status and metrics."""
@@ -410,7 +410,7 @@ class EnterpriseRedisManager(LoggerMixin):
         if self._pool:
             await self._pool.disconnect()
         
-        self.logger.info("✅ Enterprise Redis Manager shutdown complete")
+        self.logger.info("Enterprise Redis Manager shutdown complete")
 
 
 # Global instance
@@ -439,5 +439,5 @@ async def get_redis_client() -> Optional[Redis]:
         manager = await get_redis_manager()
         return await manager.get_client()
     except Exception as e:
-        logger.error("❌ Failed to get Redis client", error=str(e))
+        logger.error("Failed to get Redis client", error=str(e))
         return None
