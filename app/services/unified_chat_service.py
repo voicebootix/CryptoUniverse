@@ -573,64 +573,35 @@ class UnifiedChatService(LoggerMixin):
     
     async def _check_user_credits(self, user_id: str) -> Dict[str, Any]:
         """
-        FINAL FIX: Use exact same database lookup as credit API without creating new accounts.
+        Check user's credit balance for live trading requirements.
+        Uses the same credit lookup logic as the API endpoint.
         """
         try:
             from app.core.database import get_database
             from app.models.credit import CreditAccount
             from sqlalchemy import select
+            import uuid
 
-            # The problem is we need to use EXACTLY the same user_id format as the API
-            # Let's try both formats to find the existing account
             async with get_database() as db:
-                self.logger.info("Searching for existing credit account", user_id=user_id)
+                # Try multiple lookup methods to find existing account
+                credit_account = None
 
-                # First try: search by string user_id (as passed in)
+                # First try: search by string user_id
                 stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
                 result = await db.execute(stmt)
                 credit_account = result.scalar_one_or_none()
 
-                if credit_account:
-                    self.logger.info("Found account with string lookup",
-                                   available_credits=credit_account.available_credits)
-                else:
-                    # Second try: convert to UUID and search
-                    import uuid
+                # Second try: convert to UUID if string didn't work
+                if not credit_account and isinstance(user_id, str) and len(user_id) == 36:
                     try:
-                        user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+                        user_uuid = uuid.UUID(user_id)
                         stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
                         result = await db.execute(stmt)
                         credit_account = result.scalar_one_or_none()
-
-                        if credit_account:
-                            self.logger.info("Found account with UUID lookup",
-                                           available_credits=credit_account.available_credits)
-                    except (ValueError, TypeError):
+                    except ValueError:
                         pass
 
                 if not credit_account:
-                    # Third try: Raw SQL to find ANY account for this user
-                    from sqlalchemy import text
-                    raw_result = await db.execute(
-                        text("SELECT * FROM credit_accounts WHERE user_id::text = :user_id OR user_id = :user_uuid"),
-                        {"user_id": str(user_id), "user_uuid": user_id}
-                    )
-                    raw_account = raw_result.fetchone()
-
-                    if raw_account:
-                        self.logger.info("Found account with raw SQL",
-                                       available_credits=raw_account.available_credits)
-                        # Convert to CreditAccount object
-                        credit_account = CreditAccount(
-                            id=raw_account.id,
-                            user_id=raw_account.user_id,
-                            available_credits=raw_account.available_credits,
-                            total_credits=raw_account.total_credits
-                        )
-
-                # If still no account found, DO NOT CREATE - return not found
-                if not credit_account:
-                    self.logger.warning("No credit account found for user", user_id=user_id)
                     return {
                         "has_credits": False,
                         "available_credits": 0,
@@ -643,16 +614,12 @@ class UnifiedChatService(LoggerMixin):
                 available_credits = max(0, credit_account.available_credits or 0)
                 required_credits = self.live_trading_credit_requirement
 
-                self.logger.info("Using existing credit account",
-                               user_id=user_id,
-                               available_credits=available_credits,
-                               total_credits=getattr(credit_account, 'total_credits', 0))
-
                 return {
                     "has_credits": available_credits >= required_credits,
                     "available_credits": available_credits,
                     "required_credits": required_credits,
-                    "credit_tier": "standard",
+                    "total_credits": credit_account.total_credits,
+                    "credit_tier": "premium" if available_credits > 100 else "standard",
                     "account_status": "active"
                 }
 
@@ -724,6 +691,67 @@ class UnifiedChatService(LoggerMixin):
                 "message": f"Unable to verify trading limits: {str(e)}"
             }
     
+    async def _transform_portfolio_for_chat(self, user_id: str) -> Dict[str, Any]:
+        """
+        Transform raw exchange portfolio data to chat-friendly format.
+        This replaces the chat adapter's transformation logic.
+        """
+        try:
+            from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
+            from app.core.database import get_database
+
+            async with get_database() as db:
+                # Get raw portfolio from exchanges
+                raw_portfolio = await get_user_portfolio_from_exchanges(user_id, db)
+
+                if not raw_portfolio.get("success"):
+                    return {
+                        "total_value": 0,
+                        "daily_pnl": 0,
+                        "daily_pnl_pct": 0,
+                        "positions": [],
+                        "error": raw_portfolio.get("error", "Portfolio unavailable")
+                    }
+
+                # Transform to chat format
+                total_value = raw_portfolio.get("total_value_usd", 0)
+                balances = raw_portfolio.get("balances", [])
+
+                # Calculate daily P&L (from 24h unrealized PnL if available)
+                daily_pnl = sum(b.get("unrealized_pnl_24h", 0) for b in balances)
+                daily_pnl_pct = (daily_pnl / total_value * 100) if total_value > 0 else 0
+
+                # Format positions for chat prompt
+                positions = []
+                for balance in balances:
+                    if balance.get("total", 0) > 0:
+                        positions.append({
+                            "symbol": balance.get("asset"),
+                            "value_usd": balance.get("value_usd", 0),
+                            "quantity": balance.get("total", 0),
+                            "exchange": balance.get("exchange", "unknown")
+                        })
+
+                # Sort positions by value
+                positions.sort(key=lambda x: x.get("value_usd", 0), reverse=True)
+
+                return {
+                    "total_value": total_value,
+                    "daily_pnl": daily_pnl,
+                    "daily_pnl_pct": daily_pnl_pct,
+                    "positions": positions
+                }
+
+        except Exception as e:
+            self.logger.error(f"Portfolio transformation failed: {e}")
+            return {
+                "total_value": 0,
+                "daily_pnl": 0,
+                "daily_pnl_pct": 0,
+                "positions": [],
+                "error": str(e)
+            }
+
     async def _gather_context_data(
         self,
         intent_analysis: Dict[str, Any],
@@ -736,18 +764,20 @@ class UnifiedChatService(LoggerMixin):
         """
         intent = intent_analysis["intent"]
         context_data = {}
-        
+
         # Always get basic portfolio data with error handling
         try:
-            # Portfolio data will be implemented when needed - using placeholder
-            context_data["portfolio"] = {"total_value": 0, "positions": [], "error": "Portfolio service integration pending"}
+            # For general queries, use placeholder to avoid expensive calls
+            context_data["portfolio"] = {"total_value": 0, "positions": [], "note": "Use PORTFOLIO_ANALYSIS intent for real data"}
         except Exception as e:
             self.logger.error("Failed to get portfolio summary", error=str(e), user_id=user_id)
             context_data["portfolio"] = {"error": "Portfolio data unavailable"}
-        
+
         # Intent-specific data gathering
         if intent == ChatIntent.PORTFOLIO_ANALYSIS:
-            # Get comprehensive portfolio analysis
+            # Get REAL portfolio data from exchanges
+            context_data["portfolio"] = await self._transform_portfolio_for_chat(user_id)
+
             # Risk analysis integration pending
             context_data["risk_analysis"] = {"overall_risk": "Medium", "error": "Risk analysis integration pending"}
             context_data["performance"] = await self._get_performance_metrics(user_id)
