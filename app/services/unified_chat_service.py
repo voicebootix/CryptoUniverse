@@ -697,54 +697,83 @@ class UnifiedChatService(LoggerMixin):
         This replaces the chat adapter's transformation logic.
         """
         try:
+            # Use EXACT same code path as working trading API endpoint
+            import asyncio
             from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
             from app.core.database import get_database
+            from app.services.risk_management import risk_service
 
             async with get_database() as db:
-                # Get raw portfolio from exchanges
-                raw_portfolio = await get_user_portfolio_from_exchanges(user_id, db)
-
-                # Debug log the response
-                self.logger.info(
-                    "Portfolio fetch in chat",
-                    user_id=user_id,
-                    success=raw_portfolio.get("success"),
-                    total_value_usd=raw_portfolio.get("total_value_usd"),
-                    balance_count=len(raw_portfolio.get("balances", [])),
-                    message=raw_portfolio.get("message", "")
+                # EXACT same call as trading endpoint line 486
+                portfolio_data = await asyncio.wait_for(
+                    get_user_portfolio_from_exchanges(str(user_id), db),  # Ensure string
+                    timeout=10.0
                 )
 
-                # Extract values (should now work with removed validation check)
-                total_value = float(raw_portfolio.get("total_value_usd", 0))
-                balances = raw_portfolio.get("balances", [])
+                # Debug log
+                self.logger.info(
+                    "Chat portfolio fetch result",
+                    user_id=user_id,
+                    success=portfolio_data.get("success"),
+                    total_value_usd=portfolio_data.get("total_value_usd"),
+                    balance_count=len(portfolio_data.get("balances", [])),
+                    position_count=len(portfolio_data.get("positions", []))
+                )
 
-                # Calculate daily P&L
-                daily_pnl = sum(b.get("unrealized_pnl_24h", 0) for b in balances if b.get("unrealized_pnl_24h"))
-                daily_pnl_pct = (daily_pnl / total_value * 100) if total_value > 0 else 0
+                # Transform EXACTLY like trading endpoint (lines 514-544)
+                positions = portfolio_data.get("positions", [])
+                total_value_usd = portfolio_data.get("total_value", portfolio_data.get("total_value_usd", 0.0))
 
-                # Format positions for chat
-                positions = []
-                for balance in balances:
-                    if balance.get("value_usd", 0) > 0:
-                        positions.append({
-                            "symbol": balance.get("asset"),
-                            "value_usd": balance.get("value_usd", 0),
-                            "quantity": balance.get("balance", 0),
-                            "exchange": balance.get("exchange", "unknown")
+                # If positions aren't directly available, transform from balances (real data format)
+                if not positions and portfolio_data.get("balances"):
+                    positions = []
+                    for balance in portfolio_data.get("balances", []):
+                        if balance.get("total", 0) > 0:
+                            positions.append({
+                                "symbol": balance["asset"],
+                                "name": balance["asset"],
+                                "amount": balance["total"],
+                                "value_usd": balance["value_usd"],
+                                "entry_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
+                                "current_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
+                                "change_24h_pct": 0.0,
+                                "unrealized_pnl": 0.0,
+                                "side": "long",
+                                "exchange": balance.get("exchange", "unknown")
+                            })
+
+                # Format for chat
+                chat_positions = []
+                for pos in positions:
+                    if pos.get("value_usd", 0) > 0:
+                        chat_positions.append({
+                            "symbol": pos.get("symbol"),
+                            "value_usd": pos.get("value_usd", 0),
+                            "quantity": pos.get("amount", 0),
+                            "exchange": pos.get("exchange", "unknown")
                         })
 
                 # Sort positions by value
-                positions.sort(key=lambda x: x.get("value_usd", 0), reverse=True)
+                chat_positions.sort(key=lambda x: x.get("value_usd", 0), reverse=True)
 
-            return {
-                "total_value": total_value,
-                "daily_pnl": daily_pnl,
-                    "daily_pnl_pct": daily_pnl_pct,
-                    "positions": positions
+                return {
+                    "total_value": float(total_value_usd),
+                    "daily_pnl": float(portfolio_data.get("daily_pnl", 0)),
+                    "daily_pnl_pct": float(portfolio_data.get("daily_pnl_pct", 0)),
+                    "positions": chat_positions
                 }
 
+        except asyncio.TimeoutError:
+            self.logger.error("Portfolio fetch timeout in chat")
+            return {
+                "total_value": 0,
+                "daily_pnl": 0,
+                "daily_pnl_pct": 0,
+                "positions": [],
+                "error": "Portfolio service timeout"
+            }
         except Exception as e:
-            self.logger.error(f"Portfolio transformation failed: {e}")
+            self.logger.error(f"Portfolio transformation failed: {e}", exc_info=True)
             return {
                 "total_value": 0,
                 "daily_pnl": 0,
