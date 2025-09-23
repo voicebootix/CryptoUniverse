@@ -1,0 +1,54 @@
+{
+  "test_summary": {
+    "total_tests": 5,
+    "passed": 1,
+    "failed": 4,
+    "success_rate": 20.0,
+    "timestamp": "20250921_214841",
+    "admin_user": "admin@cryptouniverse.com",
+    "base_url": "https://cryptouniverse.onrender.com/api/v1",
+    "session_id": null
+  },
+  "detailed_results": [
+    {
+      "name": "Chat Capabilities",
+      "method": "GET",
+      "path": "/chat/capabilities",
+      "status_code": 200,
+      "success": true,
+      "description": "Get chat system capabilities"
+    },
+    {
+      "name": "Chat Sessions",
+      "method": "GET",
+      "path": "/chat/sessions",
+      "error": "'str' object has no attribute 'get'",
+      "success": false,
+      "description": "Get user chat sessions"
+    },
+    {
+      "name": "Send Chat Message",
+      "method": "POST",
+      "path": "/chat/message",
+      "status_code": 422,
+      "success": false,
+      "description": "Send a message to the unified chat system"
+    },
+    {
+      "name": "Conversational Chat Message",
+      "method": "POST",
+      "path": "/conversational-chat/message",
+      "status_code": 422,
+      "success": false,
+      "description": "Send message via conversational chat endpoint"
+    },
+    {
+      "name": "AI Conversational Chat",
+      "method": "POST",
+      "path": "/ai-chat/conversational",
+      "status_code": 405,
+      "success": false,
+      "description": "Test AI conversational endpoint"
+    }
+  ]
+}

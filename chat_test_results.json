@@ -1,0 +1,44 @@
+[
+  {
+    "name": "Get Chat History",
+    "method": "GET",
+    "path": "/chat",
+    "status_code": 405,
+    "success": false
+  },
+  {
+    "name": "Get Conversations",
+    "method": "GET",
+    "path": "/chat/conversations",
+    "status_code": 405,
+    "success": false
+  },
+  {
+    "name": "Chat Status",
+    "method": "GET",
+    "path": "/chat/status",
+    "status_code": 200,
+    "success": true
+  },
+  {
+    "name": "Send Chat Message",
+    "method": "POST",
+    "path": "/chat/message",
+    "status_code": 200,
+    "success": true
+  },
+  {
+    "name": "AI Chat Status",
+    "method": "GET",
+    "path": "/ai-chat",
+    "status_code": 405,
+    "success": false
+  },
+  {
+    "name": "AI Chat Message",
+    "method": "POST",
+    "path": "/ai-chat/message",
+    "status_code": 405,
+    "success": false
+  }
+]

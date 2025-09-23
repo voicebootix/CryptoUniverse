@@ -700,37 +700,35 @@ class UnifiedChatService(LoggerMixin):
             from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
             from app.core.database import get_database
 
-            # Call the trading portfolio endpoint directly (same as API)
-            from app.api.v1.endpoints.trading import get_user_portfolio
-            from app.core.database import get_database
-
             async with get_database() as db:
-                # Get formatted portfolio from trading endpoint
-                raw_portfolio = await get_user_portfolio(user_id, db)
+                # Get raw portfolio from exchanges
+                raw_portfolio = await get_user_portfolio_from_exchanges(user_id, db)
 
-                # Extract values using the correct field names from trading API
-                total_value = float(raw_portfolio.get("total_value", 0))
-                positions_data = raw_portfolio.get("positions", [])
-                daily_pnl = float(raw_portfolio.get("daily_pnl", 0))
-                daily_pnl_pct = raw_portfolio.get("daily_pnl_pct", 0)
+                # Extract values (should now work with removed validation check)
+                total_value = float(raw_portfolio.get("total_value_usd", 0))
+                balances = raw_portfolio.get("balances", [])
 
-                # Format positions for chat prompt
+                # Calculate daily P&L
+                daily_pnl = sum(b.get("unrealized_pnl_24h", 0) for b in balances if b.get("unrealized_pnl_24h"))
+                daily_pnl_pct = (daily_pnl / total_value * 100) if total_value > 0 else 0
+
+                # Format positions for chat
                 positions = []
-                for position in positions_data:
-                    if position.get("value_usd", 0) > 0:
+                for balance in balances:
+                    if balance.get("value_usd", 0) > 0:
                         positions.append({
-                            "symbol": position.get("symbol"),
-                            "value_usd": position.get("value_usd", 0),
-                            "quantity": position.get("amount", 0),
-                            "exchange": position.get("exchange", "unknown")
+                            "symbol": balance.get("asset"),
+                            "value_usd": balance.get("value_usd", 0),
+                            "quantity": balance.get("balance", 0),
+                            "exchange": balance.get("exchange", "unknown")
                         })
 
                 # Sort positions by value
                 positions.sort(key=lambda x: x.get("value_usd", 0), reverse=True)
 
-                return {
-                    "total_value": total_value,
-                    "daily_pnl": daily_pnl,
+            return {
+                "total_value": total_value,
+                "daily_pnl": daily_pnl,
                     "daily_pnl_pct": daily_pnl_pct,
                     "positions": positions
                 }

@@ -1,0 +1,40 @@
+{
+  "test_summary": {
+    "total_tests": 4,
+    "passed": 3,
+    "failed": 1,
+    "success_rate": 75.0,
+    "responses_with_content": 0,
+    "session_id": "3d245c02-8391-4a93-9a27-1502206e552c",
+    "timestamp": "20250921_215042"
+  },
+  "detailed_results": [
+    {
+      "name": "General Chat",
+      "status_code": 200,
+      "success": true,
+      "has_response": false,
+      "response_length": 0
+    },
+    {
+      "name": "Portfolio Question",
+      "status_code": 200,
+      "success": true,
+      "has_response": false,
+      "response_length": 0
+    },
+    {
+      "name": "Market Analysis",
+      "status_code": 200,
+      "success": true,
+      "has_response": false,
+      "response_length": 0
+    },
+    {
+      "name": "Trading Strategy",
+      "status_code": 500,
+      "success": false,
+      "error": "{\"error\":\"Chat processing failed\",\"status_code\":500,\"path\":\"/api/v1/chat/message\",\"timestamp\":4598929.751}"
+    }
+  ]
+}

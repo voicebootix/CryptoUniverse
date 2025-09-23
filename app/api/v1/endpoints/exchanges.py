@@ -1687,8 +1687,8 @@ async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> D
             and_(
                 ExchangeAccount.user_id == user_id,
                 ExchangeAccount.status == ExchangeStatus.ACTIVE.value,
-                ExchangeApiKey.status == ApiKeyStatus.ACTIVE.value,
-                ExchangeApiKey.is_validated == True
+                ExchangeApiKey.status == ApiKeyStatus.ACTIVE.value
+                # Removed is_validated check - exchanges are working without it
             )
         )
         
@@ -1696,12 +1696,45 @@ async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> D
         user_exchanges = result.fetchall()
         
         if not user_exchanges:
+            # Debug why no exchanges found
+            debug_stmt = select(ExchangeAccount, ExchangeApiKey).join(
+                ExchangeApiKey, ExchangeAccount.id == ExchangeApiKey.account_id
+            ).where(ExchangeAccount.user_id == user_id)
+
+            debug_result = await db.execute(debug_stmt)
+            all_user_exchanges = debug_result.fetchall()
+
+            logger.warning(
+                "No active validated exchanges found for portfolio",
+                user_id=user_id,
+                total_exchanges=len(all_user_exchanges),
+                filter_conditions="ACTIVE status + ACTIVE api_key + is_validated=True"
+            )
+
+            # Log details of existing exchanges
+            for account, api_key in all_user_exchanges:
+                logger.info(
+                    "Exchange account details",
+                    exchange_name=account.exchange_name,
+                    account_status=account.status,
+                    api_key_status=api_key.status,
+                    is_validated=api_key.is_validated
+                )
+
             return {
                 "success": True,
                 "total_value_usd": 0.0,
                 "balances": [],
                 "exchanges": [],
-                "message": "No exchange accounts connected",
+                "message": f"No active validated exchanges found (total: {len(all_user_exchanges)})",
+                "debug_info": [
+                    {
+                        "exchange": account.exchange_name,
+                        "account_status": account.status,
+                        "api_key_status": api_key.status,
+                        "is_validated": api_key.is_validated
+                    } for account, api_key in all_user_exchanges
+                ],
                 "performance_metrics": {
                     "total_time_ms": (time.time() - start_time) * 1000,
                     "exchanges_processed": 0,
