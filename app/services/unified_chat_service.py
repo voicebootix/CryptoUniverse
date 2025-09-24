@@ -829,18 +829,18 @@ class UnifiedChatService(LoggerMixin):
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
             # Get real opportunities with error handling
             try:
-            context_data["opportunities"] = await self.opportunity_discovery.discover_opportunities_for_user(
-            user_id=user_id,
-            force_refresh=False,
-            include_strategy_recommendations=True
-            )
+                context_data["opportunities"] = await self.opportunity_discovery.discover_opportunities_for_user(
+                    user_id=user_id,
+                    force_refresh=False,
+                    include_strategy_recommendations=True
+                )
             except Exception as e:
-            self.logger.error("Failed to discover opportunities", error=str(e), user_id=user_id)
-            context_data["opportunities"] = {
-            "success": False,
-            "error": "Opportunity discovery temporarily unavailable",
-            "opportunities": []
-            }
+                self.logger.error("Failed to discover opportunities", error=str(e), user_id=user_id)
+                context_data["opportunities"] = {
+                    "success": False,
+                    "error": "Opportunity discovery temporarily unavailable",
+                    "opportunities": []
+                }
             
         elif intent == ChatIntent.RISK_ASSESSMENT:
             # Get comprehensive risk metrics
@@ -851,71 +851,71 @@ class UnifiedChatService(LoggerMixin):
         elif intent == ChatIntent.STRATEGY_RECOMMENDATION:
             # Get strategy recommendations with error handling
             try:
-            context_data["active_strategy"] = await self.trading_strategies.get_active_strategy(user_id)
+                context_data["active_strategy"] = await self.trading_strategies.get_active_strategy(user_id)
             except Exception as e:
-            self.logger.error("Failed to get active strategy", error=str(e), user_id=user_id)
-            context_data["active_strategy"] = None
+                self.logger.error("Failed to get active strategy", error=str(e), user_id=user_id)
+                context_data["active_strategy"] = None
 
             try:
-            context_data["available_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
+                context_data["available_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
             except Exception as e:
-            self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
-            context_data["available_strategies"] = {"strategies": []}
+                self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
+                context_data["available_strategies"] = {"strategies": []}
 
         elif intent == ChatIntent.STRATEGY_MANAGEMENT:
             # Get user's purchased/active strategies
             try:
-            context_data["user_strategies"] = await self.strategy_marketplace.get_user_strategy_portfolio(user_id)
+                context_data["user_strategies"] = await self.strategy_marketplace.get_user_strategy_portfolio(user_id)
             except Exception as e:
-            self.logger.error("Failed to get user strategy portfolio", error=str(e), user_id=user_id)
-            context_data["user_strategies"] = {
-            "success": False,
-            "active_strategies": [],
-            "total_strategies": 0,
-            "error": str(e)
-            }
+                self.logger.error("Failed to get user strategy portfolio", error=str(e), user_id=user_id)
+                context_data["user_strategies"] = {
+                    "success": False,
+                    "active_strategies": [],
+                    "total_strategies": 0,
+                    "error": str(e)
+                }
 
             try:
-            context_data["marketplace_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
+                context_data["marketplace_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
             except Exception as e:
-            self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
-            context_data["marketplace_strategies"] = {"strategies": []}
+                self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
+                context_data["marketplace_strategies"] = {"strategies": []}
 
         elif intent in [ChatIntent.CREDIT_INQUIRY, ChatIntent.CREDIT_MANAGEMENT]:
             # Get credit account information using same logic as _check_user_credits
             try:
-            credit_check_result = await self._check_user_credits(user_id)
+                credit_check_result = await self._check_user_credits(user_id)
 
-            # Debug logging to see what we get
-            self.logger.info("Credit inquiry context gathering",
-            user_id=user_id,
-            account_status=credit_check_result.get("account_status"),
-            available_credits=credit_check_result.get("available_credits", 0),
-            credit_check_keys=list(credit_check_result.keys()))
+                # Debug logging to see what we get
+                self.logger.info("Credit inquiry context gathering",
+                                user_id=user_id,
+                                account_status=credit_check_result.get("account_status"),
+                                available_credits=credit_check_result.get("available_credits", 0),
+                                credit_check_keys=list(credit_check_result.keys()))
 
-            # Use the credit check results regardless of status (as long as we got credits)
-            available_credits = float(credit_check_result.get("available_credits", 0))
-            context_data["credit_account"] = {
-            "available_credits": available_credits,
-            "total_credits": available_credits,  # Use available as total approximation
-            "profit_potential": available_credits * 4,  # 1 credit = $4 profit potential
-            "account_tier": credit_check_result.get("credit_tier", "standard"),
-            "account_status": credit_check_result.get("account_status", "unknown")
-            }
+                # Use the credit check results regardless of status (as long as we got credits)
+                available_credits = float(credit_check_result.get("available_credits", 0))
+                context_data["credit_account"] = {
+                    "available_credits": available_credits,
+                    "total_credits": available_credits,  # Use available as total approximation
+                    "profit_potential": available_credits * 4,  # 1 credit = $4 profit potential
+                    "account_tier": credit_check_result.get("credit_tier", "standard"),
+                    "account_status": credit_check_result.get("account_status", "unknown")
+                }
 
-            # Add error info if present but don't let it override the credits
-            if credit_check_result.get("error"):
-            context_data["credit_account"]["error"] = credit_check_result["error"]
+                # Add error info if present but don't let it override the credits
+                if credit_check_result.get("error"):
+                    context_data["credit_account"]["error"] = credit_check_result["error"]
 
             except Exception as e:
-            self.logger.error("Failed to get credit account via credit check", error=str(e), user_id=user_id)
-            context_data["credit_account"] = {
-            "available_credits": 0,
-            "total_credits": 0,
-            "profit_potential": 0,
-            "account_tier": "standard",
-            "error": str(e)
-            }
+                self.logger.error("Failed to get credit account via credit check", error=str(e), user_id=user_id)
+                context_data["credit_account"] = {
+                    "available_credits": 0,
+                    "total_credits": 0,
+                    "profit_potential": 0,
+                    "account_tier": "standard",
+                    "error": str(e)
+                }
 
         elif intent == ChatIntent.REBALANCING:
             # Get rebalancing analysis
