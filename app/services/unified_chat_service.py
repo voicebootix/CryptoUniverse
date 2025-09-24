@@ -1122,8 +1122,8 @@ Respond naturally using ONLY the real data provided."""
 
             # Check for error condition
             if portfolio.get('total_value', 0) == -999:
-            error_msg = portfolio.get('error', 'Unknown error')
-            return f"""User asked: "{message}"
+                error_msg = portfolio.get('error', 'Unknown error')
+                return f"""User asked: "{message}"
 
 PORTFOLIO ERROR DETECTED:
 Error Message: {error_msg}
