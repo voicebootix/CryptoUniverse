@@ -719,48 +719,48 @@ class UnifiedChatService(LoggerMixin):
                 position_count=len(portfolio_data.get("positions", []))
             )
 
-            # Transform EXACTLY like trading endpoint (lines 514-544)
-            positions = portfolio_data.get("positions", [])
-            total_value_usd = portfolio_data.get("total_value", portfolio_data.get("total_value_usd", 0.0))
+        # Transform EXACTLY like trading endpoint (lines 514-544)
+        positions = portfolio_data.get("positions", [])
+        total_value_usd = portfolio_data.get("total_value", portfolio_data.get("total_value_usd", 0.0))
 
-            # If positions aren't directly available, transform from balances (real data format)
-            if not positions and portfolio_data.get("balances"):
-                positions = []
-                for balance in portfolio_data.get("balances", []):
-                    if balance.get("total", 0) > 0:
-                        positions.append({
-                            "symbol": balance["asset"],
-                            "name": balance["asset"],
-                            "amount": balance["total"],
-                            "value_usd": balance["value_usd"],
-                            "entry_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
-                            "current_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
-                            "change_24h_pct": 0.0,
-                            "unrealized_pnl": 0.0,
-                            "side": "long",
-                            "exchange": balance.get("exchange", "unknown")
-                        })
+        # If positions aren't directly available, transform from balances (real data format)
+        if not positions and portfolio_data.get("balances"):
+            positions = []
+            for balance in portfolio_data.get("balances", []):
+                if balance.get("total", 0) > 0:
+                    positions.append({
+                        "symbol": balance["asset"],
+                        "name": balance["asset"],
+                        "amount": balance["total"],
+                        "value_usd": balance["value_usd"],
+                        "entry_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
+                        "current_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
+                        "change_24h_pct": 0.0,
+                        "unrealized_pnl": 0.0,
+                        "side": "long",
+                        "exchange": balance.get("exchange", "unknown")
+                    })
 
-            # Format for chat
-            chat_positions = []
-            for pos in positions:
+        # Format for chat
+        chat_positions = []
+        for pos in positions:
             if pos.get("value_usd", 0) > 0:
-            chat_positions.append({
-            "symbol": pos.get("symbol"),
-            "value_usd": pos.get("value_usd", 0),
-            "quantity": pos.get("amount", 0),
-            "exchange": pos.get("exchange", "unknown")
-            })
+                chat_positions.append({
+                    "symbol": pos.get("symbol"),
+                    "value_usd": pos.get("value_usd", 0),
+                    "quantity": pos.get("amount", 0),
+                    "exchange": pos.get("exchange", "unknown")
+                })
 
-            # Sort positions by value
-            chat_positions.sort(key=lambda x: x.get("value_usd", 0), reverse=True)
+        # Sort positions by value
+        chat_positions.sort(key=lambda x: x.get("value_usd", 0), reverse=True)
 
-            return {
+        return {
             "total_value": float(total_value_usd),
             "daily_pnl": float(portfolio_data.get("daily_pnl", 0)),
             "daily_pnl_pct": float(portfolio_data.get("daily_pnl_pct", 0)),
             "positions": chat_positions
-            }
+        }
 
         except asyncio.TimeoutError:
             self.logger.error("Portfolio fetch timeout in chat")
