@@ -696,6 +696,16 @@ class UnifiedChatService(LoggerMixin):
         Transform raw exchange portfolio data to chat-friendly format.
         This replaces the chat adapter's transformation logic.
         """
+        # TEMP DEBUG: Return mock data to verify function is called
+        return {
+            "total_value": 12345.67,  # Unique value to verify this function runs
+            "daily_pnl": 0.0,
+            "daily_pnl_pct": 0.0,
+            "positions": [
+                {"symbol": "TEST", "value_usd": 100, "quantity": 1, "exchange": "debug"}
+            ]
+        }
+
         try:
             # Use EXACT same code path as working trading API endpoint
             import asyncio
