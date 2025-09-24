@@ -702,16 +702,16 @@ class UnifiedChatService(LoggerMixin):
             from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
             from app.core.database import get_database
 
-            async with get_database() as db:
-                # EXACT same call as trading endpoint line 486
-                portfolio_data = await asyncio.wait_for(
-                    get_user_portfolio_from_exchanges(str(user_id), db),  # Ensure string
-                    timeout=10.0
-                )
+            # Fix: Apply timeout at the correct level to avoid async context conflicts
+            async def _fetch_portfolio():
+                async with get_database() as db:
+                    return await get_user_portfolio_from_exchanges(str(user_id), db)
 
-                # Debug log
-                self.logger.info(
-                    "Chat portfolio fetch result",
+            portfolio_data = await asyncio.wait_for(_fetch_portfolio(), timeout=15.0)
+
+            # Debug log
+            self.logger.info(
+                "Chat portfolio fetch result",
                     user_id=user_id,
                     success=portfolio_data.get("success"),
                     total_value_usd=portfolio_data.get("total_value_usd"),

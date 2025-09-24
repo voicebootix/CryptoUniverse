@@ -40,8 +40,8 @@ api_router.include_router(admin_testing.router, tags=["Admin Testing"])  # Admin
 # Unified chat - single source of truth
 api_router.include_router(unified_chat.router, prefix="/chat", tags=["Unified Chat"])
 
-# Temporary backwards compatibility for /conversational-chat endpoints
-# Remove after frontend is updated to use /chat endpoints
+# Backwards compatibility routes
+api_router.include_router(unified_chat.router, prefix="/unified-chat", tags=["Unified Chat (Compatibility)"])
 api_router.include_router(unified_chat.router, prefix="/conversational-chat", tags=["Unified Chat (Compatibility)"])
 api_router.include_router(ai_consensus.router, prefix="/ai-consensus", tags=["AI Consensus"])
 api_router.include_router(opportunity_discovery.router, prefix="/opportunities", tags=["Opportunity Discovery"])
