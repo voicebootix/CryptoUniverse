@@ -986,49 +986,49 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
             decision_id = None
             
             if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
-            requires_approval = True
-            decision_id = str(uuid.uuid4())
-            # Store decision for later execution
-            await self._store_pending_decision(
-            decision_id,
-            intent_analysis,
-            context_data,
-            session.user_id,
-            session.conversation_mode
-            )
+                requires_approval = True
+                decision_id = str(uuid.uuid4())
+                # Store decision for later execution
+                await self._store_pending_decision(
+                    decision_id,
+                    intent_analysis,
+                    context_data,
+                    session.user_id,
+                    session.conversation_mode
+                )
             
             # Save to memory
             await self._save_conversation(
-            session.session_id,
-            session.user_id,
-            message,
-            content,
-            intent,
-            intent_analysis["confidence"]
+                session.session_id,
+                session.user_id,
+                message,
+                content,
+                intent,
+                intent_analysis["confidence"]
             )
-            
+
             return {
-            "success": True,
-            "session_id": session.session_id,
-            "message_id": str(uuid.uuid4()),
-            "content": content,
-            "intent": intent.value,
-            "confidence": intent_analysis["confidence"],
-            "requires_approval": requires_approval,
-            "decision_id": decision_id,
-            "metadata": {
-            "personality": personality["name"],
-            "response_time": response["elapsed_time"],
-            "context_data_keys": list(context_data.keys())
-            },
-            "timestamp": datetime.utcnow()
+                "success": True,
+                "session_id": session.session_id,
+                "message_id": str(uuid.uuid4()),
+                "content": content,
+                "intent": intent.value,
+                "confidence": intent_analysis["confidence"],
+                "requires_approval": requires_approval,
+                "decision_id": decision_id,
+                "metadata": {
+                    "personality": personality["name"],
+                    "response_time": response["elapsed_time"],
+                    "context_data_keys": list(context_data.keys())
+                },
+                "timestamp": datetime.utcnow()
             }
         else:
             return {
-            "success": False,
-            "error": response["error"],
-            "session_id": session.session_id,
-            "timestamp": datetime.utcnow()
+                "success": False,
+                "error": response["error"],
+                "session_id": session.session_id,
+                "timestamp": datetime.utcnow()
             }
     
     async def _generate_streaming_response(
