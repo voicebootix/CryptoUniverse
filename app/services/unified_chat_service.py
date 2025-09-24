@@ -774,12 +774,13 @@ class UnifiedChatService(LoggerMixin):
             }
         except Exception as e:
             self.logger.error(f"Portfolio transformation failed: {e}", exc_info=True)
+            # Return the actual error message so we can see what's failing
             return {
-                "total_value": 0,
+                "total_value": -999,  # Clear indicator of error
                 "daily_pnl": 0,
                 "daily_pnl_pct": 0,
                 "positions": [],
-                "error": str(e)
+                "error": f"ACTUAL ERROR: {str(e)}"
             }
 
     async def _gather_context_data(
