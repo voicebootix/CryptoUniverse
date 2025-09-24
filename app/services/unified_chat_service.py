@@ -1120,9 +1120,21 @@ Respond naturally using ONLY the real data provided."""
         if intent == ChatIntent.PORTFOLIO_ANALYSIS:
             portfolio = context_data.get("portfolio", {})
             risk = context_data.get("risk_analysis", {})
-            
+
+            # Check for error condition
+            if portfolio.get('total_value', 0) == -999:
+                error_msg = portfolio.get('error', 'Unknown error')
+                return f"""User asked: "{message}"
+
+PORTFOLIO ERROR DETECTED:
+Error Message: {error_msg}
+
+Please inform the user there is a technical issue with portfolio data retrieval. The actual error is: {error_msg}
+
+Tell them the development team needs to investigate this specific error."""
+
             return f"""User asked: "{message}"
-            
+
 Portfolio Data (REAL):
 - Total Value: ${portfolio.get('total_value', 0):,.2f}
 - Daily P&L: ${portfolio.get('daily_pnl', 0):,.2f} ({portfolio.get('daily_pnl_pct', 0):.2f}%)
