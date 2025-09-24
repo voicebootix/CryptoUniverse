@@ -701,7 +701,6 @@ class UnifiedChatService(LoggerMixin):
             import asyncio
             from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
             from app.core.database import get_database
-            from app.services.risk_management import risk_service
 
             async with get_database() as db:
                 # EXACT same call as trading endpoint line 486
