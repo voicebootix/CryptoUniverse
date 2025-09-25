@@ -57,7 +57,7 @@ class OpportunityResult:
     discovered_at: datetime
 
 
-@dataclass  
+@dataclass
 class UserOpportunityProfile:
     """User's opportunity discovery profile based on their strategy portfolio."""
     user_id: str
@@ -67,6 +67,7 @@ class UserOpportunityProfile:
     max_asset_tier: str  # tier_retail, tier_professional, etc
     opportunity_scan_limit: int
     last_scan_time: Optional[datetime]
+    strategy_fingerprint: str
 
 
 class UserOpportunityDiscoveryService(LoggerMixin):
@@ -142,16 +143,37 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             except Exception as redis_error:
                 self.logger.warning("Redis unavailable, continuing without caching", error=str(redis_error))
                 self.redis = None
-            
+
             # Initialize enterprise asset filter
             await enterprise_asset_filter.async_init()
-            
+
             self.logger.info("🎯 User Opportunity Discovery Service initialized")
-            
+
         except Exception as e:
             self.logger.error("Failed to initialize User Opportunity Discovery", error=str(e))
             raise
-    
+
+    def _compute_strategy_fingerprint(self, strategies: List[Dict[str, Any]]) -> str:
+        """Create a deterministic fingerprint for the user's active strategy set."""
+
+        if not strategies:
+            return "none"
+
+        try:
+            strategy_ids = [str(strategy.get("strategy_id", "")).strip() for strategy in strategies]
+            normalized = sorted(filter(None, strategy_ids))
+            if not normalized:
+                return "none"
+
+            fingerprint_source = "|".join(normalized)
+            return str(uuid.uuid5(uuid.NAMESPACE_URL, fingerprint_source))
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to compute strategy fingerprint, defaulting to 'none'",
+                error=str(exc)
+            )
+            return "none"
+
     async def _get_user_portfolio_cached(self, user_id: str) -> Dict[str, Any]:
         """Get user portfolio with enterprise caching and circuit breaker pattern."""
         
@@ -456,7 +478,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     "active_strategies": user_profile.active_strategy_count,
                     "user_tier": user_profile.user_tier,
                     "monthly_strategy_cost": user_profile.total_monthly_strategy_cost,
-                    "scan_limit": user_profile.opportunity_scan_limit
+                    "scan_limit": user_profile.opportunity_scan_limit,
+                    "strategy_fingerprint": user_profile.strategy_fingerprint
                 },
                 "strategy_performance": strategy_results,
                 "asset_discovery": {
@@ -550,7 +573,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     user_tier="basic",
                     max_asset_tier="tier_retail",
                     opportunity_scan_limit=10,  # Very limited for non-subscribers
-                    last_scan_time=None
+                    last_scan_time=None,
+                    strategy_fingerprint="none"
                 )
             
             active_strategies = portfolio_result.get("active_strategies", [])
@@ -578,6 +602,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 except:
                     pass
             
+            strategy_fingerprint = self._compute_strategy_fingerprint(active_strategies)
+
             return UserOpportunityProfile(
                 user_id=user_id,
                 active_strategy_count=strategy_count,
@@ -585,7 +611,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 user_tier=user_tier,
                 max_asset_tier=tier_config["max_asset_tier"],
                 opportunity_scan_limit=tier_config["scan_limit"],
-                last_scan_time=last_scan_time
+                last_scan_time=last_scan_time,
+                strategy_fingerprint=strategy_fingerprint
             )
             
         except Exception as e:
@@ -600,7 +627,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 user_tier="basic",
                 max_asset_tier="tier_retail",
                 opportunity_scan_limit=10,
-                last_scan_time=None
+                last_scan_time=None,
+                strategy_fingerprint="none"
             )
     
     async def _scan_strategy_opportunities(
@@ -2126,27 +2154,61 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         user_profile: UserOpportunityProfile
     ) -> Optional[Dict[str, Any]]:
         """Get cached opportunities if available and fresh."""
-        
+
         if not self.redis:
             return None
-            
+
         try:
             cache_key = f"user_opportunities:{user_id}:{user_profile.user_tier}:{user_profile.active_strategy_count}"
             cached_data = await self.redis.get(cache_key)
-            
+
             if cached_data:
                 data = json.loads(cached_data)
-                cache_time = datetime.fromisoformat(data.get("cached_at", "2000-01-01"))
-                
-                # Cache is fresh for 10 minutes
-                if datetime.utcnow() - cache_time < timedelta(minutes=10):
-                    return data
-                    
+
+                payload = data.get("payload", data)
+                metadata = data.get("cache_metadata", {})
+
+                cache_time_str = metadata.get("cached_at") or data.get("cached_at")
+                if cache_time_str:
+                    try:
+                        cache_time = datetime.fromisoformat(cache_time_str)
+                    except ValueError:
+                        cache_time = datetime.utcnow() - timedelta(hours=1)
+                else:
+                    cache_time = datetime.utcnow() - timedelta(hours=1)
+
+                cached_fingerprint = metadata.get("strategy_fingerprint") or payload.get("user_profile", {}).get("strategy_fingerprint")
+                if cached_fingerprint and cached_fingerprint != user_profile.strategy_fingerprint:
+                    self.logger.info(
+                        "Cached opportunities invalidated due to strategy change",
+                        user_id=user_id,
+                        cached_fingerprint=cached_fingerprint,
+                        current_fingerprint=user_profile.strategy_fingerprint
+                    )
+                    return None
+
+                total_opportunities = payload.get("total_opportunities", 0)
+                if total_opportunities == 0:
+                    zero_ttl = metadata.get("zero_ttl_seconds", 120)
+                    if datetime.utcnow() - cache_time > timedelta(seconds=zero_ttl):
+                        self.logger.info(
+                            "Discarding zero-result cache to force rescan",
+                            user_id=user_id,
+                            age_seconds=(datetime.utcnow() - cache_time).total_seconds(),
+                            zero_ttl=zero_ttl
+                        )
+                        return None
+
+                # Cache is fresh for 10 minutes for non-zero results, 2 minutes for zero results
+                max_age = timedelta(minutes=10) if total_opportunities > 0 else timedelta(seconds=metadata.get("zero_ttl_seconds", 120))
+                if datetime.utcnow() - cache_time < max_age:
+                    return payload
+
         except Exception as e:
             self.logger.debug("Cache retrieval failed", error=str(e))
-            
+
         return None
-    
+
     async def _cache_opportunities(
         self,
         user_id: str,
@@ -2154,24 +2216,40 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         user_profile: UserOpportunityProfile
     ):
         """Cache opportunity results."""
-        
+
         if not self.redis:
             return
-            
+
         try:
             cache_key = f"user_opportunities:{user_id}:{user_profile.user_tier}:{user_profile.active_strategy_count}"
-            
-            # Add cache metadata
-            result["cached_at"] = datetime.utcnow().isoformat()
-            result["cache_key"] = cache_key
-            
-            # Cache for 15 minutes
-            await self.redis.set(cache_key, json.dumps(result), ex=900)
-            
+
+            cache_time = datetime.utcnow().isoformat()
+            total_opportunities = result.get("total_opportunities", 0)
+
+            # Ensure cached payload is immutable by storing a JSON-safe copy
+            try:
+                payload_copy = json.loads(json.dumps(result))
+            except TypeError:
+                payload_copy = result
+
+            cache_entry = {
+                "payload": payload_copy,
+                "cache_metadata": {
+                    "cached_at": cache_time,
+                    "cache_key": cache_key,
+                    "strategy_fingerprint": user_profile.strategy_fingerprint,
+                    "zero_ttl_seconds": 120,
+                    "total_opportunities": total_opportunities
+                }
+            }
+
+            ttl_seconds = 900 if total_opportunities > 0 else 120
+            await self.redis.set(cache_key, json.dumps(cache_entry), ex=ttl_seconds)
+
             # Update last scan time
             last_scan_key = f"user_opportunity_last_scan:{user_id}"
-            await self.redis.set(last_scan_key, datetime.utcnow().isoformat(), ex=86400)  # 24h
-            
+            await self.redis.set(last_scan_key, cache_time, ex=86400)  # 24h
+
         except Exception as e:
             self.logger.debug("Cache storage failed", error=str(e))
     
