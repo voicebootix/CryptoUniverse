@@ -194,9 +194,19 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
 
         payload = updates.model_dump(exclude_unset=True)
         if "name" in payload:
-            submission.name = payload["name"].strip()
+            name_value = payload["name"]
+            if name_value is None:
+                raise ValueError("Submission name cannot be null")
+            if not isinstance(name_value, str):
+                raise ValueError("Submission name must be a string")
+            submission.name = name_value.strip()
         if "description" in payload:
-            submission.description = payload["description"].strip()
+            description_value = payload["description"]
+            if description_value is None:
+                raise ValueError("Submission description cannot be null")
+            if not isinstance(description_value, str):
+                raise ValueError("Submission description must be a string")
+            submission.description = description_value.strip()
         if "category" in payload and payload["category"]:
             submission.category = payload["category"]
         if "risk_level" in payload and payload["risk_level"]:
