@@ -9,7 +9,8 @@ import asyncio
 import logging
 import os
 import ssl
-from typing import AsyncGenerator, Optional
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, AsyncIterator, Optional
 
 import sqlalchemy
 from sqlalchemy import MetaData, event, text
@@ -259,7 +260,7 @@ db_manager = DatabaseManager()
 async def get_database() -> AsyncGenerator[AsyncSession, None]:
     """
     Dependency that provides database session.
-    
+
     Yields:
         AsyncSession: SQLAlchemy async session instance
     """
@@ -274,6 +275,24 @@ async def get_database() -> AsyncGenerator[AsyncSession, None]:
             raise
         finally:
             await session.close()
+
+
+@asynccontextmanager
+async def get_database_session() -> AsyncIterator[AsyncSession]:
+    """Context manager wrapper for obtaining a database session outside FastAPI dependencies."""
+
+    session: AsyncSession = AsyncSessionLocal()
+    try:
+        yield session
+    except Exception as e:
+        await session.rollback()
+        import structlog
+
+        logger = structlog.get_logger()
+        logger.error("Database operation failed", error=str(e))
+        raise
+    finally:
+        await session.close()
 
 
 # Dependency for getting database session with transaction

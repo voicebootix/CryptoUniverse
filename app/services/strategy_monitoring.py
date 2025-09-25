@@ -14,7 +14,7 @@ from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import get_database
+from app.core.database import get_database_session
 from app.models.user import User, UserRole
 from app.models.strategy_access import UserStrategyAccess, StrategyAccessType, StrategyType
 from app.services.unified_strategy_service import unified_strategy_service
@@ -72,7 +72,7 @@ class StrategySystemMonitor(LoggerMixin):
         start_time = datetime.utcnow()
 
         try:
-            async with get_database() as db:
+            async with get_database_session() as db:
                 # Basic user metrics
                 user_metrics = await self._get_user_metrics(db)
 
@@ -348,7 +348,7 @@ class StrategySystemMonitor(LoggerMixin):
             self.logger.info("🔧 Starting system maintenance")
 
             # Clean up expired access records
-            async with get_database() as db:
+            async with get_database_session() as db:
                 cleanup_result = await db.execute(
                     select(func.count(UserStrategyAccess.id)).where(
                         UserStrategyAccess.expires_at < datetime.utcnow(),

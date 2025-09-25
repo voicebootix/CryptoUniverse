@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy.exc import SQLAlchemyError, DatabaseError
 from sqlalchemy import select
-from app.core.database import get_database
+from app.core.database import get_database_session
 from app.models.user import User
 import structlog
 
@@ -53,7 +53,7 @@ class EnhancedChatEngineService:
                 user_uuid = user_id
 
             # Use proper async context manager instead of async for + break
-            async with get_database() as db:
+            async with get_database_session() as db:
                 # Query user with proper UUID comparison
                 stmt = select(User.simulation_mode, User.simulation_balance).where(
                     User.id == user_uuid
@@ -166,7 +166,7 @@ class EnhancedChatEngineService:
         """
         try:
             # Use async context manager for proper resource management
-            async with get_database() as db:
+            async with get_database_session() as db:
                 # Perform database operations
                 stmt = select(User).where(User.id == uuid.UUID(user_id))
                 result = await db.execute(stmt)
@@ -248,7 +248,7 @@ Migration Guide: Applying AI Chat Engine Fixes
 
 1. Database Context Management:
    BEFORE: async for db in get_database(): ... break
-   AFTER:  async with get_database() as db: ...
+   AFTER:  async with get_database_session() as db: ...
 
 2. Error Handling:
    BEFORE: except Exception as e: simulation_mode = False
