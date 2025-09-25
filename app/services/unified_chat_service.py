@@ -1796,14 +1796,16 @@ Provide a helpful response using the real data available. Never use placeholder 
         amount = trade_params.get("amount") or trade_params.get("position_size_usd")
         if amount:
             trade_request["position_size_usd"] = amount
-            price = market_data.get("current_price")
-            if price:
-                try:
-                    quantity = float(amount) / float(price)
-                    if quantity > 0:
-                        trade_request.setdefault("quantity", quantity)
-                except (TypeError, ZeroDivisionError):
-                    pass
+            # Only calculate quantity from amount if no explicit quantity was provided
+            if not trade_request.get("quantity"):
+                price = market_data.get("current_price")
+                if price:
+                    try:
+                        quantity = float(amount) / float(price)
+                        if quantity > 0:
+                            trade_request["quantity"] = quantity
+                    except (TypeError, ZeroDivisionError):
+                        pass
 
         for optional_key in [
             "price",
