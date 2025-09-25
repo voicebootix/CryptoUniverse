@@ -2299,8 +2299,18 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         cached_data = await self.redis.get(cache_key)
                         if cached_data:
                             data = json.loads(cached_data)
-                            opportunities = data.get("opportunities", [])
-                            
+
+                            # Cache entries now wrap the payload for metadata. Support
+                            # both the new {"payload": ...} structure and the legacy
+                            # flat structure to keep backward compatibility.
+                            payload = data.get("payload") if isinstance(data, dict) else None
+                            if not payload and isinstance(data, dict):
+                                payload = data
+
+                            opportunities = []
+                            if isinstance(payload, dict):
+                                opportunities = payload.get("opportunities", [])
+
                             if opportunities:
                                 # Return subset of cached opportunities with warning
                                 limited_opportunities = opportunities[:5]  # Limit to 5
