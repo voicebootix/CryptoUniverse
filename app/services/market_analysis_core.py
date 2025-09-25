@@ -264,16 +264,21 @@ class MarketAnalysisService(LoggerMixin):
                 analysis = await self._analyze_symbol_technical(symbol, timeframe, indicator_list)
                 analysis_results[symbol] = analysis
 
-            available_symbols = [
+            symbols_with_real_data = [
                 symbol for symbol, analysis in analysis_results.items()
-                if analysis.get("data_quality") != "no_data"
+                if analysis.get("data_quality") == "real_market_data"
             ]
-            unavailable_symbols = [
-                symbol for symbol in symbol_list if symbol not in available_symbols
+            symbols_with_errors = [
+                symbol for symbol, analysis in analysis_results.items()
+                if analysis.get("data_quality") == "error"
+            ]
+            symbols_without_data = [
+                s for s in symbol_list
+                if s not in symbols_with_real_data and s not in symbols_with_errors
             ]
 
             response_time = time.time() - start_time
-            overall_success = bool(available_symbols)
+            overall_success = bool(symbols_with_real_data)
             await self._update_performance_metrics(response_time, overall_success, user_id)
 
             metadata = {
@@ -282,11 +287,13 @@ class MarketAnalysisService(LoggerMixin):
                 "indicators_used": indicator_list,
                 "response_time_ms": round(response_time * 1000, 2),
                 "timestamp": datetime.utcnow().isoformat(),
-                "symbols_with_data": len(available_symbols),
-                "symbols_without_data": len(unavailable_symbols),
+                "symbols_with_data": len(symbols_with_real_data),
+                "symbols_without_data": len(symbols_without_data),
             }
-            if unavailable_symbols:
-                metadata["unavailable_symbols"] = unavailable_symbols
+            if symbols_with_errors:
+                metadata["symbols_with_errors"] = symbols_with_errors
+            if symbols_without_data:
+                metadata["unavailable_symbols"] = symbols_without_data
 
             return {
                 "success": overall_success,
