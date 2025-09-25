@@ -15,7 +15,7 @@ import json
 import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, AsyncGenerator, Union
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, is_dataclass
 from enum import Enum
 
 import structlog
@@ -1035,8 +1035,15 @@ class UnifiedChatService(LoggerMixin):
                         portfolio_snapshot
                     )
                     optimization_result = optimization.get("optimization_result")
-                    if optimization_result and hasattr(optimization_result, "__dict__"):
-                        optimization_payload = asdict(optimization_result)
+                    if optimization_result:
+                        if is_dataclass(optimization_result):
+                            optimization_payload = asdict(optimization_result)
+                        elif hasattr(optimization_result, "to_dict") and callable(optimization_result.to_dict):
+                            optimization_payload = optimization_result.to_dict()
+                        elif hasattr(optimization_result, "__dict__"):
+                            optimization_payload = dict(optimization_result.__dict__)
+                        else:
+                            optimization_payload = optimization_result
                     else:
                         optimization_payload = optimization_result
                     context_data["rebalance_analysis"] = {
