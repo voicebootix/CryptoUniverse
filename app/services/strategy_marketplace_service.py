@@ -1518,7 +1518,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         }
 
         return {
-            "success": True,
+            "success": not degraded,  # Return False for degraded snapshots to prevent incorrect messaging
             "active_strategies": strategies,
             "strategies": strategies,
             "total_strategies": len(strategies),

@@ -1256,8 +1256,22 @@ MARKETPLACE SUMMARY:
 
 Provide a comprehensive overview of the user's strategy portfolio, subscription status, and actionable recommendations for strategy management."""
             else:
-                error = user_strategies.get("error", "Unknown error")
-                return f"""User asked: "{message}"
+                # Check if this is a degraded response (timeout/error fallback)
+                if user_strategies.get("degraded", False):
+                    source = user_strategies.get("source", "unknown")
+                    return f"""User asked: "{message}"
+
+STRATEGY ACCESS STATUS:
+- Current Access: Temporarily Unable to Load (System Issue)
+- Cause: {source.replace('_', ' ').title()}
+- Available Marketplace Strategies: {len(marketplace_strategies.get('strategies', []))}
+
+Important: Your actual strategy portfolio could not be loaded at this time due to a temporary system issue.
+Please try again in a few moments. Do NOT make any strategy purchase decisions based on this response.
+If the issue persists, please contact support."""
+                else:
+                    error = user_strategies.get("error", "Unknown error")
+                    return f"""User asked: "{message}"
 
 STRATEGY ACCESS STATUS:
 - Current Access: Limited or None
