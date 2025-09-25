@@ -15,7 +15,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from typing import (
-    Any, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVar, Union, cast
+    Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVar, Union, cast
 )
 from functools import wraps
 import pickle
