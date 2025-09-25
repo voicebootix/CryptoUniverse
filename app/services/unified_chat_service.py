@@ -846,40 +846,6 @@ class UnifiedChatService(LoggerMixin):
             # Market risk integration pending
             context_data["market_risk"] = {"factors": [], "error": "Market risk integration pending"}
             
-        elif intent == ChatIntent.STRATEGY_MANAGEMENT:
-            user_strategies = context_data.get("user_strategies", {})
-            marketplace_strategies = context_data.get("marketplace_strategies", {})
-
-            if user_strategies.get("success", False):
-                active_strategies = user_strategies.get("active_strategies", [])
-                total_strategies = user_strategies.get("total_strategies", 0)
-                total_monthly_cost = user_strategies.get("total_monthly_cost", 0)
-
-                return f"""User asked: "{message}"
-
-CURRENT STRATEGY PORTFOLIO:
-- Total Active Strategies: {total_strategies}
-- Monthly Cost: {total_monthly_cost} credits
-- Active Strategies: {[s.get('name', 'Unknown') for s in active_strategies[:10]]}
-
-STRATEGY DETAILS:
-{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - {s.get('credit_cost_monthly', 0)} credits/month" for s in active_strategies[:10]])}
-
-MARKETPLACE SUMMARY:
-- Available Strategies: {len(marketplace_strategies.get('strategies', []))} total strategies
-
-Provide a comprehensive overview of the user's strategy portfolio, subscription status, and actionable recommendations for strategy management."""
-            else:
-                error = user_strategies.get("error", "Unknown error")
-                return f"""User asked: "{message}"
-
-STRATEGY ACCESS STATUS:
-- Current Access: Limited or None
-- Error: {error}
-- Available Marketplace Strategies: {len(marketplace_strategies.get('strategies', []))}
-
-Explain that strategy access requires subscription/purchase and guide the user on how to get started with strategies."""
-
         elif intent == ChatIntent.STRATEGY_RECOMMENDATION:
             # Get strategy recommendations with error handling
             try:
