@@ -23,7 +23,7 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
-from app.core.database import get_database_session
+from app.core.database import AsyncSessionLocal
 from app.core.redis import get_redis_client
 
 # Import the new ChatAI service for conversations
@@ -582,7 +582,7 @@ class UnifiedChatService(LoggerMixin):
             from sqlalchemy import select
             import uuid
 
-            async with get_database_session() as db:
+            async with AsyncSessionLocal() as db:
                 # Try multiple lookup methods to find existing account
                 credit_account = None
 
@@ -715,7 +715,7 @@ class UnifiedChatService(LoggerMixin):
 
             # Fix: Apply timeout at the correct level to avoid async context conflicts
             async def _fetch_portfolio():
-                async with get_database_session() as db:
+                async with AsyncSessionLocal() as db:
                     return await get_user_portfolio_from_exchanges(str(user_id), db)
 
             portfolio_data = await asyncio.wait_for(_fetch_portfolio(), timeout=15.0)
@@ -1702,7 +1702,7 @@ Provide a helpful response using the real data available. Never use placeholder 
             except (ValueError, TypeError):
                 user_identifier = user_id
 
-            async with get_database_session() as session:
+            async with AsyncSessionLocal() as session:
                 result = await session.execute(
                     select(User.simulation_mode).where(User.id == user_identifier)
                 )
