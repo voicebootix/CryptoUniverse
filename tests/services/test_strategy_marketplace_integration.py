@@ -127,8 +127,8 @@ async def test_published_submission_appears_in_marketplace() -> None:
             await session.commit()
             await session.refresh(publisher)
             await session.refresh(reviewer)
-            publisher_id = publisher.id.hex
-            reviewer_id = reviewer.id.hex
+            publisher_id = str(publisher.id)
+            reviewer_id = str(reviewer.id)
 
             user_rows = await session.execute(text("SELECT id FROM users"))
             existing_user_ids = {row[0] for row in user_rows}

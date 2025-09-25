@@ -1237,12 +1237,16 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     credit_cost_per_execution=max(1, monthly_cost // 30),
                     win_rate=self.normalize_win_rate_to_fraction(float(strategy.win_rate)),
                     avg_return=(
-                        float(strategy.total_pnl / strategy.total_trades)
+                        float(strategy.total_pnl / strategy.total_trades) / 100.0
                         if strategy.total_trades > 0
-                        else 0
+                        else 0.0
                     ),
                     sharpe_ratio=float(strategy.sharpe_ratio) if strategy.sharpe_ratio else None,
-                    max_drawdown=float(strategy.max_drawdown),
+                    max_drawdown=(
+                        float(strategy.max_drawdown) / 100.0
+                        if strategy.max_drawdown is not None
+                        else None
+                    ),
                     total_trades=strategy.total_trades,
                     min_capital_usd=1000,
                     risk_level=self._calculate_risk_level(strategy),
