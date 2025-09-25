@@ -22,7 +22,7 @@ from sqlalchemy import select, and_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import get_database
+from app.core.database import get_database_session
 from app.core.logging import LoggerMixin
 from app.core.async_session_manager import DatabaseSessionMixin
 from app.models.trading import TradingStrategy, Trade
@@ -1179,7 +1179,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     async def _get_community_strategies(self, user_id: str) -> List[StrategyMarketplaceItem]:
         """Get community-published strategies."""
         try:
-            async with get_database() as db:
+            async with get_database_session() as db:
                 # Get published strategies from community
                 stmt = select(TradingStrategy, StrategyPublisher).join(
                     StrategyPublisher, TradingStrategy.user_id == StrategyPublisher.user_id
@@ -1292,7 +1292,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     async def _get_live_performance(self, strategy_id: str) -> Dict[str, Any]:
         """Get live performance metrics for strategy."""
         try:
-            async with get_database() as db:
+            async with get_database_session() as db:
                 # Get recent trades for this strategy
                 stmt = select(Trade).where(
                     and_(
@@ -1350,7 +1350,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     ) -> Dict[str, Any]:
         """Purchase access to strategy using credits."""
         try:
-            async with get_database() as db:
+            async with get_database_session() as db:
                 # Get user's credit account
                 credit_stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
                 credit_result = await db.execute(credit_stmt)
@@ -1479,106 +1479,141 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         """Get user's purchased/active strategies with enterprise reliability."""
         import asyncio
         
-        # Add method-level timeout for entire operation (increased for Redis reliability)
+        # Add method-level timeout for entire operation to protect chat responsiveness
         try:
-            async with asyncio.timeout(60.0):  # 60 second timeout for entire method
-                return await self._get_user_strategy_portfolio_impl(user_id)
+            async with asyncio.timeout(12.0):
+                portfolio = await self._get_user_strategy_portfolio_impl(user_id)
+                if portfolio.get("success"):
+                    return portfolio
+                # If we received a structured but unsuccessful payload, fall back to AI snapshot
+                return self._build_fallback_ai_strategy_portfolio(user_id, "portfolio_error")
         except asyncio.TimeoutError:
             self.logger.error("❌ Portfolio fetch timeout", user_id=user_id)
-            # Return degraded state to prevent credit deductions for free strategies
-            return {
-                "success": False,
-                "degraded": True,
-                "active_strategies": [],
-                "total_strategies": 0,
-                "total_monthly_cost": 0,
-                "error": "timeout",
-                "cached": False
-            }
+            return self._build_fallback_ai_strategy_portfolio(user_id, "portfolio_timeout")
         except Exception as e:
-            self.logger.error("Failed to get user strategy portfolio", error=str(e))
-            return {"success": False, "error": str(e)}
+            self.logger.error("Failed to get user strategy portfolio", error=str(e), user_id=user_id)
+            return self._build_fallback_ai_strategy_portfolio(user_id, "portfolio_exception")
     
-    async def _get_admin_portfolio_fast_path(self, user_id: str, db) -> Dict[str, Any]:
-        """Fast database-only path for admin users to bypass Redis timeouts."""
+    def _compose_strategy_portfolio_response(
+        self,
+        strategies: List[Dict[str, Any]],
+        *,
+        source: str,
+        degraded: bool
+    ) -> Dict[str, Any]:
+        """Format strategy entries into the standard portfolio response payload."""
+
+        total_monthly_cost = sum(strategy.get("credit_cost_monthly", 0) for strategy in strategies)
+        summary = {
+            "total_strategies": len(strategies),
+            "active_strategies": len(strategies),
+            "welcome_strategies": len([s for s in strategies if s.get("credit_cost_monthly", 0) == 0]),
+            "purchased_strategies": len([s for s in strategies if s.get("credit_cost_monthly", 0) > 0]),
+            "total_portfolio_value": 10000.0,
+            "total_pnl_usd": 0.0,
+            "total_pnl_percentage": 0.0,
+            "monthly_credit_cost": total_monthly_cost,
+            "profit_potential_used": 0.0,
+            "profit_potential_remaining": 100000.0
+        }
+
+        return {
+            "success": True,
+            "active_strategies": strategies,
+            "strategies": strategies,
+            "total_strategies": len(strategies),
+            "total_monthly_cost": total_monthly_cost,
+            "summary": summary,
+            "cached": False,
+            "degraded": degraded,
+            "source": source
+        }
+
+    def _build_ai_strategy_entries(self) -> List[Dict[str, Any]]:
+        """Generate the canonical AI strategy entries used for admin and fallback flows."""
+
+        strategies: List[Dict[str, Any]] = []
+        for strategy_func, config in self.ai_strategy_catalog.items():
+            monthly_cost = config.get("credit_cost_monthly", 25)
+            strategy_record = {
+                "strategy_id": f"ai_{strategy_func}",
+                "name": config["name"],
+                "category": config["category"],
+                "is_ai_strategy": True,
+                "publisher_name": "CryptoUniverse AI",
+                "is_active": True,
+                "subscription_type": "purchased",
+                "activated_at": "2024-01-01T00:00:00Z",
+                "credit_cost_monthly": monthly_cost,
+                "credit_cost_per_execution": max(1, monthly_cost // 30),
+                "total_trades": 0,
+                "winning_trades": 0,
+                "win_rate": 0.0,
+                "total_pnl_usd": 0.0,
+                "best_trade_pnl": 0.0,
+                "worst_trade_pnl": 0.0,
+                "current_drawdown": 0.0,
+                "max_drawdown": 0.0,
+                "sharpe_ratio": None,
+                "risk_level": config["risk_level"],
+                "allocation_percentage": 10.0,
+                "max_position_size": 1000.0,
+                "stop_loss_percentage": 5.0,
+                "last_7_days_pnl": 0.0,
+                "last_30_days_pnl": 0.0,
+                "recent_trades": []
+            }
+            strategies.append(strategy_record)
+
+        return strategies
+
+    async def _get_admin_portfolio_fast_path(self, user_id: str) -> Dict[str, Any]:
+        """Fast database-independent path for admin users to bypass Redis timeouts."""
         try:
             self.logger.info("⚡ ADMIN FAST PATH: Generating all strategies without Redis", user_id=user_id)
 
-            # Get all AI strategies from catalog (no Redis lookup needed)
-            all_strategies = []
+            strategies = self._build_ai_strategy_entries()
+            self.logger.info(
+                "⚡ ADMIN FAST PATH SUCCESS",
+                user_id=user_id,
+                strategies_count=len(strategies)
+            )
 
-            for strategy_func, config in self.ai_strategy_catalog.items():
-                # Create strategy record without Redis performance lookup (admin gets all)
-                strategy_record = {
-                    "strategy_id": f"ai_{strategy_func}",
-                    "name": config["name"],
-                    "category": config["category"],
-                    "is_ai_strategy": True,
-                    "publisher_name": "CryptoUniverse AI",
-                    "is_active": True,  # Admin strategies are always active
-                    "subscription_type": "purchased",  # Admin has purchased access
-                    "activated_at": "2024-01-01T00:00:00Z",
-                    "credit_cost_monthly": config.get("credit_cost_monthly", 25),
-                    "credit_cost_per_execution": max(1, config.get("credit_cost_monthly", 25) // 30),
-                    # Default performance metrics (neutral for display)
-                    "total_trades": 0,
-                    "winning_trades": 0,
-                    "win_rate": 0.0,
-                    "total_pnl_usd": 0.0,
-                    "best_trade_pnl": 0.0,
-                    "worst_trade_pnl": 0.0,
-                    "current_drawdown": 0.0,
-                    "max_drawdown": 0.0,
-                    "sharpe_ratio": None,
-                    "risk_level": config["risk_level"],
-                    "allocation_percentage": 10.0,
-                    "max_position_size": 1000.0,
-                    "stop_loss_percentage": 5.0,
-                    "last_7_days_pnl": 0.0,
-                    "last_30_days_pnl": 0.0,
-                    "recent_trades": []
-                }
-                all_strategies.append(strategy_record)
-
-            self.logger.info("⚡ ADMIN FAST PATH SUCCESS",
-                           user_id=user_id,
-                           strategies_count=len(all_strategies))
-
-            # Return portfolio format expected by frontend
-            return {
-                "success": True,
-                "active_strategies": all_strategies,
-                "total_strategies": len(all_strategies),
-                "total_monthly_cost": sum(s["credit_cost_monthly"] for s in all_strategies),
-                "summary": {
-                    "total_strategies": len(all_strategies),
-                    "active_strategies": len(all_strategies),
-                    "welcome_strategies": 3,  # Admin gets welcome strategies
-                    "purchased_strategies": len(all_strategies) - 3,
-                    "total_portfolio_value": 10000.0,
-                    "total_pnl_usd": 0.0,
-                    "total_pnl_percentage": 0.0,
-                    "monthly_credit_cost": sum(s["credit_cost_monthly"] for s in all_strategies),
-                    "profit_potential_used": 0.0,
-                    "profit_potential_remaining": 100000.0
-                },
-                "strategies": all_strategies  # Also provide in this format for compatibility
-            }
+            return self._compose_strategy_portfolio_response(
+                strategies,
+                source="admin_fast_path",
+                degraded=False
+            )
 
         except Exception as e:
             self.logger.error("Admin fast path failed", error=str(e))
             raise e
+
+    def _build_fallback_ai_strategy_portfolio(self, user_id: str, reason: str) -> Dict[str, Any]:
+        """Return a deterministic AI strategy portfolio snapshot as a degraded fallback."""
+
+        self.logger.warning(
+            "Using AI strategy fallback portfolio",
+            user_id=user_id,
+            reason=reason
+        )
+
+        return self._compose_strategy_portfolio_response(
+            self._build_ai_strategy_entries(),
+            source=reason,
+            degraded=True
+        )
 
     async def _get_user_strategy_portfolio_impl(self, user_id: str) -> Dict[str, Any]:
         """Actual implementation with enterprise resource management."""
 
         # ADMIN BYPASS: For admin users, check if we should use fast database path
         try:
-            from app.core.database import get_database
+            from app.core.database import get_database_session
             from app.models.user import User, UserRole
             from sqlalchemy import select
 
-            async with get_database() as db:
+            async with get_database_session() as db:
                 # Check if this is an admin user (convert string UUID to proper UUID)
                 import uuid
                 try:
@@ -1596,7 +1631,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
 
                 if user_role == UserRole.ADMIN:
                     self.logger.info("🔧 Using admin fast path for portfolio", user_id=user_id)
-                    return await self._get_admin_portfolio_fast_path(user_id, db)
+                    return await self._get_admin_portfolio_fast_path(user_id)
                 else:
                     self.logger.info("Not admin user, using Redis path", user_id=user_id, user_role=user_role)
         except Exception as e:
@@ -1620,10 +1655,10 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                            redis_key=redis_key,
                            redis_available=bool(redis))
             
-            # Get strategies with timeout to prevent hanging (increased for reliability)
+            # Get strategies with timeout to prevent hanging
             active_strategies = await asyncio.wait_for(
                 self._safe_redis_operation(redis.smembers, redis_key),
-                timeout=45.0
+                timeout=8.0
             )
             if active_strategies is None:
                 active_strategies = set()  # Fallback to empty set if Redis fails
