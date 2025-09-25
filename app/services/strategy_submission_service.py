@@ -340,6 +340,19 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
         db: AsyncSession,
     ) -> StrategySubmission:
         submission = await self._get_submission_by_id(submission_id, db)
+
+        allowed_statuses = {
+            StrategyStatus.SUBMITTED,
+            StrategyStatus.UNDER_REVIEW,
+        }
+
+        if submission.status not in allowed_statuses:
+            status_value = submission.status.value if submission.status else "unknown"
+            raise ValueError(
+                "Cannot assign submission while status is "
+                f"'{status_value}'; only submitted or under_review submissions can be reassigned."
+            )
+
         submission.reviewer_id = str(reviewer.id)
         submission.status = StrategyStatus.UNDER_REVIEW
         submission.strategy_config = submission.strategy_config or {}
