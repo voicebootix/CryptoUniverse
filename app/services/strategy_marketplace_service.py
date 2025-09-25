@@ -1245,7 +1245,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     max_drawdown=(
                         float(strategy.max_drawdown) / 100.0
                         if strategy.max_drawdown is not None
-                        else None
+                        else 0.0
                     ),
                     total_trades=strategy.total_trades,
                     min_capital_usd=1000,
