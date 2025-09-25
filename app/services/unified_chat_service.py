@@ -1300,11 +1300,11 @@ Remember: You are the AI Money Manager providing personalized advice based on re
             marketplace_strategies = context_data.get("marketplace_strategies", {})
 
             if user_strategies.get("success", False):
-            active_strategies = user_strategies.get("active_strategies", [])
-            total_strategies = user_strategies.get("total_strategies", 0)
-            total_monthly_cost = user_strategies.get("total_monthly_cost", 0)
+                active_strategies = user_strategies.get("active_strategies", [])
+                total_strategies = user_strategies.get("total_strategies", 0)
+                total_monthly_cost = user_strategies.get("total_monthly_cost", 0)
 
-            return f"""User asked: "{message}"
+                return f"""User asked: "{message}"
 
 CURRENT STRATEGY PORTFOLIO:
 - Total Active Strategies: {total_strategies}
@@ -1319,8 +1319,8 @@ MARKETPLACE SUMMARY:
 
 Provide a comprehensive overview of the user's strategy portfolio, subscription status, and actionable recommendations for strategy management."""
             else:
-            error = user_strategies.get("error", "Unknown error")
-            return f"""User asked: "{message}"
+                error = user_strategies.get("error", "Unknown error")
+                return f"""User asked: "{message}"
 
 STRATEGY ACCESS STATUS:
 - Current Access: Limited or None
@@ -1448,20 +1448,20 @@ Provide a helpful response using the real data available. Never use placeholder 
         try:
             redis = await self._ensure_redis()
             if redis:
-            decision_data = {
-            "decision_id": decision_id,
-            "user_id": user_id,
-            "intent": intent_analysis["intent"].value,
-            "context_data": context_data,
-            "conversation_mode": conversation_mode.value,
-            "created_at": datetime.utcnow().isoformat(),
-            "expires_at": (datetime.utcnow() + timedelta(minutes=5)).isoformat()
-            }
-            await redis.setex(
-            f"pending_decision:{decision_id}",
-            300,  # 5 minute expiry
-            json.dumps(decision_data)
-            )
+                decision_data = {
+                    "decision_id": decision_id,
+                    "user_id": user_id,
+                    "intent": intent_analysis["intent"].value,
+                    "context_data": context_data,
+                    "conversation_mode": conversation_mode.value,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "expires_at": (datetime.utcnow() + timedelta(minutes=5)).isoformat()
+                }
+                await redis.setex(
+                    f"pending_decision:{decision_id}",
+                    300,  # 5 minute expiry
+                    json.dumps(decision_data)
+                )
         except Exception as e:
             self.logger.error("Failed to store pending decision", error=str(e))
     
@@ -1480,54 +1480,54 @@ Provide a helpful response using the real data available. Never use placeholder 
             # Retrieve pending decision
             redis = await self._ensure_redis()
             if not redis:
-            return {"success": False, "error": "Decision storage not available"}
+                return {"success": False, "error": "Decision storage not available"}
             
             decision_data = await redis.get(f"pending_decision:{decision_id}")
             if not decision_data:
-            return {"success": False, "error": "Decision not found or expired"}
+                return {"success": False, "error": "Decision not found or expired"}
             
             decision = json.loads(decision_data)
 
             conversation_mode = None
             conversation_mode_value = decision.get("conversation_mode")
             if conversation_mode_value:
-            try:
-            conversation_mode = ConversationMode(conversation_mode_value)
-            except ValueError:
-            conversation_mode = None
+                try:
+                    conversation_mode = ConversationMode(conversation_mode_value)
+                except ValueError:
+                    conversation_mode = None
 
             # Verify user
             if decision["user_id"] != user_id:
-            return {"success": False, "error": "Unauthorized"}
+                return {"success": False, "error": "Unauthorized"}
             
             if not approved:
-            return {"success": True, "message": "Decision rejected by user"}
+                return {"success": True, "message": "Decision rejected by user"}
             
             # Execute based on intent
             intent = ChatIntent(decision["intent"])
             context_data = decision["context_data"]
             
             if intent == ChatIntent.TRADE_EXECUTION:
-            # 5-PHASE EXECUTION PRESERVED
-            return await self._execute_trade_with_validation(
-            context_data.get("trade_validation", {}),
-            user_id,
-            modifications,
-            conversation_mode=conversation_mode,
-            context_data=context_data
-            )
-            
+                # 5-PHASE EXECUTION PRESERVED
+                return await self._execute_trade_with_validation(
+                    context_data.get("trade_validation", {}),
+                    user_id,
+                    modifications,
+                    conversation_mode=conversation_mode,
+                    context_data=context_data
+                )
+
             elif intent == ChatIntent.REBALANCING:
-            # Execute rebalancing
-            return await self._execute_rebalancing(
-            context_data.get("rebalance_analysis", {}),
-            user_id,
-            modifications
-            )
-            
+                # Execute rebalancing
+                return await self._execute_rebalancing(
+                    context_data.get("rebalance_analysis", {}),
+                    user_id,
+                    modifications
+                )
+
             else:
-            return {"success": False, "error": f"Unknown decision type: {intent}"}
-                    except Exception as e:
+                return {"success": False, "error": f"Unknown decision type: {intent}"}
+        except Exception as e:
             self.logger.exception("Decision execution failed", error=str(e))
             return {"success": False, "error": str(e)}
     
@@ -1557,14 +1557,14 @@ Provide a helpful response using the real data available. Never use placeholder 
         simulation_mode = self._coerce_to_bool(trade_payload.get("simulation_mode"), True)
         try:
             missing_fields = [
-            field for field in ("symbol", "action") if not trade_params.get(field)
+                field for field in ("symbol", "action") if not trade_params.get(field)
             ]
             if missing_fields:
-            return {
-            "success": False,
-            "message": f"Missing required trade parameters: {', '.join(missing_fields)}",
-            "phases_completed": phases_completed
-            }
+                return {
+                    "success": False,
+                    "message": f"Missing required trade parameters: {', '.join(missing_fields)}",
+                    "phases_completed": phases_completed
+                }
 
             # Phase 1: Analysis
             self.logger.info("Phase 1: Trade Analysis", trade=trade_payload)
@@ -1574,20 +1574,20 @@ Provide a helpful response using the real data available. Never use placeholder 
             # Phase 2: AI Consensus (ONLY for trade validation)
             self.logger.info("Phase 2: AI Consensus Validation")
             consensus = await self.ai_consensus.validate_trade_decision(
-            trade_params=trade_payload,
-            market_analysis=analysis,
-            confidence_threshold=85.0,
-            user_id=user_id
+                trade_params=trade_payload,
+                market_analysis=analysis,
+                confidence_threshold=85.0,
+                user_id=user_id
             )
             phases_completed.append("consensus")
 
             if not consensus.get("approved", False):
-            return {
-            "success": False,
-            "message": "Trade rejected by AI consensus",
-            "reason": consensus.get("reason", "Risk threshold exceeded"),
-            "phases_completed": phases_completed
-            }
+                return {
+                    "success": False,
+                    "message": "Trade rejected by AI consensus",
+                    "reason": consensus.get("reason", "Risk threshold exceeded"),
+                    "phases_completed": phases_completed
+                }
 
             # Phase 3: Validation
             self.logger.info("Phase 3: Trade Validation")
@@ -1600,18 +1600,18 @@ Provide a helpful response using the real data available. Never use placeholder 
 
             # Ensure basic action mapping for validator
             if "action" not in trade_request and "side" in trade_request:
-            trade_request["action"] = trade_request["side"]
+                trade_request["action"] = trade_request["side"]
 
             validation = await self.trade_executor.validate_trade(trade_request, user_id)
             phases_completed.append("validation")
 
             if not validation.get("valid", False):
-            return {
-            "success": False,
-            "message": "Trade validation failed",
-            "reason": validation.get("reason", "Invalid parameters"),
-            "phases_completed": phases_completed
-            }
+                return {
+                    "success": False,
+                    "message": "Trade validation failed",
+                    "reason": validation.get("reason", "Invalid parameters"),
+                    "phases_completed": phases_completed
+                }
 
             trade_request = validation.get("trade_request", trade_request)
             trade_request.setdefault("side", trade_request.get("action", "BUY").lower())
@@ -1620,113 +1620,113 @@ Provide a helpful response using the real data available. Never use placeholder 
             self.logger.info("Phase 4: Trade Execution")
 
             if conversation_mode == ConversationMode.PAPER_TRADING:
-            quantity = trade_params.get("quantity")
-            notional_amount = trade_params.get("amount") or trade_params.get("position_size_usd")
+                quantity = trade_params.get("quantity")
+                notional_amount = trade_params.get("amount") or trade_params.get("position_size_usd")
 
-            if not quantity and notional_amount and market_data.get("current_price"):
-            try:
-            quantity = float(notional_amount) / float(market_data["current_price"])
-            except (TypeError, ZeroDivisionError):
-            quantity = None
+                if not quantity and notional_amount and market_data.get("current_price"):
+                    try:
+                        quantity = float(notional_amount) / float(market_data["current_price"])
+                    except (TypeError, ZeroDivisionError):
+                        quantity = None
 
-            if quantity is None:
-            return {
-            "success": False,
-            "message": "Unable to determine trade quantity for paper trading",
-            "phases_completed": phases_completed
-            }
+                if quantity is None:
+                    return {
+                        "success": False,
+                        "message": "Unable to determine trade quantity for paper trading",
+                        "phases_completed": phases_completed
+                    }
 
-            paper_result = await self.paper_trading.execute_paper_trade(
-            user_id=user_id,
-            symbol=trade_params["symbol"],
-            side=trade_params["action"],
-            quantity=quantity,
-            strategy_used=trade_params.get("strategy", "chat_trade"),
-            order_type=trade_params.get("order_type", "market")
-            )
-            phases_completed.append("execution")
+                paper_result = await self.paper_trading.execute_paper_trade(
+                    user_id=user_id,
+                    symbol=trade_params["symbol"],
+                    side=trade_params["action"],
+                    quantity=quantity,
+                    strategy_used=trade_params.get("strategy", "chat_trade"),
+                    order_type=trade_params.get("order_type", "market")
+                )
+                phases_completed.append("execution")
 
-            if not paper_result.get("success", False):
-            return {
-            "success": False,
-            "message": paper_result.get("error", "Paper trade execution failed"),
-            "phases_completed": phases_completed,
-            "execution_details": paper_result
-            }
+                if not paper_result.get("success", False):
+                    return {
+                        "success": False,
+                        "message": paper_result.get("error", "Paper trade execution failed"),
+                        "phases_completed": phases_completed,
+                        "execution_details": paper_result
+                    }
 
-            monitoring = {"monitoring_active": False, "paper_trading": True}
-            phases_completed.append("monitoring")
+                monitoring = {"monitoring_active": False, "paper_trading": True}
+                phases_completed.append("monitoring")
 
-            return {
-            "success": True,
-            "message": paper_result.get("message", "Paper trade executed successfully"),
-            "trade_id": paper_result.get("paper_trade", {}).get("trade_id"),
-            "phases_completed": phases_completed,
-            "execution_details": paper_result,
-            "monitoring_details": monitoring
-            }
+                return {
+                    "success": True,
+                    "message": paper_result.get("message", "Paper trade executed successfully"),
+                    "trade_id": paper_result.get("paper_trade", {}).get("trade_id"),
+                    "phases_completed": phases_completed,
+                    "execution_details": paper_result,
+                    "monitoring_details": monitoring
+                }
 
             simulation_mode = await self._get_user_simulation_mode(user_id)
             if simulation_mode is None:
-            simulation_mode = True
+                simulation_mode = True
 
             trade_request = self._build_trade_request_for_execution(trade_params, market_data)
             if not trade_request.get("symbol") or not trade_request.get("action"):
-            return {
-            "success": False,
-            "message": "Unable to build trade request for execution",
-            "phases_completed": phases_completed
-            }
+                return {
+                    "success": False,
+                    "message": "Unable to build trade request for execution",
+                    "phases_completed": phases_completed
+                }
 
             execution = await self.trade_executor.execute_trade(
-            trade_request,
-            user_id,
-            simulation_mode
+                trade_request,
+                user_id,
+                simulation_mode
             )
             phases_completed.append("execution")
 
             if not execution.get("success", False):
-            return {
-            "success": False,
-            "message": "Trade execution failed",
-            "reason": execution.get("error", "Unknown error"),
-            "phases_completed": phases_completed
-            }
+                return {
+                    "success": False,
+                    "message": "Trade execution failed",
+                    "reason": execution.get("error", "Unknown error"),
+                    "phases_completed": phases_completed
+                }
 
             trade_id = execution.get("trade_id")
             simulation_identifier = execution.get("simulation_result", {}).get("order_id")
             derived_trade_id = trade_id or simulation_identifier
 
             if trade_id:
-            # Phase 5: Monitoring
-            self.logger.info("Phase 5: Trade Monitoring")
-            monitoring = await self._initiate_trade_monitoring(
-            trade_id,
-            user_id
-            )
-            phases_completed.append("monitoring")
+                # Phase 5: Monitoring
+                self.logger.info("Phase 5: Trade Monitoring")
+                monitoring = await self._initiate_trade_monitoring(
+                    trade_id,
+                    user_id
+                )
+                phases_completed.append("monitoring")
             else:
-            monitoring = {
-            "monitoring_active": False,
-            "reason": "Trade monitoring skipped - no trade ID available",
-            "simulation": simulation_identifier is not None
-            }
+                monitoring = {
+                    "monitoring_active": False,
+                    "reason": "Trade monitoring skipped - no trade ID available",
+                    "simulation": simulation_identifier is not None
+                }
 
             return {
-            "success": True,
-            "message": execution.get("message", "Trade executed successfully"),
-            "trade_id": derived_trade_id,
-            "phases_completed": phases_completed,
-            "execution_details": execution,
-            "monitoring_details": monitoring
+                "success": True,
+                "message": execution.get("message", "Trade executed successfully"),
+                "trade_id": derived_trade_id,
+                "phases_completed": phases_completed,
+                "execution_details": execution,
+                "monitoring_details": monitoring
             }
 
         except Exception as e:
             self.logger.exception("Trade execution error", error=str(e))
             return {
-            "success": False,
-            "error": str(e),
-            "phases_completed": phases_completed
+                "success": False,
+                "error": str(e),
+                "phases_completed": phases_completed
             }
 
     async def _get_user_simulation_mode(self, user_id: str) -> Optional[bool]:
@@ -1734,23 +1734,23 @@ Provide a helpful response using the real data available. Never use placeholder 
         try:
             user_identifier: Any = user_id
             try:
-            user_identifier = uuid.UUID(str(user_id))
+                user_identifier = uuid.UUID(str(user_id))
             except (ValueError, TypeError):
-            user_identifier = user_id
+                user_identifier = user_id
 
             async with AsyncSessionLocal() as session:
-            result = await session.execute(
-            select(User.simulation_mode).where(User.id == user_identifier)
-            )
-            value = result.scalar_one_or_none()
-            if value is None:
-            return None
-            return bool(value)
+                result = await session.execute(
+                    select(User.simulation_mode).where(User.id == user_identifier)
+                )
+                value = result.scalar_one_or_none()
+                if value is None:
+                    return None
+                return bool(value)
         except Exception as exc:
             self.logger.warning(
-            "Failed to fetch user simulation mode",
-            error=str(exc),
-            user_id=str(user_id)
+                "Failed to fetch user simulation mode",
+                error=str(exc),
+                user_id=str(user_id)
             )
             return None
 
@@ -1787,12 +1787,12 @@ Provide a helpful response using the real data available. Never use placeholder 
             trade_request["position_size_usd"] = amount
             price = market_data.get("current_price")
             if price:
-            try:
-            quantity = float(amount) / float(price)
-            if quantity > 0:
-            trade_request.setdefault("quantity", quantity)
-            except (TypeError, ZeroDivisionError):
-            pass
+                try:
+                    quantity = float(amount) / float(price)
+                    if quantity > 0:
+                        trade_request.setdefault("quantity", quantity)
+                except (TypeError, ZeroDivisionError):
+                    pass
 
         for optional_key in [
             "price",
@@ -1804,7 +1804,7 @@ Provide a helpful response using the real data available. Never use placeholder 
             "strategy"
         ]:
             if optional_key in trade_params and trade_params[optional_key] is not None:
-            trade_request[optional_key] = trade_params[optional_key]
+                trade_request[optional_key] = trade_params[optional_key]
 
         action_value = trade_request.get("action")
         if isinstance(action_value, str) and action_value:
@@ -1822,79 +1822,79 @@ Provide a helpful response using the real data available. Never use placeholder 
         try:
             trades = rebalance_analysis.get("recommended_trades", [])
             if modifications:
-            # Apply any user modifications to trades
-            pass
-            
+                # Apply any user modifications to trades
+                pass
+
             results = []
             for trade in trades:
-            base_request = {
-            "symbol": trade.get("symbol"),
-            "action": trade.get("action") or trade.get("side"),
-            "amount": trade.get("amount"),
-            "quantity": trade.get("quantity", trade.get("amount")),
-            "order_type": trade.get("order_type", "market"),
-            "price": trade.get("price"),
-            "exchange": trade.get("exchange"),
-            "stop_loss": trade.get("stop_loss"),
-            "take_profit": trade.get("take_profit"),
-            }
+                base_request = {
+                    "symbol": trade.get("symbol"),
+                    "action": trade.get("action") or trade.get("side"),
+                    "amount": trade.get("amount"),
+                    "quantity": trade.get("quantity", trade.get("amount")),
+                    "order_type": trade.get("order_type", "market"),
+                    "price": trade.get("price"),
+                    "exchange": trade.get("exchange"),
+                    "stop_loss": trade.get("stop_loss"),
+                    "take_profit": trade.get("take_profit"),
+                }
 
-            base_request = {k: v for k, v in base_request.items() if v is not None}
+                base_request = {k: v for k, v in base_request.items() if v is not None}
 
-            if "action" not in base_request and "side" in base_request:
-            base_request["action"] = base_request["side"]
+                if "action" not in base_request and "side" in base_request:
+                    base_request["action"] = base_request["side"]
 
-            try:
-            validation = await self.trade_executor.validate_trade(dict(base_request), user_id)
-            except Exception as validation_error:
-            self.logger.exception(
-            "Rebalancing trade validation crashed",
-            error=str(validation_error),
-            trade=base_request
-            )
-            results.append({
-            "success": False,
-            "error": str(validation_error),
-            "trade_request": base_request
-            })
-            continue
+                try:
+                    validation = await self.trade_executor.validate_trade(dict(base_request), user_id)
+                except Exception as validation_error:
+                    self.logger.exception(
+                        "Rebalancing trade validation crashed",
+                        error=str(validation_error),
+                        trade=base_request
+                    )
+                    results.append({
+                        "success": False,
+                        "error": str(validation_error),
+                        "trade_request": base_request
+                    })
+                    continue
 
-            if not validation.get("valid", False):
-            results.append({
-            "success": False,
-            "error": validation.get("reason", "Invalid parameters"),
-            "trade_request": validation.get("trade_request", base_request)
-            })
-            continue
+                if not validation.get("valid", False):
+                    results.append({
+                        "success": False,
+                        "error": validation.get("reason", "Invalid parameters"),
+                        "trade_request": validation.get("trade_request", base_request)
+                    })
+                    continue
 
-            normalized_request = validation.get("trade_request", base_request)
-            normalized_request.setdefault(
-            "side",
-            normalized_request.get("action", "BUY").lower()
-            )
+                normalized_request = validation.get("trade_request", base_request)
+                normalized_request.setdefault(
+                    "side",
+                    normalized_request.get("action", "BUY").lower()
+                )
 
-            simulation_mode = self._coerce_to_bool(trade.get("simulation_mode"), True)
+                simulation_mode = self._coerce_to_bool(trade.get("simulation_mode"), True)
 
-            result = await self.trade_executor.execute_trade(
-            normalized_request,
-            user_id,
-            simulation_mode
-            )
-            results.append(result)
-            
+                result = await self.trade_executor.execute_trade(
+                    normalized_request,
+                    user_id,
+                    simulation_mode
+                )
+                results.append(result)
+
             return {
-            "success": True,
-            "message": "Rebalancing executed successfully",
-            "trades_executed": len([r for r in results if r.get("success")]),
-            "trades_failed": len([r for r in results if not r.get("success")]),
-            "results": results
+                "success": True,
+                "message": "Rebalancing executed successfully",
+                "trades_executed": len([r for r in results if r.get("success")]),
+                "trades_failed": len([r for r in results if not r.get("success")]),
+                "results": results
             }
-            
+
         except Exception as e:
             self.logger.exception("Rebalancing execution error", error=str(e))
             return {
-            "success": False,
-            "error": str(e)
+                "success": False,
+                "error": str(e)
             }
     
     async def _initiate_trade_monitoring(
@@ -1906,15 +1906,15 @@ Provide a helpful response using the real data available. Never use placeholder 
         try:
             # Set up monitoring alerts, stop losses, etc.
             return {
-            "monitoring_active": True,
-            "trade_id": trade_id,
-            "alerts_configured": True
+                "monitoring_active": True,
+                "trade_id": trade_id,
+                "alerts_configured": True
             }
         except Exception as e:
             self.logger.error("Failed to initiate monitoring", error=str(e))
             return {
-            "monitoring_active": False,
-            "error": str(e)
+                "monitoring_active": False,
+                "error": str(e)
             }
     
     async def _save_conversation(
@@ -1992,9 +1992,9 @@ Provide a helpful response using the real data available. Never use placeholder 
         active_sessions = []
         for session_id, session in self.sessions.items():
             if session.user_id == user_id:
-            # Consider session active if used in last 24 hours
-            if (datetime.utcnow() - session.last_activity).total_seconds() < 86400:
-            active_sessions.append(session_id)
+                # Consider session active if used in last 24 hours
+                if (datetime.utcnow() - session.last_activity).total_seconds() < 86400:
+                    active_sessions.append(session_id)
         return active_sessions
     
     async def get_service_status(self) -> Dict[str, Any]:
@@ -2006,18 +2006,18 @@ Provide a helpful response using the real data available. Never use placeholder 
             "chat_ai_status": await self.chat_ai.get_service_status(),
             "ai_consensus_status": "operational",  # Only for trades
             "connected_services": {
-            "market_analysis": "connected",
-            "portfolio_risk": "connected",
-            "trade_execution": "connected",
-            "strategy_marketplace": "connected",
-            "paper_trading": "connected"
+                "market_analysis": "connected",
+                "portfolio_risk": "connected",
+                "trade_execution": "connected",
+                "strategy_marketplace": "connected",
+                "paper_trading": "connected"
             },
             "features_active": {
-            "credit_validation": True,
-            "strategy_checks": True,
-            "paper_trading_no_credits": True,
-            "5_phase_execution": True,
-            "real_data_only": True
+                "credit_validation": True,
+                "strategy_checks": True,
+                "paper_trading_no_credits": True,
+                "5_phase_execution": True,
+                "real_data_only": True
             }
         }
 
