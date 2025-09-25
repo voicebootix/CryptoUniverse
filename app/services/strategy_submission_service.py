@@ -14,7 +14,6 @@ if TYPE_CHECKING:
         StrategySubmissionUpdate,
     )
 
-import structlog
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -32,9 +31,6 @@ from app.models.strategy_submission import (
 )
 from app.models.trading import StrategyType, TradingStrategy
 from app.models.user import User
-
-
-logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -67,7 +63,10 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
 
     def __init__(self) -> None:
         super().__init__()
-        self.logger = logger.bind(service="strategy_submission_service")
+
+    @property
+    def logger(self):  # type: ignore[override]
+        return super().logger.bind(service="strategy_submission_service")
 
     # ------------------------------------------------------------------
     # Publisher operations
@@ -444,9 +443,20 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
         publisher = publisher_result.scalar_one_or_none()
         new_publisher = False
         if not publisher:
+            display_name = "Publisher"
+            if user:
+                full_name_attr = getattr(user, "full_name", None)
+                if callable(full_name_attr):
+                    full_name_value = full_name_attr()
+                else:
+                    full_name_value = full_name_attr
+                if full_name_value:
+                    display_name = full_name_value
+                elif user.email:
+                    display_name = user.email.split("@")[0]
             publisher = StrategyPublisher(
                 user_id=user_uuid,
-                display_name=user.full_name or (user.email.split("@")[0] if user.email else "Publisher"),
+                display_name=display_name,
                 verified=True,
                 total_followers=0,
                 total_strategies=0,
@@ -582,13 +592,24 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
             (submission.strategy_config or {}).get(self.REVIEW_HISTORY_KEY, [])
         )
 
+        if user:
+            full_name_attr = getattr(user, "full_name", None)
+            if callable(full_name_attr):
+                publisher_name = full_name_attr()
+            else:
+                publisher_name = full_name_attr
+            if not publisher_name and user.email:
+                publisher_name = user.email.split("@")[0]
+        else:
+            publisher_name = None
+
         return {
             "id": submission.id,
             "name": submission.name,
             "description": submission.description,
             "category": submission.category,
             "publisher_id": str(user.id) if user else None,
-            "publisher_name": (user.full_name or user.email) if user else "Unknown",
+            "publisher_name": publisher_name or (user.email.split("@")[0] if user and user.email else "Unknown"),
             "publisher_email": user.email if user else None,
             "risk_level": submission.risk_level.value if submission.risk_level else "medium",
             "complexity_level": submission.complexity_level.value
