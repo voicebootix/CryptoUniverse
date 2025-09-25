@@ -1482,6 +1482,7 @@ Provide a helpful response using the real data available. Never use placeholder 
         """
         # Merge both approaches for robust trade execution
         trade_payload = dict(trade_params or {})
+        trade_params = trade_params or {}
 
         if modifications:
             trade_payload.update(modifications)
@@ -1494,7 +1495,7 @@ Provide a helpful response using the real data available. Never use placeholder 
         simulation_mode = self._coerce_to_bool(trade_payload.get("simulation_mode"), True)
         try:
             missing_fields = [
-                field for field in ("symbol", "action") if not trade_params.get(field)
+                field for field in ("symbol", "action") if not trade_payload.get(field)
             ]
             if missing_fields:
                 return {
@@ -1557,8 +1558,8 @@ Provide a helpful response using the real data available. Never use placeholder 
             self.logger.info("Phase 4: Trade Execution")
 
             if conversation_mode == ConversationMode.PAPER_TRADING:
-                quantity = trade_params.get("quantity")
-                notional_amount = trade_params.get("amount") or trade_params.get("position_size_usd")
+                quantity = trade_payload.get("quantity")
+                notional_amount = trade_payload.get("amount") or trade_payload.get("position_size_usd")
 
                 if not quantity and notional_amount and market_data.get("current_price"):
                     try:
@@ -1575,11 +1576,11 @@ Provide a helpful response using the real data available. Never use placeholder 
 
                 paper_result = await self.paper_trading.execute_paper_trade(
                     user_id=user_id,
-                    symbol=trade_params["symbol"],
-                    side=trade_params["action"],
+                    symbol=trade_payload["symbol"],
+                    side=trade_payload["action"],
                     quantity=quantity,
-                    strategy_used=trade_params.get("strategy", "chat_trade"),
-                    order_type=trade_params.get("order_type", "market")
+                    strategy_used=trade_payload.get("strategy", "chat_trade"),
+                    order_type=trade_payload.get("order_type", "market")
                 )
                 phases_completed.append("execution")
 
@@ -1607,7 +1608,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                 if simulation_mode is None:
                     simulation_mode = True
 
-                trade_request = self._build_trade_request_for_execution(trade_params, market_data)
+                trade_request = self._build_trade_request_for_execution(trade_payload, market_data)
                 if not trade_request.get("symbol") or not trade_request.get("action"):
                     return {
                         "success": False,
@@ -1768,7 +1769,8 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "symbol": trade.get("symbol"),
                     "action": trade.get("action") or trade.get("side"),
                     "amount": trade.get("amount"),
-                    "quantity": trade.get("quantity", trade.get("amount")),
+                    "position_size_usd": trade.get("position_size_usd") or trade.get("amount"),
+                    "quantity": trade.get("quantity"),
                     "order_type": trade.get("order_type", "market"),
                     "price": trade.get("price"),
                     "exchange": trade.get("exchange"),
