@@ -4785,50 +4785,18 @@ class TradingStrategiesService(LoggerMixin):
 
             # No data available
             return {
-                "total_return": 15.5,
-                "benchmark_return": 12.0,
-                "volatility": 0.045,
-                "max_drawdown": -8.5,
-                "recovery_time": 12,
-                "win_rate": 62,
-                "profit_factor": 1.75,
-                "avg_trade": 2.3,
-                "largest_win": 8.5,
-                "largest_loss": -4.2,
-                "returns_are_percent": True,
-                "benchmark_is_percent": True,
-                "volatility_is_percent": False,
-                "max_drawdown_is_percent": True,
-                "win_rate_is_percent": True,
-                "average_trade_is_percent": True,
-                "largest_win_is_percent": True,
-                "largest_loss_is_percent": True
+                "data_quality": "no_data",
+                "status": "no_data_available",
+                "message": "No verified trades or backtests found for requested period",
+                "total_trades": 0,
             }
         except Exception as e:
             self.logger.error("Failed to get strategy performance data", error=str(e))
-            # Return default data to prevent complete failure
             return {
-                "total_return": 0.0,
-                "benchmark_return": 0.0,
-                        "benchmark_return_units": "decimal",
-                "volatility": 0.0,
-                "max_drawdown": 0.0,
-                "recovery_time": None,
-                "win_rate": 0.0,
-                "profit_factor": 0.0,
-                "avg_trade": 0.0,
-                "largest_win": 0.0,
-                        "largest_win_units": "decimal",
-                "largest_loss": 0.0,
-                        "largest_loss_units": "decimal",
-                "returns_are_percent": True,
-                "benchmark_is_percent": True,
-                "volatility_is_percent": False,
-                "max_drawdown_is_percent": True,
-                "win_rate_is_percent": True,
-                "average_trade_is_percent": True,
-                "largest_win_is_percent": True,
-                "largest_loss_is_percent": True
+                "data_quality": "error",
+                "status": "error",
+                "error": str(e),
+                "total_trades": 0,
             }
 
     @staticmethod
@@ -4943,22 +4911,66 @@ class TradingStrategiesService(LoggerMixin):
             strategy_data = await self._get_strategy_performance_data(strategy_name, analysis_period, user_id)
             normalized_data, unit_flags = self._normalize_strategy_performance_data(strategy_data)
 
-            def _safe_float(value: Any, default: float) -> float:
+            def _safe_float(value: Any) -> Optional[float]:
                 try:
                     if value is None:
-                        return default
+                        return None
                     return float(value)
                 except (TypeError, ValueError):
-                    return default
+                    return None
 
-            total_return = _safe_float(normalized_data.get("total_return"), 0.155)
-            benchmark_return = _safe_float(normalized_data.get("benchmark_return"), 0.12)
-            volatility = _safe_float(normalized_data.get("volatility"), 0.045)
-            max_drawdown = _safe_float(normalized_data.get("max_drawdown"), -0.085)
-            win_rate = _safe_float(normalized_data.get("win_rate"), 0.62)
-            average_trade = _safe_float(normalized_data.get("avg_trade"), 0.023)
-            largest_win = _safe_float(normalized_data.get("largest_win"), 0.085)
-            largest_loss = _safe_float(normalized_data.get("largest_loss"), -0.042)
+            data_quality = strategy_data.get("data_quality", "unknown")
+            perf_result["data_quality"] = data_quality
+            perf_result["status"] = strategy_data.get("status", data_quality)
+            perf_result["raw_performance"] = strategy_data
+            perf_result["unit_metadata"] = unit_flags
+
+            if data_quality in {"no_data", "error"} or not normalized_data:
+                perf_result["performance_metrics"] = {}
+                perf_result["risk_adjusted_metrics"] = {}
+                perf_result["benchmark_comparison"] = {}
+                perf_result["attribution_analysis"] = {}
+                perf_result["optimization_recommendations"] = []
+                perf_result["error"] = (
+                    strategy_data.get("error")
+                    or strategy_data.get("message")
+                    or "No verified performance data available"
+                )
+                return {
+                    "success": False,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data_quality": perf_result.get("data_quality"),
+                    "status": perf_result.get("status"),
+                    "strategy_performance_analysis": perf_result,
+                }
+
+            total_return = _safe_float(normalized_data.get("total_return"))
+            benchmark_return = _safe_float(normalized_data.get("benchmark_return")) or 0.0
+            volatility = _safe_float(normalized_data.get("volatility"))
+            max_drawdown = _safe_float(normalized_data.get("max_drawdown"))
+            win_rate = _safe_float(normalized_data.get("win_rate"))
+            average_trade = _safe_float(normalized_data.get("avg_trade"))
+            largest_win = _safe_float(normalized_data.get("largest_win")) or 0.0
+            largest_loss = _safe_float(normalized_data.get("largest_loss")) or 0.0
+
+            if any(
+                metric is None
+                for metric in [total_return, volatility, max_drawdown, win_rate, average_trade]
+            ):
+                perf_result["performance_metrics"] = {}
+                perf_result["risk_adjusted_metrics"] = {}
+                perf_result["benchmark_comparison"] = {}
+                perf_result["attribution_analysis"] = {}
+                perf_result["optimization_recommendations"] = []
+                perf_result["status"] = "insufficient_data"
+                perf_result["error"] = "Missing required performance metrics"
+                return {
+                    "success": False,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data_quality": perf_result.get("data_quality"),
+                    "status": perf_result.get("status"),
+                    "strategy_performance_analysis": perf_result,
+                }
 
             period_days = max(1, self._get_period_days_safe(analysis_period))
             annualized_return = total_return * (365 / period_days)
@@ -4971,13 +4983,11 @@ class TradingStrategiesService(LoggerMixin):
                 "max_drawdown_pct": max_drawdown * 100,
                 "recovery_time_days": strategy_data.get("recovery_time", 12),
                 "winning_trades_pct": win_rate * 100,
-                "profit_factor": strategy_data.get("profit_factor", 1.75),
+                "profit_factor": _safe_float(strategy_data.get("profit_factor")) or 0.0,
                 "average_trade_return": average_trade * 100,
                 "largest_win": largest_win * 100,
                 "largest_loss": largest_loss * 100
             }
-
-            perf_result["unit_metadata"] = unit_flags
 
             # Risk-adjusted metrics
             risk_free_rate = 0.05  # 5% risk-free rate
@@ -5099,12 +5109,35 @@ class TradingStrategiesService(LoggerMixin):
             return {
                 "success": True,
                 "timestamp": datetime.utcnow().isoformat(),
-                "strategy_performance_analysis": perf_result
+                "data_quality": perf_result.get("data_quality"),
+                "status": perf_result.get("status"),
+                "strategy_performance_analysis": perf_result,
             }
-            
+
         except Exception as e:
             self.logger.error("Strategy performance analysis failed", error=str(e), exc_info=True)
-            return {"success": False, "error": str(e), "function": "strategy_performance"}
+            error_payload = {
+                "strategy_name": strategy_name or "Portfolio",
+                "analysis_period": analysis_period,
+                "performance_metrics": {},
+                "risk_adjusted_metrics": {},
+                "benchmark_comparison": {},
+                "attribution_analysis": {},
+                "optimization_recommendations": [],
+                "data_quality": "error",
+                "status": "error",
+                "error": str(e),
+                "raw_performance": {},
+                "unit_metadata": {},
+            }
+            return {
+                "success": False,
+                "timestamp": datetime.utcnow().isoformat(),
+                "data_quality": "error",
+                "status": "error",
+                "strategy_performance_analysis": error_payload,
+                "function": "strategy_performance",
+            }
     
     async def _calculate_real_correlation(
         self, 
