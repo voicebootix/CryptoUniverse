@@ -476,6 +476,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 },
                 "user_profile": {
                     "active_strategies": user_profile.active_strategy_count,
+                    "active_strategy_count": user_profile.active_strategy_count,
                     "user_tier": user_profile.user_tier,
                     "monthly_strategy_cost": user_profile.total_monthly_strategy_cost,
                     "scan_limit": user_profile.opportunity_scan_limit,
@@ -2166,6 +2167,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 data = json.loads(cached_data)
 
                 payload = data.get("payload", data)
+                if isinstance(payload, dict):
+                    self._ensure_profile_strategy_counts(payload)
                 metadata = data.get("cache_metadata", {})
 
                 cache_time_str = metadata.get("cached_at") or data.get("cached_at")
@@ -2232,6 +2235,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             except TypeError:
                 payload_copy = result
 
+            self._ensure_profile_strategy_counts(payload_copy)
+
             cache_entry = {
                 "payload": payload_copy,
                 "cache_metadata": {
@@ -2252,6 +2257,24 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         except Exception as e:
             self.logger.debug("Cache storage failed", error=str(e))
+
+    def _ensure_profile_strategy_counts(self, payload: Dict[str, Any]) -> None:
+        """Ensure both legacy and new user profile keys are present."""
+
+        if not isinstance(payload, dict):
+            return
+
+        profile = payload.get("user_profile")
+        if not isinstance(profile, dict):
+            return
+
+        active_strategies = profile.get("active_strategies")
+        active_strategy_count = profile.get("active_strategy_count")
+
+        if active_strategies is None and active_strategy_count is not None:
+            profile["active_strategies"] = active_strategy_count
+        elif active_strategy_count is None and active_strategies is not None:
+            profile["active_strategy_count"] = active_strategies
     
     async def _track_error_metrics(self, user_id: str, scan_id: str, error: str, execution_time: float):
         """Track error metrics for monitoring and alerting."""
