@@ -1536,6 +1536,19 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         strategies: List[Dict[str, Any]] = []
         for strategy_func, config in self.ai_strategy_catalog.items():
             monthly_cost = config.get("credit_cost_monthly", 25)
+
+            try:
+                monthly_cost_value = float(monthly_cost)
+            except (TypeError, ValueError):
+                monthly_cost_value = 0.0
+
+            if monthly_cost_value == 0.0:
+                subscription_type = "welcome"
+                credit_cost_per_execution = 0
+            else:
+                subscription_type = "purchased"
+                credit_cost_per_execution = max(1, int(monthly_cost_value / 30))
+
             strategy_record = {
                 "strategy_id": f"ai_{strategy_func}",
                 "name": config["name"],
@@ -1543,10 +1556,10 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 "is_ai_strategy": True,
                 "publisher_name": "CryptoUniverse AI",
                 "is_active": True,
-                "subscription_type": "purchased",
+                "subscription_type": subscription_type,
                 "activated_at": "2024-01-01T00:00:00Z",
                 "credit_cost_monthly": monthly_cost,
-                "credit_cost_per_execution": max(1, monthly_cost // 30),
+                "credit_cost_per_execution": credit_cost_per_execution,
                 "total_trades": 0,
                 "winning_trades": 0,
                 "win_rate": 0.0,

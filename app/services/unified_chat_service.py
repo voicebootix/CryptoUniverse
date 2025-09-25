@@ -23,7 +23,7 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
-from app.core.database import AsyncSessionLocal
+from app.core.database import get_database_session
 from app.core.redis import get_redis_client
 
 # Import the new ChatAI service for conversations
@@ -582,7 +582,7 @@ class UnifiedChatService(LoggerMixin):
             from sqlalchemy import select
             import uuid
 
-            async with AsyncSessionLocal() as db:
+            async with get_database_session() as db:
                 # Try multiple lookup methods to find existing account
                 credit_account = None
 
@@ -715,7 +715,7 @@ class UnifiedChatService(LoggerMixin):
 
             # Fix: Apply timeout at the correct level to avoid async context conflicts
             async def _fetch_portfolio():
-                async with AsyncSessionLocal() as db:
+                async with get_database_session() as db:
                     return await get_user_portfolio_from_exchanges(str(user_id), db)
 
             portfolio_data = await asyncio.wait_for(_fetch_portfolio(), timeout=15.0)
@@ -1214,28 +1214,67 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
                 prompt_parts.append(f"\n{strategy} ({len(opps)} opportunities):")
                 for i, opp in enumerate(opps[:3], 1):  # Show top 3 per strategy
                     symbol = opp.get('symbol', 'N/A')
-                    confidence = opp.get('confidence_score', 0)
-                    profit_usd = opp.get('profit_potential_usd', 0)
-                    metadata = opp.get('metadata', {})
+                    metadata = opp.get('metadata', {}) or {}
+
+                    try:
+                        confidence_val = float(opp.get('confidence_score') or 0)
+                    except (TypeError, ValueError):
+                        confidence_val = 0.0
+
+                    try:
+                        profit_val = float(opp.get('profit_potential_usd') or 0)
+                    except (TypeError, ValueError):
+                        profit_val = 0.0
 
                     # Format based on opportunity type
                     if 'portfolio' in strategy.lower():
                         if metadata.get('strategy'):
                             prompt_parts.append(f"  {i}. {metadata['strategy'].replace('_', ' ').title()}")
-                            prompt_parts.append(f"     Expected Return: {metadata.get('expected_annual_return', 0)*100:.1f}%")
-                            prompt_parts.append(f"     Sharpe Ratio: {metadata.get('sharpe_ratio', 0):.2f}")
-                            prompt_parts.append(f"     Risk Level: {metadata.get('risk_level', 0)*100:.1f}%")
+
+                            try:
+                                expected_return = float(metadata.get('expected_annual_return') or 0) * 100
+                            except (TypeError, ValueError):
+                                expected_return = 0.0
+
+                            try:
+                                sharpe_ratio = float(metadata.get('sharpe_ratio') or 0)
+                            except (TypeError, ValueError):
+                                sharpe_ratio = 0.0
+
+                            try:
+                                risk_level = float(metadata.get('risk_level') or 0) * 100
+                            except (TypeError, ValueError):
+                                risk_level = 0.0
+
+                            prompt_parts.append(f"     Expected Return: {expected_return:.1f}%")
+                            prompt_parts.append(f"     Sharpe Ratio: {sharpe_ratio:.2f}")
+                            prompt_parts.append(f"     Risk Level: {risk_level:.1f}%")
                         else:
                             prompt_parts.append(f"  {i}. {symbol} - {metadata.get('rebalance_action', 'REBALANCE')}")
-                            prompt_parts.append(f"     Amount: {metadata.get('amount', 0)*100:.1f}% of portfolio")
+
+                            try:
+                                amount_pct = float(metadata.get('amount') or 0) * 100
+                            except (TypeError, ValueError):
+                                amount_pct = 0.0
+
+                            prompt_parts.append(f"     Amount: {amount_pct:.1f}% of portfolio")
                     elif 'risk' in strategy.lower():
                         prompt_parts.append(f"  {i}. {metadata.get('risk_type', 'Risk Alert')}")
                         prompt_parts.append(f"     Action: {metadata.get('strategy', 'Mitigation needed')}")
-                        prompt_parts.append(f"     Urgency: {metadata.get('urgency', confidence/100)}")
+
+                        try:
+                            if metadata.get('urgency') is not None:
+                                urgency = float(metadata.get('urgency'))
+                            else:
+                                urgency = confidence_val / 100.0
+                        except (TypeError, ValueError):
+                            urgency = confidence_val / 100.0
+
+                        prompt_parts.append(f"     Urgency: {urgency:.2f}")
                     else:
                         prompt_parts.append(f"  {i}. {symbol}")
-                        prompt_parts.append(f"     Confidence: {confidence:.1f}%")
-                        prompt_parts.append(f"     Profit Potential: ${profit_usd:,.0f}")
+                        prompt_parts.append(f"     Confidence: {confidence_val:.1f}%")
+                        prompt_parts.append(f"     Profit Potential: ${profit_val:,.0f}")
                         action = metadata.get('signal_action', opp.get('action', 'ANALYZE'))
                         if action:
                             prompt_parts.append(f"     Action: {action}")
@@ -1254,40 +1293,6 @@ INSTRUCTIONS FOR AI MONEY MANAGER:
 Remember: You are the AI Money Manager providing personalized advice based on real analysis.""")
             
             return "\n".join(prompt_parts)
-
-        elif intent == ChatIntent.STRATEGY_MANAGEMENT:
-            user_strategies = context_data.get("user_strategies", {})
-            marketplace_strategies = context_data.get("marketplace_strategies", {})
-
-            if user_strategies.get("success", False):
-                active_strategies = user_strategies.get("active_strategies", [])
-                total_strategies = user_strategies.get("total_strategies", 0)
-                total_monthly_cost = user_strategies.get("total_monthly_cost", 0)
-
-                return f"""User asked: "{message}"
-
-CURRENT STRATEGY PORTFOLIO:
-- Total Active Strategies: {total_strategies}
-- Monthly Cost: {total_monthly_cost} credits
-- Active Strategies: {[s.get('name', 'Unknown') for s in active_strategies[:10]]}
-
-STRATEGY DETAILS:
-{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - {s.get('credit_cost_monthly', 0)} credits/month" for s in active_strategies[:10]])}
-
-MARKETPLACE SUMMARY:
-- Available Strategies: {len(marketplace_strategies.get('strategies', []))} total strategies
-
-Provide a comprehensive overview of the user's strategy portfolio, subscription status, and actionable recommendations for strategy management."""
-            else:
-                error = user_strategies.get("error", "Unknown error")
-                return f"""User asked: "{message}"
-
-STRATEGY ACCESS STATUS:
-- Current Access: Limited or None
-- Error: {error}
-- Available Marketplace Strategies: {len(marketplace_strategies.get('strategies', []))}
-
-Explain that strategy access requires subscription/purchase and guide the user on how to get started with strategies."""
 
         elif intent == ChatIntent.STRATEGY_RECOMMENDATION:
             active_strategy = context_data.get("active_strategy", {})
@@ -1702,7 +1707,7 @@ Provide a helpful response using the real data available. Never use placeholder 
             except (ValueError, TypeError):
                 user_identifier = user_id
 
-            async with AsyncSessionLocal() as session:
+            async with get_database_session() as session:
                 result = await session.execute(
                     select(User.simulation_mode).where(User.id == user_identifier)
                 )
