@@ -291,6 +291,7 @@ class MarketAnalysisService(LoggerMixin):
             return {
                 "success": overall_success,
                 "function": "technical_analysis",
+                "technical_analysis": analysis_results,
                 "data": analysis_results,
                 "metadata": metadata,
             }

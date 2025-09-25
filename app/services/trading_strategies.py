@@ -4931,8 +4931,18 @@ class TradingStrategiesService(LoggerMixin):
                 perf_result["benchmark_comparison"] = {}
                 perf_result["attribution_analysis"] = {}
                 perf_result["optimization_recommendations"] = []
-                perf_result["error"] = strategy_data.get("error") or strategy_data.get("message") or "No verified performance data available"
-                return perf_result
+                perf_result["error"] = (
+                    strategy_data.get("error")
+                    or strategy_data.get("message")
+                    or "No verified performance data available"
+                )
+                return {
+                    "success": False,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data_quality": perf_result.get("data_quality"),
+                    "status": perf_result.get("status"),
+                    "strategy_performance_analysis": perf_result,
+                }
 
             total_return = _safe_float(normalized_data.get("total_return"))
             benchmark_return = _safe_float(normalized_data.get("benchmark_return")) or 0.0
@@ -4943,7 +4953,10 @@ class TradingStrategiesService(LoggerMixin):
             largest_win = _safe_float(normalized_data.get("largest_win")) or 0.0
             largest_loss = _safe_float(normalized_data.get("largest_loss")) or 0.0
 
-            if any(metric is None for metric in [total_return, volatility, max_drawdown, win_rate, average_trade]):
+            if any(
+                metric is None
+                for metric in [total_return, volatility, max_drawdown, win_rate, average_trade]
+            ):
                 perf_result["performance_metrics"] = {}
                 perf_result["risk_adjusted_metrics"] = {}
                 perf_result["benchmark_comparison"] = {}
@@ -4951,7 +4964,13 @@ class TradingStrategiesService(LoggerMixin):
                 perf_result["optimization_recommendations"] = []
                 perf_result["status"] = "insufficient_data"
                 perf_result["error"] = "Missing required performance metrics"
-                return perf_result
+                return {
+                    "success": False,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "data_quality": perf_result.get("data_quality"),
+                    "status": perf_result.get("status"),
+                    "strategy_performance_analysis": perf_result,
+                }
 
             period_days = max(1, self._get_period_days_safe(analysis_period))
             annualized_return = total_return * (365 / period_days)
@@ -5090,12 +5109,35 @@ class TradingStrategiesService(LoggerMixin):
             return {
                 "success": True,
                 "timestamp": datetime.utcnow().isoformat(),
-                "strategy_performance_analysis": perf_result
+                "data_quality": perf_result.get("data_quality"),
+                "status": perf_result.get("status"),
+                "strategy_performance_analysis": perf_result,
             }
-            
+
         except Exception as e:
             self.logger.error("Strategy performance analysis failed", error=str(e), exc_info=True)
-            return {"success": False, "error": str(e), "function": "strategy_performance"}
+            error_payload = {
+                "strategy_name": strategy_name or "Portfolio",
+                "analysis_period": analysis_period,
+                "performance_metrics": {},
+                "risk_adjusted_metrics": {},
+                "benchmark_comparison": {},
+                "attribution_analysis": {},
+                "optimization_recommendations": [],
+                "data_quality": "error",
+                "status": "error",
+                "error": str(e),
+                "raw_performance": {},
+                "unit_metadata": {},
+            }
+            return {
+                "success": False,
+                "timestamp": datetime.utcnow().isoformat(),
+                "data_quality": "error",
+                "status": "error",
+                "strategy_performance_analysis": error_payload,
+                "function": "strategy_performance",
+            }
     
     async def _calculate_real_correlation(
         self, 

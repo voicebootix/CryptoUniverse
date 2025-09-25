@@ -3,8 +3,12 @@ from pathlib import Path
 import sys
 from typing import Any
 
+import os
 import pytest
 import types
+
+os.environ.setdefault("SECRET_KEY", "test-secret")
+os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -78,10 +82,12 @@ async def test_strategy_performance_requires_real_data(monkeypatch):
     assert "total_return" not in data
 
     summary = await service.strategy_performance(None, "30d", user_id="test-user")
+    assert summary["success"] is False
     assert summary["data_quality"] == "no_data"
     assert summary["status"] == "no_data_available"
-    assert summary["performance_metrics"] == {}
-    assert summary.get("error")
+    analysis = summary["strategy_performance_analysis"]
+    assert analysis["performance_metrics"] == {}
+    assert analysis.get("error")
 
 
 @pytest.mark.asyncio
@@ -95,7 +101,7 @@ async def test_technical_analysis_marks_missing_data(monkeypatch):
 
     result = await service.technical_analysis("BTC/USDT")
     assert result["success"] is False
-    symbol_payload = result["data"]["BTC/USDT"]
+    symbol_payload = result["technical_analysis"]["BTC/USDT"]
     assert symbol_payload["data_quality"] == "no_data"
     assert symbol_payload["analysis"] == {}
     assert symbol_payload["signals"] == {}
