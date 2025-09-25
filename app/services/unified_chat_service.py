@@ -1825,12 +1825,14 @@ Provide a helpful response using the real data available. Never use placeholder 
                 # Apply any user modifications to trades
                 pass
 
-            results = []
+            results: List[Dict[str, Any]] = []
             for trade in trades:
                 base_request = {
                     "symbol": trade.get("symbol"),
                     "action": trade.get("action") or trade.get("side"),
                     "amount": trade.get("amount"),
+                    "position_size_usd": trade.get("position_size_usd")
+                    or trade.get("amount"),
                     "quantity": trade.get("quantity", trade.get("amount")),
                     "order_type": trade.get("order_type", "market"),
                     "price": trade.get("price"),
@@ -1870,7 +1872,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                 normalized_request = validation.get("trade_request", base_request)
                 normalized_request.setdefault(
                     "side",
-                    normalized_request.get("action", "BUY").lower()
+                    normalized_request.get("action", "BUY").lower(),
                 )
 
                 simulation_mode = self._coerce_to_bool(trade.get("simulation_mode"), True)
@@ -1878,7 +1880,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                 result = await self.trade_executor.execute_trade(
                     normalized_request,
                     user_id,
-                    simulation_mode
+                    simulation_mode,
                 )
                 results.append(result)
 
@@ -1887,14 +1889,14 @@ Provide a helpful response using the real data available. Never use placeholder 
                 "message": "Rebalancing executed successfully",
                 "trades_executed": len([r for r in results if r.get("success")]),
                 "trades_failed": len([r for r in results if not r.get("success")]),
-                "results": results
+                "results": results,
             }
 
         except Exception as e:
             self.logger.exception("Rebalancing execution error", error=str(e))
             return {
                 "success": False,
-                "error": str(e)
+                "error": str(e),
             }
     
     async def _initiate_trade_monitoring(
