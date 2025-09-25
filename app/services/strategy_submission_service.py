@@ -345,12 +345,19 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
             StrategyStatus.SUBMITTED,
             StrategyStatus.UNDER_REVIEW,
         }
+        changes_requested_status = getattr(
+            StrategyStatus, "CHANGES_REQUESTED", None
+        )
+        if changes_requested_status is not None:
+            allowed_statuses.add(changes_requested_status)
 
         if submission.status not in allowed_statuses:
             status_value = submission.status.value if submission.status else "unknown"
             raise ValueError(
                 "Cannot assign submission while status is "
-                f"'{status_value}'; only submitted or under_review submissions can be reassigned."
+                f"'{status_value}'; only submitted, under_review"
+                f"{', changes_requested' if changes_requested_status else ''}"
+                " submissions can be reassigned."
             )
 
         submission.reviewer_id = str(reviewer.id)
