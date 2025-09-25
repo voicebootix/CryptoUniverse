@@ -408,6 +408,9 @@ cache = CacheManager(
     enabled=not settings.DEBUG
 )
 
+# Alias for backward compatibility
+cache_manager = cache
+
 # Helper functions for backward compatibility
 async def get_cache() -> CacheManager:
     """Get the global cache manager instance."""
