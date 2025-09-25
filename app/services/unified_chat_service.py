@@ -1204,10 +1204,17 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
             prompt_parts = [f'User asked: "{message}"']
             prompt_parts.append(f"\nTotal opportunities found: {len(opportunities)}")
             prompt_parts.append(f"User risk profile: {user_profile.get('risk_profile', 'balanced')}")
-            active_strategies_total = user_profile.get(
-                "active_strategies",
-                user_profile.get("active_strategy_count", 0),
-            )
+            # Robust coercion of active_strategies to integer count
+            active_strategies_raw = user_profile.get("active_strategies")
+            if isinstance(active_strategies_raw, (list, tuple, set)):
+                active_strategies_total = len(active_strategies_raw)
+            elif isinstance(active_strategies_raw, int):
+                active_strategies_total = active_strategies_raw
+            elif isinstance(active_strategies_raw, str) and active_strategies_raw.isdigit():
+                active_strategies_total = int(active_strategies_raw)
+            else:
+                active_strategies_total = user_profile.get("active_strategy_count", 0)
+
             prompt_parts.append(
                 f"Active strategies: {active_strategies_total}"
             )
@@ -1240,6 +1247,9 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
                     if total_potential:
                         summary_line += f" • ${total_potential:,.0f} potential"
                     if average_confidence is not None:
+                        # Normalize confidence to percentage (0-1 -> 0-100)
+                        if average_confidence <= 1.0:
+                            average_confidence *= 100
                         summary_line += f" • {average_confidence:.1f}% avg confidence"
                     prompt_parts.append(summary_line)
 
@@ -1251,6 +1261,9 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
                 for index, opportunity in enumerate(strategy_opps[:3], start=1):
                     symbol = opportunity.get("symbol", "N/A")
                     confidence = opportunity.get("confidence_score", 0.0)
+                    # Normalize confidence to percentage (0-1 -> 0-100)
+                    if confidence <= 1.0:
+                        confidence *= 100
                     profit_usd = opportunity.get("profit_potential_usd", 0.0)
                     metadata = opportunity.get("metadata", {}) or {}
 
