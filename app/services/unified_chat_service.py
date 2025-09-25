@@ -203,7 +203,21 @@ class UnifiedChatService(LoggerMixin):
     
     def _initialize_personalities(self) -> Dict[TradingMode, Dict[str, Any]]:
         """Initialize AI personalities - PRESERVED from conversational AI."""
-        return {
+        # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
             TradingMode.CONSERVATIVE: {
                 "name": "Warren - Conservative Financial Advisor",
                 "style": "cautious, analytical, risk-averse, thorough",
@@ -244,7 +258,21 @@ class UnifiedChatService(LoggerMixin):
     
     def _initialize_intent_patterns(self) -> Dict[str, List[str]]:
         """Initialize intent patterns - PRESERVED from chat engine."""
-        return {
+        # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
             ChatIntent.GREETING: [
                 "hello", "hi", "hey", "good morning", "good evening", 
                 "how are you", "what's up", "greetings"
@@ -486,7 +514,21 @@ class UnifiedChatService(LoggerMixin):
                 detected_intent = intent_mapping.get(ai_intent, ChatIntent.UNKNOWN)
                 confidence = intent_data.get("confidence", 0.7)
         
-        return {
+        # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
             "intent": detected_intent,
             "confidence": confidence,
             "requires_action": detected_intent in [
@@ -511,7 +553,21 @@ class UnifiedChatService(LoggerMixin):
         
         # Paper trading mode - NO CREDIT CHECKS
         if conversation_mode == ConversationMode.PAPER_TRADING:
-            return {"allowed": True, "message": "Paper trading mode active"}
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {"allowed": True, "message": "Paper trading mode active"}
         
         # Check credit requirements for paid operations
         if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
@@ -529,7 +585,21 @@ class UnifiedChatService(LoggerMixin):
                                account_status=credit_check.get('account_status', 'unknown'))
 
                 if not credit_check["has_credits"]:
-                    return {
+                    # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                         "allowed": False,
                         "message": f"Insufficient credits. You have {credit_check['available_credits']} credits. "
                                   f"This operation requires {credit_check['required_credits']} credits. "
@@ -546,6 +616,20 @@ class UnifiedChatService(LoggerMixin):
         if intent in [ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
             strategy_check = await self._check_strategy_access(user_id)
             if not strategy_check["has_access"] and intent == ChatIntent.STRATEGY_RECOMMENDATION:
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {
                     "allowed": False,
                     "message": f"You need to purchase strategy access. "
@@ -563,13 +647,41 @@ class UnifiedChatService(LoggerMixin):
         if intent == ChatIntent.TRADE_EXECUTION:
             limit_check = await self._check_trading_limits(user_id)
             if not limit_check["within_limits"]:
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {
                     "allowed": False,
                     "message": limit_check["message"],
                     "requires_action": False
                 }
         
-        return {"allowed": True, "message": "All checks passed"}
+        # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {"allowed": True, "message": "All checks passed"}
     
     async def _check_user_credits(self, user_id: str) -> Dict[str, Any]:
         """
@@ -601,7 +713,21 @@ class UnifiedChatService(LoggerMixin):
                         pass
 
                 if not credit_account:
-                    return {
+                    # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                         "has_credits": False,
                         "available_credits": 0,
                         "required_credits": self.live_trading_credit_requirement,
@@ -613,6 +739,20 @@ class UnifiedChatService(LoggerMixin):
                 available_credits = max(0, credit_account.available_credits or 0)
                 required_credits = self.live_trading_credit_requirement
 
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {
                     "has_credits": available_credits >= required_credits,
                     "available_credits": available_credits,
@@ -624,7 +764,21 @@ class UnifiedChatService(LoggerMixin):
 
         except Exception as e:
             self.logger.error("Credit check failed", error=str(e), user_id=user_id)
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "has_credits": False,
                 "available_credits": 0,
                 "required_credits": self.live_trading_credit_requirement,
@@ -652,7 +806,21 @@ class UnifiedChatService(LoggerMixin):
             # For admin users or successful portfolio fetch with strategies, grant access
             has_access = portfolio_success and len(active_strategies) > 0
 
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "has_access": has_access,
                 "active_strategies": active_strategies,
                 "available_count": len(available.get("strategies", [])),
@@ -661,7 +829,21 @@ class UnifiedChatService(LoggerMixin):
             }
         except Exception as e:
             self.logger.error("Strategy check failed", error=str(e))
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "has_access": False,
                 "active_strategies": [],
                 "available_count": 0,
@@ -677,7 +859,21 @@ class UnifiedChatService(LoggerMixin):
             portfolio = {"total_value": 0, "positions": []}
             risk_limits = await self.portfolio_risk.calculate_position_limits(user_id)
             
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "within_limits": True,  # Real calculation needed
                 "message": "Trading limits OK",
                 "current_exposure": portfolio.get("total_value", 0),
@@ -685,7 +881,21 @@ class UnifiedChatService(LoggerMixin):
             }
         except Exception as e:
             self.logger.error("Limit check failed", error=str(e))
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "within_limits": False,
                 "message": f"Unable to verify trading limits: {str(e)}"
             }
@@ -753,7 +963,21 @@ class UnifiedChatService(LoggerMixin):
             # Sort positions by value
             chat_positions.sort(key=lambda x: x.get("value_usd", 0), reverse=True)
 
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "total_value": float(total_value_usd),
                 "daily_pnl": float(portfolio_data.get("daily_pnl", 0)),
                 "daily_pnl_pct": float(portfolio_data.get("daily_pnl_pct", 0)),
@@ -762,7 +986,21 @@ class UnifiedChatService(LoggerMixin):
 
         except asyncio.TimeoutError:
             self.logger.error("Portfolio fetch timeout in chat")
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "total_value": 0,
                 "daily_pnl": 0,
                 "daily_pnl_pct": 0,
@@ -772,7 +1010,21 @@ class UnifiedChatService(LoggerMixin):
         except Exception as e:
             self.logger.error(f"Portfolio transformation failed: {e}", exc_info=True)
             # Return the actual error message so we can see what's failing
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "total_value": -999,  # Clear indicator of error
                 "daily_pnl": 0,
                 "daily_pnl_pct": 0,
@@ -1031,7 +1283,21 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                 intent_analysis["confidence"]
             )
 
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "success": True,
                 "session_id": session.session_id,
                 "message_id": str(uuid.uuid4()),
@@ -1048,7 +1314,21 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                 "timestamp": datetime.utcnow()
             }
         else:
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "success": False,
                 "error": response["error"],
                 "session_id": session.session_id,
@@ -1198,6 +1478,8 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
                     or opportunity.get("strategy_id")
                     or "Unknown"
                 )
+                # Convert strategy_name to string before calling .replace() and .title()
+                strategy_name = str(strategy_name) if strategy_name else "Unknown"
                 normalized_strategy = strategy_name.replace("_", " ").title()
                 opportunities_by_strategy.setdefault(normalized_strategy, []).append(opportunity)
             # Build comprehensive prompt
@@ -1518,7 +1800,21 @@ Provide a helpful response using the real data available. Never use placeholder 
         try:
             # This would connect to your actual user service
             # For now, returning structure that matches your system
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
             "trading_mode": "balanced",
             "operation_mode": "assisted",
             "risk_tolerance": "medium",
@@ -1526,13 +1822,41 @@ Provide a helpful response using the real data available. Never use placeholder 
             }
         except Exception as e:
             self.logger.error("Failed to get user config", error=str(e))
-            return {"trading_mode": "balanced", "operation_mode": "assisted"}
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {"trading_mode": "balanced", "operation_mode": "assisted"}
     
     async def _get_performance_metrics(self, user_id: str) -> Dict[str, Any]:
         """Get performance metrics - REAL data."""
         try:
             # Connect to your performance tracking service
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
             "total_return": 0.0,
             "win_rate": 0.0,
             "sharpe_ratio": 0.0,
@@ -1540,7 +1864,21 @@ Provide a helpful response using the real data available. Never use placeholder 
             }
         except Exception as e:
             self.logger.error("Failed to get performance metrics", error=str(e))
-            return {}
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {}
     
     async def _prepare_trade_validation(
         self,
@@ -1548,7 +1886,21 @@ Provide a helpful response using the real data available. Never use placeholder 
         user_id: str
     ) -> Dict[str, Any]:
         """Prepare trade for 5-phase validation."""
-        return {
+        # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
             "symbol": entities.get("symbol", "BTC"),
             "action": entities.get("action", "buy"),
             "amount": entities.get("amount", 0),
@@ -1607,10 +1959,38 @@ Provide a helpful response using the real data available. Never use placeholder 
             # Retrieve pending decision
             redis = await self._ensure_redis()
             if not redis:
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {"success": False, "error": "Decision storage not available"}
 
             decision_data = await redis.get(f"pending_decision:{decision_id}")
             if not decision_data:
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {"success": False, "error": "Decision not found or expired"}
 
             decision = json.loads(decision_data)
@@ -1625,9 +2005,37 @@ Provide a helpful response using the real data available. Never use placeholder 
 
             # Verify user
             if decision["user_id"] != user_id:
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {"success": False, "error": "Unauthorized"}
 
             if not approved:
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {"success": True, "message": "Decision rejected by user"}
             # Execute based on intent
             intent = ChatIntent(decision["intent"])
@@ -1652,10 +2060,38 @@ Provide a helpful response using the real data available. Never use placeholder 
                 )
 
             else:
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {"success": False, "error": f"Unknown decision type: {intent}"}
         except Exception as e:
             self.logger.exception("Decision execution failed", error=str(e))
-            return {"success": False, "error": str(e)}
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {"success": False, "error": str(e)}
     
     async def _execute_trade_with_validation(
         self,
@@ -1687,6 +2123,20 @@ Provide a helpful response using the real data available. Never use placeholder 
                 field for field in ("symbol", "action") if not trade_payload.get(field)
             ]
             if missing_fields:
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {
                     "success": False,
                     "message": f"Missing required trade parameters: {', '.join(missing_fields)}",
@@ -1709,6 +2159,20 @@ Provide a helpful response using the real data available. Never use placeholder 
             phases_completed.append("consensus")
 
             if not consensus.get("approved", False):
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {
                     "success": False,
                     "message": "Trade rejected by AI consensus",
@@ -1733,6 +2197,20 @@ Provide a helpful response using the real data available. Never use placeholder 
             phases_completed.append("validation")
 
             if not validation.get("valid", False):
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {
                     "success": False,
                     "message": "Trade validation failed",
@@ -1758,7 +2236,21 @@ Provide a helpful response using the real data available. Never use placeholder 
                         quantity = None
 
                 if quantity is None:
-                    return {
+                    # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                         "success": False,
                         "message": "Unable to determine trade quantity for paper trading",
                         "phases_completed": phases_completed
@@ -1779,7 +2271,21 @@ Provide a helpful response using the real data available. Never use placeholder 
                 phases_completed.append("execution")
 
                 if not paper_result.get("success", False):
-                    return {
+                    # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                         "success": False,
                         "message": paper_result.get("error", "Paper trade execution failed"),
                         "phases_completed": phases_completed,
@@ -1788,6 +2294,20 @@ Provide a helpful response using the real data available. Never use placeholder 
 
                 monitoring = {"monitoring_active": False, "paper_trading": True}
                 phases_completed.append("monitoring")
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {
                     "success": True,
                     "message": paper_result.get("message", "Paper trade executed successfully"),
@@ -1804,7 +2324,21 @@ Provide a helpful response using the real data available. Never use placeholder 
                 # Use the validated trade_request from Phase 3, not rebuild from raw trade_params
                 # Ensure required fields are present in the validated request
                 if not trade_request.get("symbol") or not trade_request.get("action"):
-                    return {
+                    # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                         "success": False,
                         "message": "Validated trade request missing required fields",
                         "phases_completed": phases_completed
@@ -1818,7 +2352,21 @@ Provide a helpful response using the real data available. Never use placeholder 
                 phases_completed.append("execution")
 
                 if not execution.get("success", False):
-                    return {
+                    # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                         "success": False,
                         "message": "Trade execution failed",
                         "reason": execution.get("error", "Unknown error"),
@@ -1844,6 +2392,20 @@ Provide a helpful response using the real data available. Never use placeholder 
                         "simulation": simulation_identifier is not None
                     }
 
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {
                     "success": True,
                     "message": execution.get("message", "Trade executed successfully"),
@@ -1855,7 +2417,21 @@ Provide a helpful response using the real data available. Never use placeholder 
 
         except Exception as e:
             self.logger.exception("Trade execution error", error=str(e))
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "success": False,
                 "error": str(e),
                 "phases_completed": phases_completed
@@ -2020,7 +2596,21 @@ Provide a helpful response using the real data available. Never use placeholder 
                     })
                     continue
 
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "success": True,
                 "message": "Rebalancing executed successfully",
                 "trades_executed": len([r for r in results if r.get("success")]),
@@ -2030,7 +2620,21 @@ Provide a helpful response using the real data available. Never use placeholder 
 
         except Exception as e:
             self.logger.exception("Rebalancing execution error", error=str(e))
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "success": False,
                 "error": str(e),
             }
@@ -2043,14 +2647,42 @@ Provide a helpful response using the real data available. Never use placeholder 
         """Initiate post-trade monitoring."""
         try:
             # Set up monitoring alerts, stop losses, etc.
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "monitoring_active": True,
                 "trade_id": trade_id,
                 "alerts_configured": True
             }
         except Exception as e:
             self.logger.error("Failed to initiate monitoring", error=str(e))
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "monitoring_active": False,
                 "error": str(e)
             }
@@ -2142,6 +2774,20 @@ Provide a helpful response using the real data available. Never use placeholder 
             price_data = await self.market_analysis.realtime_price_tracking([symbol])
             if price_data and symbol in price_data:
                 market_info = price_data[symbol]
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {
                     "symbol": symbol,
                     "current_price": market_info.get("price", 0),
@@ -2151,17 +2797,59 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "timestamp": datetime.utcnow().isoformat()
                 }
             else:
+                # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
                 return {"symbol": symbol, "current_price": 0, "error": "Symbol data not available"}
         except Exception as e:
             self.logger.error("Market data fetch failed", error=str(e), symbol=symbol)
-            return {"symbol": symbol, "current_price": 0, "error": f"Market data service error: {str(e)}"}
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {"symbol": symbol, "current_price": 0, "error": f"Market data service error: {str(e)}"}
 
     async def _get_technical_analysis(self, symbol: str) -> Dict[str, Any]:
         """Get technical analysis for a symbol."""
         try:
             # Use market analysis service for technical indicators
             tech_data = await self.market_analysis.technical_analysis(symbol)
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "symbol": symbol,
                 "signals": tech_data.get("signals", []),
                 "indicators": tech_data.get("indicators", {}),
@@ -2171,7 +2859,21 @@ Provide a helpful response using the real data available. Never use placeholder 
             }
         except Exception as e:
             self.logger.error("Technical analysis failed", error=str(e), symbol=symbol)
-            return {"symbol": symbol, "signals": [], "error": f"Technical analysis service error: {str(e)}"}
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {"symbol": symbol, "signals": [], "error": f"Technical analysis service error: {str(e)}"}
 
     async def _get_market_risk_analysis(self, user_id: str) -> Dict[str, Any]:
         """Get market-wide risk analysis."""
@@ -2186,7 +2888,21 @@ Provide a helpful response using the real data available. Never use placeholder 
             if market_overview.get("overall_volatility", 0) > 0.5:
                 risk_factors.append("High market volatility")
 
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "market_volatility": market_overview.get("overall_volatility", 0),
                 "fear_greed_index": market_overview.get("market_fear_greed_index", 50),
                 "factors": risk_factors,
@@ -2195,7 +2911,21 @@ Provide a helpful response using the real data available. Never use placeholder 
             }
         except Exception as e:
             self.logger.error("Market risk analysis failed", error=str(e), user_id=user_id)
-            return {"factors": [], "error": f"Market risk service error: {str(e)}"}
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {"factors": [], "error": f"Market risk service error: {str(e)}"}
 
     async def _get_rebalancing_analysis(self, user_id: str) -> Dict[str, Any]:
         """Get portfolio rebalancing recommendations."""
@@ -2224,7 +2954,21 @@ Provide a helpful response using the real data available. Never use placeholder 
                             "target_percentage": 30
                         })
 
-            return {
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
                 "needs_rebalancing": needs_rebalancing,
                 "recommended_trades": recommended_trades,
                 "risk_score": risk_analysis.get("overall_risk_score", 0),
@@ -2233,11 +2977,39 @@ Provide a helpful response using the real data available. Never use placeholder 
             }
         except Exception as e:
             self.logger.error("Rebalancing analysis failed", error=str(e), user_id=user_id)
-            return {"needs_rebalancing": False, "error": f"Rebalancing service error: {str(e)}"}
+            # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {"needs_rebalancing": False, "error": f"Rebalancing service error: {str(e)}"}
 
     async def get_service_status(self) -> Dict[str, Any]:
         """Get comprehensive service status."""
-        return {
+        # Get real performance data from trading strategies service
+            from app.services.real_performance_tracker import real_performance_tracker
+            
+            performance_data = await real_performance_tracker.get_user_portfolio_performance(user_id)
+            
+            if performance_data.get("success"):
+                return {
+                    "total_return": performance_data.get("total_return", 0.0),
+                    "win_rate": performance_data.get("win_rate", 0.0),
+                    "sharpe_ratio": performance_data.get("sharpe_ratio", 0.0),
+                    "max_drawdown": performance_data.get("max_drawdown", 0.0),
+                    "data_quality": "real_performance_data"
+                }
+            else:
+                return {
             "service": "UnifiedChat",
             "status": "operational",
             "active_sessions": len(self.sessions),
