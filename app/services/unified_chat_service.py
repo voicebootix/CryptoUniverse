@@ -1460,10 +1460,17 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "created_at": datetime.utcnow().isoformat(),
                     "expires_at": (datetime.utcnow() + timedelta(minutes=5)).isoformat()
                 }
+                # Use resilient JSON serialization to handle datetime objects
+                def json_serializer(obj):
+                    """Convert non-serializable objects to strings."""
+                    if hasattr(obj, 'isoformat'):  # datetime objects
+                        return obj.isoformat()
+                    return str(obj)
+
                 await redis.setex(
                     f"pending_decision:{decision_id}",
                     300,  # 5 minute expiry
-                    json.dumps(decision_data)
+                    json.dumps(decision_data, default=json_serializer)
                 )
         except Exception as e:
             self.logger.error("Failed to store pending decision", error=str(e))
@@ -1623,8 +1630,9 @@ Provide a helpful response using the real data available. Never use placeholder 
             self.logger.info("Phase 4: Trade Execution")
 
             if conversation_mode == ConversationMode.PAPER_TRADING:
-                quantity = trade_params.get("quantity")
-                notional_amount = trade_params.get("amount") or trade_params.get("position_size_usd")
+                # Use validated trade_request instead of raw trade_params
+                quantity = trade_request.get("quantity")
+                notional_amount = trade_request.get("amount") or trade_request.get("position_size_usd")
 
                 if not quantity and notional_amount and market_data.get("current_price"):
                     try:
@@ -1639,13 +1647,17 @@ Provide a helpful response using the real data available. Never use placeholder 
                         "phases_completed": phases_completed
                     }
 
+                # Use normalized values from validated trade_request
+                side = trade_request.get("side", trade_request.get("action", "buy")).lower()
+                order_type = trade_request.get("order_type", "market").lower()
+
                 paper_result = await self.paper_trading.execute_paper_trade(
                     user_id=user_id,
-                    symbol=trade_params["symbol"],
-                    side=trade_params["action"],
+                    symbol=trade_request["symbol"],
+                    side=side,
                     quantity=quantity,
-                    strategy_used=trade_params.get("strategy", "chat_trade"),
-                    order_type=trade_params.get("order_type", "market")
+                    strategy_used=trade_request.get("strategy", "chat_trade"),
+                    order_type=order_type
                 )
                 phases_completed.append("execution")
 
@@ -1673,11 +1685,12 @@ Provide a helpful response using the real data available. Never use placeholder 
             if simulation_mode is None:
                 simulation_mode = True
 
-            trade_request = self._build_trade_request_for_execution(trade_params, market_data)
+            # Use the validated trade_request from Phase 3, not rebuild from raw trade_params
+            # Ensure required fields are present in the validated request
             if not trade_request.get("symbol") or not trade_request.get("action"):
                 return {
                     "success": False,
-                    "message": "Unable to build trade request for execution",
+                    "message": "Validated trade request missing required fields",
                     "phases_completed": phases_completed
                 }
 
