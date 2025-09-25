@@ -1227,29 +1227,48 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
             if strategy_performance:
                 prompt_parts.append("\n📊 STRATEGY PERFORMANCE:")
                 for strat, performance in strategy_performance.items():
-                    opportunity_count = (
+                    # Safe coercion for count
+                    raw_count = (
                         performance.get("count", 0)
                         if isinstance(performance, dict)
                         else performance
                     )
-                    total_potential = (
+                    try:
+                        opportunity_count = int(raw_count) if raw_count is not None else 0
+                    except (ValueError, TypeError):
+                        opportunity_count = 0
+
+                    # Safe coercion for total_potential
+                    raw_potential = (
                         performance.get("total_potential", 0.0)
                         if isinstance(performance, dict)
                         else 0.0
                     )
-                    average_confidence = (
+                    try:
+                        total_potential = float(raw_potential) if raw_potential is not None else 0.0
+                    except (ValueError, TypeError):
+                        total_potential = 0.0
+
+                    # Safe coercion for average_confidence
+                    raw_confidence = (
                         performance.get("avg_confidence")
                         if isinstance(performance, dict)
                         else None
                     )
+                    average_confidence = None
+                    if raw_confidence is not None:
+                        try:
+                            average_confidence = float(raw_confidence)
+                            # Normalize confidence to percentage (treat >1 as already percentage)
+                            if average_confidence <= 1.0:
+                                average_confidence *= 100
+                        except (ValueError, TypeError):
+                            average_confidence = None
 
                     summary_line = f"- {strat}: {opportunity_count} opportunities"
-                    if total_potential:
+                    if total_potential > 0:
                         summary_line += f" • ${total_potential:,.0f} potential"
                     if average_confidence is not None:
-                        # Normalize confidence to percentage (0-1 -> 0-100)
-                        if average_confidence <= 1.0:
-                            average_confidence *= 100
                         summary_line += f" • {average_confidence:.1f}% avg confidence"
                     prompt_parts.append(summary_line)
 
@@ -1260,11 +1279,26 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
 
                 for index, opportunity in enumerate(strategy_opps[:3], start=1):
                     symbol = opportunity.get("symbol", "N/A")
-                    confidence = opportunity.get("confidence_score", 0.0)
-                    # Normalize confidence to percentage (0-1 -> 0-100)
-                    if confidence <= 1.0:
-                        confidence *= 100
-                    profit_usd = opportunity.get("profit_potential_usd", 0.0)
+
+                    # Safe conversion for confidence
+                    raw_confidence = opportunity.get("confidence_score", 0.0)
+                    try:
+                        confidence = float(raw_confidence) if raw_confidence is not None else 0.0
+                        # Normalize confidence to percentage (0-1 -> 0-100)
+                        if confidence <= 1.0:
+                            confidence *= 100
+                        # Clamp confidence to 0-100 range
+                        confidence = max(0.0, min(100.0, confidence))
+                    except (ValueError, TypeError):
+                        confidence = 0.0
+
+                    # Safe conversion for profit_usd
+                    raw_profit = opportunity.get("profit_potential_usd", 0.0)
+                    try:
+                        profit_usd = float(raw_profit) if raw_profit is not None else 0.0
+                    except (ValueError, TypeError):
+                        profit_usd = 0.0
+
                     metadata = opportunity.get("metadata", {}) or {}
 
                     prompt_parts.append(f"  {index}. {symbol}")
@@ -1285,9 +1319,26 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
 
                         expected_return = metadata.get("expected_annual_return")
                         if expected_return is not None:
-                            prompt_parts.append(
-                                f"     Expected Return: {expected_return * 100:.1f}%"
-                            )
+                            try:
+                                # Handle string values like "5%" or "0.05"
+                                if isinstance(expected_return, str):
+                                    expected_return = expected_return.strip()
+                                    if expected_return.endswith('%'):
+                                        expected_return = expected_return[:-1].strip()
+                                    expected_return = float(expected_return)
+
+                                # Convert to numeric and normalize
+                                expected_return = float(expected_return)
+                                # If abs(value) <= 1, treat as fraction; otherwise as percentage
+                                if abs(expected_return) <= 1.0:
+                                    expected_return *= 100
+
+                                prompt_parts.append(
+                                    f"     Expected Return: {expected_return:.1f}%"
+                                )
+                            except (ValueError, TypeError):
+                                # Skip field if parsing fails
+                                pass
 
                         sharpe_ratio = metadata.get("sharpe_ratio")
                         if sharpe_ratio is not None:
@@ -1304,9 +1355,26 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
 
                         allocation = metadata.get("amount")
                         if allocation is not None:
-                            prompt_parts.append(
-                                f"     Allocation: {allocation * 100:.1f}% of portfolio"
-                            )
+                            try:
+                                # Handle string values like "10%" or "0.10"
+                                if isinstance(allocation, str):
+                                    allocation = allocation.strip()
+                                    if allocation.endswith('%'):
+                                        allocation = allocation[:-1].strip()
+                                    allocation = float(allocation)
+
+                                # Convert to numeric and normalize
+                                allocation = float(allocation)
+                                # If abs(value) <= 1, treat as fraction; otherwise as percentage
+                                if abs(allocation) <= 1.0:
+                                    allocation *= 100
+
+                                prompt_parts.append(
+                                    f"     Allocation: {allocation:.1f}% of portfolio"
+                                )
+                            except (ValueError, TypeError):
+                                # Skip field if parsing fails
+                                pass
 
                     elif "risk" in strategy_name_lower:
                         prompt_parts.append(
