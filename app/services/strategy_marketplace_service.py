@@ -1499,7 +1499,8 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         strategies: List[Dict[str, Any]],
         *,
         source: str,
-        degraded: bool
+        degraded: bool,
+        success: bool = True
     ) -> Dict[str, Any]:
         """Format strategy entries into the standard portfolio response payload."""
 
@@ -1518,7 +1519,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         }
 
         return {
-            "success": True,
+            "success": success,
             "active_strategies": strategies,
             "strategies": strategies,
             "total_strategies": len(strategies),
@@ -1601,7 +1602,8 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         return self._compose_strategy_portfolio_response(
             self._build_ai_strategy_entries(),
             source=reason,
-            degraded=True
+            degraded=True,
+            success=False
         )
 
     async def _get_user_strategy_portfolio_impl(self, user_id: str) -> Dict[str, Any]:
