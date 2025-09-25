@@ -38,6 +38,7 @@ from app.models.strategy_submission import (
 from app.services.trading_strategies import trading_strategies_service
 from app.services.trade_execution import TradeExecutionService
 from app.services.strategy_marketplace_service import strategy_marketplace_service
+from app.services.strategy_submission_service import strategy_submission_service
 from app.services.rate_limit import rate_limiter
 
 settings = get_settings()
@@ -2322,17 +2323,22 @@ async def get_user_strategy_submissions(
     )
 
     try:
-        # Try to query real submissions from database
         try:
-            query = select(StrategySubmission).where(
-                StrategySubmission.user_id == str(current_user.id)
-            ).order_by(desc(StrategySubmission.created_at))
-
-            result = await db.execute(query)
-            submissions = result.scalars().all()
-
-            # Convert to dict format for API response
-            submissions_data = [submission.to_dict() for submission in submissions]
+            submissions = await strategy_submission_service.list_user_submissions(
+                str(current_user.id), db
+            )
+            submissions_data = []
+            for submission in submissions:
+                submission_dict = submission.to_dict()
+                strategy_config = submission.strategy_config or {}
+                submission_dict.update(
+                    {
+                        "review_history": strategy_config.get("review_history", []),
+                        "review_state": strategy_config.get("review_state"),
+                        "published_strategy_id": strategy_config.get("published_strategy_id"),
+                    }
+                )
+                submissions_data.append(submission_dict)
 
             return {
                 "success": True,
@@ -2340,89 +2346,14 @@ async def get_user_strategy_submissions(
                 "total_count": len(submissions_data)
             }
         except (sa_exc.NoSuchTableError, sa_exc.OperationalError, sa_exc.ProgrammingError) as db_error:
-            # If database table doesn't exist, return mock data temporarily
-            logger.warning(f"Database table issue, returning mock data: {str(db_error)}")
-
-            # Return mock data for demonstration
-            submissions = [
-                {
-                    "id": "sub_001",
-                    "name": "AI Momentum Strategy",
-                    "description": "Advanced momentum-based trading strategy using machine learning",
-                    "category": "algorithmic",
-                    "risk_level": "medium",
-                    "expected_return_range": [15.0, 35.0],
-                    "required_capital": 5000,
-                    "pricing_model": "profit_share",
-                    "profit_share_percentage": 25,
-                    "status": "submitted",
-                    "created_at": "2025-01-10T10:00:00Z",
-                    "submitted_at": "2025-01-10T10:30:00Z",
-                    "backtest_results": {
-                        "total_return": 28.5,
-                        "sharpe_ratio": 1.85,
-                        "max_drawdown": -12.3,
-                        "win_rate": 0.67,
-                        "total_trades": 156,
-                        "profit_factor": 2.1,
-                        "period_days": 365
-                    },
-                    "validation_results": {
-                        "is_valid": True,
-                        "security_score": 92,
-                        "performance_score": 85,
-                        "code_quality_score": 88,
-                        "overall_score": 88
-                    },
-                    "tags": ["momentum", "ai", "crypto"],
-                    "target_audience": ["intermediate", "advanced"],
-                    "complexity_level": "intermediate",
-                    "documentation_quality": 85,
-                    "support_level": "standard"
-                },
-                {
-                    "id": "sub_002",
-                    "name": "Mean Reversion Pro",
-                    "description": "Statistical mean reversion strategy with dynamic thresholds",
-                    "category": "mean_reversion",
-                    "risk_level": "low",
-                    "expected_return_range": [8.0, 18.0],
-                    "required_capital": 2000,
-                    "pricing_model": "subscription",
-                    "price_amount": 49.99,
-                    "status": "approved",
-                    "created_at": "2025-01-05T14:00:00Z",
-                    "submitted_at": "2025-01-05T14:30:00Z",
-                    "reviewed_at": "2025-01-08T09:15:00Z",
-                    "reviewer_feedback": "Excellent strategy with solid backtesting results. Well documented.",
-                    "backtest_results": {
-                        "total_return": 16.2,
-                        "sharpe_ratio": 2.1,
-                        "max_drawdown": -8.7,
-                        "win_rate": 0.72,
-                        "total_trades": 203,
-                        "profit_factor": 1.8,
-                        "period_days": 365
-                    },
-                    "validation_results": {
-                        "is_valid": True,
-                        "security_score": 95,
-                        "performance_score": 91,
-                        "code_quality_score": 93,
-                        "overall_score": 93
-                    },
-                    "tags": ["mean_reversion", "statistical", "low_risk"],
-                    "target_audience": ["beginner", "intermediate"],
-                    "complexity_level": "beginner",
-                    "documentation_quality": 95,
-                    "support_level": "premium"
-                }
-            ]
-
+            logger.warning(
+                "Strategy submissions table unavailable, returning empty dataset",
+                error=str(db_error)
+            )
             return {
                 "success": True,
-                "submissions": submissions,
-                "total_count": len(submissions)
+                "submissions": [],
+                "total_count": 0
             }
         
     except Exception as e:
@@ -2503,90 +2434,48 @@ async def submit_strategy_for_review(
     )
 
     try:
-        # Try to create new submission in database
-        persisted = False
-        submission_id = None
-
-        try:
-            # Request already has proper enum types from validation
-            submission = StrategySubmission(
-                user_id=str(current_user.id),
-                name=request.name,
-                description=request.description,
-                # category=request.category,  # READ-ONLY placeholder; remove after migration
-                risk_level=request.risk_level,
-                expected_return_min=float(request.expected_return_range[0]) if request.expected_return_range else 0.0,
-                expected_return_max=float(request.expected_return_range[1]) if request.expected_return_range else 0.0,
-                required_capital=Decimal(str(request.required_capital)) if request.required_capital is not None else Decimal("1000"),
-                pricing_model=request.pricing_model,
-                price_amount=Decimal(str(request.price_amount)) if request.price_amount is not None else None,
-                profit_share_percentage=float(request.profit_share_percentage) if request.profit_share_percentage is not None else None,
-                status=StrategyStatus.SUBMITTED,
-                submitted_at=datetime.utcnow(),
-                tags=request.tags,
-                target_audience=request.target_audience,
-                complexity_level=request.complexity_level,
-                support_level=request.support_level
-            )
-
-            db.add(submission)
-            await db.commit()
-            await db.refresh(submission)
-
-            submission_id = submission.id
-            persisted = True
-
-        except (sa_exc.NoSuchTableError, sa_exc.OperationalError, sa_exc.ProgrammingError) as db_error:
-            # Rollback the database session
-            await db.rollback()
-
-            # If database table doesn't exist, generate a temporary ID
-            logger.warning(
-                "Database table issue, using temporary ID",
-                error=str(db_error),
-                conversion_error=True,
-                user_id=str(current_user.id),
-                strategy_name=request.name
-            )
-            submission_id = str(uuid.uuid4())
-            persisted = False
-            response.status_code = status.HTTP_202_ACCEPTED
-
-        except Exception as db_error:
-            # Rollback the database session
-            await db.rollback()
-
-            # Other database errors should still generate temp ID but log differently
-            logger.error(
-                "Database save failed, using temporary ID",
-                error=str(db_error),
-                conversion_error=True,
-                user_id=str(current_user.id),
-                strategy_name=request.name
-            )
-            submission_id = str(uuid.uuid4())
-            persisted = False
-            response.status_code = status.HTTP_202_ACCEPTED
+        submission = await strategy_submission_service.create_submission(
+            request=request,
+            user=current_user,
+            db=db
+        )
 
         logger.info(
             "Strategy submitted for review",
             user_id=str(current_user.id),
             strategy_name=request.name,
-            submission_id=submission_id,
-            # category=request.category,  # READ-ONLY placeholder; remove after migration
+            submission_id=submission.id,
             risk_level=request.risk_level,
-            persisted=persisted
+            persisted=True
         )
 
         return {
             "success": True,
-            "submission_id": submission_id,
+            "submission_id": submission.id,
             "message": f"Strategy '{request.name}' submitted for review successfully",
             "estimated_review_time": "3-5 business days",
-            "persisted": persisted,
+            "persisted": True,
             "source": "user_submission"
         }
-        
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        ) from e
+    except (sa_exc.NoSuchTableError, sa_exc.OperationalError, sa_exc.ProgrammingError) as db_error:
+        logger.exception("Strategy submission persistence issue", error=str(db_error))
+        response.status_code = status.HTTP_202_ACCEPTED
+        return {
+            "success": True,
+            "submission_id": str(uuid.uuid4()),
+            "message": f"Strategy '{request.name}' submitted for review. Persistence deferred.",
+            "estimated_review_time": "3-5 business days",
+            "persisted": False,
+            "source": "user_submission"
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Strategy submission failed", user_id=str(current_user.id))
         raise HTTPException(
@@ -2598,7 +2487,8 @@ async def submit_strategy_for_review(
 @router.post("/publisher/withdraw/{submission_id}")
 async def withdraw_strategy_submission(
     submission_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
 ):
     """Withdraw a strategy submission from review."""
     
@@ -2617,18 +2507,29 @@ async def withdraw_strategy_submission(
     )
     
     try:
-        # In a real system, this would update the submission status to 'withdrawn'
+        submission = await strategy_submission_service.withdraw_submission(
+            submission_id=submission_id,
+            user=current_user,
+            db=db
+        )
+
         logger.info(
             "Strategy submission withdrawn",
             user_id=str(current_user.id),
             submission_id=submission_id
         )
-        
+
         return {
             "success": True,
-            "message": "Submission withdrawn successfully"
+            "message": "Submission withdrawn successfully",
+            "status": submission.status.value
         }
-        
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        ) from e
     except Exception as e:
         logger.exception("Failed to withdraw submission", user_id=str(current_user.id))
         raise HTTPException(
@@ -2641,7 +2542,8 @@ async def withdraw_strategy_submission(
 async def update_strategy_submission(
     submission_id: str,
     updates: StrategySubmissionUpdate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
 ):
     """Update a strategy submission with typed validation."""
     
@@ -2677,20 +2579,32 @@ async def update_strategy_submission(
                     detail="profit_share_percentage is required when pricing_model is profit_share"
                 )
         
-        # In a real system, this would update the submission record with validated fields
+        submission = await strategy_submission_service.update_submission(
+            submission_id=submission_id,
+            user=current_user,
+            updates=updates,
+            db=db
+        )
+
         logger.info(
             "Strategy submission updated",
             user_id=str(current_user.id),
             submission_id=submission_id,
             updates=list(update_fields.keys())
         )
-        
+
         return {
             "success": True,
             "message": "Submission updated successfully",
-            "updated_fields": list(update_fields.keys())
+            "updated_fields": list(update_fields.keys()),
+            "submission": submission.to_dict()
         }
-        
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        ) from e
     except HTTPException:
         raise
     except Exception as e:
