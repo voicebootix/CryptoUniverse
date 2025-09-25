@@ -169,7 +169,7 @@ const StrategyApprovalDebug: React.FC = () => {
         const response = await apiClient.get('/admin/strategies/review-stats');
         console.log('✅ [StrategyApprovalDebug] Review stats fetched successfully:', response.data);
         return response.data as ReviewStats;
-      } catch (error) {
+      } catch (error: unknown) {
         console.error('❌ [StrategyApprovalDebug] Review stats fetch failed:', error);
         throw error;
       }
@@ -191,7 +191,7 @@ const StrategyApprovalDebug: React.FC = () => {
           data: response.data
         });
         return response.data.strategies as PendingStrategy[];
-      } catch (error) {
+      } catch (error: unknown) {
         console.error('❌ [StrategyApprovalDebug] Pending strategies fetch failed:', error);
         throw error;
       }
@@ -217,18 +217,19 @@ const StrategyApprovalDebug: React.FC = () => {
         });
         console.log('✅ [StrategyApprovalDebug] Mutation API call successful:', response.data);
         return response.data;
-      } catch (error) {
+      } catch (error: unknown) {
         console.error('❌ [StrategyApprovalDebug] Mutation API call failed:', error);
 
-        // Enhanced error logging
-        if (error.response) {
-          console.error('🔍 [StrategyApprovalDebug] Error response status:', error.response.status);
-          console.error('🔍 [StrategyApprovalDebug] Error response data:', error.response.data);
-          console.error('🔍 [StrategyApprovalDebug] Error response headers:', error.response.headers);
-        } else if (error.request) {
-          console.error('🔍 [StrategyApprovalDebug] No response received:', error.request);
+        // Enhanced error logging with proper type casting
+        const axiosError = error as any; // Cast to any for axios error properties
+        if (axiosError.response) {
+          console.error('🔍 [StrategyApprovalDebug] Error response status:', axiosError.response.status);
+          console.error('🔍 [StrategyApprovalDebug] Error response data:', axiosError.response.data);
+          console.error('🔍 [StrategyApprovalDebug] Error response headers:', axiosError.response.headers);
+        } else if (axiosError.request) {
+          console.error('🔍 [StrategyApprovalDebug] No response received:', axiosError.request);
         } else {
-          console.error('🔍 [StrategyApprovalDebug] Request setup error:', error.message);
+          console.error('🔍 [StrategyApprovalDebug] Request setup error:', axiosError.message || String(error));
         }
 
         throw error;
@@ -315,7 +316,7 @@ const StrategyApprovalDebug: React.FC = () => {
     try {
       reviewStrategyMutation.mutate(mutationData);
       console.log('✅ [StrategyApprovalDebug] reviewStrategyMutation.mutate called successfully');
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('💥 [StrategyApprovalDebug] reviewStrategyMutation.mutate threw error:', error);
     }
   };
