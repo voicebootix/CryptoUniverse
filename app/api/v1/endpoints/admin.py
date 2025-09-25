@@ -507,7 +507,8 @@ async def update_strategy_pricing(
         
         # Force reload in services
         from app.services.profit_sharing_service import profit_sharing_service
-        from app.services.strategy_marketplace_service import strategy_marketplace_service
+from app.services.strategy_marketplace_service import strategy_marketplace_service
+from app.services.strategy_submission_service import strategy_submission_service
         
         profit_sharing_service.strategy_pricing = await profit_sharing_service._load_dynamic_strategy_pricing()
         strategy_marketplace_service.strategy_pricing = await strategy_marketplace_service._load_dynamic_strategy_pricing()
@@ -1547,6 +1548,10 @@ class StrategyReviewRequest(BaseModel):
         return v.lower()
 
 
+class StrategyAssignmentRequest(BaseModel):
+    reviewer_id: Optional[str] = None
+
+
 # Strategy Approval Endpoints
 @router.get("/strategies/review-stats")
 async def get_strategy_review_stats(
@@ -1563,25 +1568,18 @@ async def get_strategy_review_stats(
     )
 
     try:
-        from app.models.trading import TradingStrategy
-
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-
-        # Count total strategies as "pending" (mock data)
-        result = await db.execute(
-            select(func.count(TradingStrategy.id)).where(
-                TradingStrategy.created_at >= today_start - timedelta(days=30)
-            )
+        stats = await strategy_submission_service.get_review_stats(
+            db=db,
+            reviewer=current_user
         )
-        total_strategies = result.scalar_one_or_none() or 0
 
         return ReviewStatsResponse(
-            total_pending=min(total_strategies, 5),  # Mock: show max 5 pending
-            under_review=0,
-            approved_today=0,
-            rejected_today=0,
-            avg_review_time_hours=2,
-            my_assigned=0
+            total_pending=stats.total_pending,
+            under_review=stats.under_review,
+            approved_today=stats.approved_today,
+            rejected_today=stats.rejected_today,
+            avg_review_time_hours=stats.avg_review_time_hours,
+            my_assigned=stats.my_assigned
         )
 
     except Exception as e:
@@ -1608,74 +1606,10 @@ async def get_pending_strategies(
     )
 
     try:
-        from app.models.trading import TradingStrategy
-
-        # Get recent strategies (mock as "pending approval")
-        stmt = select(TradingStrategy).join(User).where(
-            TradingStrategy.created_at >= datetime.utcnow() - timedelta(days=30)
-        ).order_by(TradingStrategy.created_at.desc()).limit(10)
-
-        result = await db.execute(stmt)
-        strategies = result.scalars().all()
-
-        # Mock strategy approval data structure
-        pending_strategies = []
-        for strategy in strategies:
-            # Get user info
-            user_result = await db.execute(
-                select(User).where(User.id == strategy.user_id)
-            )
-            user = user_result.scalar_one_or_none()
-
-            if user:
-                pending_strategy = {
-                    "id": str(strategy.id),
-                    "name": strategy.name,
-                    "description": strategy.description or "No description provided",
-                    "category": "algorithmic",  # Mock category
-                    "publisher_id": str(user.id),
-                    "publisher_name": user.email.split('@')[0],
-                    "publisher_email": user.email,
-                    "risk_level": "medium",
-                    "complexity_level": "intermediate",
-                    "expected_return_range": [5.0, 15.0],
-                    "required_capital": 1000.0,
-                    "max_positions": strategy.max_positions,
-                    "trading_pairs": ["BTC/USDT", "ETH/USDT"],
-                    "timeframes": [strategy.timeframe],
-                    "tags": ["automated", "ai"],
-                    "pricing_model": "free",
-                    "status": "submitted",
-                    "submitted_at": strategy.created_at.isoformat(),
-                    "backtest_results": {
-                        "total_return": float(strategy.total_pnl) / 1000.0 if strategy.total_pnl else 0.0,
-                        "sharpe_ratio": float(strategy.sharpe_ratio) if strategy.sharpe_ratio else 1.2,
-                        "max_drawdown": float(strategy.max_drawdown) / 1000.0 if strategy.max_drawdown else -5.0,
-                        "win_rate": strategy.win_rate / 100.0 if strategy.total_trades > 0 else 0.6,
-                        "total_trades": strategy.total_trades,
-                        "profit_factor": 1.3,
-                        "volatility": 0.15,
-                        "period_days": 30
-                    },
-                    "validation_results": {
-                        "is_valid": True,
-                        "security_score": 85,
-                        "performance_score": 78,
-                        "code_quality_score": 82,
-                        "overall_score": 82,
-                        "issues": []
-                    },
-                    "review_history": [],
-                    "documentation": {
-                        "readme": f"Strategy: {strategy.name}\n\nThis is an automated trading strategy.",
-                        "changelog": "v1.0 - Initial version",
-                        "examples": [],
-                        "api_reference": ""
-                    },
-                    "created_at": strategy.created_at.isoformat(),
-                    "updated_at": strategy.updated_at.isoformat()
-                }
-                pending_strategies.append(pending_strategy)
+        pending_strategies = await strategy_submission_service.get_pending_submissions(
+            db=db,
+            status_filter=status_filter
+        )
 
         return {
             "strategies": pending_strategies,
@@ -1688,6 +1622,70 @@ async def get_pending_strategies(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get pending strategies"
+        ) from e
+
+
+@router.post("/strategies/{submission_id}/assign")
+async def assign_strategy_submission(
+    submission_id: str,
+    request: StrategyAssignmentRequest,
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+    db: AsyncSession = Depends(get_database)
+):
+    """Assign a strategy submission to a reviewer."""
+
+    await rate_limiter.check_rate_limit(
+        key="admin:assign_strategy",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+
+    try:
+        reviewer = current_user
+        if request.reviewer_id:
+            try:
+                reviewer_uuid = UUID(request.reviewer_id)
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid reviewer_id"
+                ) from exc
+
+            reviewer_instance = await db.get(User, reviewer_uuid)
+            if not reviewer_instance:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Reviewer not found"
+                )
+            reviewer = reviewer_instance
+
+        submission = await strategy_submission_service.assign_submission(
+            submission_id=submission_id,
+            reviewer=reviewer,
+            db=db
+        )
+
+        return {
+            "status": "success",
+            "message": "Strategy submission assigned",
+            "submission_id": submission_id,
+            "reviewer": reviewer.email,
+            "status_value": submission.status.value
+        }
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        ) from e
+    except Exception as e:
+        logger.exception("Strategy assignment failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to assign strategy"
         ) from e
 
 
@@ -1708,54 +1706,17 @@ async def review_strategy(
     )
 
     try:
-        from app.models.trading import TradingStrategy
-
-        # Get strategy
-        result = await db.execute(
-            select(TradingStrategy).where(TradingStrategy.id == strategy_id)
+        submission = await strategy_submission_service.review_submission(
+            submission_id=strategy_id,
+            reviewer=current_user,
+            action=request.action,
+            comment=request.comment,
+            db=db
         )
-        strategy = result.scalar_one_or_none()
-        if not strategy:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Strategy not found"
-            )
-
-        # Get strategy owner
-        owner_result = await db.execute(
-            select(User).where(User.id == strategy.user_id)
-        )
-        owner = owner_result.scalar_one_or_none()
-
-        # Create audit log for the review action
-        audit_log = AuditLog(
-            user_id=current_user.id,
-            event_type=f"strategy_review_{request.action}",
-            event_data={
-                "strategy_id": strategy_id,
-                "strategy_name": strategy.name,
-                "owner_email": owner.email if owner else "unknown",
-                "action": request.action,
-                "comment": request.comment,
-                "details": {
-                    "strategy_id": strategy_id,
-                    "strategy_name": strategy.name,
-                    "owner_email": owner.email if owner else "unknown",
-                    "action": request.action,
-                    "comment": request.comment,
-                    "reviewer": current_user.email
-                },
-                "ip_address": "admin_api",
-                "user_agent": "system"
-            }
-        )
-        db.add(audit_log)
-
-        await db.commit()
 
         logger.info(
-            f"Strategy {request.action} completed",
-            strategy_id=strategy_id,
+            "Strategy submission review processed",
+            submission_id=strategy_id,
             reviewer=str(current_user.id),
             action=request.action
         )
@@ -1764,16 +1725,21 @@ async def review_strategy(
             "status": "success",
             "message": f"Strategy has been {request.action.replace('_', ' ')}d successfully",
             "action": request.action,
-            "strategy_id": strategy_id,
-            "strategy_name": strategy.name,
+            "submission_id": submission.id,
             "reviewer": current_user.email,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "status_value": submission.status.value,
+            "published_strategy_id": (submission.strategy_config or {}).get("published_strategy_id")
         }
 
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e)
+        ) from e
     except Exception as e:
-        await db.rollback()
         logger.exception("Strategy review failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
