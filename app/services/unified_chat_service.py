@@ -1811,6 +1811,32 @@ Provide a helpful response using the real data available. Never use placeholder 
 
                 try:
                     validation = await self.trade_executor.validate_trade(dict(base_request), user_id)
+
+                    if not validation.get("valid", False):
+                        results.append(
+                            {
+                                "success": False,
+                                "error": validation.get("reason", "Invalid parameters"),
+                                "trade_request": validation.get("trade_request", base_request),
+                            }
+                        )
+                        continue
+
+                    normalized_request = validation.get("trade_request", base_request)
+                    normalized_request.setdefault(
+                        "side",
+                        normalized_request.get("action", "BUY").lower(),
+                    )
+
+                    simulation_mode = self._coerce_to_bool(trade.get("simulation_mode"), True)
+
+                    result = await self.trade_executor.execute_trade(
+                        normalized_request,
+                        user_id,
+                        simulation_mode,
+                    )
+                    results.append(result)
+
                 except Exception as validation_error:
                     self.logger.exception(
                         "Rebalancing trade validation crashed",
@@ -1825,31 +1851,6 @@ Provide a helpful response using the real data available. Never use placeholder 
                         }
                     )
                     continue
-
-                if not validation.get("valid", False):
-                    results.append(
-                        {
-                            "success": False,
-                            "error": validation.get("reason", "Invalid parameters"),
-                            "trade_request": validation.get("trade_request", base_request),
-                        }
-                    )
-                    continue
-
-                normalized_request = validation.get("trade_request", base_request)
-                normalized_request.setdefault(
-                    "side",
-                    normalized_request.get("action", "BUY").lower(),
-                )
-
-                simulation_mode = self._coerce_to_bool(trade.get("simulation_mode"), True)
-
-                result = await self.trade_executor.execute_trade(
-                    normalized_request,
-                    user_id,
-                    simulation_mode,
-                )
-                results.append(result)
 
             return {
                 "success": True,
