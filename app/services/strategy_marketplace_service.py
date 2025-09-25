@@ -1788,7 +1788,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 self.logger.warning("Cannot hydrate strategies from DB - invalid user_id format", user_id=user_id)
                 return []
 
-            async with get_database() as db:
+            async with get_database_session() as db:
                 query = (
                     select(UserStrategyAccess)
                     .where(
