@@ -23,7 +23,7 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, get_database_session
 from app.core.redis import get_redis_client
 
 # Import the new ChatAI service for conversations
@@ -577,12 +577,11 @@ class UnifiedChatService(LoggerMixin):
         Uses the same credit lookup logic as the API endpoint.
         """
         try:
-            from app.core.database import get_database
             from app.models.credit import CreditAccount
             from sqlalchemy import select
             import uuid
 
-            async with get_database() as db:
+            async with get_database_session() as db:
                 # Try multiple lookup methods to find existing account
                 credit_account = None
 
@@ -700,11 +699,10 @@ class UnifiedChatService(LoggerMixin):
             # Use EXACT same code path as working trading API endpoint
             import asyncio
             from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
-            from app.core.database import get_database
 
             # Fix: Apply timeout at the correct level to avoid async context conflicts
             async def _fetch_portfolio():
-                async with get_database() as db:
+                async with get_database_session() as db:
                     return await get_user_portfolio_from_exchanges(str(user_id), db)
 
             portfolio_data = await asyncio.wait_for(_fetch_portfolio(), timeout=15.0)
@@ -1176,7 +1174,6 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
                 )
                 normalized_strategy = strategy_name.replace("_", " ").title()
                 opportunities_by_strategy.setdefault(normalized_strategy, []).append(opportunity)
-
             # Build comprehensive prompt
             prompt_parts = [f'User asked: "{message}"']
             prompt_parts.append(f"\nTotal opportunities found: {len(opportunities)}")
@@ -1282,7 +1279,6 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
                         urgency = metadata.get("urgency")
                         if urgency is not None:
                             prompt_parts.append(f"     Urgency: {urgency}")
-
             prompt_parts.append(f"""
 
 INSTRUCTIONS FOR AI MONEY MANAGER:
@@ -1491,11 +1487,11 @@ Provide a helpful response using the real data available. Never use placeholder 
             redis = await self._ensure_redis()
             if not redis:
                 return {"success": False, "error": "Decision storage not available"}
-            
+
             decision_data = await redis.get(f"pending_decision:{decision_id}")
             if not decision_data:
                 return {"success": False, "error": "Decision not found or expired"}
-            
+
             decision = json.loads(decision_data)
 
             conversation_mode = None
@@ -1509,14 +1505,13 @@ Provide a helpful response using the real data available. Never use placeholder 
             # Verify user
             if decision["user_id"] != user_id:
                 return {"success": False, "error": "Unauthorized"}
-            
+
             if not approved:
                 return {"success": True, "message": "Decision rejected by user"}
-            
             # Execute based on intent
             intent = ChatIntent(decision["intent"])
             context_data = decision["context_data"]
-            
+
             if intent == ChatIntent.TRADE_EXECUTION:
                 # 5-PHASE EXECUTION PRESERVED
                 return await self._execute_trade_with_validation(
@@ -1555,6 +1550,7 @@ Provide a helpful response using the real data available. Never use placeholder 
         """
         # Merge both approaches for robust trade execution
         trade_payload = dict(trade_params or {})
+        trade_params = trade_params or {}
 
         if modifications:
             trade_payload.update(modifications)
@@ -1567,7 +1563,7 @@ Provide a helpful response using the real data available. Never use placeholder 
         simulation_mode = self._coerce_to_bool(trade_payload.get("simulation_mode"), True)
         try:
             missing_fields = [
-                field for field in ("symbol", "action") if not trade_params.get(field)
+                field for field in ("symbol", "action") if not trade_payload.get(field)
             ]
             if missing_fields:
                 return {
@@ -1671,7 +1667,6 @@ Provide a helpful response using the real data available. Never use placeholder 
 
                 monitoring = {"monitoring_active": False, "paper_trading": True}
                 phases_completed.append("monitoring")
-
                 return {
                     "success": True,
                     "message": paper_result.get("message", "Paper trade executed successfully"),
@@ -1680,62 +1675,62 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "execution_details": paper_result,
                     "monitoring_details": monitoring
                 }
-
-            simulation_mode = await self._get_user_simulation_mode(user_id)
-            if simulation_mode is None:
-                simulation_mode = True
-
-            # Use the validated trade_request from Phase 3, not rebuild from raw trade_params
-            # Ensure required fields are present in the validated request
-            if not trade_request.get("symbol") or not trade_request.get("action"):
-                return {
-                    "success": False,
-                    "message": "Validated trade request missing required fields",
-                    "phases_completed": phases_completed
-                }
-
-            execution = await self.trade_executor.execute_trade(
-                trade_request,
-                user_id,
-                simulation_mode
-            )
-            phases_completed.append("execution")
-
-            if not execution.get("success", False):
-                return {
-                    "success": False,
-                    "message": "Trade execution failed",
-                    "reason": execution.get("error", "Unknown error"),
-                    "phases_completed": phases_completed
-                }
-
-            trade_id = execution.get("trade_id")
-            simulation_identifier = execution.get("simulation_result", {}).get("order_id")
-            derived_trade_id = trade_id or simulation_identifier
-
-            if trade_id:
-                # Phase 5: Monitoring
-                self.logger.info("Phase 5: Trade Monitoring")
-                monitoring = await self._initiate_trade_monitoring(
-                    trade_id,
-                    user_id
-                )
-                phases_completed.append("monitoring")
             else:
-                monitoring = {
-                    "monitoring_active": False,
-                    "reason": "Trade monitoring skipped - no trade ID available",
-                    "simulation": simulation_identifier is not None
-                }
+                simulation_mode = await self._get_user_simulation_mode(user_id)
+                if simulation_mode is None:
+                    simulation_mode = True
 
-            return {
-                "success": True,
-                "message": execution.get("message", "Trade executed successfully"),
-                "trade_id": derived_trade_id,
-                "phases_completed": phases_completed,
-                "execution_details": execution,
-                "monitoring_details": monitoring
-            }
+                # Use the validated trade_request from Phase 3, not rebuild from raw trade_params
+                # Ensure required fields are present in the validated request
+                if not trade_request.get("symbol") or not trade_request.get("action"):
+                    return {
+                        "success": False,
+                        "message": "Validated trade request missing required fields",
+                        "phases_completed": phases_completed
+                    }
+
+                execution = await self.trade_executor.execute_trade(
+                    trade_request,
+                    user_id,
+                    simulation_mode
+                )
+                phases_completed.append("execution")
+
+                if not execution.get("success", False):
+                    return {
+                        "success": False,
+                        "message": "Trade execution failed",
+                        "reason": execution.get("error", "Unknown error"),
+                        "phases_completed": phases_completed
+                    }
+
+                trade_id = execution.get("trade_id")
+                simulation_identifier = execution.get("simulation_result", {}).get("order_id")
+                derived_trade_id = trade_id or simulation_identifier
+
+                if trade_id:
+                    # Phase 5: Monitoring
+                    self.logger.info("Phase 5: Trade Monitoring")
+                    monitoring = await self._initiate_trade_monitoring(
+                        trade_id,
+                        user_id
+                    )
+                    phases_completed.append("monitoring")
+                else:
+                    monitoring = {
+                        "monitoring_active": False,
+                        "reason": "Trade monitoring skipped - no trade ID available",
+                        "simulation": simulation_identifier is not None
+                    }
+
+                return {
+                    "success": True,
+                    "message": execution.get("message", "Trade executed successfully"),
+                    "trade_id": derived_trade_id,
+                    "phases_completed": phases_completed,
+                    "execution_details": execution,
+                    "monitoring_details": monitoring
+                }
 
         except Exception as e:
             self.logger.exception("Trade execution error", error=str(e))
@@ -1847,9 +1842,8 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "symbol": trade.get("symbol"),
                     "action": trade.get("action") or trade.get("side"),
                     "amount": trade.get("amount"),
-                    "position_size_usd": trade.get("position_size_usd")
-                    or trade.get("amount"),
-                    "quantity": trade.get("quantity", trade.get("amount")),
+                    "position_size_usd": trade.get("position_size_usd") or trade.get("amount"),
+                    "quantity": trade.get("quantity"),
                     "order_type": trade.get("order_type", "market"),
                     "price": trade.get("price"),
                     "exchange": trade.get("exchange"),
@@ -1914,7 +1908,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                 "success": False,
                 "error": str(e),
             }
-    
+
     async def _initiate_trade_monitoring(
         self,
         trade_id: str,
@@ -1948,20 +1942,20 @@ Provide a helpful response using the real data available. Never use placeholder 
         try:
             # Save user message
             await self.memory_service.add_message(
-            session_id=session_id,
-            user_id=user_id,
-            message_type=ChatMessageType.USER,
-            content=user_message,
-            metadata={"intent": intent.value, "confidence": confidence}
+                session_id=session_id,
+                user_id=user_id,
+                message_type=ChatMessageType.USER,
+                content=user_message,
+                metadata={"intent": intent.value, "confidence": confidence}
             )
-            
+
             # Save assistant response
             await self.memory_service.add_message(
-            session_id=session_id,
-            user_id=user_id,
-            message_type=ChatMessageType.ASSISTANT,
-            content=assistant_message,
-            metadata={"intent": intent.value}
+                session_id=session_id,
+                user_id=user_id,
+                message_type=ChatMessageType.ASSISTANT,
+                content=assistant_message,
+                metadata={"intent": intent.value}
             )
         except Exception as e:
             self.logger.error("Failed to save conversation", error=str(e))
