@@ -13,6 +13,7 @@ Revolutionary business model: Strategy subscriptions with performance-based pric
 
 import asyncio
 import json
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -1178,7 +1179,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     
     async def _get_community_strategies(
         self,
-        user_id: str,
+        _user_id: str,
         session: Optional[AsyncSession] = None,
     ) -> List[StrategyMarketplaceItem]:
         """Get community-published strategies."""
@@ -1188,8 +1189,8 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 StrategyPublisher, TradingStrategy.user_id == StrategyPublisher.user_id
             ).where(
                 and_(
-                    TradingStrategy.is_active == True,
-                    StrategyPublisher.verified == True
+                    TradingStrategy.is_active,
+                    StrategyPublisher.verified
                 )
             ).order_by(desc(TradingStrategy.total_pnl))
 
@@ -1234,7 +1235,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     is_ai_strategy=False,
                     credit_cost_monthly=monthly_cost,
                     credit_cost_per_execution=max(1, monthly_cost // 30),
-                    win_rate=strategy.win_rate,
+                    win_rate=self.normalize_win_rate_to_fraction(float(strategy.win_rate)),
                     avg_return=(
                         float(strategy.total_pnl / strategy.total_trades)
                         if strategy.total_trades > 0
@@ -1263,7 +1264,11 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
 
         try:
             if session is not None:
-                return await _load_with_session(session)
+                try:
+                    return await _load_with_session(session)
+                except Exception:
+                    await session.rollback()
+                    raise
 
             async with AsyncSessionLocal() as owned_session:
                 try:
@@ -1322,10 +1327,25 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     ) -> Dict[str, Any]:
         """Get live performance metrics for strategy."""
 
+        def _no_data_response() -> Dict[str, Any]:
+            return {
+                "data_quality": "no_data",
+                "status": "no_trades",
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "win_rate": 0.0,
+                "badges": self._build_performance_badges("no_data")
+            }
+
+        try:
+            strategy_uuid = uuid.UUID(strategy_id)
+        except Exception:
+            return _no_data_response()
+
         async def _load_with_session(active_session: AsyncSession) -> Dict[str, Any]:
             stmt = select(Trade).where(
                 and_(
-                    Trade.strategy_id == strategy_id,
+                    Trade.strategy_id == strategy_uuid,
                     Trade.created_at >= datetime.utcnow() - timedelta(days=30)
                 )
             ).order_by(desc(Trade.created_at))
@@ -1334,14 +1354,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             recent_trades = result.scalars().all()
 
             if not recent_trades:
-                return {
-                    "data_quality": "no_data",
-                    "status": "no_trades",
-                    "total_trades": 0,
-                    "total_pnl": 0.0,
-                    "win_rate": 0.0,
-                    "badges": self._build_performance_badges("no_data")
-                }
+                return _no_data_response()
 
             total_pnl = sum(float(trade.profit_realized_usd) for trade in recent_trades)
             winning_trades = sum(1 for trade in recent_trades if trade.profit_realized_usd > 0)
@@ -1362,7 +1375,11 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
 
         try:
             if session is not None:
-                return await _load_with_session(session)
+                try:
+                    return await _load_with_session(session)
+                except Exception:
+                    await session.rollback()
+                    raise
 
             async with AsyncSessionLocal() as owned_session:
                 try:

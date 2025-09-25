@@ -44,7 +44,7 @@ from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler  # noqa: E402
 
 
 if not hasattr(SQLiteTypeCompiler, "visit_UUID"):
-    def _visit_uuid(self, type_, **_kw):  # pragma: no cover - sqlite shim
+    def _visit_uuid(_, __, **_kw):  # pragma: no cover - sqlite shim
         return "CHAR(36)"
 
     SQLiteTypeCompiler.visit_UUID = _visit_uuid  # type: ignore[attr-defined]
@@ -180,7 +180,7 @@ async def test_published_submission_appears_in_marketplace() -> None:
 
         original_live_performance = marketplace_service._get_live_performance
 
-        async def _fake_live_performance(strategy_id: str, session=None):  # type: ignore[override]
+        async def _fake_live_performance(_strategy_id: str, _session=None):  # type: ignore[override]
             return {
                 "data_quality": "no_data",
                 "status": "no_trades",
