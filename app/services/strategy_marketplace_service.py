@@ -1812,10 +1812,32 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 return []
 
             redis_key = f"user_strategies:{user_id}"
+            ttl_seconds = 24 * 60 * 60  # default to 24 hours
             if redis_client:
                 await self._safe_redis_operation(redis_client.delete, redis_key)
                 for strategy_id in valid_strategy_ids:
                     await self._safe_redis_operation(redis_client.sadd, redis_key, strategy_id)
+
+                # If any strategies have an upcoming expiration, use the earliest expiry as TTL
+                expiry_candidates = [
+                    record.expires_at
+                    for record in access_records
+                    if record.is_valid() and record.expires_at
+                ]
+                if expiry_candidates:
+                    from datetime import datetime, timezone
+
+                    now = datetime.now(timezone.utc)
+                    soonest_expiry = min(expiry_candidates)
+                    ttl_from_expiry = int((soonest_expiry - now).total_seconds())
+                    if ttl_from_expiry > 0:
+                        ttl_seconds = min(ttl_seconds, ttl_from_expiry)
+
+                await self._safe_redis_operation(
+                    redis_client.expire,
+                    redis_key,
+                    ttl_seconds,
+                )
 
             self.logger.info(
                 "Hydrated user strategies from database",

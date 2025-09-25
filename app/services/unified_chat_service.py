@@ -1181,7 +1181,7 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
             prompt_parts = [f'User asked: "{message}"']
             prompt_parts.append(f"\nTotal opportunities found: {len(opportunities)}")
             prompt_parts.append(f"User risk profile: {user_profile.get('risk_profile', 'balanced')}")
-            prompt_parts.append(f"Active strategies: {user_profile.get('active_strategy_count', 0)}")
+            prompt_parts.append(f"Active strategies: {user_profile.get('active_strategies', 0)}")
             if user_profile.get("strategy_fingerprint"):
                 prompt_parts.append(
                     f"Strategy portfolio fingerprint: {user_profile['strategy_fingerprint']}"
