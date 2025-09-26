@@ -31,6 +31,7 @@ from app.models.user import User
 from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.models.copy_trading import StrategyPublisher, StrategyPerformance
 from app.services.trading_strategies import trading_strategies_service
+from app.models.strategy_access import UserStrategyAccess
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -1738,15 +1739,27 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             # ENHANCED RECOVERY: If no strategies found, implement comprehensive recovery
             if not active_strategies:
                 self.logger.warning("🔍 Redis strategies empty, initiating recovery mechanism", user_id=user_id)
-                
-                recovered = await self._recover_missing_strategies(user_id, redis)
-                if recovered:
-                    # Re-fetch after recovery using safe operation
-                    active_strategies = await self._safe_redis_operation(redis.smembers, f"user_strategies:{user_id}")
-                    if active_strategies is None:
-                        active_strategies = set()
-                    active_strategies = [s.decode() if isinstance(s, bytes) else s for s in active_strategies]
-                    self.logger.info("✅ Strategy recovery successful", user_id=user_id, strategies_recovered=len(active_strategies))
+
+                hydrated_strategies = await self._hydrate_strategies_from_db(user_id, redis)
+
+                if hydrated_strategies:
+                    active_strategies = hydrated_strategies
+                    raw_strategies = list(active_strategies)
+                    self.logger.info(
+                        "✅ Strategy portfolio hydrated from database",
+                        user_id=user_id,
+                        strategies_recovered=len(active_strategies)
+                    )
+                else:
+                    recovered = await self._recover_missing_strategies(user_id, redis)
+                    if recovered:
+                        # Re-fetch after recovery using safe operation
+                        active_strategies = await self._safe_redis_operation(redis.smembers, f"user_strategies:{user_id}")
+                        if active_strategies is None:
+                            active_strategies = set()
+                        active_strategies = [s.decode() if isinstance(s, bytes) else s for s in active_strategies]
+                        raw_strategies = list(active_strategies)
+                        self.logger.info("✅ Strategy recovery successful", user_id=user_id, strategies_recovered=len(active_strategies))
             
             strategy_portfolio = []
             total_monthly_cost = 0
@@ -1851,18 +1864,98 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         except Exception as e:
             self.logger.error("Failed to get user strategy portfolio", error=str(e))
             return {"success": False, "error": str(e)}
-            
+
         finally:
             # Redis connection is managed by the connection manager
             # Do not close the shared client - just clear the reference
             if redis:
                 redis = None
-    
+
+    async def _hydrate_strategies_from_db(self, user_id: str, redis_client) -> List[str]:
+        """Rebuild the user's strategy portfolio directly from the database."""
+
+        try:
+            import uuid
+
+            try:
+                user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+            except ValueError:
+                self.logger.warning("Cannot hydrate strategies from DB - invalid user_id format", user_id=user_id)
+                return []
+
+            async with get_database_session() as db:
+                query = (
+                    select(UserStrategyAccess)
+                    .where(
+                        and_(
+                            UserStrategyAccess.user_id == user_uuid,
+                            UserStrategyAccess.is_active.is_(True)
+                        )
+                    )
+                )
+                result = await db.execute(query)
+                access_records = result.scalars().all()
+
+            if not access_records:
+                self.logger.info("No database-backed strategies found during hydration", user_id=user_id)
+                return []
+
+            valid_strategy_ids = [record.strategy_id for record in access_records if record.is_valid()]
+
+            if not valid_strategy_ids:
+                self.logger.info("Database strategies are inactive or expired", user_id=user_id)
+                return []
+
+            redis_key = f"user_strategies:{user_id}"
+            ttl_seconds = 24 * 60 * 60  # default to 24 hours
+            if redis_client:
+                await self._safe_redis_operation(redis_client.delete, redis_key)
+                for strategy_id in valid_strategy_ids:
+                    await self._safe_redis_operation(redis_client.sadd, redis_key, strategy_id)
+
+                # If any strategies have an upcoming expiration, use the earliest expiry as TTL
+                expiry_candidates = [
+                    record.expires_at
+                    for record in access_records
+                    if record.is_valid() and record.expires_at
+                ]
+                if expiry_candidates:
+                    from datetime import datetime, timezone
+
+                    now = datetime.now(timezone.utc)
+                    soonest_expiry = min(expiry_candidates)
+                    ttl_from_expiry = int((soonest_expiry - now).total_seconds())
+                    if ttl_from_expiry > 0:
+                        ttl_seconds = min(ttl_seconds, ttl_from_expiry)
+
+                await self._safe_redis_operation(
+                    redis_client.expire,
+                    redis_key,
+                    ttl_seconds,
+                )
+
+            self.logger.info(
+                "Hydrated user strategies from database",
+                user_id=user_id,
+                strategy_count=len(valid_strategy_ids)
+            )
+
+            return valid_strategy_ids
+
+        except Exception as exc:
+            self.logger.error(
+                "Database hydration for strategies failed",
+                user_id=user_id,
+                error=str(exc),
+                exc_info=True
+            )
+            return []
+
     async def _recover_missing_strategies(self, user_id: str, redis) -> bool:
         """Lightweight Redis-only strategy recovery mechanism."""
         try:
             self.logger.info("🔄 EMERGENCY STRATEGY RECOVERY INITIATED", user_id=user_id)
-            
+
             # SIMPLIFIED APPROACH: Always provision core free strategies
             # Avoid database calls that can cause deadlocks
             strategies_to_provision = [

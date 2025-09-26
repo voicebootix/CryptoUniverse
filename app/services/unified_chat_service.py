@@ -1186,65 +1186,226 @@ Portfolio:
 Analyze this trade request and provide recommendations. If viable, explain the 5-phase execution process."""
         
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-            opportunities = context_data.get("opportunities", {}).get("opportunities", [])
-            strategy_performance = context_data.get("opportunities", {}).get("strategy_performance", {})
-            user_profile = context_data.get("opportunities", {}).get("user_profile", {})
-            
-            # Group opportunities by strategy
-            opportunities_by_strategy = {}
-            for opp in opportunities:
-                strategy = opp.get('strategy_name', 'Unknown')
-                if strategy not in opportunities_by_strategy:
-                    opportunities_by_strategy[strategy] = []
-                opportunities_by_strategy[strategy].append(opp)
-            
+            # Extract payload first (API may nest data under "payload" key)
+            opportunities_data = context_data.get("opportunities", {})
+            # Ensure payload is always a dict - handle None, non-dict values safely
+            payload = opportunities_data.get("payload") or opportunities_data or {}
+            if not isinstance(payload, dict):
+                payload = {}
+
+            # Guard against None values - ensure correct empty types
+            opportunities = payload.get("opportunities") or []
+            strategy_performance = payload.get("strategy_performance") or {}
+            user_profile = payload.get("user_profile") or {}
+
+            # Group opportunities by strategy with deterministic naming
+            opportunities_by_strategy: Dict[str, List[Dict[str, Any]]] = {}
+            for opportunity in opportunities:
+                strategy_name = (
+                    opportunity.get("strategy_name")
+                    or opportunity.get("strategy_id")
+                    or "Unknown"
+                )
+                # Convert strategy_name to string before calling .replace() and .title()
+                strategy_name = str(strategy_name) if strategy_name else "Unknown"
+                normalized_strategy = strategy_name.replace("_", " ").title()
+                opportunities_by_strategy.setdefault(normalized_strategy, []).append(opportunity)
             # Build comprehensive prompt
             prompt_parts = [f'User asked: "{message}"']
             prompt_parts.append(f"\nTotal opportunities found: {len(opportunities)}")
             prompt_parts.append(f"User risk profile: {user_profile.get('risk_profile', 'balanced')}")
-            prompt_parts.append(f"Active strategies: {user_profile.get('active_strategy_count', 0)}")
-            
+            # Robust coercion of active_strategies to integer count
+            active_strategies_raw = user_profile.get("active_strategies")
+            if isinstance(active_strategies_raw, (list, tuple, set)):
+                active_strategies_total = len(active_strategies_raw)
+            elif isinstance(active_strategies_raw, int):
+                active_strategies_total = active_strategies_raw
+            elif isinstance(active_strategies_raw, str) and active_strategies_raw.isdigit():
+                active_strategies_total = int(active_strategies_raw)
+            else:
+                active_strategies_total = user_profile.get("active_strategy_count", 0)
+
+            prompt_parts.append(
+                f"Active strategies: {active_strategies_total}"
+            )
+            if user_profile.get("strategy_fingerprint"):
+                prompt_parts.append(
+                    f"Strategy portfolio fingerprint: {user_profile['strategy_fingerprint']}"
+                )
+
             # Strategy performance summary
             if strategy_performance:
                 prompt_parts.append("\n📊 STRATEGY PERFORMANCE:")
-                for strat, perf in strategy_performance.items():
-                    count = perf.get('count', 0) if isinstance(perf, dict) else perf
-                    prompt_parts.append(f"- {strat}: {count} opportunities")
-            
+                for strat, performance in strategy_performance.items():
+                    # Safe coercion for count
+                    raw_count = (
+                        performance.get("count", 0)
+                        if isinstance(performance, dict)
+                        else performance
+                    )
+                    try:
+                        opportunity_count = int(raw_count) if raw_count is not None else 0
+                    except (ValueError, TypeError):
+                        opportunity_count = 0
+
+                    # Safe coercion for total_potential
+                    raw_potential = (
+                        performance.get("total_potential", 0.0)
+                        if isinstance(performance, dict)
+                        else 0.0
+                    )
+                    try:
+                        total_potential = float(raw_potential) if raw_potential is not None else 0.0
+                    except (ValueError, TypeError):
+                        total_potential = 0.0
+
+                    # Safe coercion for average_confidence
+                    raw_confidence = (
+                        performance.get("avg_confidence")
+                        if isinstance(performance, dict)
+                        else None
+                    )
+                    average_confidence = None
+                    if raw_confidence is not None:
+                        try:
+                            average_confidence = float(raw_confidence)
+                            # Normalize confidence to percentage (treat >1 as already percentage)
+                            if average_confidence <= 1.0:
+                                average_confidence *= 100
+                        except (ValueError, TypeError):
+                            average_confidence = None
+
+                    summary_line = f"- {strat}: {opportunity_count} opportunities"
+                    if total_potential > 0:
+                        summary_line += f" • ${total_potential:,.0f} potential"
+                    if average_confidence is not None:
+                        summary_line += f" • {average_confidence:.1f}% avg confidence"
+                    prompt_parts.append(summary_line)
+
             # Detailed opportunities by strategy
             prompt_parts.append("\n🎯 OPPORTUNITIES BY STRATEGY:")
-            for strategy, opps in opportunities_by_strategy.items():
-                prompt_parts.append(f"\n{strategy} ({len(opps)} opportunities):")
-                for i, opp in enumerate(opps[:3], 1):  # Show top 3 per strategy
-                    symbol = opp.get('symbol', 'N/A')
-                    confidence = opp.get('confidence_score', 0)
-                    profit_usd = opp.get('profit_potential_usd', 0)
-                    metadata = opp.get('metadata', {})
+            for strategy_name, strategy_opps in opportunities_by_strategy.items():
+                prompt_parts.append(f"\n{strategy_name} ({len(strategy_opps)} opportunities):")
 
-                    # Format based on opportunity type
-                    if 'portfolio' in strategy.lower():
-                        if metadata.get('strategy'):
-                            prompt_parts.append(f"  {i}. {metadata['strategy'].replace('_', ' ').title()}")
-                            prompt_parts.append(f"     Expected Return: {metadata.get('expected_annual_return', 0)*100:.1f}%")
-                            prompt_parts.append(f"     Sharpe Ratio: {metadata.get('sharpe_ratio', 0):.2f}")
-                            prompt_parts.append(f"     Risk Level: {metadata.get('risk_level', 0)*100:.1f}%")
-                        else:
-                            prompt_parts.append(f"  {i}. {symbol} - {metadata.get('rebalance_action', 'REBALANCE')}")
-                            prompt_parts.append(f"     Amount: {metadata.get('amount', 0)*100:.1f}% of portfolio")
-                    elif 'risk' in strategy.lower():
-                        prompt_parts.append(f"  {i}. {metadata.get('risk_type', 'Risk Alert')}")
-                        prompt_parts.append(f"     Action: {metadata.get('strategy', 'Mitigation needed')}")
-                        prompt_parts.append(f"     Urgency: {metadata.get('urgency', confidence/100)}")
-                    else:
-                        prompt_parts.append(f"  {i}. {symbol}")
-                        prompt_parts.append(f"     Confidence: {confidence:.1f}%")
-                        prompt_parts.append(f"     Profit Potential: ${profit_usd:,.0f}")
-                        action = metadata.get('signal_action', opp.get('action', 'ANALYZE'))
-                        if action:
-                            prompt_parts.append(f"     Action: {action}")
-            
+                for index, opportunity in enumerate(strategy_opps[:3], start=1):
+                    symbol = opportunity.get("symbol", "N/A")
+
+                    # Safe conversion for confidence
+                    raw_confidence = opportunity.get("confidence_score", 0.0)
+                    try:
+                        confidence = float(raw_confidence) if raw_confidence is not None else 0.0
+                        # Normalize confidence to percentage (0-1 -> 0-100)
+                        if confidence <= 1.0:
+                            confidence *= 100
+                        # Clamp confidence to 0-100 range
+                        confidence = max(0.0, min(100.0, confidence))
+                    except (ValueError, TypeError):
+                        confidence = 0.0
+
+                    # Safe conversion for profit_usd
+                    raw_profit = opportunity.get("profit_potential_usd", 0.0)
+                    try:
+                        profit_usd = float(raw_profit) if raw_profit is not None else 0.0
+                    except (ValueError, TypeError):
+                        profit_usd = 0.0
+
+                    metadata = opportunity.get("metadata", {}) or {}
+
+                    prompt_parts.append(f"  {index}. {symbol}")
+                    prompt_parts.append(f"     Confidence: {confidence:.1f}%")
+                    prompt_parts.append(f"     Profit Potential: ${profit_usd:,.0f}")
+
+                    action = metadata.get("signal_action") or opportunity.get("action")
+                    if action:
+                        prompt_parts.append(f"     Action: {action}")
+
+                    strategy_name_lower = strategy_name.lower()
+                    if "portfolio" in strategy_name_lower:
+                        strategy_variant = metadata.get("strategy")
+                        if strategy_variant:
+                            # Coerce to string to safely call .replace() and .title()
+                            strategy_str = str(strategy_variant)
+                            prompt_parts.append(
+                                f"     Strategy: {strategy_str.replace('_', ' ').title()}"
+                            )
+
+                        expected_return = metadata.get("expected_annual_return")
+                        if expected_return is not None:
+                            try:
+                                # Handle string values like "5%" or "0.05"
+                                if isinstance(expected_return, str):
+                                    expected_return = expected_return.strip()
+                                    if expected_return.endswith('%'):
+                                        expected_return = expected_return[:-1].strip()
+                                    expected_return = float(expected_return)
+
+                                # Convert to numeric and normalize
+                                expected_return = float(expected_return)
+                                # If abs(value) <= 1, treat as fraction; otherwise as percentage
+                                if abs(expected_return) <= 1.0:
+                                    expected_return *= 100
+
+                                prompt_parts.append(
+                                    f"     Expected Return: {expected_return:.1f}%"
+                                )
+                            except (ValueError, TypeError):
+                                # Skip field if parsing fails
+                                pass
+
+                        sharpe_ratio = metadata.get("sharpe_ratio")
+                        if sharpe_ratio is not None:
+                            try:
+                                # Safe coercion to float for formatting
+                                numeric_sharpe = float(sharpe_ratio)
+                                prompt_parts.append(f"     Sharpe Ratio: {numeric_sharpe:.2f}")
+                            except (TypeError, ValueError):
+                                # Preserve original value when coercion fails
+                                prompt_parts.append(f"     Sharpe Ratio: {sharpe_ratio}")
+
+                        risk_level = metadata.get("risk_level")
+                        if risk_level is not None:
+                            if isinstance(risk_level, str):
+                                prompt_parts.append(f"     Risk Level: {risk_level}")
+                            else:
+                                prompt_parts.append(
+                                    f"     Risk Level: {risk_level * 100:.1f}%"
+                                )
+
+                        allocation = metadata.get("amount")
+                        if allocation is not None:
+                            try:
+                                # Handle string values like "10%" or "0.10"
+                                if isinstance(allocation, str):
+                                    allocation = allocation.strip()
+                                    if allocation.endswith('%'):
+                                        allocation = allocation[:-1].strip()
+                                    allocation = float(allocation)
+
+                                # Convert to numeric and normalize
+                                allocation = float(allocation)
+                                # If abs(value) <= 1, treat as fraction; otherwise as percentage
+                                if abs(allocation) <= 1.0:
+                                    allocation *= 100
+
+                                prompt_parts.append(
+                                    f"     Allocation: {allocation:.1f}% of portfolio"
+                                )
+                            except (ValueError, TypeError):
+                                # Skip field if parsing fails
+                                pass
+
+                    elif "risk" in strategy_name_lower:
+                        prompt_parts.append(
+                            f"     Risk Type: {metadata.get('risk_type', 'Risk Alert')}"
+                        )
+                        prompt_parts.append(
+                            f"     Recommendation: {metadata.get('strategy', 'Mitigation required')}"
+                        )
+                        urgency = metadata.get("urgency")
+                        if urgency is not None:
+                            prompt_parts.append(f"     Urgency: {urgency}")
             prompt_parts.append(f"""
-            
+
 INSTRUCTIONS FOR AI MONEY MANAGER:
 1. Present opportunities grouped by strategy type
 2. For portfolio optimization, explain each of the 6 strategies and their expected returns
@@ -1255,7 +1416,7 @@ INSTRUCTIONS FOR AI MONEY MANAGER:
 7. End with a clear recommendation based on user's profile
 
 Remember: You are the AI Money Manager providing personalized advice based on real analysis.""")
-            
+
             return "\n".join(prompt_parts)
 
         elif intent == ChatIntent.STRATEGY_MANAGEMENT:
@@ -1434,10 +1595,17 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "created_at": datetime.utcnow().isoformat(),
                     "expires_at": (datetime.utcnow() + timedelta(minutes=5)).isoformat()
                 }
+                # Use resilient JSON serialization to handle datetime objects
+                def json_serializer(obj):
+                    """Convert non-serializable objects to strings."""
+                    if hasattr(obj, 'isoformat'):  # datetime objects
+                        return obj.isoformat()
+                    return str(obj)
+
                 await redis.setex(
                     f"pending_decision:{decision_id}",
                     300,  # 5 minute expiry
-                    json.dumps(decision_data)
+                    json.dumps(decision_data, default=json_serializer)
                 )
         except Exception as e:
             self.logger.error("Failed to store pending decision", error=str(e))
@@ -1479,7 +1647,6 @@ Provide a helpful response using the real data available. Never use placeholder 
 
             if not approved:
                 return {"success": True, "message": "Decision rejected by user"}
-
             # Execute based on intent
             intent = ChatIntent(decision["intent"])
             context_data = decision["context_data"]
@@ -1551,11 +1718,10 @@ Provide a helpful response using the real data available. Never use placeholder 
 
             # Phase 2: AI Consensus (ONLY for trade validation)
             self.logger.info("Phase 2: AI Consensus Validation")
-            consensus = await self.ai_consensus.validate_trade_decision(
-            trade_params=trade_payload,
-            market_analysis=analysis,
-            confidence_threshold=85.0,
-            user_id=user_id
+            consensus = await self.ai_consensus.validate_trade(
+                analysis,  # Pass analysis as first argument
+                confidence_threshold=85.0,
+                user_id=user_id
             )
             phases_completed.append("consensus")
 
@@ -1598,8 +1764,9 @@ Provide a helpful response using the real data available. Never use placeholder 
             self.logger.info("Phase 4: Trade Execution")
 
             if conversation_mode == ConversationMode.PAPER_TRADING:
-                quantity = trade_payload.get("quantity")
-                notional_amount = trade_payload.get("amount") or trade_payload.get("position_size_usd")
+                # Use validated trade_request instead of raw trade_params
+                quantity = trade_request.get("quantity")
+                notional_amount = trade_request.get("amount") or trade_request.get("position_size_usd")
 
                 if not quantity and notional_amount and market_data.get("current_price"):
                     try:
@@ -1614,13 +1781,17 @@ Provide a helpful response using the real data available. Never use placeholder 
                         "phases_completed": phases_completed
                     }
 
+                # Use normalized values from validated trade_request
+                side = trade_request.get("side", trade_request.get("action", "buy")).lower()
+                order_type = trade_request.get("order_type", "market").lower()
+
                 paper_result = await self.paper_trading.execute_paper_trade(
                     user_id=user_id,
-                    symbol=trade_payload["symbol"],
-                    side=trade_payload["action"],
+                    symbol=trade_request["symbol"],
+                    side=side,
                     quantity=quantity,
-                    strategy_used=trade_payload.get("strategy", "chat_trade"),
-                    order_type=trade_payload.get("order_type", "market")
+                    strategy_used=trade_request.get("strategy", "chat_trade"),
+                    order_type=order_type
                 )
                 phases_completed.append("execution")
 
@@ -1634,7 +1805,6 @@ Provide a helpful response using the real data available. Never use placeholder 
 
                 monitoring = {"monitoring_active": False, "paper_trading": True}
                 phases_completed.append("monitoring")
-
                 return {
                     "success": True,
                     "message": paper_result.get("message", "Paper trade executed successfully"),
@@ -1648,11 +1818,12 @@ Provide a helpful response using the real data available. Never use placeholder 
                 if simulation_mode is None:
                     simulation_mode = True
 
-                trade_request = self._build_trade_request_for_execution(trade_payload, market_data)
+                # Use the validated trade_request from Phase 3, not rebuild from raw trade_params
+                # Ensure required fields are present in the validated request
                 if not trade_request.get("symbol") or not trade_request.get("action"):
                     return {
                         "success": False,
-                        "message": "Unable to build trade request for execution",
+                        "message": "Validated trade request missing required fields",
                         "phases_completed": phases_completed
                     }
 
@@ -1763,14 +1934,16 @@ Provide a helpful response using the real data available. Never use placeholder 
         amount = trade_params.get("amount") or trade_params.get("position_size_usd")
         if amount:
             trade_request["position_size_usd"] = amount
-            price = market_data.get("current_price")
-            if price:
-                try:
-                    quantity = float(amount) / float(price)
-                    if quantity > 0:
-                        trade_request.setdefault("quantity", quantity)
-                except (TypeError, ZeroDivisionError):
-                    pass
+            # Only calculate quantity from amount if no explicit quantity was provided
+            if not trade_request.get("quantity"):
+                price = market_data.get("current_price")
+                if price:
+                    try:
+                        quantity = float(amount) / float(price)
+                        if quantity > 0:
+                            trade_request["quantity"] = quantity
+                    except (TypeError, ZeroDivisionError):
+                        pass
 
         for optional_key in [
             "price",
@@ -1855,15 +2028,13 @@ Provide a helpful response using the real data available. Never use placeholder 
                     self.logger.exception(
                         "Rebalancing trade validation crashed",
                         error=str(validation_error),
-                        trade=base_request,
+                        trade=base_request
                     )
-                    results.append(
-                        {
-                            "success": False,
-                            "error": str(validation_error),
-                            "trade_request": base_request,
-                        }
-                    )
+                    results.append({
+                        "success": False,
+                        "error": str(validation_error),
+                        "trade_request": base_request
+                    })
                     continue
 
             return {
