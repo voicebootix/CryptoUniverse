@@ -13,8 +13,9 @@ Revolutionary business model: Strategy subscriptions with performance-based pric
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, AsyncIterator
 from dataclasses import dataclass
 
 import structlog
@@ -22,7 +23,7 @@ from sqlalchemy import select, and_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import get_database
+from app.core.database import AsyncSessionLocal
 from app.core.logging import LoggerMixin
 from app.core.async_session_manager import DatabaseSessionMixin
 from app.models.trading import TradingStrategy, Trade
@@ -88,9 +89,20 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     def __init__(self):
         self.ai_strategy_catalog = self._build_ai_strategy_catalog()
         self.performance_cache = {}
-        
+
         # Strategy pricing will be loaded dynamically from admin settings
         self.strategy_pricing = None
+
+    @asynccontextmanager
+    async def _session_scope(self) -> AsyncIterator[AsyncSession]:
+        """Provide an isolated async session for service operations."""
+
+        async with AsyncSessionLocal() as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
     
     # Win Rate Conversion Utilities
     # CANONICAL UNIT: 0-1 (fraction) for all internal operations
@@ -745,7 +757,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             normalized["best_trade_pnl"] = _convert_value(
                 best_trade_source,
                 ["largest_win_unit", "best_trade_unit", "largest_win_is_percent"],
-                enable_percent_fallback=False
+                enable_percent_fallback=True
             )
 
             worst_trade_source = performance_data.get("worst_trade_pnl")
@@ -756,7 +768,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             normalized["worst_trade_pnl"] = _convert_value(
                 worst_trade_source,
                 ["largest_loss_unit", "worst_trade_unit", "largest_loss_is_percent"],
-                enable_percent_fallback=False
+                enable_percent_fallback=True
             )
 
             # Supported symbols - no optimistic defaults
@@ -1179,7 +1191,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     async def _get_community_strategies(self, user_id: str) -> List[StrategyMarketplaceItem]:
         """Get community-published strategies."""
         try:
-            async with get_database() as db:
+            async with self._session_scope() as db:
                 # Get published strategies from community
                 stmt = select(TradingStrategy, StrategyPublisher).join(
                     StrategyPublisher, TradingStrategy.user_id == StrategyPublisher.user_id
@@ -1189,12 +1201,15 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                         StrategyPublisher.verified == True
                     )
                 ).order_by(desc(TradingStrategy.total_pnl))
-                
+
                 result = await db.execute(stmt)
                 strategies = result.fetchall()
-                
+
                 community_items = []
                 for strategy, publisher in strategies:
+                    win_rate_fraction = self.normalize_win_rate_to_fraction(
+                        float(strategy.win_rate)
+                    )
                     # Calculate pricing based on performance
                     monthly_cost = self._calculate_strategy_pricing(strategy)
 
@@ -1219,19 +1234,19 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                         description=strategy.description or "Community-published strategy",
                         category=strategy.strategy_type.value,
                         publisher_id=str(publisher.id),
-                        publisher_name=publisher.display_name,
+                        publisher_name=publisher.display_name or "Publisher",
                         is_ai_strategy=False,
                         credit_cost_monthly=monthly_cost,
                         credit_cost_per_execution=max(1, monthly_cost // 30),
-                        win_rate=strategy.win_rate,
-                        avg_return=float(strategy.total_pnl / strategy.total_trades) if strategy.total_trades > 0 else 0,
+                        win_rate=win_rate_fraction,
+                        avg_return=float(strategy.total_pnl / strategy.total_trades) if strategy.total_trades > 0 else 0.0,
                         sharpe_ratio=float(strategy.sharpe_ratio) if strategy.sharpe_ratio else None,
-                        max_drawdown=float(strategy.max_drawdown),
+                        max_drawdown=float(strategy.max_drawdown or 0),
                         total_trades=strategy.total_trades,
                         min_capital_usd=1000,  # Default minimum
                         risk_level=self._calculate_risk_level(strategy),
-                        timeframes=[strategy.timeframe],
-                        supported_symbols=strategy.target_symbols,
+                        timeframes=[strategy.timeframe] if strategy.timeframe else ["1h"],
+                        supported_symbols=list(strategy.target_symbols or []),
                         backtest_results={},  # Would be populated from backtesting service
                         ab_test_results={},   # Would be populated from A/B testing
                         live_performance=live_performance,
@@ -1253,15 +1268,16 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     def _calculate_strategy_pricing(self, strategy: TradingStrategy) -> int:
         """Calculate credit pricing based on strategy performance."""
         base_price = 20  # Base 20 credits
-        
+
         # Performance multipliers (win_rate is 0-1 fraction internally)
-        if strategy.win_rate > 0.80:  # 80%
+        win_rate_fraction = self.normalize_win_rate_to_fraction(float(strategy.win_rate))
+        if win_rate_fraction > 0.80:  # 80%
             base_price *= 2.0
-        elif strategy.win_rate > 0.70:  # 70%
+        elif win_rate_fraction > 0.70:  # 70%
             base_price *= 1.5
-        elif strategy.win_rate > 0.60:  # 60%
+        elif win_rate_fraction > 0.60:  # 60%
             base_price *= 1.2
-        
+
         # Sharpe ratio multiplier
         if strategy.sharpe_ratio and strategy.sharpe_ratio > 2.0:
             base_price *= 1.5
@@ -1278,13 +1294,16 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     
     def _calculate_risk_level(self, strategy: TradingStrategy) -> str:
         """Calculate risk level based on strategy metrics."""
-        if strategy.max_drawdown > 30:
+        drawdown_value = float(strategy.max_drawdown or 0)
+        drawdown_pct = drawdown_value * 100 if drawdown_value <= 1 else drawdown_value
+
+        if drawdown_pct > 30:
             return "very_high"
-        elif strategy.max_drawdown > 20:
+        elif drawdown_pct > 20:
             return "high"
-        elif strategy.max_drawdown > 10:
+        elif drawdown_pct > 10:
             return "medium"
-        elif strategy.max_drawdown > 5:
+        elif drawdown_pct > 5:
             return "low"
         else:
             return "very_low"
@@ -1292,11 +1311,17 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     async def _get_live_performance(self, strategy_id: str) -> Dict[str, Any]:
         """Get live performance metrics for strategy."""
         try:
-            async with get_database() as db:
+            async with self._session_scope() as db:
+                from uuid import UUID
+
+                try:
+                    strategy_uuid = UUID(strategy_id)
+                except (ValueError, TypeError):
+                    strategy_uuid = strategy_id
                 # Get recent trades for this strategy
                 stmt = select(Trade).where(
                     and_(
-                        Trade.strategy_id == strategy_id,
+                        Trade.strategy_id == strategy_uuid,
                         Trade.created_at >= datetime.utcnow() - timedelta(days=30)
                     )
                 ).order_by(desc(Trade.created_at))
@@ -1349,22 +1374,22 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         subscription_type: str = "monthly"  # monthly, per_execution
     ) -> Dict[str, Any]:
         """Purchase access to strategy using credits."""
-        try:
-            async with get_database() as db:
+        async with self._session_scope() as db:
+            try:
                 # Get user's credit account
                 credit_stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
                 credit_result = await db.execute(credit_stmt)
                 credit_account = credit_result.scalar_one_or_none()
-                
+
                 if not credit_account:
                     return {"success": False, "error": "No credit account found"}
-                
+
                 # Get strategy pricing
                 if strategy_id.startswith("ai_"):
                     strategy_func = strategy_id.replace("ai_", "")
                     if strategy_func not in self.ai_strategy_catalog:
                         return {"success": False, "error": "Strategy not found"}
-                    
+
                     config = self.ai_strategy_catalog[strategy_func]
                     # Handle different subscription types
                     if subscription_type in ["monthly", "permanent"]:
@@ -1373,10 +1398,17 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                         cost = config["credit_cost_per_execution"]
                 else:
                     # Community strategy
-                    strategy_stmt = select(TradingStrategy).where(TradingStrategy.id == strategy_id)
+                    from uuid import UUID
+
+                    try:
+                        strategy_uuid = UUID(strategy_id)
+                    except (ValueError, TypeError):
+                        strategy_uuid = strategy_id
+
+                    strategy_stmt = select(TradingStrategy).where(TradingStrategy.id == strategy_uuid)
                     strategy_result = await db.execute(strategy_stmt)
                     strategy = strategy_result.scalar_one_or_none()
-                    
+
                     if not strategy:
                         return {"success": False, "error": "Strategy not found"}
                     
@@ -1412,13 +1444,13 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 await self._add_to_user_strategy_portfolio(user_id, strategy_id, db)
                 
                 await db.commit()
-                
-                self.logger.info("Strategy purchase successful", 
-                               user_id=user_id, 
-                               strategy_id=strategy_id, 
+
+                self.logger.info("Strategy purchase successful",
+                               user_id=user_id,
+                               strategy_id=strategy_id,
                                cost=cost,
                                subscription_type=subscription_type)
-                
+
                 return {
                     "success": True,
                     "strategy_id": strategy_id,
@@ -1426,10 +1458,10 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     "remaining_credits": credit_account.available_credits,
                     "subscription_type": subscription_type
                 }
-                
-        except Exception as e:
-            self.logger.error("Strategy purchase failed", error=str(e))
-            return {"success": False, "error": str(e)}
+            except Exception as e:
+                await db.rollback()
+                self.logger.error("Strategy purchase failed", error=str(e))
+                return {"success": False, "error": str(e)}
     
     async def _add_to_user_strategy_portfolio(self, user_id: str, strategy_id: str, db: AsyncSession):
         """Add strategy to user's active strategy portfolio with enhanced error handling."""
@@ -1574,11 +1606,9 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
 
         # ADMIN BYPASS: For admin users, check if we should use fast database path
         try:
-            from app.core.database import get_database
             from app.models.user import User, UserRole
-            from sqlalchemy import select
 
-            async with get_database() as db:
+            async with self._session_scope() as db:
                 # Check if this is an admin user (convert string UUID to proper UUID)
                 import uuid
                 try:
