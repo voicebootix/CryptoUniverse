@@ -1186,9 +1186,13 @@ Portfolio:
 Analyze this trade request and provide recommendations. If viable, explain the 5-phase execution process."""
         
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-            opportunities = context_data.get("opportunities", {}).get("opportunities", [])
-            strategy_performance = context_data.get("opportunities", {}).get("strategy_performance", {})
-            user_profile = context_data.get("opportunities", {}).get("user_profile", {})
+            # Extract payload first (API may nest data under "payload" key)
+            opportunities_data = context_data.get("opportunities", {})
+            payload = opportunities_data.get("payload", opportunities_data)  # Fallback to original if no payload
+
+            opportunities = payload.get("opportunities", [])
+            strategy_performance = payload.get("strategy_performance", {})
+            user_profile = payload.get("user_profile", {})
 
             # Group opportunities by strategy with deterministic naming
             opportunities_by_strategy: Dict[str, List[Dict[str, Any]]] = {}
@@ -1315,8 +1319,10 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
                     if "portfolio" in strategy_name_lower:
                         strategy_variant = metadata.get("strategy")
                         if strategy_variant:
+                            # Coerce to string to safely call .replace() and .title()
+                            strategy_str = str(strategy_variant)
                             prompt_parts.append(
-                                f"     Strategy: {strategy_variant.replace('_', ' ').title()}"
+                                f"     Strategy: {strategy_str.replace('_', ' ').title()}"
                             )
 
                         expected_return = metadata.get("expected_annual_return")
@@ -1708,9 +1714,8 @@ Provide a helpful response using the real data available. Never use placeholder 
 
             # Phase 2: AI Consensus (ONLY for trade validation)
             self.logger.info("Phase 2: AI Consensus Validation")
-            consensus = await self.ai_consensus.validate_trade_decision(
-                trade_params=trade_payload,
-                market_analysis=analysis,
+            consensus = await self.ai_consensus.validate_trade(
+                analysis,  # Pass analysis as first argument
                 confidence_threshold=85.0,
                 user_id=user_id
             )
