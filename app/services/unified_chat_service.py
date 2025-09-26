@@ -1188,7 +1188,10 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
             # Extract payload first (API may nest data under "payload" key)
             opportunities_data = context_data.get("opportunities", {})
-            payload = opportunities_data.get("payload", opportunities_data)  # Fallback to original if no payload
+            # Ensure payload is always a dict - handle None, non-dict values safely
+            payload = opportunities_data.get("payload") or opportunities_data or {}
+            if not isinstance(payload, dict):
+                payload = {}
 
             opportunities = payload.get("opportunities", [])
             strategy_performance = payload.get("strategy_performance", {})
