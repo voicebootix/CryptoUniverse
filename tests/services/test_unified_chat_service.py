@@ -6,6 +6,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 os.environ.setdefault("SECRET_KEY", "test-secret")
+# NOTE:
+# The production application uses PostgreSQL via the asyncpg driver.  Our test
+# suite swaps the database URL to an on-disk SQLite database powered by
+# aiosqlite so tests can run without provisioning PostgreSQL.  The async driver
+# must therefore be installed in dev/test environments.
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
