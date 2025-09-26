@@ -352,7 +352,7 @@ export const pipelineApi = {
   // Get pipeline execution history
   async getPipelineHistory(limit: number = 50): Promise<any> {
     try {
-      const response = await apiClient.get('/market-analysis/trending-coins', {
+      const response = await apiClient.get('/market/trending-coins', {
         params: { limit },
       });
       return {
@@ -376,7 +376,7 @@ export const pipelineApi = {
   // Get system performance metrics
   async getSystemMetrics(): Promise<any> {
     try {
-      const response = await apiClient.get('/market-analysis/system-status');
+      const response = await apiClient.get('/market/system-status');
       return {
         success: true,
         data: response.data,

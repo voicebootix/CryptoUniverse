@@ -38,6 +38,7 @@ import { Progress } from '@/components/ui/progress';
 import { useUser } from '@/store/authStore';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
+import pipelineApi from '@/lib/api/pipelineApi';
 
 interface AIConfig {
   intensity: 'hibernation' | 'conservative' | 'active' | 'aggressive' | 'hyperactive';
