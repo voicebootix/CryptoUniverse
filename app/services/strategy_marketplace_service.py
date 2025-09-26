@@ -1711,15 +1711,22 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     strategy_func = strategy_id.replace("ai_", "")
                     if strategy_func in self.ai_strategy_catalog:
                         config = self.ai_strategy_catalog[strategy_func]
-                        total_monthly_cost += config["credit_cost_monthly"]
-                        
+
+                        monthly_cost = config.get("credit_cost_monthly", 0)
+                        try:
+                            monthly_cost_value = float(monthly_cost)
+                        except (TypeError, ValueError):
+                            monthly_cost_value = 0.0
+
+                        total_monthly_cost += monthly_cost_value
+
                         performance = await self._get_ai_strategy_performance(strategy_func, user_id)
-                        
+
                         strategy_portfolio.append({
                             "strategy_id": strategy_id,
                             "name": config["name"],
                             "category": config["category"],
-                            "monthly_cost": config["credit_cost_monthly"],
+                            "monthly_cost": monthly_cost_value,
                             "performance": performance,
                             "is_ai_strategy": True
                         })
@@ -1733,6 +1740,19 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 pnl = perf.get("total_pnl", 0)
                 total_pnl += pnl
 
+                monthly_cost = strategy.get("monthly_cost", 0)
+                try:
+                    monthly_cost_value = float(monthly_cost)
+                except (TypeError, ValueError):
+                    monthly_cost_value = 0.0
+
+                if monthly_cost_value == 0.0:
+                    subscription_type = "welcome"
+                    credit_cost_per_execution = 0
+                else:
+                    subscription_type = "purchased"
+                    credit_cost_per_execution = max(1, int(monthly_cost_value / 30))
+
                 transformed_strategy = {
                     "strategy_id": strategy["strategy_id"],
                     "name": strategy["name"],
@@ -1742,13 +1762,13 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
 
                     # Status & Subscription
                     "is_active": True,
-                    "subscription_type": "welcome" if strategy["monthly_cost"] == 0 else "purchased",
+                    "subscription_type": subscription_type,
                     "activated_at": "2024-01-15T10:00:00Z",
                     "expires_at": None,
 
                     # Pricing
-                    "credit_cost_monthly": strategy["monthly_cost"],
-                    "credit_cost_per_execution": 0.1,
+                    "credit_cost_monthly": monthly_cost,
+                    "credit_cost_per_execution": credit_cost_per_execution,
 
                     # Performance Metrics
                     "total_trades": perf.get("total_trades", 45),
