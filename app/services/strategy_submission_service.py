@@ -20,6 +20,7 @@ from sqlalchemy.orm import joinedload
 
 from app.core.async_session_manager import DatabaseSessionMixin
 from app.core.caching import cache_manager
+from app.core.redis import cache_manager as redis_cache_manager
 from app.core.logging import LoggerMixin
 from app.models.copy_trading import StrategyPublisher
 from app.models.strategy_submission import (
@@ -422,7 +423,7 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
 
         await db.commit()
         await db.refresh(submission)
-        await cache_manager.delete("strategies:marketplace")
+        await self._invalidate_marketplace_cache()
         return submission
 
     # ------------------------------------------------------------------
@@ -591,6 +592,53 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
                 strategy_id=str(strategy.id),
             )
         return strategy
+
+    async def _invalidate_marketplace_cache(self) -> None:
+        """Clear cached marketplace responses after publishing updates."""
+
+        try:
+            await cache_manager.delete("strategies:marketplace")
+        except Exception as exc:  # pragma: no cover - best-effort cleanup
+            self.logger.warning(
+                "legacy_marketplace_cache_invalidation_failed",
+                error=str(exc),
+            )
+
+        try:
+            redis_client = await redis_cache_manager.redis.get_client()
+        except Exception as exc:  # pragma: no cover - redis unavailable
+            self.logger.warning(
+                "marketplace_cache_invalidation_unavailable",
+                error=str(exc),
+            )
+            return
+
+        if redis_client is None:
+            return
+
+        pattern = "marketplace:*"
+        batch: List[str] = []
+
+        try:
+            async for key in redis_client.scan_iter(match=pattern, count=100):
+                key_str = (
+                    key.decode("utf-8")
+                    if isinstance(key, (bytes, bytearray))
+                    else str(key)
+                )
+                batch.append(key_str)
+                if len(batch) >= 100:
+                    await redis_client.delete(*batch)
+                    batch.clear()
+
+            if batch:
+                await redis_client.delete(*batch)
+        except Exception as exc:  # pragma: no cover - best-effort cleanup
+            self.logger.warning(
+                "marketplace_cache_prefix_purge_failed",
+                pattern=pattern,
+                error=str(exc),
+            )
 
     async def _calculate_average_review_hours(self, db: AsyncSession) -> int:
         stmt = select(
