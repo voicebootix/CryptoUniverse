@@ -1690,11 +1690,6 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "created_at": datetime.utcnow().isoformat(),
                     "expires_at": (datetime.utcnow() + timedelta(minutes=5)).isoformat()
                 }
-                await redis.setex(
-                    f"pending_decision:{decision_id}",
-                    300,  # 5 minute expiry
-                    json.dumps(decision_data)
-                # Use resilient JSON serialization to handle datetime objects
                 def json_serializer(obj):
                     """Convert non-serializable objects to strings."""
                     if hasattr(obj, 'isoformat'):  # datetime objects
@@ -1948,12 +1943,6 @@ Provide a helpful response using the real data available. Never use placeholder 
                 if not trade_request.get("symbol") or not trade_request.get("action"):
                     return {
                         "success": False,
-                        "message": "Unable to build trade request for execution",
-                # Use the validated trade_request from Phase 3, not rebuild from raw trade_params
-                # Ensure required fields are present in the validated request
-                if not trade_request.get("symbol") or not trade_request.get("action"):
-                    return {
-                        "success": False,
                         "message": "Validated trade request missing required fields",
                         "phases_completed": phases_completed
                     }
@@ -2173,44 +2162,6 @@ Provide a helpful response using the real data available. Never use placeholder 
                     simulation_mode,
                 )
                 results.append(result)
-
-                    if not validation.get("valid", False):
-                        results.append(
-                            {
-                                "success": False,
-                                "error": validation.get("reason", "Invalid parameters"),
-                                "trade_request": validation.get("trade_request", base_request),
-                            }
-                        )
-                        continue
-
-                    normalized_request = validation.get("trade_request", base_request)
-                    normalized_request.setdefault(
-                        "side",
-                        normalized_request.get("action", "BUY").lower(),
-                    )
-
-                    simulation_mode = self._coerce_to_bool(trade.get("simulation_mode"), True)
-
-                    result = await self.trade_executor.execute_trade(
-                        normalized_request,
-                        user_id,
-                        simulation_mode,
-                    )
-                    results.append(result)
-
-                except Exception as validation_error:
-                    self.logger.exception(
-                        "Rebalancing trade validation crashed",
-                        error=str(validation_error),
-                        trade=base_request
-                    )
-                    results.append({
-                        "success": False,
-                        "error": str(validation_error),
-                        "trade_request": base_request
-                    })
-                    continue
 
             return {
                 "success": True,

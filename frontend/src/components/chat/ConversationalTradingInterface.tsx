@@ -43,6 +43,7 @@ import {
   ExecutionPhase,
   AIPersonality,
   MessageType,
+  TradeProposal,
   PHASE_CONFIG,
   PERSONALITY_CONFIG,
   API_ENDPOINTS,
