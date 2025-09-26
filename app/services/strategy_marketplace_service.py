@@ -1883,15 +1883,12 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 "profit_potential_remaining": 10000.0 - abs(total_pnl)
             }
 
-            return {
-                "success": True,
-                "active_strategies": transformed_strategies,
-                "summary": portfolio_summary,
-                "strategies": transformed_strategies,
-                "total_strategies": len(strategy_portfolio),
-                "total_monthly_cost": total_monthly_cost,
-                "cached": False
-            }
+            return self._compose_strategy_portfolio_response(
+                transformed_strategies,
+                source="redis_user_portfolio",
+                degraded=False,
+                success=True
+            )
             
         except asyncio.TimeoutError:
             self.logger.error("❌ Redis operation timeout", user_id=user_id)
