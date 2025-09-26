@@ -1342,7 +1342,13 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
 
                         sharpe_ratio = metadata.get("sharpe_ratio")
                         if sharpe_ratio is not None:
-                            prompt_parts.append(f"     Sharpe Ratio: {sharpe_ratio:.2f}")
+                            try:
+                                # Safe coercion to float for formatting
+                                numeric_sharpe = float(sharpe_ratio)
+                                prompt_parts.append(f"     Sharpe Ratio: {numeric_sharpe:.2f}")
+                            except (TypeError, ValueError):
+                                # Preserve original value when coercion fails
+                                prompt_parts.append(f"     Sharpe Ratio: {sharpe_ratio}")
 
                         risk_level = metadata.get("risk_level")
                         if risk_level is not None:
