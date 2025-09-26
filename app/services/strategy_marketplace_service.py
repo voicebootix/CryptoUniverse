@@ -1481,7 +1481,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         
         # Add method-level timeout for entire operation to protect chat responsiveness
         try:
-            async with asyncio.timeout(12.0):
+            async with asyncio.timeout(22.0):
                 portfolio = await self._get_user_strategy_portfolio_impl(user_id)
                 if portfolio.get("success"):
                     return portfolio

@@ -1583,7 +1583,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                 }
 
             trade_request = validation.get("trade_request", trade_request)
-            trade_request.setdefault("side", trade_request.get("action", "BUY").lower())
+            trade_request["side"] = trade_request.get("action", trade_request.get("side", "BUY")).lower()
 
             # Phase 4: Execution
             self.logger.info("Phase 4: Trade Execution")
@@ -1740,7 +1740,11 @@ Provide a helpful response using the real data available. Never use placeholder 
         if action:
             normalized_action = action.upper() if isinstance(action, str) else action
             trade_request["action"] = normalized_action
-            trade_request["side"] = normalized_action
+            trade_request["side"] = (
+                normalized_action.lower()
+                if isinstance(normalized_action, str)
+                else normalized_action
+            )
 
         order_type = trade_params.get("order_type")
         if isinstance(order_type, str):
@@ -1777,7 +1781,7 @@ Provide a helpful response using the real data available. Never use placeholder 
 
         action_value = trade_request.get("action")
         if isinstance(action_value, str) and action_value:
-            trade_request.setdefault("side", action_value.lower())
+            trade_request["side"] = trade_request.get("side", action_value).lower()
 
         return trade_request
 
