@@ -1124,26 +1124,101 @@ class PortfolioOptimizationEngine(LoggerMixin):
         if not positions or total_value <= 0:
             return trades
 
+        def _safe_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
         # Calculate current weights and cache useful context
         current_weights: Dict[str, float] = {}
         position_lookup: Dict[str, Dict[str, Any]] = {}
+        aggregated_positions: Dict[str, Dict[str, Any]] = {}
+
         for position in positions:
             symbol = position.get("symbol")
             if not symbol:
                 continue
 
+            aggregated = aggregated_positions.setdefault(
+                symbol,
+                {
+                    "value": 0.0,
+                    "quantity_sum": 0.0,
+                    "has_quantity": False,
+                    "exchanges": set(),
+                    "value_price_sum": 0.0,
+                    "value_weight": 0.0,
+                    "quantity_price_sum": 0.0,
+                    "quantity_weight": 0.0,
+                    "last_price": None,
+                },
+            )
+
+            exchange = position.get("exchange")
+            if exchange:
+                aggregated["exchanges"].add(exchange)
+
             position_value = _extract_position_value(position)
-            if position_value <= 0:
+            if position_value > 0:
+                aggregated["value"] += position_value
+
+            quantity_raw = (
+                position.get("quantity")
+                if position.get("quantity") is not None
+                else position.get("amount")
+                if position.get("amount") is not None
+                else position.get("units")
+            )
+            quantity_float = _safe_float(quantity_raw)
+            if quantity_float is not None:
+                aggregated["quantity_sum"] += quantity_float
+                aggregated["has_quantity"] = True
+
+            price_raw = None
+            for price_key in ("current_price", "price", "mark_price"):
+                candidate = position.get(price_key)
+                if candidate is not None:
+                    price_raw = candidate
+                    break
+
+            price_float = _safe_float(price_raw)
+            if price_float is not None:
+                aggregated["last_price"] = price_float
+                if position_value > 0:
+                    aggregated["value_price_sum"] += price_float * position_value
+                    aggregated["value_weight"] += position_value
+                elif quantity_float is not None and quantity_float != 0:
+                    weight = abs(quantity_float)
+                    aggregated["quantity_price_sum"] += price_float * weight
+                    aggregated["quantity_weight"] += weight
+
+        for symbol, aggregated in aggregated_positions.items():
+            aggregated_value = aggregated["value"]
+            if aggregated_value <= 0:
                 continue
 
-            weight = position_value / total_value
-            current_weights[symbol] = current_weights.get(symbol, 0.0) + weight
-            # Store the most recent position data for trade enrichment
+            current_weights[symbol] = aggregated_value / total_value
+
+            if aggregated["value_weight"] > 0:
+                weighted_price = aggregated["value_price_sum"] / aggregated["value_weight"]
+            elif aggregated["quantity_weight"] > 0:
+                weighted_price = aggregated["quantity_price_sum"] / aggregated["quantity_weight"]
+            else:
+                weighted_price = aggregated.get("last_price")
+
+            aggregated_quantity = (
+                aggregated["quantity_sum"] if aggregated["has_quantity"] else None
+            )
+            exchanges = sorted(aggregated["exchanges"]) if aggregated["exchanges"] else None
+
             position_lookup[symbol] = {
-                "value": position_value,
-                "exchange": position.get("exchange"),
-                "price": position.get("current_price") or position.get("price"),
-                "quantity": position.get("quantity") or position.get("amount") or position.get("units"),
+                "value": aggregated_value,
+                "exchange": exchanges,
+                "price": weighted_price,
+                "quantity": aggregated_quantity,
             }
 
         # Do not propose trades for assets the user does not currently hold
@@ -1181,25 +1256,74 @@ class PortfolioOptimizationEngine(LoggerMixin):
                 continue
 
             reference_price = current_context.get("price")
+            reference_price_float = _safe_float(reference_price)
+            if reference_price_float is not None and reference_price_float <= 0:
+                reference_price_float = None
+
             current_quantity = current_context.get("quantity")
+            current_quantity_float = _safe_float(current_quantity)
+            baseline_quantity = current_quantity_float
+
+            price_candidates: List[Optional[float]] = []
+            if reference_price_float is not None and reference_price_float > 0:
+                price_candidates.append(reference_price_float)
+
+            if baseline_quantity is not None:
+                try:
+                    derived_price = current_value / baseline_quantity
+                except (TypeError, ValueError, ZeroDivisionError):
+                    derived_price = None
+                if derived_price is not None and derived_price > 0:
+                    price_candidates.append(derived_price)
+
+            implied_price = next(
+                (candidate for candidate in price_candidates if candidate is not None and candidate > 0),
+                None,
+            )
+
             target_quantity = None
             quantity_change = None
 
-            if reference_price:
+            if implied_price is not None:
                 try:
-                    reference_price_float = float(reference_price)
-                    if reference_price_float > 0:
-                        target_quantity = target_value / reference_price_float
-                        baseline_quantity = (
-                            float(current_quantity)
-                            if current_quantity is not None
-                            else current_value / reference_price_float
-                        )
-                        quantity_change = target_quantity - baseline_quantity
+                    target_quantity = target_value / implied_price
                 except (TypeError, ValueError, ZeroDivisionError):
-                    reference_price_float = None
+                    target_quantity = None
+
+                if baseline_quantity is None:
+                    try:
+                        baseline_quantity = current_value / implied_price
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        baseline_quantity = None
+
+                if target_quantity is not None:
+                    if baseline_quantity is not None:
+                        quantity_change = target_quantity - baseline_quantity
+                    else:
+                        try:
+                            quantity_change = (target_value - current_value) / implied_price
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            quantity_change = None
+
+                if reference_price_float is None:
+                    reference_price_float = implied_price
             else:
-                reference_price_float = None
+                if (
+                    baseline_quantity is not None
+                    and target_value is not None
+                    and current_value is not None
+                ):
+                    try:
+                        value_delta = target_value - current_value
+                        if abs(baseline_quantity) > 0:
+                            derived_price = current_value / baseline_quantity
+                            if derived_price and derived_price > 0:
+                                quantity_change = value_delta / derived_price
+                                target_quantity = baseline_quantity + quantity_change
+                                if reference_price_float is None:
+                                    reference_price_float = derived_price
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        quantity_change = None
 
             trade_record = {
                 "symbol": symbol,

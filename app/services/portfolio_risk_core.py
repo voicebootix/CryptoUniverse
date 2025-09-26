@@ -1013,7 +1013,7 @@ class PortfolioRiskService(LoggerMixin):
     
     def _generate_request_id(self) -> str:
         """Generate unique request ID."""
-        return f"PRMS_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        return f"PRS_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     
     async def _generate_comprehensive_recommendations(
         self,
@@ -1571,10 +1571,6 @@ class PortfolioRiskService(LoggerMixin):
                 "timestamp": datetime.utcnow().isoformat()
             }
     
-    def _generate_request_id(self) -> str:
-        """Generate unique request ID."""
-        return f"PRS_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-
     def _make_json_serializable(self, obj: Any) -> Any:
         """Convert objects to JSON-serializable format."""
         if isinstance(obj, dict):
