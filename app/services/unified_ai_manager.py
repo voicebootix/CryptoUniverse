@@ -217,6 +217,17 @@ class UnifiedAIManager(LoggerMixin):
             if decision.auto_execute and not decision.requires_approval:
                 # Autonomous execution
                 execution_result = await self._execute_ai_decision(decision)
+
+                if execution_result.get("success"):
+                    self.active_decisions.pop(decision.decision_id, None)
+                else:
+                    self.logger.warning(
+                        "Autonomous decision execution failed",
+                        decision_id=decision.decision_id,
+                        user_id=user_id,
+                        error=execution_result.get("error")
+                    )
+
                 return {
                     "success": True,
                     "decision_id": decision.decision_id,
@@ -261,15 +272,31 @@ class UnifiedAIManager(LoggerMixin):
             
             # Execute the decision
             result = await self._execute_ai_decision(decision)
-            
-            # Clean up
-            del self.active_decisions[decision_id]
-            
+
+            if result.get("success"):
+                # Clean up only on success
+                self.active_decisions.pop(decision_id, None)
+
+                return {
+                    "success": True,
+                    "decision_id": decision_id,
+                    "execution_result": result,
+                    "message": "Decision executed successfully"
+                }
+
+            error_message = result.get("error", "Execution failed")
+            self.logger.warning(
+                "AI decision execution returned error",
+                decision_id=decision_id,
+                user_id=user_id,
+                error=error_message
+            )
+
             return {
-                "success": True,
+                "success": False,
                 "decision_id": decision_id,
-                "execution_result": result,
-                "message": "Decision executed successfully"
+                "error": error_message,
+                "execution_result": result
             }
             
         except Exception as e:
@@ -832,15 +859,35 @@ class UnifiedAIManager(LoggerMixin):
             user_id = decision.user_id
             
             if decision_type == "trade":
-                # Execute trade
+                trade_request = self._build_trade_request(decision)
+                if not trade_request.get("symbol") or not trade_request.get("action"):
+                    return {
+                        "success": False,
+                        "error": "Trade recommendation missing required fields",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+
+                strategy_id = trade_request.pop("strategy_id", None)
+                simulation_mode = trade_request.pop("simulation_mode", None)
+
+                if simulation_mode is None:
+                    simulation_mode = (
+                        decision.recommendation.get("simulation_mode")
+                        or decision.context.get("user_config", {}).get("simulation_mode")
+                        or decision.context.get("simulation_mode")
+                        or True
+                    )
+
+                if isinstance(simulation_mode, str):
+                    simulation_mode = simulation_mode.strip().lower() not in {"false", "0", "off", "no"}
+
                 result = await self.trade_executor.execute_trade(
+                    trade_request=trade_request,
                     user_id=user_id,
-                    symbol=recommendation.get("symbol"),
-                    action=recommendation.get("action"),
-                    amount=recommendation.get("amount"),
-                    order_type=recommendation.get("order_type", "market")
+                    simulation_mode=bool(simulation_mode),
+                    strategy_id=strategy_id,
                 )
-                
+
             elif decision_type == "rebalance":
                 # Execute rebalancing
                 trades = recommendation.get("trades", [])
@@ -862,16 +909,52 @@ class UnifiedAIManager(LoggerMixin):
                 result = {"success": False, "error": f"Unknown decision type: {decision_type}"}
             
             # Log execution
-            self.logger.info("AI decision executed", 
-                           decision_id=decision.decision_id,
-                           decision_type=decision_type,
-                           success=result.get("success"))
-            
+            log_data = {
+                "decision_id": decision.decision_id,
+                "decision_type": decision_type,
+                "success": result.get("success"),
+            }
+            if not result.get("success") and result.get("error"):
+                log_data["error"] = result.get("error")
+
+            self.logger.info("AI decision executed", **log_data)
+
             return result
-            
+
         except Exception as e:
             self.logger.error("AI decision execution failed", error=str(e), decision_id=decision.decision_id)
             return {"success": False, "error": str(e)}
+
+    def _build_trade_request(self, decision: AIDecision) -> Dict[str, Any]:
+        """Build a normalized trade request payload from an AI decision."""
+
+        recommendation = decision.recommendation or {}
+        metadata = decision.context or {}
+
+        trade_request: Dict[str, Any] = {
+            "symbol": recommendation.get("symbol") or recommendation.get("asset") or recommendation.get("pair"),
+            "action": recommendation.get("action") or recommendation.get("side") or metadata.get("action"),
+            "quantity": recommendation.get("quantity"),
+            "amount": recommendation.get("amount"),
+            "position_size_usd": recommendation.get("position_size_usd") or recommendation.get("notional_usd"),
+            "order_type": recommendation.get("order_type") or recommendation.get("orderType"),
+            "price": recommendation.get("price") or recommendation.get("entry_price"),
+            "stop_loss": recommendation.get("stop_loss") or recommendation.get("stopLoss"),
+            "take_profit": recommendation.get("take_profit") or recommendation.get("takeProfit"),
+            "exchange": recommendation.get("exchange") or metadata.get("exchange"),
+            "time_in_force": recommendation.get("time_in_force") or recommendation.get("tif"),
+            "opportunity_data": recommendation.get("opportunity_data") or metadata.get("opportunity_data"),
+            "strategy_id": recommendation.get("strategy_id") or metadata.get("strategy_id"),
+            "simulation_mode": recommendation.get("simulation_mode"),
+        }
+
+        # Clean up empty values while preserving False/0
+        cleaned_request = {key: value for key, value in trade_request.items() if value is not None}
+
+        if "order_type" not in cleaned_request:
+            cleaned_request["order_type"] = "market"
+
+        return cleaned_request
     
     async def _format_ai_response(self, decision: AIDecision, interface: InterfaceType) -> Dict[str, Any]:
         """Format AI response based on interface type."""
@@ -909,7 +992,12 @@ class UnifiedAIManager(LoggerMixin):
                     "decision_id": decision.decision_id,
                     "requires_approval": decision.requires_approval,
                     "confidence": decision.confidence,
-                    "interface": interface.value
+                    "interface": interface.value,
+                    "intent": decision.intent,
+                    "decision_type": decision.decision_type,
+                    "recommendation": decision.recommendation,
+                    "risk_assessment": decision.risk_assessment,
+                    "timestamp": decision.timestamp.isoformat(),
                 }
             }
             
