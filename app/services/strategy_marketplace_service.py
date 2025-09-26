@@ -1657,7 +1657,8 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             return self._compose_strategy_portfolio_response(
                 strategies,
                 source="admin_fast_path",
-                degraded=False
+                degraded=False,
+                success=True
             )
 
         except Exception as e:
