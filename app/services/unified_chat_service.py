@@ -1193,9 +1193,10 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
             if not isinstance(payload, dict):
                 payload = {}
 
-            opportunities = payload.get("opportunities", [])
-            strategy_performance = payload.get("strategy_performance", {})
-            user_profile = payload.get("user_profile", {})
+            # Guard against None values - ensure correct empty types
+            opportunities = payload.get("opportunities") or []
+            strategy_performance = payload.get("strategy_performance") or {}
+            user_profile = payload.get("user_profile") or {}
 
             # Group opportunities by strategy with deterministic naming
             opportunities_by_strategy: Dict[str, List[Dict[str, Any]]] = {}
