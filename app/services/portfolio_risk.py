@@ -375,7 +375,7 @@ class ExchangePortfolioConnector(LoggerMixin):
                 await redis_manager.set(
                     cache_key,
                     json.dumps(portfolio_data, default=str),
-                    ex=self.cache_ttl
+                    expire=self.cache_ttl
                 )
         except Exception as e:
             self.logger.warning("Cache storage failed", error=str(e))
@@ -1092,49 +1092,142 @@ class PortfolioOptimizationEngine(LoggerMixin):
         target_weights: Dict[str, float]
     ) -> List[Dict[str, Any]]:
         """Generate trades needed for rebalancing."""
-        
-        trades = []
-        total_value = current_portfolio.get("total_value_usd", 0)
-        
-        if total_value <= 0:
+
+        trades: List[Dict[str, Any]] = []
+
+        def _extract_position_value(position: Dict[str, Any]) -> float:
+            """Best effort extraction of the USD value for a position."""
+            for key in ("value_usd", "usd_value", "market_value", "current_value", "value"):
+                raw_value = position.get(key)
+                if raw_value is not None:
+                    try:
+                        return float(raw_value)
+                    except (TypeError, ValueError):
+                        continue
+
+            quantity = position.get("quantity") or position.get("amount") or position.get("units")
+            price = position.get("current_price") or position.get("price") or position.get("mark_price")
+            if quantity is not None and price is not None:
+                try:
+                    return float(quantity) * float(price)
+                except (TypeError, ValueError):
+                    return 0.0
+            return 0.0
+
+        positions = current_portfolio.get("positions", []) or []
+        total_value = (
+            current_portfolio.get("total_value_usd")
+            or current_portfolio.get("total_value")
+            or sum(_extract_position_value(position) for position in positions)
+        )
+
+        if not positions or total_value <= 0:
             return trades
-        
-        # Calculate current weights
-        current_weights = {}
-        for position in current_portfolio.get("positions", []):
-            symbol = position["symbol"]
-            current_weight = position["value_usd"] / total_value
-            
-            if symbol in current_weights:
-                current_weights[symbol] += current_weight
-            else:
-                current_weights[symbol] = current_weight
-        
-        # Generate rebalancing trades
-        for symbol, target_weight in target_weights.items():
-            current_weight = current_weights.get(symbol, 0)
+
+        # Calculate current weights and cache useful context
+        current_weights: Dict[str, float] = {}
+        position_lookup: Dict[str, Dict[str, Any]] = {}
+        for position in positions:
+            symbol = position.get("symbol")
+            if not symbol:
+                continue
+
+            position_value = _extract_position_value(position)
+            if position_value <= 0:
+                continue
+
+            weight = position_value / total_value
+            current_weights[symbol] = current_weights.get(symbol, 0.0) + weight
+            # Store the most recent position data for trade enrichment
+            position_lookup[symbol] = {
+                "value": position_value,
+                "exchange": position.get("exchange"),
+                "price": position.get("current_price") or position.get("price"),
+                "quantity": position.get("quantity") or position.get("amount") or position.get("units"),
+            }
+
+        # Do not propose trades for assets the user does not currently hold
+        filtered_weights = {
+            symbol: weight
+            for symbol, weight in target_weights.items()
+            if symbol in current_weights
+        }
+
+        if not filtered_weights:
+            return trades
+
+        # Renormalize filtered target weights so they sum to 1
+        target_total = sum(filtered_weights.values())
+        if target_total <= 0:
+            return trades
+
+        normalized_targets = {
+            symbol: weight / target_total
+            for symbol, weight in filtered_weights.items()
+        }
+
+        threshold = max(total_value * 0.003, 1.0)  # 0.3% of portfolio value or $1 minimum
+
+        for symbol, target_weight in normalized_targets.items():
+            current_weight = current_weights.get(symbol, 0.0)
             weight_diff = target_weight - current_weight
-            
-            # Only generate trade if difference is significant (>1%)
-            if abs(weight_diff) > 0.01:
-                target_value = target_weight * total_value
-                current_value = current_weight * total_value
-                trade_value = target_value - current_value
-                
-                trades.append({
-                    "symbol": symbol,
-                    "action": "BUY" if trade_value > 0 else "SELL",
-                    "value_usd": abs(trade_value),
-                    "current_weight": current_weight,
-                    "target_weight": target_weight,
-                    "weight_change": weight_diff,
-                    "priority": "HIGH" if abs(weight_diff) > 0.05 else "MEDIUM"
-                })
-        
-        # Sort by priority and weight change magnitude
-        trades.sort(key=lambda x: (x["priority"] == "LOW", -abs(x["weight_change"])))
-        
-        return trades[:10]  # Limit to top 10 trades
+
+            current_context = position_lookup.get(symbol, {})
+            current_value = current_context.get("value", current_weight * total_value)
+            target_value = target_weight * total_value
+            trade_value = target_value - current_value
+
+            if abs(trade_value) <= threshold:
+                continue
+
+            reference_price = current_context.get("price")
+            current_quantity = current_context.get("quantity")
+            target_quantity = None
+            quantity_change = None
+
+            if reference_price:
+                try:
+                    reference_price_float = float(reference_price)
+                    if reference_price_float > 0:
+                        target_quantity = target_value / reference_price_float
+                        baseline_quantity = (
+                            float(current_quantity)
+                            if current_quantity is not None
+                            else current_value / reference_price_float
+                        )
+                        quantity_change = target_quantity - baseline_quantity
+                except (TypeError, ValueError, ZeroDivisionError):
+                    reference_price_float = None
+            else:
+                reference_price_float = None
+
+            trade_record = {
+                "symbol": symbol,
+                "action": "BUY" if trade_value > 0 else "SELL",
+                "value_change": round(trade_value, 2),
+                "notional_usd": abs(round(trade_value, 2)),
+                "amount": abs(round(trade_value, 2)),
+                "current_value": round(current_value, 2),
+                "target_value": round(target_value, 2),
+                "current_weight": round(current_weight, 6),
+                "target_weight": round(target_weight, 6),
+                "weight_change": round(weight_diff, 6),
+                "priority": "HIGH" if abs(weight_diff) > 0.05 else "MEDIUM",
+                "exchange": current_context.get("exchange"),
+            }
+
+            if reference_price_float is not None:
+                trade_record["reference_price"] = round(reference_price_float, 8)
+            if target_quantity is not None and quantity_change is not None:
+                trade_record["target_quantity"] = round(target_quantity, 8)
+                trade_record["quantity_change"] = round(quantity_change, 8)
+
+            trades.append(trade_record)
+
+        trades.sort(key=lambda item: -abs(item.get("weight_change", 0.0)))
+
+        # Provide the most impactful recommendations first, limited to top 10 for clarity
+        return trades[:10]
     
     def _get_empty_optimization_result(self, strategy: OptimizationStrategy) -> OptimizationResult:
         """Return empty optimization result."""

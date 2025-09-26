@@ -953,7 +953,7 @@ class ChatServiceAdaptersFixed:
         """AI MONEY MANAGER: Test all strategies and return comprehensive analysis."""
         try:
             logger.info("AI Money Manager: Testing all strategies for optimal selection", user_id=user_id)
-            
+
             # Convert portfolio for optimization
             optimization_portfolio = self._convert_portfolio_for_optimization(portfolio_data)
             
@@ -1047,59 +1047,72 @@ class ChatServiceAdaptersFixed:
             
             # Find the best strategy
             if successful_results:
-                best_strategy = max(successful_results.keys(), 
+                best_strategy = max(successful_results.keys(),
                                   key=lambda k: successful_results[k]["final_score"])
                 best_metrics = successful_results[best_strategy]
-                
+
                 # Sort all results by score for ranking
-                ranked_strategies = sorted(successful_results.items(), 
-                                         key=lambda x: x[1]["final_score"], 
+                ranked_strategies = sorted(successful_results.items(),
+                                         key=lambda x: x[1]["final_score"],
                                          reverse=True)
-                
+
                 logger.info("AI Money Manager: Strategy analysis completed",
                            best_strategy=best_strategy,
                            best_score=best_metrics["final_score"],
                            strategies_tested=len(strategy_results),
                            successful_strategies=len(successful_results))
-                
+
                 return {
+                    "analysis_type": "comprehensive_multi_strategy",
                     "recommended_strategy": best_strategy,
                     "best_metrics": best_metrics,
                     "all_results": strategy_results,
+                    "all_strategies": strategy_results,
                     "ranked_strategies": ranked_strategies,
                     "analysis_summary": {
                         "total_tested": len(strategy_results),
                         "successful": len(successful_results),
                         "failed": len(strategy_results) - len(successful_results)
-                    }
+                    },
+                    "strategies_tested": len(strategy_results),
+                    "successful_strategies": len(successful_results),
+                    "failed_strategies": len(strategy_results) - len(successful_results)
                 }
             else:
                 # All strategies failed - use intelligent fallback
                 fallback_strategy = await self._select_optimal_strategy(portfolio_data, user_id)
-                logger.warning("All strategies failed, using intelligent fallback", 
+                logger.warning("All strategies failed, using intelligent fallback",
                               fallback_strategy=fallback_strategy)
-                
+
                 return {
+                    "analysis_type": "fallback_intelligent_selection",
                     "recommended_strategy": fallback_strategy,
                     "best_metrics": {"expected_return": 0.15, "final_score": 0.1},
                     "all_results": strategy_results,
+                    "all_strategies": strategy_results,
                     "ranked_strategies": [],
                     "analysis_summary": {
                         "total_tested": len(strategy_results),
                         "successful": 0,
                         "failed": len(strategy_results),
                         "fallback_used": True
-                    }
+                    },
+                    "strategies_tested": len(strategy_results),
+                    "successful_strategies": 0,
+                    "failed_strategies": len(strategy_results),
+                    "fallback_used": True
                 }
-                
+
         except Exception as e:
             logger.error("Comprehensive strategy analysis failed", error=str(e))
             # Use existing intelligent selection as fallback
             fallback_strategy = await self._select_optimal_strategy(portfolio_data, user_id)
             return {
+                "analysis_type": "error_fallback",
                 "recommended_strategy": fallback_strategy,
                 "best_metrics": {"expected_return": 0.15, "final_score": 0.1},
                 "all_results": {},
+                "all_strategies": {},
                 "ranked_strategies": [],
                 "analysis_summary": {
                     "total_tested": 0,
@@ -1107,7 +1120,12 @@ class ChatServiceAdaptersFixed:
                     "failed": 0,
                     "error": str(e),
                     "fallback_used": True
-                }
+                },
+                "strategies_tested": 0,
+                "successful_strategies": 0,
+                "failed_strategies": 0,
+                "fallback_used": True,
+                "error": str(e)
             }
     
     def _map_risk_tolerance(self, risk_tolerance: str) -> str:
