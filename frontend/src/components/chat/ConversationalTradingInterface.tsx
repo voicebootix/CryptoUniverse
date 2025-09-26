@@ -33,7 +33,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
@@ -42,8 +42,6 @@ import { useChatStore, ChatMode, ChatMessage as BaseChatMessage } from '@/store/
 import {
   ExecutionPhase,
   AIPersonality,
-  TradeProposal,
-  ConversationMemory,
   MessageType,
   PHASE_CONFIG,
   PERSONALITY_CONFIG,
@@ -83,6 +81,24 @@ interface Message extends ExtendedChatMessage {
 const phaseConfig = PHASE_CONFIG;
 const personalityConfig = PERSONALITY_CONFIG;
 
+interface PendingTradeDetails {
+  decisionId: string;
+  action?: string;
+  symbol?: string;
+  orderType?: string;
+  confidence?: number;
+  price?: number;
+  quantity?: number;
+  positionSizeUsd?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  simulation?: boolean;
+  reasoning: string[];
+  risks: string[];
+  analysis?: string;
+  riskScore?: number;
+}
+
 interface ConversationalTradingInterfaceProps {
   className?: string;
   isExpanded?: boolean;
@@ -107,7 +123,9 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     sendMessage: sendChatMessage,
     initializeSession,
     setCurrentMode,
-    clearChat
+    pendingDecision,
+    approveDecision,
+    clearPendingDecision
   } = useChatStore();
   
   // Overlay state for local-only messages (phase, trade, ai messages)
@@ -139,8 +157,9 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
   const [inputValue, setInputValue] = useState('');
   const [currentPhase, setCurrentPhase] = useState<ExecutionPhase>(ExecutionPhase.IDLE);
   const [personality, setPersonality] = useState<AIPersonality>(AIPersonality.BALANCED);
-  const [memory, setMemory] = useState<ConversationMemory | null>(null);
-  const [activeProposal, setActiveProposal] = useState<TradeProposal | null>(null);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [decisionLoading, setDecisionLoading] = useState(false);
+  const [decisionAction, setDecisionAction] = useState<'approve' | 'decline' | null>(null);
   // Remove WebSocket connection state since we're using REST API
   const [isConnected] = useState(true); // Always connected via REST API
   
@@ -183,17 +202,6 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     setOverlays(prev => [...prev, message]);
   };
 
-  const addTradeProposalMessage = (proposal: TradeProposal) => {
-    const message: ExtendedChatMessage = {
-      id: `proposal-${proposal.id}`,
-      content: `**Trade Proposal Ready**\n${proposal.action.toUpperCase()} ${proposal.amount} ${proposal.symbol} at $${proposal.price}`,
-      type: 'trade',
-      tradeProposal: proposal,
-      timestamp: new Date().toISOString()
-    };
-    setOverlays(prev => [...prev, message]);
-  };
-
   const addAIMessage = (content: string, metadata?: any) => {
     const message: ExtendedChatMessage = {
       id: `ai-${Date.now()}`,
@@ -204,6 +212,111 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     };
     setOverlays(prev => [...prev, message]);
   };
+
+  const pendingTradeDetails = useMemo<PendingTradeDetails | null>(() => {
+    if (!pendingDecision?.message) {
+      return null;
+    }
+
+    const metadata = pendingDecision.message.metadata ?? {};
+    const recommendation = metadata.recommendation ?? {};
+    const riskAssessment = metadata.risk_assessment ?? recommendation.risk_assessment ?? {};
+
+    const parseNumber = (value: any): number | undefined => {
+      if (value === null || value === undefined) {
+        return undefined;
+      }
+      const numeric = typeof value === 'number' ? value : parseFloat(value);
+      return Number.isFinite(numeric) ? numeric : undefined;
+    };
+
+    const normalizeStringArray = (value: any): string[] => {
+      if (Array.isArray(value)) {
+        return value
+          .map(item => (typeof item === 'string' ? item.trim() : `${item}`.trim()))
+          .filter(Boolean);
+      }
+      if (typeof value === 'string') {
+        return value
+          .split(/\r?\n|;/)
+          .map(item => item.trim())
+          .filter(Boolean);
+      }
+      return [];
+    };
+
+    const actionRaw = recommendation.action ?? recommendation.side ?? metadata.action;
+    const symbolRaw = recommendation.symbol ?? recommendation.asset ?? recommendation.pair ?? metadata.symbol;
+
+    const orderTypeRaw = recommendation.order_type ?? recommendation.orderType;
+    const confidenceRaw =
+      metadata.confidence ?? pendingDecision.message.confidence ?? recommendation.confidence;
+
+    let simulationFlag = metadata.simulation_mode ?? recommendation.simulation_mode;
+    if (typeof simulationFlag === 'string') {
+      simulationFlag = !['false', '0', 'off', 'no'].includes(simulationFlag.toLowerCase());
+    }
+
+    const quantityValue =
+      parseNumber(
+        recommendation.quantity ??
+          recommendation.units ??
+          (recommendation.amount_unit === 'contracts' ? recommendation.amount : undefined)
+      ) ?? undefined;
+
+    const positionSizeUsdValue =
+      parseNumber(
+        recommendation.position_size_usd ??
+          recommendation.amount_usd ??
+          (recommendation.amount_unit && recommendation.amount_unit !== 'contracts'
+            ? recommendation.amount
+            : undefined)
+      ) ?? undefined;
+
+    const analysisText =
+      metadata.ai_analysis ?? recommendation.analysis ?? pendingDecision.message.content;
+
+    const confidence =
+      typeof confidenceRaw === 'number'
+        ? confidenceRaw > 1
+          ? confidenceRaw / 100
+          : confidenceRaw
+        : undefined;
+
+    return {
+      decisionId: pendingDecision.id,
+      action: typeof actionRaw === 'string' ? actionRaw.toUpperCase() : undefined,
+      symbol: typeof symbolRaw === 'string' ? symbolRaw.toUpperCase() : undefined,
+      orderType:
+        typeof orderTypeRaw === 'string'
+          ? orderTypeRaw.toUpperCase()
+          : undefined,
+      confidence,
+      price: parseNumber(recommendation.price ?? recommendation.entry_price),
+      quantity: quantityValue,
+      positionSizeUsd: positionSizeUsdValue,
+      stopLoss: parseNumber(recommendation.stop_loss ?? recommendation.stopLoss),
+      takeProfit: parseNumber(recommendation.take_profit ?? recommendation.takeProfit),
+      simulation: typeof simulationFlag === 'boolean' ? simulationFlag : undefined,
+      reasoning: normalizeStringArray(
+        metadata.reasoning ?? recommendation.reasoning ?? recommendation.reasons
+      ),
+      risks: normalizeStringArray(
+        riskAssessment.alerts ?? riskAssessment.highlights ?? riskAssessment.notes
+      ),
+      analysis: typeof analysisText === 'string' ? analysisText : undefined,
+      riskScore: parseNumber(riskAssessment.score ?? riskAssessment.overall_score),
+    };
+  }, [pendingDecision]);
+
+  const memory = useMemo(() => {
+    const metadata = pendingDecision?.message?.metadata;
+    if (!metadata) {
+      return null;
+    }
+
+    return metadata.memory ?? null;
+  }, [pendingDecision]);
 
   const sendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
@@ -223,42 +336,73 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     }
   };
 
-  const executeTradeProposal = async (proposal: TradeProposal) => {
-    setCurrentPhase(ExecutionPhase.EXECUTION);
-    
+  const handleDecision = async (approved: boolean) => {
+    if (!pendingDecision) {
+      return;
+    }
+
+    setDecisionError(null);
+    setDecisionAction(approved ? 'approve' : 'decline');
+
+    if (approved) {
+      setCurrentPhase(ExecutionPhase.EXECUTION);
+    }
+
+    setDecisionLoading(true);
+
     try {
-      // Simplified trade execution - just show success message for now
-      toast({
-        title: 'Trade Executed!',
-        description: `${proposal.action} ${proposal.amount} ${proposal.symbol} at ${proposal.price}`,
-      });
-      setCurrentPhase(ExecutionPhase.MONITORING);
-      setActiveProposal(null);
+      const result = await approveDecision(pendingDecision.id, approved);
+
+      if (approved) {
+        const description = result?.message || 'Monitoring exchange execution...';
+        toast({
+          title: 'Trade execution requested',
+          description,
+        });
+        setCurrentPhase(ExecutionPhase.MONITORING);
+      } else {
+        toast({
+          title: 'Recommendation declined',
+          description: 'The AI will adjust the strategy based on your feedback.',
+        });
+        clearPendingDecision();
+        setCurrentPhase(ExecutionPhase.IDLE);
+      }
     } catch (error: any) {
-      setCurrentPhase(ExecutionPhase.IDLE);
+      const message =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to process decision';
+      setDecisionError(message);
       toast({
-        title: 'Trade Execution Failed',
-        description: error.message || 'Failed to execute trade',
-        variant: 'destructive'
+        title: 'Decision processing failed',
+        description: message,
+        variant: 'destructive',
       });
+      setCurrentPhase(ExecutionPhase.IDLE);
+    } finally {
+      setDecisionLoading(false);
+      setDecisionAction(null);
     }
   };
 
-  const handleExecutionResult = (result: any) => {
-    if (result.success) {
-      toast({
-        title: 'Trade Executed!',
-        description: `${result.action} ${result.amount} ${result.symbol} at $${result.price}`,
-      });
-      setCurrentPhase(ExecutionPhase.MONITORING);
-    } else {
-      toast({
-        title: 'Trade Failed',
-        description: result.error,
-        variant: 'destructive'
-      });
-      setCurrentPhase(ExecutionPhase.IDLE);
+  const handleModifyDecision = () => {
+    if (!pendingTradeDetails) {
+      return;
     }
+
+    const actionText = pendingTradeDetails.action || 'Adjust';
+    const symbolText = pendingTradeDetails.symbol ? ` ${pendingTradeDetails.symbol}` : '';
+
+    let sizingText = '';
+    if (pendingTradeDetails.positionSizeUsd) {
+      sizingText = ` to ${formatCurrency(pendingTradeDetails.positionSizeUsd)}`;
+    } else if (pendingTradeDetails.quantity) {
+      sizingText = ` to ${pendingTradeDetails.quantity}`;
+    }
+
+    setInputValue(`Modify: ${actionText}${symbolText}${sizingText}`.trim());
   };
 
   const renderPhaseIndicator = () => (
@@ -283,103 +427,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     </div>
   );
 
-  const renderTradeProposal = (proposal: TradeProposal) => (
-    <Card className="border-primary/20 bg-primary/5">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary" />
-            Trade Recommendation
-          </CardTitle>
-          <Badge className={proposal.confidence > 0.8 ? 'bg-green-500' : 'bg-yellow-500'}>
-            {(proposal.confidence * 100).toFixed(0)}% Confidence
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <p className="text-sm text-muted-foreground">Action</p>
-            <p className="font-semibold text-lg">
-              {proposal.action.toUpperCase()} {proposal.symbol}
-            </p>
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">Amount</p>
-            <p className="font-semibold text-lg">{formatCurrency(proposal.amount)}</p>
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">Entry Price</p>
-            <p className="font-semibold">${proposal.price}</p>
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">Expected Profit</p>
-            <p className="font-semibold text-green-500">
-              +{formatCurrency(proposal.expectedProfit)}
-            </p>
-          </div>
-        </div>
-
-        <Separator />
-
-        <div>
-          <p className="text-sm font-medium mb-2">AI Reasoning:</p>
-          <ul className="space-y-1">
-            {proposal.reasoning.map((reason, idx) => (
-              <li key={idx} className="text-sm text-muted-foreground flex items-start gap-2">
-                <Check className="h-3 w-3 text-green-500 mt-0.5" />
-                {reason}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div>
-          <p className="text-sm font-medium mb-2">Risk Factors:</p>
-          <ul className="space-y-1">
-            {proposal.risks.map((risk, idx) => (
-              <li key={idx} className="text-sm text-muted-foreground flex items-start gap-2">
-                <AlertCircle className="h-3 w-3 text-yellow-500 mt-0.5" />
-                {risk}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="flex gap-2 pt-2">
-          <Button 
-            className="flex-1 bg-green-600 hover:bg-green-700"
-            onClick={() => executeTradeProposal(proposal)}
-          >
-            <CheckCircle className="h-4 w-4 mr-2" />
-            Execute Trade
-          </Button>
-          <Button 
-            variant="outline" 
-            className="flex-1"
-            onClick={() => {
-              setInputValue(`Modify: ${proposal.action} ${proposal.amount / 2} ${proposal.symbol}`);
-              setActiveProposal(null);
-            }}
-          >
-            Modify
-          </Button>
-          <Button 
-            variant="outline"
-            onClick={() => setActiveProposal(null)}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-
   const renderMessage = (message: ExtendedChatMessage) => {
-    if (message.type === 'trade' && message.tradeProposal) {
-      return renderTradeProposal(message.tradeProposal);
-    }
-
     const isUser = message.type === 'user';
     const icon = isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />;
     
@@ -515,6 +563,166 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
             <div ref={messagesEndRef} />
           </div>
         </ScrollArea>
+
+        {pendingTradeDetails && (
+          <div className="px-6 pb-4">
+            <Card className="border-primary/30 bg-primary/5">
+              <CardHeader className="space-y-1">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    {pendingTradeDetails.action && pendingTradeDetails.symbol
+                      ? `${pendingTradeDetails.action} ${pendingTradeDetails.symbol}`
+                      : 'Trade recommendation'}
+                  </CardTitle>
+                  <div className="flex items-center gap-2">
+                    {typeof pendingTradeDetails.riskScore === 'number' && (
+                      <Badge variant="outline" className="text-xs">
+                        Risk {pendingTradeDetails.riskScore.toFixed(1)}
+                      </Badge>
+                    )}
+                    {typeof pendingTradeDetails.confidence === 'number' && (
+                      <Badge className={pendingTradeDetails.confidence >= 0.75 ? 'bg-green-600' : 'bg-amber-500'}>
+                        {(pendingTradeDetails.confidence * 100).toFixed(0)}% Confidence
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Decision ID: <span className="font-mono">{pendingTradeDetails.decisionId}</span>
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">Order Type</p>
+                    <p className="text-sm font-medium">
+                      {(pendingTradeDetails.orderType || 'MARKET').toUpperCase()}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">Mode</p>
+                    <p className="text-sm font-medium">
+                      {pendingTradeDetails.simulation === false ? 'Live trading' : 'Simulation'}
+                    </p>
+                  </div>
+                  {typeof pendingTradeDetails.price === 'number' && (
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Entry Price</p>
+                      <p className="text-sm font-medium">${pendingTradeDetails.price.toFixed(2)}</p>
+                    </div>
+                  )}
+                  {typeof pendingTradeDetails.positionSizeUsd === 'number' && (
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Position Size</p>
+                      <p className="text-sm font-medium">{formatCurrency(pendingTradeDetails.positionSizeUsd)}</p>
+                    </div>
+                  )}
+                  {typeof pendingTradeDetails.quantity === 'number' && (
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Quantity</p>
+                      <p className="text-sm font-medium">{pendingTradeDetails.quantity}</p>
+                    </div>
+                  )}
+                  {typeof pendingTradeDetails.stopLoss === 'number' && (
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Stop Loss</p>
+                      <p className="text-sm font-medium">${pendingTradeDetails.stopLoss.toFixed(2)}</p>
+                    </div>
+                  )}
+                  {typeof pendingTradeDetails.takeProfit === 'number' && (
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Take Profit</p>
+                      <p className="text-sm font-medium">${pendingTradeDetails.takeProfit.toFixed(2)}</p>
+                    </div>
+                  )}
+                </div>
+
+                {pendingTradeDetails.analysis && (
+                  <Alert className="bg-primary/10 border-primary/40">
+                    <AlertTitle>AI Analysis</AlertTitle>
+                    <AlertDescription className="whitespace-pre-wrap text-sm">
+                      {pendingTradeDetails.analysis}
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {pendingTradeDetails.reasoning.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium mb-2">Why the AI likes this setup</p>
+                    <ul className="space-y-1">
+                      {pendingTradeDetails.reasoning.map((reason, index) => (
+                        <li key={index} className="text-sm text-muted-foreground flex items-start gap-2">
+                          <Check className="h-4 w-4 text-green-500 mt-0.5" />
+                          {reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {pendingTradeDetails.risks.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium mb-2">Risk considerations</p>
+                    <ul className="space-y-1">
+                      {pendingTradeDetails.risks.map((risk, index) => (
+                        <li key={index} className="text-sm text-muted-foreground flex items-start gap-2">
+                          <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5" />
+                          {risk}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {decisionError && (
+                  <Alert variant="destructive">
+                    <AlertTitle>Unable to process decision</AlertTitle>
+                    <AlertDescription>{decisionError}</AlertDescription>
+                  </Alert>
+                )}
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <Button
+                      className="flex-1 sm:flex-none bg-green-600 hover:bg-green-700"
+                      onClick={() => handleDecision(true)}
+                      disabled={decisionLoading}
+                    >
+                      {decisionLoading && decisionAction === 'approve' ? (
+                        <Loader className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                      )}
+                      Approve & Execute
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="flex-1 sm:flex-none"
+                      onClick={() => handleDecision(false)}
+                      disabled={decisionLoading}
+                    >
+                      {decisionLoading && decisionAction === 'decline' ? (
+                        <Loader className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <X className="h-4 w-4 mr-2" />
+                      )}
+                      Decline
+                    </Button>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    className="justify-start sm:justify-center"
+                    onClick={handleModifyDecision}
+                  >
+                    <MessageSquare className="h-4 w-4 mr-2" />
+                    Ask for changes
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
 
         <Separator />
 

@@ -260,11 +260,18 @@ export const pipelineApi = {
   // Get autonomous mode status
   async getAutonomousStatus(): Promise<any> {
     try {
-      const response = await apiClient.get('/master-controller/autonomous-status');
-      return response.data;
+      const response = await apiClient.get('/trading/status');
+      return {
+        success: true,
+        data: response.data,
+      };
     } catch (error: any) {
       console.error('Get autonomous status failed:', error);
-      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to get autonomous status';
+      const errorMessage =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to get autonomous status';
       const statusCode = error?.response?.status;
       throw new Error(`Autonomous Status API Error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`);
     }
@@ -273,11 +280,53 @@ export const pipelineApi = {
   // Start autonomous mode
   async startAutonomousMode(config: Record<string, any> = {}): Promise<any> {
     try {
-      const response = await apiClient.post('/master-controller/start-autonomous', config);
+      const mapIntensityToMode = (intensity?: string, fallback?: string) => {
+        switch (intensity) {
+          case 'hibernation':
+            return 'conservative';
+          case 'conservative':
+            return 'conservative';
+          case 'active':
+            return 'balanced';
+          case 'aggressive':
+            return 'aggressive';
+          case 'hyperactive':
+            return 'beast_mode';
+          default:
+            return fallback ?? 'balanced';
+        }
+      };
+
+      const payload = {
+        enable: true,
+        mode: mapIntensityToMode(config.intensity, config.mode),
+        max_daily_loss_pct: config.max_daily_loss_pct ?? config.maxDailyLoss ?? 5,
+        max_position_size_pct:
+          config.max_position_size_pct ??
+          config.maxPositionSizePct ??
+          Math.min(50, Math.max(5, typeof config.riskTolerance === 'number' ? config.riskTolerance / 2 : 10)),
+        allowed_symbols:
+          config.allowed_symbols ??
+          config.allowedSymbols ??
+          ['BTC', 'ETH', 'SOL', 'AVAX', 'MATIC'],
+        excluded_symbols: config.excluded_symbols ?? config.excludedSymbols ?? [],
+        trading_hours:
+          config.trading_hours ??
+          config.tradingHours ?? {
+            start: '00:00',
+            end: '23:59',
+          },
+      };
+
+      const response = await apiClient.post('/trading/autonomous/start', payload);
       return response.data;
     } catch (error: any) {
       console.error('Start autonomous mode failed:', error);
-      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to start autonomous mode';
+      const errorMessage =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to start autonomous mode';
       const statusCode = error?.response?.status;
       throw new Error(`Start Autonomous API Error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`);
     }
@@ -286,11 +335,15 @@ export const pipelineApi = {
   // Stop autonomous mode
   async stopAutonomousMode(): Promise<any> {
     try {
-      const response = await apiClient.post('/master-controller/stop-autonomous');
+      const response = await apiClient.post('/trading/autonomous/start', { enable: false });
       return response.data;
     } catch (error: any) {
       console.error('Stop autonomous mode failed:', error);
-      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to stop autonomous mode';
+      const errorMessage =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to stop autonomous mode';
       const statusCode = error?.response?.status;
       throw new Error(`Stop Autonomous API Error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`);
     }
@@ -299,13 +352,22 @@ export const pipelineApi = {
   // Get pipeline execution history
   async getPipelineHistory(limit: number = 50): Promise<any> {
     try {
-      const response = await apiClient.get('/master-controller/execution-history', {
-        params: { limit }
+      const response = await apiClient.get('/market-analysis/trending-coins', {
+        params: { limit },
       });
-      return response.data;
+      return {
+        success: true,
+        data: {
+          history: response.data?.data?.coins ?? response.data?.data ?? [],
+        },
+      };
     } catch (error: any) {
       console.error('Get pipeline history failed:', error);
-      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to get pipeline history';
+      const errorMessage =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to get pipeline history';
       const statusCode = error?.response?.status;
       throw new Error(`Pipeline History API Error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`);
     }
@@ -314,11 +376,18 @@ export const pipelineApi = {
   // Get system performance metrics
   async getSystemMetrics(): Promise<any> {
     try {
-      const response = await apiClient.get('/master-controller/system-metrics');
-      return response.data;
+      const response = await apiClient.get('/market-analysis/system-status');
+      return {
+        success: true,
+        data: response.data,
+      };
     } catch (error: any) {
       console.error('Get system metrics failed:', error);
-      const errorMessage = error?.response?.data?.message || error?.message || 'Failed to get system metrics';
+      const errorMessage =
+        error?.response?.data?.detail ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to get system metrics';
       const statusCode = error?.response?.status;
       throw new Error(`System Metrics API Error${statusCode ? ` (${statusCode})` : ''}: ${errorMessage}`);
     }
