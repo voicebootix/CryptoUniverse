@@ -1178,76 +1178,110 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             "improvement": 22.7
         }
     
-    async def _get_community_strategies(self, user_id: str) -> List[StrategyMarketplaceItem]:
+    async def _get_community_strategies(
+        self,
+        _user_id: str,
+        session: Optional[AsyncSession] = None,
+    ) -> List[StrategyMarketplaceItem]:
         """Get community-published strategies."""
+
+        async def _load_with_session(active_session: AsyncSession) -> List[StrategyMarketplaceItem]:
+            stmt = select(TradingStrategy, StrategyPublisher).join(
+                StrategyPublisher, TradingStrategy.user_id == StrategyPublisher.user_id
+            ).where(
+                and_(
+                    TradingStrategy.is_active,
+                    StrategyPublisher.verified
+                )
+            ).order_by(desc(TradingStrategy.total_pnl))
+
+            result = await active_session.execute(stmt)
+            strategies = result.fetchall()
+
+            community_items: List[StrategyMarketplaceItem] = []
+            for strategy, publisher in strategies:
+                monthly_cost = self._calculate_strategy_pricing(strategy)
+
+                live_performance = await self._get_live_performance(
+                    str(strategy.id), session=active_session
+                )
+                live_quality = (
+                    live_performance.get("data_quality", "no_data")
+                    if isinstance(live_performance, dict)
+                    else "no_data"
+                )
+                live_badges: List[str] = []
+                if isinstance(live_performance, dict):
+                    live_badges = list(
+                        live_performance.get("badges")
+                        or self._build_performance_badges(live_quality)
+                    )
+                    live_performance.setdefault("badges", live_badges)
+                else:
+                    live_performance = {
+                        "data_quality": "no_data",
+                        "status": "no_data",
+                        "total_trades": 0,
+                        "badges": self._build_performance_badges("no_data"),
+                    }
+                    live_badges = live_performance["badges"]
+
+                item = StrategyMarketplaceItem(
+                    strategy_id=str(strategy.id),
+                    name=strategy.name,
+                    description=strategy.description or "Community-published strategy",
+                    category=strategy.strategy_type.value,
+                    publisher_id=str(publisher.id),
+                    publisher_name=publisher.display_name,
+                    is_ai_strategy=False,
+                    credit_cost_monthly=monthly_cost,
+                    credit_cost_per_execution=max(1, monthly_cost // 30),
+                    win_rate=self.normalize_win_rate_to_fraction(float(strategy.win_rate)),
+                    avg_return=(
+                        float(strategy.total_pnl / strategy.total_trades) / 100.0
+                        if strategy.total_trades > 0
+                        else 0.0
+                    ),
+                    sharpe_ratio=float(strategy.sharpe_ratio) if strategy.sharpe_ratio else None,
+                    max_drawdown=(
+                        float(strategy.max_drawdown) / 100.0
+                        if strategy.max_drawdown is not None
+                        else 0.0
+                    ),
+                    total_trades=strategy.total_trades,
+                    min_capital_usd=1000,
+                    risk_level=self._calculate_risk_level(strategy),
+                    timeframes=[strategy.timeframe],
+                    supported_symbols=strategy.target_symbols,
+                    backtest_results={},
+                    ab_test_results={},
+                    live_performance=live_performance,
+                    performance_badges=live_badges,
+                    data_quality=live_quality,
+                    created_at=strategy.created_at,
+                    last_updated=strategy.updated_at,
+                    is_active=strategy.is_active,
+                    tier="community",
+                )
+                community_items.append(item)
+
+            return community_items
+
         try:
-            async with get_database_session() as db:
-                # Get published strategies from community
-                stmt = select(TradingStrategy, StrategyPublisher).join(
-                    StrategyPublisher, TradingStrategy.user_id == StrategyPublisher.user_id
-                ).where(
-                    and_(
-                        TradingStrategy.is_active == True,
-                        StrategyPublisher.verified == True
-                    )
-                ).order_by(desc(TradingStrategy.total_pnl))
-                
-                result = await db.execute(stmt)
-                strategies = result.fetchall()
-                
-                community_items = []
-                for strategy, publisher in strategies:
-                    # Calculate pricing based on performance
-                    monthly_cost = self._calculate_strategy_pricing(strategy)
+            if session is not None:
+                try:
+                    return await _load_with_session(session)
+                except Exception:
+                    await session.rollback()
+                    raise
 
-                    live_performance = await self._get_live_performance(str(strategy.id))
-                    live_quality = live_performance.get("data_quality", "no_data") if isinstance(live_performance, dict) else "no_data"
-                    live_badges = []
-                    if isinstance(live_performance, dict):
-                        live_badges = list(live_performance.get("badges") or self._build_performance_badges(live_quality))
-                        live_performance.setdefault("badges", live_badges)
-                    else:
-                        live_performance = {
-                            "data_quality": "no_data",
-                            "status": "no_data",
-                            "total_trades": 0,
-                            "badges": self._build_performance_badges("no_data")
-                        }
-                        live_badges = live_performance["badges"]
+            async with AsyncSessionLocal() as owned_session:
+                try:
+                    return await _load_with_session(owned_session)
+                except Exception:
+                    await owned_session.rollback()
+                    raise
 
-                    item = StrategyMarketplaceItem(
-                        strategy_id=str(strategy.id),
-                        name=strategy.name,
-                        description=strategy.description or "Community-published strategy",
-                        category=strategy.strategy_type.value,
-                        publisher_id=str(publisher.id),
-                        publisher_name=publisher.display_name,
-                        is_ai_strategy=False,
-                        credit_cost_monthly=monthly_cost,
-                        credit_cost_per_execution=max(1, monthly_cost // 30),
-                        win_rate=strategy.win_rate,
-                        avg_return=float(strategy.total_pnl / strategy.total_trades) if strategy.total_trades > 0 else 0,
-                        sharpe_ratio=float(strategy.sharpe_ratio) if strategy.sharpe_ratio else None,
-                        max_drawdown=float(strategy.max_drawdown),
-                        total_trades=strategy.total_trades,
-                        min_capital_usd=1000,  # Default minimum
-                        risk_level=self._calculate_risk_level(strategy),
-                        timeframes=[strategy.timeframe],
-                        supported_symbols=strategy.target_symbols,
-                        backtest_results={},  # Would be populated from backtesting service
-                        ab_test_results={},   # Would be populated from A/B testing
-                        live_performance=live_performance,
-                        performance_badges=live_badges,
-                        data_quality=live_quality,
-                        created_at=strategy.created_at,
-                        last_updated=strategy.updated_at,
-                        is_active=strategy.is_active,
-                        tier="community"
-                    )
-                    community_items.append(item)
-                
-                return community_items
-                
         except Exception as e:
             self.logger.error("Failed to get community strategies", error=str(e))
             return []
@@ -1291,48 +1325,73 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         else:
             return "very_low"
     
-    async def _get_live_performance(self, strategy_id: str) -> Dict[str, Any]:
+    async def _get_live_performance(
+        self,
+        strategy_id: str,
+        session: Optional[AsyncSession] = None,
+    ) -> Dict[str, Any]:
         """Get live performance metrics for strategy."""
+
+        def _no_data_response() -> Dict[str, Any]:
+            return {
+                "data_quality": "no_data",
+                "status": "no_trades",
+                "total_trades": 0,
+                "total_pnl": 0.0,
+                "win_rate": 0.0,
+                "badges": self._build_performance_badges("no_data")
+            }
+
         try:
-            async with get_database_session() as db:
-                # Get recent trades for this strategy
-                stmt = select(Trade).where(
-                    and_(
-                        Trade.strategy_id == strategy_id,
-                        Trade.created_at >= datetime.utcnow() - timedelta(days=30)
-                    )
-                ).order_by(desc(Trade.created_at))
-                
-                result = await db.execute(stmt)
-                recent_trades = result.scalars().all()
+            strategy_uuid = uuid.UUID(strategy_id)
+        except Exception:
+            return _no_data_response()
 
-                if not recent_trades:
-                    return {
-                        "data_quality": "no_data",
-                        "status": "no_trades",
-                        "total_trades": 0,
-                        "total_pnl": 0.0,
-                        "win_rate": 0.0,
-                        "badges": self._build_performance_badges("no_data")
-                    }
+        async def _load_with_session(active_session: AsyncSession) -> Dict[str, Any]:
+            stmt = select(Trade).where(
+                and_(
+                    Trade.strategy_id == strategy_uuid,
+                    Trade.created_at >= datetime.utcnow() - timedelta(days=30)
+                )
+            ).order_by(desc(Trade.created_at))
 
-                # Calculate 30-day performance with consistent field names and units
-                total_pnl = sum(float(trade.profit_realized_usd) for trade in recent_trades)
-                winning_trades = sum(1 for trade in recent_trades if trade.profit_realized_usd > 0)
-                win_rate = winning_trades / len(recent_trades)  # Normalized 0-1 range
+            result = await active_session.execute(stmt)
+            recent_trades = result.scalars().all()
 
-                return {
-                    "period": "30_days",
-                    "total_pnl": total_pnl,  # USD amount
-                    "win_rate": win_rate,    # 0-1 normalized fraction
-                    "total_trades": len(recent_trades),
-                    "avg_trade_pnl": total_pnl / len(recent_trades),
-                    "best_trade": max(float(trade.profit_realized_usd) for trade in recent_trades),
-                    "worst_trade": min(float(trade.profit_realized_usd) for trade in recent_trades),
-                    "data_quality": "verified_real_trades",
-                    "status": "live_trades",
-                    "badges": self._build_performance_badges("verified_real_trades")
-                }
+            if not recent_trades:
+                return _no_data_response()
+
+            total_pnl = sum(float(trade.profit_realized_usd) for trade in recent_trades)
+            winning_trades = sum(1 for trade in recent_trades if trade.profit_realized_usd > 0)
+            win_rate = winning_trades / len(recent_trades)
+
+            return {
+                "period": "30_days",
+                "total_pnl": total_pnl,
+                "win_rate": win_rate,
+                "total_trades": len(recent_trades),
+                "avg_trade_pnl": total_pnl / len(recent_trades),
+                "best_trade": max(float(trade.profit_realized_usd) for trade in recent_trades),
+                "worst_trade": min(float(trade.profit_realized_usd) for trade in recent_trades),
+                "data_quality": "verified_real_trades",
+                "status": "live_trades",
+                "badges": self._build_performance_badges("verified_real_trades")
+            }
+
+        try:
+            if session is not None:
+                try:
+                    return await _load_with_session(session)
+                except Exception:
+                    await session.rollback()
+                    raise
+
+            async with AsyncSessionLocal() as owned_session:
+                try:
+                    return await _load_with_session(owned_session)
+                except Exception:
+                    await owned_session.rollback()
+                    raise
 
         except Exception as e:
             self.logger.error("Failed to get live performance", error=str(e))
@@ -1695,15 +1754,27 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             # ENHANCED RECOVERY: If no strategies found, implement comprehensive recovery
             if not active_strategies:
                 self.logger.warning("🔍 Redis strategies empty, initiating recovery mechanism", user_id=user_id)
-                
-                recovered = await self._recover_missing_strategies(user_id, redis)
-                if recovered:
-                    # Re-fetch after recovery using safe operation
-                    active_strategies = await self._safe_redis_operation(redis.smembers, f"user_strategies:{user_id}")
-                    if active_strategies is None:
-                        active_strategies = set()
-                    active_strategies = [s.decode() if isinstance(s, bytes) else s for s in active_strategies]
-                    self.logger.info("✅ Strategy recovery successful", user_id=user_id, strategies_recovered=len(active_strategies))
+
+                hydrated_strategies = await self._hydrate_strategies_from_db(user_id, redis)
+
+                if hydrated_strategies:
+                    active_strategies = hydrated_strategies
+                    raw_strategies = list(active_strategies)
+                    self.logger.info(
+                        "✅ Strategy portfolio hydrated from database",
+                        user_id=user_id,
+                        strategies_recovered=len(active_strategies)
+                    )
+                else:
+                    recovered = await self._recover_missing_strategies(user_id, redis)
+                    if recovered:
+                        # Re-fetch after recovery using safe operation
+                        active_strategies = await self._safe_redis_operation(redis.smembers, f"user_strategies:{user_id}")
+                        if active_strategies is None:
+                            active_strategies = set()
+                        active_strategies = [s.decode() if isinstance(s, bytes) else s for s in active_strategies]
+                        raw_strategies = list(active_strategies)
+                        self.logger.info("✅ Strategy recovery successful", user_id=user_id, strategies_recovered=len(active_strategies))
             
             strategy_portfolio = []
             total_monthly_cost = 0
@@ -1828,18 +1899,98 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         except Exception as e:
             self.logger.error("Failed to get user strategy portfolio", error=str(e))
             return {"success": False, "error": str(e)}
-            
+
         finally:
             # Redis connection is managed by the connection manager
             # Do not close the shared client - just clear the reference
             if redis:
                 redis = None
-    
+
+    async def _hydrate_strategies_from_db(self, user_id: str, redis_client) -> List[str]:
+        """Rebuild the user's strategy portfolio directly from the database."""
+
+        try:
+            import uuid
+
+            try:
+                user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+            except ValueError:
+                self.logger.warning("Cannot hydrate strategies from DB - invalid user_id format", user_id=user_id)
+                return []
+
+            async with get_database_session() as db:
+                query = (
+                    select(UserStrategyAccess)
+                    .where(
+                        and_(
+                            UserStrategyAccess.user_id == user_uuid,
+                            UserStrategyAccess.is_active.is_(True)
+                        )
+                    )
+                )
+                result = await db.execute(query)
+                access_records = result.scalars().all()
+
+            if not access_records:
+                self.logger.info("No database-backed strategies found during hydration", user_id=user_id)
+                return []
+
+            valid_strategy_ids = [record.strategy_id for record in access_records if record.is_valid()]
+
+            if not valid_strategy_ids:
+                self.logger.info("Database strategies are inactive or expired", user_id=user_id)
+                return []
+
+            redis_key = f"user_strategies:{user_id}"
+            ttl_seconds = 24 * 60 * 60  # default to 24 hours
+            if redis_client:
+                await self._safe_redis_operation(redis_client.delete, redis_key)
+                for strategy_id in valid_strategy_ids:
+                    await self._safe_redis_operation(redis_client.sadd, redis_key, strategy_id)
+
+                # If any strategies have an upcoming expiration, use the earliest expiry as TTL
+                expiry_candidates = [
+                    record.expires_at
+                    for record in access_records
+                    if record.is_valid() and record.expires_at
+                ]
+                if expiry_candidates:
+                    from datetime import datetime, timezone
+
+                    now = datetime.now(timezone.utc)
+                    soonest_expiry = min(expiry_candidates)
+                    ttl_from_expiry = int((soonest_expiry - now).total_seconds())
+                    if ttl_from_expiry > 0:
+                        ttl_seconds = min(ttl_seconds, ttl_from_expiry)
+
+                await self._safe_redis_operation(
+                    redis_client.expire,
+                    redis_key,
+                    ttl_seconds,
+                )
+
+            self.logger.info(
+                "Hydrated user strategies from database",
+                user_id=user_id,
+                strategy_count=len(valid_strategy_ids)
+            )
+
+            return valid_strategy_ids
+
+        except Exception as exc:
+            self.logger.error(
+                "Database hydration for strategies failed",
+                user_id=user_id,
+                error=str(exc),
+                exc_info=True
+            )
+            return []
+
     async def _recover_missing_strategies(self, user_id: str, redis) -> bool:
         """Lightweight Redis-only strategy recovery mechanism."""
         try:
             self.logger.info("🔄 EMERGENCY STRATEGY RECOVERY INITIATED", user_id=user_id)
-            
+
             # SIMPLIFIED APPROACH: Always provision core free strategies
             # Avoid database calls that can cause deadlocks
             strategies_to_provision = [
