@@ -13,6 +13,7 @@ Revolutionary business model: Strategy subscriptions with performance-based pric
 
 import asyncio
 import json
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ from sqlalchemy import select, and_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import get_database_session
+from app.core.database import AsyncSessionLocal, get_database_session
 from app.core.logging import LoggerMixin
 from app.core.async_session_manager import DatabaseSessionMixin
 from app.models.trading import TradingStrategy, Trade
@@ -30,6 +31,7 @@ from app.models.user import User
 from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
 from app.models.copy_trading import StrategyPublisher, StrategyPerformance
 from app.services.trading_strategies import trading_strategies_service
+from app.models.strategy_access import UserStrategyAccess
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
