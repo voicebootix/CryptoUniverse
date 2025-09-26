@@ -577,6 +577,7 @@ class UnifiedChatService(LoggerMixin):
         Uses the same credit lookup logic as the API endpoint.
         """
         try:
+            from decimal import Decimal
             from app.models.credit import CreditAccount
             from sqlalchemy import select
             import uuid
@@ -609,15 +610,27 @@ class UnifiedChatService(LoggerMixin):
                         "account_status": "no_account"
                     }
 
-                # Found existing account - use it
-                available_credits = max(0, credit_account.available_credits or 0)
+                # Found existing account - normalise numeric fields for downstream prompts
+                available_credits = int(max(0, credit_account.available_credits or 0))
+                total_credits = int(max(available_credits, credit_account.total_credits or 0))
+                used_credits = int(max(0, credit_account.used_credits or 0))
                 required_credits = self.live_trading_credit_requirement
+
+                try:
+                    profit_potential = float(credit_account.calculate_profit_potential())
+                except Exception:
+                    profit_potential = float(Decimal(available_credits) * Decimal(4))
+
+                profit_earned = float(credit_account.total_profit_realized_usd or 0)
 
                 return {
                     "has_credits": available_credits >= required_credits,
                     "available_credits": available_credits,
                     "required_credits": required_credits,
-                    "total_credits": credit_account.total_credits,
+                    "total_credits": total_credits,
+                    "used_credits": used_credits,
+                    "profit_potential": profit_potential,
+                    "profit_realized": profit_earned,
                     "credit_tier": "premium" if available_credits > 100 else "standard",
                     "account_status": "active"
                 }
@@ -796,7 +809,11 @@ class UnifiedChatService(LoggerMixin):
         # Always get basic portfolio data with error handling
         try:
             # For general queries, use placeholder to avoid expensive calls
-            context_data["portfolio"] = {"total_value": 0, "positions": [], "note": "Use PORTFOLIO_ANALYSIS intent for real data"}
+            context_data["portfolio"] = {
+                "total_value": 0,
+                "positions": [],
+                "note": "Use PORTFOLIO_ANALYSIS intent for real data"
+            }
         except Exception as e:
             self.logger.error("Failed to get portfolio summary", error=str(e), user_id=user_id)
             context_data["portfolio"] = {"error": "Portfolio data unavailable"}
@@ -915,10 +932,16 @@ class UnifiedChatService(LoggerMixin):
 
                 # Use the credit check results regardless of status (as long as we got credits)
                 available_credits = float(credit_check_result.get("available_credits", 0))
+                total_credits = float(credit_check_result.get("total_credits", available_credits))
+                profit_potential = float(credit_check_result.get("profit_potential", available_credits * 4))
+                profit_realized = float(credit_check_result.get("profit_realized", credit_check_result.get("profit_earned", 0)))
+
                 context_data["credit_account"] = {
                     "available_credits": available_credits,
-                    "total_credits": available_credits,  # Use available as total approximation
-                    "profit_potential": available_credits * 4,  # 1 credit = $4 profit potential
+                    "total_credits": total_credits,
+                    "used_credits": float(credit_check_result.get("used_credits", 0)),
+                    "profit_potential": profit_potential,
+                    "profit_realized": profit_realized,
                     "account_tier": credit_check_result.get("credit_tier", "standard"),
                     "account_status": credit_check_result.get("account_status", "unknown")
                 }
@@ -1186,8 +1209,8 @@ Portfolio:
 Analyze this trade request and provide recommendations. If viable, explain the 5-phase execution process."""
         
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-            # Extract payload first (API may nest data under "payload" key)
             opportunities_data = context_data.get("opportunities", {})
+
             # Ensure payload is always a dict - handle None, non-dict values safely
             payload = opportunities_data.get("payload") or opportunities_data or {}
             if not isinstance(payload, dict):
@@ -1197,19 +1220,14 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
             opportunities = payload.get("opportunities") or []
             strategy_performance = payload.get("strategy_performance") or {}
             user_profile = payload.get("user_profile") or {}
-
-            # Group opportunities by strategy with deterministic naming
-            opportunities_by_strategy: Dict[str, List[Dict[str, Any]]] = {}
-            for opportunity in opportunities:
-                strategy_name = (
-                    opportunity.get("strategy_name")
-                    or opportunity.get("strategy_id")
-                    or "Unknown"
-                )
-                # Convert strategy_name to string before calling .replace() and .title()
-                strategy_name = str(strategy_name) if strategy_name else "Unknown"
-                normalized_strategy = strategy_name.replace("_", " ").title()
-                opportunities_by_strategy.setdefault(normalized_strategy, []).append(opportunity)
+            
+            # Group opportunities by strategy
+            opportunities_by_strategy = {}
+            for opp in opportunities:
+                strategy = opp.get('strategy_name', 'Unknown')
+                if strategy not in opportunities_by_strategy:
+                    opportunities_by_strategy[strategy] = []
+                opportunities_by_strategy[strategy].append(opp)
             # Build comprehensive prompt
             prompt_parts = [f'User asked: "{message}"']
             prompt_parts.append(f"\nTotal opportunities found: {len(opportunities)}")
@@ -1236,6 +1254,80 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
             # Strategy performance summary
             if strategy_performance:
                 prompt_parts.append("\n📊 STRATEGY PERFORMANCE:")
+                for strat, perf in strategy_performance.items():
+                    count = perf.get('count', 0) if isinstance(perf, dict) else perf
+                    prompt_parts.append(f"- {strat}: {count} opportunities")
+            
+            # Detailed opportunities by strategy
+            prompt_parts.append("\n🎯 OPPORTUNITIES BY STRATEGY:")
+            for strategy, opps in opportunities_by_strategy.items():
+                prompt_parts.append(f"\n{strategy} ({len(opps)} opportunities):")
+                for i, opp in enumerate(opps[:3], 1):  # Show top 3 per strategy
+                    symbol = opp.get('symbol', 'N/A')
+                    metadata = opp.get('metadata', {}) or {}
+
+                    try:
+                        confidence_val = float(opp.get('confidence_score') or 0)
+                    except (TypeError, ValueError):
+                        confidence_val = 0.0
+
+                    try:
+                        profit_val = float(opp.get('profit_potential_usd') or 0)
+                    except (TypeError, ValueError):
+                        profit_val = 0.0
+
+                    # Format based on opportunity type
+                    if 'portfolio' in strategy.lower():
+                        if metadata.get('strategy'):
+                            prompt_parts.append(f"  {i}. {metadata['strategy'].replace('_', ' ').title()}")
+
+                            try:
+                                expected_return = float(metadata.get('expected_annual_return') or 0) * 100
+                            except (TypeError, ValueError):
+                                expected_return = 0.0
+
+                            try:
+                                sharpe_ratio = float(metadata.get('sharpe_ratio') or 0)
+                            except (TypeError, ValueError):
+                                sharpe_ratio = 0.0
+
+                            try:
+                                risk_level = float(metadata.get('risk_level') or 0) * 100
+                            except (TypeError, ValueError):
+                                risk_level = 0.0
+
+                            prompt_parts.append(f"     Expected Return: {expected_return:.1f}%")
+                            prompt_parts.append(f"     Sharpe Ratio: {sharpe_ratio:.2f}")
+                            prompt_parts.append(f"     Risk Level: {risk_level:.1f}%")
+                        else:
+                            prompt_parts.append(f"  {i}. {symbol} - {metadata.get('rebalance_action', 'REBALANCE')}")
+
+                            try:
+                                amount_pct = float(metadata.get('amount') or 0) * 100
+                            except (TypeError, ValueError):
+                                amount_pct = 0.0
+
+                            prompt_parts.append(f"     Amount: {amount_pct:.1f}% of portfolio")
+                    elif 'risk' in strategy.lower():
+                        prompt_parts.append(f"  {i}. {metadata.get('risk_type', 'Risk Alert')}")
+                        prompt_parts.append(f"     Action: {metadata.get('strategy', 'Mitigation needed')}")
+
+                        try:
+                            if metadata.get('urgency') is not None:
+                                urgency = float(metadata.get('urgency'))
+                            else:
+                                urgency = confidence_val / 100.0
+                        except (TypeError, ValueError):
+                            urgency = confidence_val / 100.0
+
+                        prompt_parts.append(f"     Urgency: {urgency:.2f}")
+                    else:
+                        prompt_parts.append(f"  {i}. {symbol}")
+                        prompt_parts.append(f"     Confidence: {confidence_val:.1f}%")
+                        prompt_parts.append(f"     Profit Potential: ${profit_val:,.0f}")
+                        action = metadata.get('signal_action', opp.get('action', 'ANALYZE'))
+                        if action:
+                            prompt_parts.append(f"     Action: {action}")
                 for strat, performance in strategy_performance.items():
                     # Safe coercion for count
                     raw_count = (
@@ -1495,7 +1587,9 @@ Provide personalized strategy recommendations based on the user's current setup 
 CREDIT ACCOUNT SUMMARY:
 - Available Credits: {credit_account.get('available_credits', 0):,.0f} credits
 - Total Credits Purchased: {credit_account.get('total_credits', 0):,.0f} credits
-- Profit Potential: ${credit_account.get('profit_potential', 0):,.2f}
+- Credits Used To Date: {credit_account.get('used_credits', 0):,.0f} credits
+- Profit Potential Remaining: ${credit_account.get('profit_potential', 0):,.2f}
+- Profit Already Realized: ${credit_account.get('profit_realized', 0):,.2f}
 - Account Tier: {credit_account.get('account_tier', 'standard').title()}
 
 CREDIT CONVERSION RATE:
@@ -1512,6 +1606,7 @@ Provide a clear explanation of the user's credit balance, what it means for thei
 
 CREDIT MANAGEMENT OVERVIEW:
 - Current Balance: {credit_account.get('available_credits', 0):,.0f} credits
+- Credits Used: {credit_account.get('used_credits', 0):,.0f} credits
 - Account Tier: {credit_account.get('account_tier', 'standard').title()}
 - Profit Potential: ${credit_account.get('profit_potential', 0):,.2f}
 
@@ -1595,6 +1690,10 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "created_at": datetime.utcnow().isoformat(),
                     "expires_at": (datetime.utcnow() + timedelta(minutes=5)).isoformat()
                 }
+                await redis.setex(
+                    f"pending_decision:{decision_id}",
+                    300,  # 5 minute expiry
+                    json.dumps(decision_data)
                 # Use resilient JSON serialization to handle datetime objects
                 def json_serializer(obj):
                     """Convert non-serializable objects to strings."""
@@ -1758,12 +1857,18 @@ Provide a helpful response using the real data available. Never use placeholder 
                 }
 
             trade_request = validation.get("trade_request", trade_request)
-            trade_request.setdefault("side", trade_request.get("action", "BUY").lower())
+            trade_request["side"] = trade_request.get("action", trade_request.get("side", "BUY")).lower()
 
             # Phase 4: Execution
             self.logger.info("Phase 4: Trade Execution")
 
             if conversation_mode == ConversationMode.PAPER_TRADING:
+                # Get quantity, only calculate from amount if not provided
+                quantity = trade_payload.get("quantity")
+
+                # Only calculate quantity from amount if no explicit quantity was provided
+                if not quantity:
+                    notional_amount = trade_payload.get("amount") or trade_payload.get("position_size_usd")
                 # Use validated trade_request instead of raw trade_params
                 quantity = trade_request.get("quantity")
                 notional_amount = trade_request.get("amount") or trade_request.get("position_size_usd")
@@ -1780,6 +1885,27 @@ Provide a helpful response using the real data available. Never use placeholder 
                         "message": "Unable to determine trade quantity for paper trading",
                         "phases_completed": phases_completed
                     }
+
+                paper_result = await self.paper_trading.execute_paper_trade(
+                    user_id=user_id,
+                    symbol=trade_payload["symbol"],
+                    side=trade_payload["action"],
+                    quantity=quantity,
+                    strategy_used=trade_payload.get("strategy", "chat_trade"),
+                    order_type=trade_payload.get("order_type", "market")
+                )
+                phases_completed.append("execution")
+
+                if not paper_result.get("success", False):
+                    return {
+                        "success": False,
+                        "message": paper_result.get("error", "Paper trade execution failed"),
+                        "phases_completed": phases_completed,
+                        "execution_details": paper_result
+                    }
+
+                monitoring = {"monitoring_active": False, "paper_trading": True}
+                phases_completed.append("monitoring")
 
                 # Use normalized values from validated trade_request
                 side = trade_request.get("side", trade_request.get("action", "buy")).lower()
@@ -1818,6 +1944,11 @@ Provide a helpful response using the real data available. Never use placeholder 
                 if simulation_mode is None:
                     simulation_mode = True
 
+                trade_request = self._build_trade_request_for_execution(trade_payload, market_data)
+                if not trade_request.get("symbol") or not trade_request.get("action"):
+                    return {
+                        "success": False,
+                        "message": "Unable to build trade request for execution",
                 # Use the validated trade_request from Phase 3, not rebuild from raw trade_params
                 # Ensure required fields are present in the validated request
                 if not trade_request.get("symbol") or not trade_request.get("action"):
@@ -1887,7 +2018,7 @@ Provide a helpful response using the real data available. Never use placeholder 
             except (ValueError, TypeError):
                 user_identifier = user_id
 
-            async with AsyncSessionLocal() as session:
+            async with get_database_session() as session:
                 result = await session.execute(
                     select(User.simulation_mode).where(User.id == user_identifier)
                 )
@@ -1920,7 +2051,11 @@ Provide a helpful response using the real data available. Never use placeholder 
         if action:
             normalized_action = action.upper() if isinstance(action, str) else action
             trade_request["action"] = normalized_action
-            trade_request["side"] = normalized_action
+            trade_request["side"] = (
+                normalized_action.lower()
+                if isinstance(normalized_action, str)
+                else normalized_action
+            )
 
         order_type = trade_params.get("order_type")
         if isinstance(order_type, str):
@@ -1934,14 +2069,15 @@ Provide a helpful response using the real data available. Never use placeholder 
         amount = trade_params.get("amount") or trade_params.get("position_size_usd")
         if amount:
             trade_request["position_size_usd"] = amount
-            # Only calculate quantity from amount if no explicit quantity was provided
+
+            # Only calculate quantity from amount if not already set
             if not trade_request.get("quantity"):
                 price = market_data.get("current_price")
                 if price:
                     try:
                         quantity = float(amount) / float(price)
                         if quantity > 0:
-                            trade_request["quantity"] = quantity
+                            trade_request.setdefault("quantity", quantity)
                     except (TypeError, ZeroDivisionError):
                         pass
 
@@ -1959,7 +2095,7 @@ Provide a helpful response using the real data available. Never use placeholder 
 
         action_value = trade_request.get("action")
         if isinstance(action_value, str) and action_value:
-            trade_request.setdefault("side", action_value.lower())
+            trade_request["side"] = trade_request.get("side", action_value).lower()
 
         return trade_request
 
@@ -1998,6 +2134,45 @@ Provide a helpful response using the real data available. Never use placeholder 
 
                 try:
                     validation = await self.trade_executor.validate_trade(dict(base_request), user_id)
+                except Exception as validation_error:
+                    self.logger.exception(
+                        "Rebalancing trade validation crashed",
+                        error=str(validation_error),
+                        trade=base_request,
+                    )
+                    results.append(
+                        {
+                            "success": False,
+                            "error": str(validation_error),
+                            "trade_request": base_request,
+                        }
+                    )
+                    continue
+
+                if not validation.get("valid", False):
+                    results.append(
+                        {
+                            "success": False,
+                            "error": validation.get("reason", "Invalid parameters"),
+                            "trade_request": validation.get("trade_request", base_request),
+                        }
+                    )
+                    continue
+
+                normalized_request = validation.get("trade_request", base_request)
+                normalized_request.setdefault(
+                    "side",
+                    normalized_request.get("action", "BUY").lower(),
+                )
+
+                simulation_mode = self._coerce_to_bool(trade.get("simulation_mode"), True)
+
+                result = await self.trade_executor.execute_trade(
+                    normalized_request,
+                    user_id,
+                    simulation_mode,
+                )
+                results.append(result)
 
                     if not validation.get("valid", False):
                         results.append(

@@ -4,6 +4,8 @@ from datetime import datetime
 import asyncio
 import structlog
 
+from app.core.database import get_database_session
+
 logger = structlog.get_logger(__name__)
 
 class ConnectionManager:
@@ -142,11 +144,10 @@ class ConnectionManager:
     async def _is_admin_user(self, user_id: str) -> bool:
         """Check if a user has admin privileges."""
         try:
-            from app.core.database import get_database
             from app.models.user import User, UserRole
             from sqlalchemy import select
-            
-            async with get_database() as db:
+
+            async with get_database_session() as db:
                 result = await db.execute(
                     select(User).filter(User.id == user_id)
                 )
