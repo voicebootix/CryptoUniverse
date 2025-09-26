@@ -1198,6 +1198,8 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
                     or opportunity.get("strategy_id")
                     or "Unknown"
                 )
+                # Convert strategy_name to string before calling .replace() and .title()
+                strategy_name = str(strategy_name) if strategy_name else "Unknown"
                 normalized_strategy = strategy_name.replace("_", " ").title()
                 opportunities_by_strategy.setdefault(normalized_strategy, []).append(opportunity)
             # Build comprehensive prompt
