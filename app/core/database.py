@@ -164,15 +164,15 @@ def receive_after_cursor_execute(conn, cursor, statement, parameters, context, e
     logger = structlog.get_logger()
     
     # ENTERPRISE: Log all slow queries regardless of environment
-    if total > 0.2:  # ENTERPRISE STANDARD: Warn on queries >200ms
-        logger.warning(
-            "Slow database query",
+    if total > 0.5:  # ENTERPRISE: Error on queries >500ms
+        logger.error(
+            "Very slow database query",
             duration=total,
             statement=statement[:200] + "..." if len(statement) > 200 else statement
         )
-    elif total > 0.5:  # ENTERPRISE: Error on queries >500ms
-        logger.error(
-            "Very slow database query",
+    elif total > 0.2:  # ENTERPRISE STANDARD: Warn on queries >200ms
+        logger.warning(
+            "Slow database query",
             duration=total,
             statement=statement[:200] + "..." if len(statement) > 200 else statement
         )
