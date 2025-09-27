@@ -1436,6 +1436,12 @@ REBALANCING ANALYSIS ERROR:
                 normalized = raw_value * 100 if abs(raw_value) <= 1 else raw_value
                 return normalized
 
+            def _format_percentage(value: Any) -> Optional[str]:
+                percent_value = _safe_percentage(value)
+                if percent_value is None:
+                    return None
+                return f"{percent_value:.1f}%"
+
             # Strategy performance summary with improved safe conversion
             if strategy_performance:
                 prompt_parts.append("\n📊 STRATEGY PERFORMANCE:")
