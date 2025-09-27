@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bot,
@@ -23,11 +23,13 @@ import {
   Cpu,
   Eye,
   Sparkles,
-  LineChart
+  LineChart,
+  Loader
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -36,6 +38,8 @@ import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { useUser } from '@/store/authStore';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
+import { useToast } from '@/components/ui/use-toast';
+import pipelineApi from '@/lib/api/pipelineApi';
 
 interface AIConfig {
   intensity: 'hibernation' | 'conservative' | 'active' | 'aggressive' | 'hyperactive';
@@ -114,6 +118,7 @@ const intensityConfigs = {
 
 const AutonomousAI: React.FC = () => {
   const user = useUser();
+  const { toast } = useToast();
   const [config, setConfig] = useState<AIConfig>(defaultConfig);
   const [isActive, setIsActive] = useState(false);
   const [sessionMetrics, setSessionMetrics] = useState({
@@ -124,6 +129,9 @@ const AutonomousAI: React.FC = () => {
     activeStrategies: 3,
     lastTradeAt: null as string | null
   });
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   const handleConfigChange = (key: keyof AIConfig, value: any) => {
     setConfig(prev => ({ ...prev, [key]: value }));
@@ -145,22 +153,109 @@ const AutonomousAI: React.FC = () => {
     }));
   };
 
-  const startAutonomousTrading = async () => {
+  const fetchStatus = useCallback(async () => {
+    setStatusLoading(true);
+    setStatusError(null);
+
     try {
-      // API call to start autonomous trading
+      const statusResponse = await pipelineApi.getAutonomousStatus();
+      const status = statusResponse?.data ?? statusResponse;
+      setIsActive(Boolean(status?.autonomous_mode));
+
+      const performance = status?.performance_today ?? {};
+
+      setSessionMetrics(prev => ({
+        tradesExecuted: performance.trades_executed ?? performance.trades ?? prev.tradesExecuted,
+        totalPnL:
+          typeof performance.pnl_pct === 'number'
+            ? performance.pnl_pct
+            : typeof performance.pnl === 'number'
+              ? performance.pnl
+              : prev.totalPnL,
+        currentDrawdown:
+          typeof performance.max_drawdown_pct === 'number'
+            ? performance.max_drawdown_pct
+            : typeof performance.drawdown_pct === 'number'
+              ? performance.drawdown_pct
+              : prev.currentDrawdown,
+        winRate:
+          typeof performance.win_rate === 'number'
+            ? performance.win_rate
+            : typeof performance.win_rate_pct === 'number'
+              ? performance.win_rate_pct
+              : prev.winRate,
+        activeStrategies: Array.isArray(status?.active_strategies)
+          ? status.active_strategies.length
+          : prev.activeStrategies,
+        lastTradeAt:
+          performance.last_trade_at ?? performance.last_trade_time ?? prev.lastTradeAt,
+      }));
+    } catch (error: any) {
+      const message = error?.message || 'Unable to load autonomous status';
+      setStatusError(message);
+      toast({
+        title: 'Failed to load autonomous status',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setStatusLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
+
+  const startAutonomousTrading = async () => {
+    setActionLoading(true);
+    setStatusError(null);
+
+    try {
+      const response = await pipelineApi.startAutonomousMode(config);
       setIsActive(true);
-      // Real implementation would call ${import.meta.env.VITE_API_URL}/autonomous/start
-    } catch (error) {
+      toast({
+        title: 'Autonomous trading activated',
+        description: response?.message || 'The AI money manager is now monitoring markets.',
+      });
+      await fetchStatus();
+    } catch (error: any) {
       console.error('Failed to start autonomous trading:', error);
+      const message = error?.message || 'Failed to start autonomous trading';
+      setStatusError(message);
+      toast({
+        title: 'Unable to start autonomous mode',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setActionLoading(false);
     }
   };
 
   const stopAutonomousTrading = async () => {
+    setActionLoading(true);
+    setStatusError(null);
+
     try {
+      const response = await pipelineApi.stopAutonomousMode();
       setIsActive(false);
-      // Real implementation would call ${import.meta.env.VITE_API_URL}/autonomous/stop
-    } catch (error) {
+      toast({
+        title: 'Autonomous trading paused',
+        description: response?.message || 'The AI has stopped executing live trades.',
+      });
+      await fetchStatus();
+    } catch (error: any) {
       console.error('Failed to stop autonomous trading:', error);
+      const message = error?.message || 'Failed to stop autonomous trading';
+      setStatusError(message);
+      toast({
+        title: 'Unable to stop autonomous mode',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -202,6 +297,13 @@ const AutonomousAI: React.FC = () => {
         </div>
       </div>
 
+      {statusError && (
+        <Alert variant="destructive" className="border-destructive/40 bg-destructive/10">
+          <AlertTitle>Autonomous status unavailable</AlertTitle>
+          <AlertDescription>{statusError}</AlertDescription>
+        </Alert>
+      )}
+
       {/* Status Overview */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         <Card className={`border-2 ${isActive ? 'border-green-500 bg-green-50' : 'border-gray-200'}`}>
@@ -210,11 +312,22 @@ const AutonomousAI: React.FC = () => {
             <Bot className={`h-4 w-4 ${isActive ? 'text-green-500' : 'text-gray-500'}`} />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {isActive ? 'ACTIVE' : 'SLEEPING'}
+            <div className="text-2xl font-bold flex items-center gap-2 min-h-[2.5rem]">
+              {statusLoading ? (
+                <>
+                  <Loader className="h-5 w-5 animate-spin text-muted-foreground" />
+                  <span className="text-base font-medium text-muted-foreground">Updating...</span>
+                </>
+              ) : (
+                isActive ? 'ACTIVE' : 'SLEEPING'
+              )}
             </div>
             <p className="text-xs text-muted-foreground">
-              {isActive ? 'Monitoring markets in real-time' : 'Click start to activate'}
+              {statusLoading
+                ? 'Checking latest status...'
+                : isActive
+                  ? 'Monitoring markets in real-time'
+                  : 'Click start to activate'}
             </p>
           </CardContent>
         </Card>
@@ -418,13 +531,19 @@ const AutonomousAI: React.FC = () => {
                 <Button
                   size="lg"
                   className={`w-full ${
-                    isActive 
-                      ? 'bg-red-500 hover:bg-red-600' 
+                    isActive
+                      ? 'bg-red-500 hover:bg-red-600'
                       : 'bg-gradient-to-r from-green-600 to-blue-600'
                   }`}
                   onClick={isActive ? stopAutonomousTrading : startAutonomousTrading}
+                  disabled={actionLoading || statusLoading}
                 >
-                  {isActive ? (
+                  {actionLoading ? (
+                    <>
+                      <Loader className="w-4 h-4 mr-2 animate-spin" />
+                      Processing...
+                    </>
+                  ) : isActive ? (
                     <>
                       <Pause className="w-4 h-4 mr-2" />
                       Stop AI

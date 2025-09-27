@@ -119,6 +119,43 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
     };
   };
 
+  const normalizeApiResult = <T = Record<string, any>>(result: any, defaultSuccess = false): { success: boolean; data: T } => {
+    if (result === undefined || result === null) {
+      return { success: defaultSuccess, data: {} as T };
+    }
+
+    if (typeof result !== 'object') {
+      return { success: defaultSuccess, data: result as T };
+    }
+
+    const successField =
+      typeof (result as any).success === 'boolean'
+        ? (result as any).success
+        : typeof (result as any).data?.success === 'boolean'
+          ? (result as any).data.success
+          : defaultSuccess;
+
+    const data = ((result as any).data ?? result) as T;
+
+    return { success: successField, data };
+  };
+
+  const deriveAutonomousActive = (data: Record<string, any>, fallback: boolean) => {
+    if (typeof data?.active === 'boolean') {
+      return data.active;
+    }
+    if (typeof data?.autonomous_mode === 'boolean') {
+      return data.autonomous_mode;
+    }
+    if (typeof data?.enable === 'boolean') {
+      return data.enable;
+    }
+    if (typeof data?.enabled === 'boolean') {
+      return data.enabled;
+    }
+    return fallback;
+  };
+
   const fetchMarketOverview = async (): Promise<void> => {
     setLoading(true);
     setError(null);
@@ -527,7 +564,12 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
     setError(null);
     try {
       const result = await pipelineApi.startAutonomousMode(config);
-      setAutonomousStatus({ ...result, active: true });
+      const { success, data } = normalizeApiResult(result, true);
+      setAutonomousStatus({
+        ...data,
+        success,
+        active: deriveAutonomousActive(data, true),
+      });
     } catch (err: any) {
       setError(err?.message || 'Failed to start autonomous mode');
     } finally {
@@ -540,7 +582,12 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
     setError(null);
     try {
       const result = await pipelineApi.stopAutonomousMode();
-      setAutonomousStatus({ ...result, active: false });
+      const { success, data } = normalizeApiResult(result, true);
+      setAutonomousStatus({
+        ...data,
+        success,
+        active: deriveAutonomousActive(data, false),
+      });
     } catch (err: any) {
       setError(err?.message || 'Failed to stop autonomous mode');
     } finally {
@@ -551,9 +598,13 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
   const fetchAutonomousStatus = async (): Promise<void> => {
     try {
       const result = await pipelineApi.getAutonomousStatus();
-      if (result && result.success === true) {
-        const statusData = result.data || result;
-        setAutonomousStatus(statusData);
+      const { success, data } = normalizeApiResult(result, false);
+      if (success) {
+        setAutonomousStatus({
+          ...data,
+          success,
+          active: deriveAutonomousActive(data, deriveAutonomousActive(autonomousStatus ?? {}, false)),
+        });
       }
     } catch (err: any) {
       // Don't set error for status checks
@@ -566,11 +617,12 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
     if (!userId) {
       return;
     }
-    
+
     try {
       const result = await pipelineApi.getSystemMetrics();
-      if (result.success) {
-        setSystemMetrics(result.data || result);
+      const { success, data } = normalizeApiResult(result, false);
+      if (success) {
+        setSystemMetrics(data);
       }
     } catch (err: any) {
       console.warn('Failed to fetch system metrics:', err.message);
@@ -580,9 +632,12 @@ export const usePipelineAnalysis = (userId: string = 'frontend'): PipelineAnalys
   const fetchPipelineHistory = async (limit: number = 50): Promise<void> => {
     try {
       const result = await pipelineApi.getPipelineHistory(limit);
+      const { success, data } = normalizeApiResult(result, false);
       // Only update state if still mounted
-      if (isMountedRef.current && result.success) {
-        setPipelineHistory(result.data?.history || result.history || []);
+      if (isMountedRef.current && success) {
+        const historySource = (data as any)?.history ?? (data as any)?.data?.history;
+        const normalizedHistory = Array.isArray(historySource) ? historySource : [];
+        setPipelineHistory(normalizedHistory);
       }
     } catch (err: any) {
       // Log full error object and only update if still mounted

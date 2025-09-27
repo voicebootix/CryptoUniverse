@@ -18,6 +18,14 @@ export enum ChatMode {
   SUPPORT = 'support'      // Help & support
 }
 
+interface DecisionApprovalResult {
+  success: boolean;
+  decision_id: string;
+  execution_result?: any;
+  message?: string;
+  error?: string;
+}
+
 interface ChatState {
   // Session Management
   sessionId: string | null;
@@ -55,7 +63,7 @@ interface ChatState {
   clearChat: () => void;
   
   // Decision Actions
-  approveDecision: (decisionId: string, approved: boolean) => Promise<void>;
+  approveDecision: (decisionId: string, approved: boolean) => Promise<DecisionApprovalResult>;
   clearPendingDecision: () => void;
 }
 
@@ -269,18 +277,18 @@ export const useChatStore = create<ChatState>()(
       approveDecision: async (decisionId: string, approved: boolean) => {
         try {
           const { apiClient } = await import('@/lib/api/client');
-          
+
           const response = await apiClient.post('/chat/decision/approve', {
             decision_id: decisionId,
             approved: approved,
             modifications: {}
           });
-          
+
           if (response.data.success) {
             // Add execution result message
             const executionMessage: ChatMessage = {
               id: `execution-${Date.now()}`,
-              content: approved 
+              content: approved
                 ? `✅ Decision executed successfully: ${response.data.message}`
                 : `❌ Decision cancelled`,
               type: 'assistant',
@@ -290,23 +298,29 @@ export const useChatStore = create<ChatState>()(
                 execution_result: response.data.execution_result
               }
             };
-            
+
             // Use addMessage to handle unread count and timestamp ordering
             get().addMessage(executionMessage);
             set({ pendingDecision: null });
+
+            return response.data;
           }
+
+          throw new Error(response.data.message || 'Decision approval failed');
         } catch (error) {
           console.error('Failed to approve decision:', error);
-          
+
           const errorMessage: ChatMessage = {
             id: `error-${Date.now()}`,
             content: "Failed to process your decision. Please try again.",
             type: 'assistant',
             timestamp: new Date().toISOString()
           };
-          
+
           // Use addMessage to handle unread count and timestamp ordering
           get().addMessage(errorMessage);
+
+          throw error;
         }
       },
       

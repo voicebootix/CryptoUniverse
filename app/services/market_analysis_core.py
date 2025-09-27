@@ -259,27 +259,50 @@ class MarketAnalysisService(LoggerMixin):
             ]
             
             analysis_results = {}
-            
+
             for symbol in symbol_list:
                 analysis = await self._analyze_symbol_technical(symbol, timeframe, indicator_list)
                 analysis_results[symbol] = analysis
-            
+
+            symbols_with_real_data = [
+                symbol for symbol, analysis in analysis_results.items()
+                if analysis.get("data_quality") == "real_market_data"
+            ]
+            symbols_with_errors = [
+                symbol for symbol, analysis in analysis_results.items()
+                if analysis.get("data_quality") == "error"
+            ]
+            symbols_without_data = [
+                s for s in symbol_list
+                if s not in symbols_with_real_data and s not in symbols_with_errors
+            ]
+
             response_time = time.time() - start_time
-            await self._update_performance_metrics(response_time, True, user_id)
-            
-            return {
-                "success": True,
-                "function": "technical_analysis", 
-                "data": analysis_results,
-                "metadata": {
-                    "symbols_analyzed": len(symbol_list),
-                    "timeframe": timeframe,
-                    "indicators_used": indicator_list,
-                    "response_time_ms": round(response_time * 1000, 2),
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+            overall_success = bool(symbols_with_real_data)
+            await self._update_performance_metrics(response_time, overall_success, user_id)
+
+            metadata = {
+                "symbols_analyzed": len(symbol_list),
+                "timeframe": timeframe,
+                "indicators_used": indicator_list,
+                "response_time_ms": round(response_time * 1000, 2),
+                "timestamp": datetime.utcnow().isoformat(),
+                "symbols_with_data": len(symbols_with_real_data),
+                "symbols_without_data": len(symbols_without_data),
             }
-            
+            if symbols_with_errors:
+                metadata["symbols_with_errors"] = symbols_with_errors
+            if symbols_without_data:
+                metadata["unavailable_symbols"] = symbols_without_data
+
+            return {
+                "success": overall_success,
+                "function": "technical_analysis",
+                "technical_analysis": analysis_results,
+                "data": analysis_results,
+                "metadata": metadata,
+            }
+
         except Exception as e:
             await self._update_performance_metrics(time.time() - start_time, False, user_id)
             raise e
@@ -733,7 +756,8 @@ class MarketAnalysisService(LoggerMixin):
                 "confidence": self._calculate_analysis_confidence(technical_analysis, len(price_data)),
                 "timestamp": datetime.utcnow().isoformat(),
                 "data_source": "real_market_data",
-                "data_points": len(price_data)
+                "data_points": len(price_data),
+                "data_quality": "real_market_data",
             }
             
         except Exception as e:
@@ -758,97 +782,12 @@ class MarketAnalysisService(LoggerMixin):
                 self.logger.info(f"✅ Fetched {len(ohlcv_data)} real candles for {symbol}")
                 return ohlcv_data
 
-            # Fallback to fetching current price if no historical data
-            current_price_data = await real_market_data_service.get_real_price(symbol)
-            if not current_price_data or current_price_data.get('price', 0) <= 0:
-                return []
-            
-            # Only use synthetic data as last resort fallback
-            self.logger.warning(f"⚠️ Using synthetic fallback for {symbol}")
-            current_price = current_price_data['price']
-            price_data = []
-            base_price = current_price
-            
-            # Market parameters based on crypto volatility
-            volatility = 0.03  # 3% daily volatility (realistic for crypto)
-            trend_bias = 0.0   # Start neutral
-            
-            # Determine market cycle for this symbol
-            # Use symbol hash to create deterministic but varied patterns
-            symbol_hash = hash(symbol) % 100
-            
-            if symbol_hash < 20:  # 20% bullish trend
-                trend_bias = 0.001  # 0.1% upward bias per period
-                volatility = 0.025  # Lower volatility in trends
-            elif symbol_hash < 40:  # 20% bearish trend
-                trend_bias = -0.001  # 0.1% downward bias
-                volatility = 0.025
-            elif symbol_hash < 60:  # 20% high volatility
-                volatility = 0.05   # 5% volatility
-                trend_bias = 0.0
-            elif symbol_hash < 80:  # 20% accumulation phase
-                volatility = 0.015  # Low volatility
-                trend_bias = 0.0
-            else:  # 20% breakout pattern
-                volatility = 0.02
-                trend_bias = 0.0
-            
-            # Generate price history with momentum
-            momentum = 0  # Track short-term momentum
-            
-            for i in range(periods):
-                # Add momentum factor (creates more realistic trends)
-                momentum = momentum * 0.9  # Decay factor
-                
-                # Breakout pattern for last group
-                if symbol_hash >= 80 and i > periods * 0.7:
-                    # Breakout in last 30% of data
-                    trend_bias = 0.002  # Strong upward movement
-                    volatility = 0.04   # Increased volatility
-                
-                # Calculate price change with trend and momentum
-                random_component = np.random.normal(0, volatility)
-                price_change = trend_bias + momentum * 0.1 + random_component
-                
-                # Add momentum based on recent movement
-                if i > 0 and price_change > 0.02:
-                    momentum = min(0.5, momentum + 0.1)  # Bullish momentum
-                elif i > 0 and price_change < -0.02:
-                    momentum = max(-0.5, momentum - 0.1)  # Bearish momentum
-                
-                # Calculate new price
-                price = base_price * (1 + price_change)
-                
-                # Ensure price stays positive
-                price = max(price, base_price * 0.5)  # Don't drop below 50% of start
-                
-                # Generate realistic volume patterns
-                # Higher volume on larger price movements
-                base_volume = 5000000  # 5M base volume
-                volume_multiplier = 1 + abs(price_change) * 10  # More volume on big moves
-                volume = base_volume * volume_multiplier * np.random.uniform(0.8, 1.2)
-                
-                # Generate high/low with realistic wicks
-                wick_size = abs(price_change) + volatility * 0.5
-                high = price * (1 + wick_size)
-                low = price * (1 - wick_size)
-                
-                # Ensure open is between high and low
-                open_price = base_price if i == 0 else price_data[-1]['close']
-                
-                price_data.append({
-                    'timestamp': (datetime.utcnow() - timedelta(hours=periods-i)).isoformat(),
-                    'open': float(open_price),
-                    'high': float(high),
-                    'low': float(low),
-                    'close': float(price),
-                    'volume': float(volume)
-                })
-                
-                base_price = price
-            
-            # Reverse to get chronological order
-            return list(reversed(price_data))
+            self.logger.warning(
+                "No historical OHLCV data available from real market data service",
+                symbol=symbol,
+                timeframe=timeframe,
+            )
+            return []
             
         except Exception as e:
             logger.error("Failed to get historical price data", symbol=symbol, error=str(e))
@@ -1038,58 +977,18 @@ class MarketAnalysisService(LoggerMixin):
     
     async def _fallback_technical_analysis(self, symbol: str, timeframe: str) -> Dict[str, Any]:
         """Fallback technical analysis when real data is unavailable."""
-        try:
-            # Try to get at least current price
-            current_data = await market_data_feeds.get_real_time_price(symbol)
-            current_price = float(current_data.get("price", 50000)) if current_data.get("success") else 50000.0
-            
-            return {
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "analysis": {
-                    "trend": {
-                        "direction": "NEUTRAL",
-                        "strength": 5.0,
-                        "sma_20": current_price,
-                        "sma_50": current_price,
-                        "ema_12": current_price,
-                        "ema_26": current_price
-                    },
-                    "momentum": {
-                        "rsi": 50.0,
-                        "macd": {
-                            "macd": 0.0,
-                            "signal": 0.0,
-                            "histogram": 0.0,
-                            "trend": "NEUTRAL"
-                        }
-                    },
-                    "price": {
-                        "current": round(current_price, 2),
-                        "high_24h": round(current_price * 1.02, 2),
-                        "low_24h": round(current_price * 0.98, 2),
-                        "volume": 1000000
-                    }
-                },
-                "signals": {"buy": 1, "sell": 1, "neutral": 1},
-                "confidence": 3.0,
-                "timestamp": datetime.utcnow().isoformat(),
-                "data_source": "fallback_with_current_price"
-            }
-        except Exception:
-            return {
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "analysis": {
-                    "trend": {"direction": "NEUTRAL", "strength": 5.0, "sma_20": 50000, "sma_50": 50000, "ema_12": 50000, "ema_26": 50000},
-                    "momentum": {"rsi": 50.0, "macd": {"macd": 0.0, "signal": 0.0, "histogram": 0.0, "trend": "NEUTRAL"}},
-                    "price": {"current": 50000, "high_24h": 51000, "low_24h": 49000, "volume": 1000000}
-                },
-                "signals": {"buy": 1, "sell": 1, "neutral": 1},
-                "confidence": 1.0,
-                "timestamp": datetime.utcnow().isoformat(),
-                "data_source": "emergency_fallback"
-            }
+        timestamp = datetime.utcnow().isoformat()
+        return {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "analysis": {},
+            "signals": {},
+            "confidence": 0.0,
+            "timestamp": timestamp,
+            "data_source": "no_market_data",
+            "data_quality": "no_data",
+            "error": "historical_price_data_unavailable"
+        }
     
     async def _analyze_price_action_sentiment(self, symbol: str, timeframes: List[str]) -> Dict[str, Any]:
         """Analyze sentiment based on REAL price action."""

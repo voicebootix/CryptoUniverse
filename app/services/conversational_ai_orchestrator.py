@@ -406,7 +406,7 @@ class ConversationalAIOrchestrator(LoggerMixin):
         """Get user's credit account status and transaction history."""
         try:
             # FIXED: Use EXACT same logic as credit API endpoint
-            from app.core.database import get_database
+            from app.core.database import get_database_session
             from app.api.v1.endpoints.credits import get_or_create_credit_account
             import uuid
 
@@ -416,7 +416,7 @@ class ConversationalAIOrchestrator(LoggerMixin):
             else:
                 user_uuid = user_id
 
-            async with get_database() as db:
+            async with get_database_session() as db:
                 # Use the EXACT same function as credit API
                 credit_account = await get_or_create_credit_account(user_uuid, db)
 
