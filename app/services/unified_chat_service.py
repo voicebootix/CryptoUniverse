@@ -410,8 +410,15 @@ class UnifiedChatService(LoggerMixin):
                     return response
             
             # Step 3: Gather required data
+            prefetched_user_strategies = requirements_check.get("user_strategies")
+            prefetched_marketplace = requirements_check.get("marketplace_strategies")
+
             context_data = await self._gather_context_data(
-                intent_analysis, user_id, session
+                intent_analysis,
+                user_id,
+                session,
+                user_strategies=prefetched_user_strategies,
+                marketplace_strategies=prefetched_marketplace
             )
             
             # Step 4: Generate response
@@ -617,6 +624,8 @@ class UnifiedChatService(LoggerMixin):
         if conversation_mode == ConversationMode.PAPER_TRADING:
             return {"allowed": True, "message": "Paper trading mode active"}
         
+        requirements_result: Dict[str, Any] = {"allowed": True, "message": "All checks passed"}
+
         # Check credit requirements for paid operations
         if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
             if conversation_mode == ConversationMode.LIVE_TRADING:
@@ -645,12 +654,15 @@ class UnifiedChatService(LoggerMixin):
                             "required_credits": credit_check['required_credits']
                         }
                     }
-        
+
         # Check strategy access for strategy-related operations
         if intent in [ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
             strategy_check = await self._check_strategy_access(user_id)
+            requirements_result["strategy_access"] = strategy_check
+            requirements_result["user_strategies"] = strategy_check.get("portfolio_data")
+            requirements_result["marketplace_strategies"] = strategy_check.get("marketplace_data")
             if not strategy_check["has_access"] and intent == ChatIntent.STRATEGY_RECOMMENDATION:
-                return {
+                requirements_result.update({
                     "allowed": False,
                     "message": f"You need to purchase strategy access. "
                               f"Available strategies: {strategy_check['available_count']}. "
@@ -660,9 +672,10 @@ class UnifiedChatService(LoggerMixin):
                         "type": "strategy_purchase",
                         "available_strategies": strategy_check['available_strategies']
                     }
-                }
+                })
+                return requirements_result
             # For STRATEGY_MANAGEMENT, we allow access even without purchased strategies (show what they can buy)
-        
+
         # Check trading limits
         if intent == ChatIntent.TRADE_EXECUTION:
             limit_check = await self._check_trading_limits(user_id)
@@ -672,8 +685,8 @@ class UnifiedChatService(LoggerMixin):
                     "message": limit_check["message"],
                     "requires_action": False
                 }
-        
-        return {"allowed": True, "message": "All checks passed"}
+
+        return requirements_result
     
     async def _check_user_credits(self, user_id: str) -> Dict[str, Any]:
         """
@@ -761,7 +774,9 @@ class UnifiedChatService(LoggerMixin):
                 "active_strategies": active_strategies,
                 "available_count": len(available.get("strategies", [])),
                 "available_strategies": available.get("strategies", [])[:5],  # Top 5
-                "portfolio_success": portfolio_success
+                "portfolio_success": portfolio_success,
+                "portfolio_data": portfolio,
+                "marketplace_data": available
             }
         except Exception as e:
             self.logger.error("Strategy check failed", error=str(e))
@@ -770,7 +785,9 @@ class UnifiedChatService(LoggerMixin):
                 "active_strategies": [],
                 "available_count": 0,
                 "error": str(e),
-                "portfolio_success": False
+                "portfolio_success": False,
+                "portfolio_data": None,
+                "marketplace_data": None
             }
     
     async def _check_trading_limits(self, user_id: str) -> Dict[str, Any]:
@@ -888,7 +905,9 @@ class UnifiedChatService(LoggerMixin):
         self,
         intent_analysis: Dict[str, Any],
         user_id: str,
-        session: ChatSession
+        session: ChatSession,
+        user_strategies: Optional[Dict[str, Any]] = None,
+        marketplace_strategies: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Gather ALL required data based on intent.
@@ -958,30 +977,42 @@ class UnifiedChatService(LoggerMixin):
                 self.logger.error("Failed to get active strategy", error=str(e), user_id=user_id)
                 context_data["active_strategy"] = None
 
-            try:
-                context_data["available_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
-            except Exception as e:
-                self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
-                context_data["available_strategies"] = {"strategies": []}
+            if user_strategies is not None:
+                context_data["user_strategies"] = user_strategies
+
+            if marketplace_strategies is not None:
+                context_data["available_strategies"] = marketplace_strategies
+            else:
+                try:
+                    context_data["available_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
+                except Exception as e:
+                    self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
+                    context_data["available_strategies"] = {"strategies": []}
 
         elif intent == ChatIntent.STRATEGY_MANAGEMENT:
             # Get user's purchased/active strategies
-            try:
-                context_data["user_strategies"] = await self.strategy_marketplace.get_user_strategy_portfolio(user_id)
-            except Exception as e:
-                self.logger.error("Failed to get user strategy portfolio", error=str(e), user_id=user_id)
-                context_data["user_strategies"] = {
-                    "success": False,
-                    "active_strategies": [],
-                    "total_strategies": 0,
-                    "error": str(e)
-                }
+            if user_strategies is not None:
+                context_data["user_strategies"] = user_strategies
+            else:
+                try:
+                    context_data["user_strategies"] = await self.strategy_marketplace.get_user_strategy_portfolio(user_id)
+                except Exception as e:
+                    self.logger.error("Failed to get user strategy portfolio", error=str(e), user_id=user_id)
+                    context_data["user_strategies"] = {
+                        "success": False,
+                        "active_strategies": [],
+                        "total_strategies": 0,
+                        "error": str(e)
+                    }
 
-            try:
-                context_data["marketplace_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
-            except Exception as e:
-                self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
-                context_data["marketplace_strategies"] = {"strategies": []}
+            if marketplace_strategies is not None:
+                context_data["marketplace_strategies"] = marketplace_strategies
+            else:
+                try:
+                    context_data["marketplace_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
+                except Exception as e:
+                    self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
+                    context_data["marketplace_strategies"] = {"strategies": []}
 
         elif intent in [ChatIntent.CREDIT_INQUIRY, ChatIntent.CREDIT_MANAGEMENT]:
             # Get credit account information using same logic as _check_user_credits
