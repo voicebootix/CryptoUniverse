@@ -375,7 +375,7 @@ class ExchangePortfolioConnector(LoggerMixin):
                 await redis_manager.set(
                     cache_key,
                     json.dumps(portfolio_data, default=str),
-                    ex=self.cache_ttl
+                    expire=self.cache_ttl
                 )
         except Exception as e:
             self.logger.warning("Cache storage failed", error=str(e))
@@ -1092,49 +1092,266 @@ class PortfolioOptimizationEngine(LoggerMixin):
         target_weights: Dict[str, float]
     ) -> List[Dict[str, Any]]:
         """Generate trades needed for rebalancing."""
-        
-        trades = []
-        total_value = current_portfolio.get("total_value_usd", 0)
-        
-        if total_value <= 0:
+
+        trades: List[Dict[str, Any]] = []
+
+        def _extract_position_value(position: Dict[str, Any]) -> float:
+            """Best effort extraction of the USD value for a position."""
+            for key in ("value_usd", "usd_value", "market_value", "current_value", "value"):
+                raw_value = position.get(key)
+                if raw_value is not None:
+                    try:
+                        return float(raw_value)
+                    except (TypeError, ValueError):
+                        continue
+
+            quantity = position.get("quantity") or position.get("amount") or position.get("units")
+            price = position.get("current_price") or position.get("price") or position.get("mark_price")
+            if quantity is not None and price is not None:
+                try:
+                    return float(quantity) * float(price)
+                except (TypeError, ValueError):
+                    return 0.0
+            return 0.0
+
+        positions = current_portfolio.get("positions", []) or []
+        total_value = (
+            current_portfolio.get("total_value_usd")
+            or current_portfolio.get("total_value")
+            or sum(_extract_position_value(position) for position in positions)
+        )
+
+        if not positions or total_value <= 0:
             return trades
-        
-        # Calculate current weights
-        current_weights = {}
-        for position in current_portfolio.get("positions", []):
-            symbol = position["symbol"]
-            current_weight = position["value_usd"] / total_value
-            
-            if symbol in current_weights:
-                current_weights[symbol] += current_weight
+
+        def _safe_float(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        # Calculate current weights and cache useful context
+        current_weights: Dict[str, float] = {}
+        position_lookup: Dict[str, Dict[str, Any]] = {}
+        aggregated_positions: Dict[str, Dict[str, Any]] = {}
+
+        for position in positions:
+            symbol = position.get("symbol")
+            if not symbol:
+                continue
+
+            aggregated = aggregated_positions.setdefault(
+                symbol,
+                {
+                    "value": 0.0,
+                    "quantity_sum": 0.0,
+                    "has_quantity": False,
+                    "exchanges": set(),
+                    "value_price_sum": 0.0,
+                    "value_weight": 0.0,
+                    "quantity_price_sum": 0.0,
+                    "quantity_weight": 0.0,
+                    "last_price": None,
+                },
+            )
+
+            exchange = position.get("exchange")
+            if exchange:
+                aggregated["exchanges"].add(exchange)
+
+            position_value = _extract_position_value(position)
+            if position_value > 0:
+                aggregated["value"] += position_value
+
+            quantity_raw = (
+                position.get("quantity")
+                if position.get("quantity") is not None
+                else position.get("amount")
+                if position.get("amount") is not None
+                else position.get("units")
+            )
+            quantity_float = _safe_float(quantity_raw)
+            if quantity_float is not None:
+                aggregated["quantity_sum"] += quantity_float
+                aggregated["has_quantity"] = True
+
+            price_raw = None
+            for price_key in ("current_price", "price", "mark_price"):
+                candidate = position.get(price_key)
+                if candidate is not None:
+                    price_raw = candidate
+                    break
+
+            price_float = _safe_float(price_raw)
+            if price_float is not None:
+                aggregated["last_price"] = price_float
+                if position_value > 0:
+                    aggregated["value_price_sum"] += price_float * position_value
+                    aggregated["value_weight"] += position_value
+                elif quantity_float is not None and quantity_float != 0:
+                    weight = abs(quantity_float)
+                    aggregated["quantity_price_sum"] += price_float * weight
+                    aggregated["quantity_weight"] += weight
+
+        for symbol, aggregated in aggregated_positions.items():
+            aggregated_value = aggregated["value"]
+            if aggregated_value <= 0:
+                continue
+
+            current_weights[symbol] = aggregated_value / total_value
+
+            if aggregated["value_weight"] > 0:
+                weighted_price = aggregated["value_price_sum"] / aggregated["value_weight"]
+            elif aggregated["quantity_weight"] > 0:
+                weighted_price = aggregated["quantity_price_sum"] / aggregated["quantity_weight"]
             else:
-                current_weights[symbol] = current_weight
-        
-        # Generate rebalancing trades
-        for symbol, target_weight in target_weights.items():
-            current_weight = current_weights.get(symbol, 0)
+                weighted_price = aggregated.get("last_price")
+
+            aggregated_quantity = (
+                aggregated["quantity_sum"] if aggregated["has_quantity"] else None
+            )
+            exchanges = sorted(aggregated["exchanges"]) if aggregated["exchanges"] else None
+
+            position_lookup[symbol] = {
+                "value": aggregated_value,
+                "exchange": exchanges,
+                "price": weighted_price,
+                "quantity": aggregated_quantity,
+            }
+
+        # Do not propose trades for assets the user does not currently hold
+        filtered_weights = {
+            symbol: weight
+            for symbol, weight in target_weights.items()
+            if symbol in current_weights
+        }
+
+        if not filtered_weights:
+            return trades
+
+        # Renormalize filtered target weights so they sum to 1
+        target_total = sum(filtered_weights.values())
+        if target_total <= 0:
+            return trades
+
+        normalized_targets = {
+            symbol: weight / target_total
+            for symbol, weight in filtered_weights.items()
+        }
+
+        threshold = max(total_value * 0.003, 1.0)  # 0.3% of portfolio value or $1 minimum
+
+        for symbol, target_weight in normalized_targets.items():
+            current_weight = current_weights.get(symbol, 0.0)
             weight_diff = target_weight - current_weight
-            
-            # Only generate trade if difference is significant (>1%)
-            if abs(weight_diff) > 0.01:
-                target_value = target_weight * total_value
-                current_value = current_weight * total_value
-                trade_value = target_value - current_value
-                
-                trades.append({
-                    "symbol": symbol,
-                    "action": "BUY" if trade_value > 0 else "SELL",
-                    "value_usd": abs(trade_value),
-                    "current_weight": current_weight,
-                    "target_weight": target_weight,
-                    "weight_change": weight_diff,
-                    "priority": "HIGH" if abs(weight_diff) > 0.05 else "MEDIUM"
-                })
-        
-        # Sort by priority and weight change magnitude
-        trades.sort(key=lambda x: (x["priority"] == "LOW", -abs(x["weight_change"])))
-        
-        return trades[:10]  # Limit to top 10 trades
+
+            current_context = position_lookup.get(symbol, {})
+            current_value = current_context.get("value", current_weight * total_value)
+            target_value = target_weight * total_value
+            trade_value = target_value - current_value
+
+            if abs(trade_value) <= threshold:
+                continue
+
+            reference_price = current_context.get("price")
+            reference_price_float = _safe_float(reference_price)
+            if reference_price_float is not None and reference_price_float <= 0:
+                reference_price_float = None
+
+            current_quantity = current_context.get("quantity")
+            current_quantity_float = _safe_float(current_quantity)
+            baseline_quantity = current_quantity_float
+
+            price_candidates: List[Optional[float]] = []
+            if reference_price_float is not None and reference_price_float > 0:
+                price_candidates.append(reference_price_float)
+
+            if baseline_quantity is not None:
+                try:
+                    derived_price = current_value / baseline_quantity
+                except (TypeError, ValueError, ZeroDivisionError):
+                    derived_price = None
+                if derived_price is not None and derived_price > 0:
+                    price_candidates.append(derived_price)
+
+            implied_price = next(
+                (candidate for candidate in price_candidates if candidate is not None and candidate > 0),
+                None,
+            )
+
+            target_quantity = None
+            quantity_change = None
+
+            if implied_price is not None:
+                try:
+                    target_quantity = target_value / implied_price
+                except (TypeError, ValueError, ZeroDivisionError):
+                    target_quantity = None
+
+                if baseline_quantity is None:
+                    try:
+                        baseline_quantity = current_value / implied_price
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        baseline_quantity = None
+
+                if target_quantity is not None:
+                    if baseline_quantity is not None:
+                        quantity_change = target_quantity - baseline_quantity
+                    else:
+                        try:
+                            quantity_change = (target_value - current_value) / implied_price
+                        except (TypeError, ValueError, ZeroDivisionError):
+                            quantity_change = None
+
+                if reference_price_float is None:
+                    reference_price_float = implied_price
+            else:
+                if (
+                    baseline_quantity is not None
+                    and target_value is not None
+                    and current_value is not None
+                ):
+                    try:
+                        value_delta = target_value - current_value
+                        if abs(baseline_quantity) > 0:
+                            derived_price = current_value / baseline_quantity
+                            if derived_price and derived_price > 0:
+                                quantity_change = value_delta / derived_price
+                                target_quantity = baseline_quantity + quantity_change
+                                if reference_price_float is None:
+                                    reference_price_float = derived_price
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        quantity_change = None
+
+            trade_record = {
+                "symbol": symbol,
+                "action": "BUY" if trade_value > 0 else "SELL",
+                "value_change": round(trade_value, 2),
+                "notional_usd": abs(round(trade_value, 2)),
+                "amount": abs(round(trade_value, 2)),
+                "current_value": round(current_value, 2),
+                "target_value": round(target_value, 2),
+                "current_weight": round(current_weight, 6),
+                "target_weight": round(target_weight, 6),
+                "weight_change": round(weight_diff, 6),
+                "priority": "HIGH" if abs(weight_diff) > 0.05 else "MEDIUM",
+                "exchange": current_context.get("exchange"),
+            }
+
+            if reference_price_float is not None:
+                trade_record["reference_price"] = round(reference_price_float, 8)
+            if target_quantity is not None and quantity_change is not None:
+                trade_record["target_quantity"] = round(target_quantity, 8)
+                trade_record["quantity_change"] = round(quantity_change, 8)
+
+            trades.append(trade_record)
+
+        trades.sort(key=lambda item: -abs(item.get("weight_change", 0.0)))
+
+        # Provide the most impactful recommendations first, limited to top 10 for clarity
+        return trades[:10]
     
     def _get_empty_optimization_result(self, strategy: OptimizationStrategy) -> OptimizationResult:
         """Return empty optimization result."""

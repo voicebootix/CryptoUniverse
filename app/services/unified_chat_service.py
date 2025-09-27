@@ -794,6 +794,7 @@ class UnifiedChatService(LoggerMixin):
         """
         intent = intent_analysis["intent"]
         context_data = {}
+        user_config = await self._get_user_config(user_id)
 
         # Always get basic portfolio data with error handling
         try:
@@ -919,13 +920,16 @@ class UnifiedChatService(LoggerMixin):
 
         elif intent == ChatIntent.REBALANCING:
             # Get rebalancing analysis
-            # Rebalancing integration pending
-            context_data["rebalance_analysis"] = {"needs_rebalancing": False, "error": "Rebalancing integration pending"}
-            
+            try:
+                rebalance_data = await self._get_rebalancing_analysis(user_id, user_config=user_config)
+                context_data["rebalance_analysis"] = rebalance_data
+            except Exception as e:
+                self.logger.error("Failed to get rebalancing analysis", error=str(e), user_id=user_id)
+                context_data["rebalance_analysis"] = {"needs_rebalancing": False, "error": f"Rebalancing analysis unavailable: {str(e)}"}
         # Add user context
-        context_data["user_config"] = await self._get_user_config(user_id)
+        context_data["user_config"] = user_config
         context_data["session_context"] = session.context
-        
+
         return context_data
     
     async def _generate_complete_response(
@@ -1146,9 +1150,9 @@ Provide a comprehensive portfolio analysis using this real data."""
         elif intent == ChatIntent.TRADE_EXECUTION:
             market = context_data.get("market_data", {})
             portfolio = context_data.get("portfolio", {})
-            
+
             return f"""User wants to execute a trade: "{message}"
-            
+
 Market Data (REAL):
 - Current Price: ${market.get('current_price', 0):,.2f}
 - 24h Change: {market.get('change_24h', 0):.2f}%
@@ -1161,6 +1165,155 @@ Portfolio:
 
 Analyze this trade request and provide recommendations. If viable, explain the 5-phase execution process."""
         
+        elif intent == ChatIntent.REBALANCING:
+            rebalance = context_data.get("rebalance_analysis", {})
+            portfolio = context_data.get("portfolio", {})
+
+            if not rebalance:
+                return f"""User asked: "{message}"
+
+REBALANCING ANALYSIS UNAVAILABLE:
+- We could not retrieve the portfolio optimization snapshot.
+- Let the user know we cannot run rebalancing right now and to try again shortly."""
+
+            if rebalance.get("error") and not rebalance.get("recommended_trades"):
+                return f"""User asked: "{message}"
+
+REBALANCING ANALYSIS ERROR:
+- Error: {rebalance.get('error')}
+- Communicate the failure, offer to rerun later, and escalate if it persists."""
+
+            strategy = rebalance.get("recommended_strategy", "unknown")
+            needs_rebalancing = bool(rebalance.get("needs_rebalancing"))
+            execution_plan = rebalance.get("execution_plan", {})
+            strategy_rankings = rebalance.get("strategy_rankings", [])
+            recommended_trades = rebalance.get("recommended_trades", [])
+            metrics = rebalance.get("analysis_metrics", {})
+            portfolio_value_raw = rebalance.get("portfolio_value") or portfolio.get("total_value", 0)
+            try:
+                portfolio_value = float(portfolio_value_raw)
+            except (TypeError, ValueError):
+                portfolio_value = 0.0
+            risk_profile = rebalance.get("user_risk_profile", "medium")
+
+            def _pct(value: Any) -> Optional[str]:
+                try:
+                    return f"{float(value):.2%}"
+                except (TypeError, ValueError):
+                    return None
+
+            plan_status = "REBALANCE REQUIRED" if needs_rebalancing else "PORTFOLIO WITHIN THRESHOLD"
+            execution_ready = execution_plan.get("execution_ready", False)
+            trade_volume_pct_raw = metrics.get("trade_volume_pct", 0.0)
+            try:
+                trade_volume_pct = float(trade_volume_pct_raw)
+            except (TypeError, ValueError):
+                trade_volume_pct = 0.0
+            total_notional_raw = execution_plan.get("total_notional")
+            try:
+                total_notional = float(total_notional_raw)
+            except (TypeError, ValueError):
+                total_notional = trade_volume_pct * portfolio_value
+
+            trade_lines: List[str] = []
+            for idx, trade in enumerate(recommended_trades[:5], 1):
+                symbol = trade.get("symbol", "?")
+                action = trade.get("action", trade.get("side", "HOLD")).upper()
+                raw_notional = (
+                    trade.get("notional_usd")
+                    or trade.get("amount")
+                    or trade.get("value_change")
+                    or trade.get("position_size_usd")
+                    or 0
+                )
+                try:
+                    notional = float(raw_notional)
+                except (TypeError, ValueError):
+                    notional = 0.0
+                weight_change = trade.get("weight_change")
+                exchange = trade.get("exchange") or "multi-exchange"
+                price = trade.get("reference_price") or trade.get("price")
+                if not isinstance(weight_change, (int, float)):
+                    try:
+                        weight_change = float(weight_change)
+                    except (TypeError, ValueError):
+                        weight_change = None
+                weight_text = f", weight Δ {weight_change:+.2%}" if isinstance(weight_change, (int, float)) else ""
+                try:
+                    price_value = float(price)
+                except (TypeError, ValueError):
+                    price_value = None
+                price_text = f" @ ${price_value:,.2f}" if price_value else ""
+                trade_lines.append(
+                    f"  {idx}. {action} {symbol} ≈ ${notional:,.2f}{price_text} on {exchange}{weight_text}"
+                )
+
+            if not trade_lines:
+                trade_lines.append("  • No trades generated — explain why the allocation stays put.")
+
+            ranking_lines: List[str] = []
+            for rank_idx, ranking in enumerate(strategy_rankings[:6], 1):
+                ranking_lines.append(
+                    "  {}. {} | score {:.3f} | trade volume {:.2%} | Sharpe {:.2f} | exp. return {:.2%}".format(
+                        rank_idx,
+                        ranking.get("strategy", "unknown"),
+                        ranking.get("score", 0.0),
+                        ranking.get("trade_volume_pct", 0.0),
+                        ranking.get("sharpe_ratio", 0.0),
+                        ranking.get("expected_return", 0.0),
+                    )
+                )
+
+            if not ranking_lines:
+                ranking_lines.append("  • Strategy ranking data unavailable")
+
+            baseline_return = _pct(metrics.get("baseline_expected_return"))
+            improvement = _pct(metrics.get("expected_return_improvement"))
+            risk_reduction = _pct(metrics.get("risk_reduction"))
+            diversification_gain = _pct(metrics.get("diversification_gain"))
+
+            instructions = [
+                f"User asked: \"{message}\"",
+                "",
+                "PORTFOLIO CONTEXT:",
+                f"- Total Value: ${portfolio_value:,.2f}",
+                f"- Risk Profile: {risk_profile}",
+                f"- Current Stance: {plan_status}",
+                "",
+                "REBALANCING SUMMARY:",
+                f"- Recommended Strategy: {strategy}",
+                f"- Execution Ready: {'YES' if execution_ready else 'NO'}",
+                f"- Trade Count: {len(recommended_trades)}",
+                f"- Total Trade Notional: ${float(total_notional or 0):,.2f}",
+            ]
+
+            if baseline_return is not None:
+                instructions.append(f"- Baseline Expected Return: {baseline_return}")
+            if improvement is not None:
+                instructions.append(f"- Expected Return Improvement: {improvement}")
+            if risk_reduction is not None:
+                instructions.append(f"- Risk Reduction (volatility): {risk_reduction}")
+            if diversification_gain is not None:
+                instructions.append(f"- Diversification Gain: {diversification_gain}")
+
+            instructions.extend([
+                "",
+                "TOP TRADE INSTRUCTIONS:",
+                *trade_lines,
+                "",
+                "STRATEGY COMPARISON (all six strategies evaluated):",
+                *ranking_lines,
+                "",
+                "GUIDANCE:",
+                "1. Explain why the recommended strategy wins compared to the others using the scores and metrics.",
+                "2. Summarize how the trades realign the portfolio and highlight any major sells/buys.",
+                "3. Respect the user's risk profile and mention how the plan adheres to it.",
+                "4. If execution_ready is false, explain the gating factor (e.g., insufficient deviation) and next review timing.",
+                "5. Conclude with clear next steps (execute now vs. monitor) and offer autonomous scheduling if applicable.",
+            ])
+
+            return "\n".join(instructions)
+
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
             opportunities = context_data.get("opportunities", {}).get("opportunities", [])
             strategy_performance = context_data.get("opportunities", {}).get("strategy_performance", {})
@@ -2054,7 +2207,128 @@ Provide a helpful response using the real data available. Never use placeholder 
                 if (datetime.utcnow() - session.last_activity).total_seconds() < 86400:
                     active_sessions.append(session_id)
         return active_sessions
-    
+
+    async def _get_real_market_data(self, symbol: str) -> Dict[str, Any]:
+        """Get real market data for a symbol."""
+        try:
+            # Use the market analysis service to get current price data
+            price_data = await self.market_analysis.realtime_price_tracking([symbol])
+            if price_data and symbol in price_data:
+                market_info = price_data[symbol]
+                return {
+                    "symbol": symbol,
+                    "current_price": market_info.get("price", 0),
+                    "change_24h": market_info.get("change_24h", 0),
+                    "volume_24h": market_info.get("volume_24h", 0),
+                    "trend": "bullish" if market_info.get("change_24h", 0) > 0 else "bearish",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            else:
+                return {"symbol": symbol, "current_price": 0, "error": "Symbol data not available"}
+        except Exception as e:
+            self.logger.error("Market data fetch failed", error=str(e), symbol=symbol)
+            return {"symbol": symbol, "current_price": 0, "error": f"Market data service error: {str(e)}"}
+
+    async def _get_technical_analysis(self, symbol: str) -> Dict[str, Any]:
+        """Get technical analysis for a symbol."""
+        try:
+            # Use market analysis service for technical indicators
+            tech_data = await self.market_analysis.technical_analysis(symbol)
+            return {
+                "symbol": symbol,
+                "signals": tech_data.get("signals", []),
+                "indicators": tech_data.get("indicators", {}),
+                "trend": tech_data.get("overall_trend", "neutral"),
+                "strength": tech_data.get("signal_strength", 0),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            self.logger.error("Technical analysis failed", error=str(e), symbol=symbol)
+            return {"symbol": symbol, "signals": [], "error": f"Technical analysis service error: {str(e)}"}
+
+    async def _get_market_risk_analysis(self, user_id: str) -> Dict[str, Any]:
+        """Get market-wide risk analysis."""
+        try:
+            # Get market volatility and risk factors
+            market_overview = await self.market_analysis.get_market_overview()
+            volatility_data = await self.market_analysis.volatility_analysis(["BTC", "ETH"])
+
+            risk_factors = []
+            if market_overview.get("market_fear_greed_index", 50) < 30:
+                risk_factors.append("Extreme Fear in market")
+            if market_overview.get("overall_volatility", 0) > 0.5:
+                risk_factors.append("High market volatility")
+
+            return {
+                "market_volatility": market_overview.get("overall_volatility", 0),
+                "fear_greed_index": market_overview.get("market_fear_greed_index", 50),
+                "factors": risk_factors,
+                "risk_level": "high" if len(risk_factors) > 1 else "medium" if risk_factors else "low",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        except Exception as e:
+            self.logger.error("Market risk analysis failed", error=str(e), user_id=user_id)
+            return {"factors": [], "error": f"Market risk service error: {str(e)}"}
+
+    async def _get_rebalancing_analysis(
+        self,
+        user_id: str,
+        user_config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Get enterprise-grade rebalancing recommendations across all strategies."""
+
+        try:
+            # Ensure we have the latest portfolio snapshot for chat context
+            portfolio_snapshot = await self._transform_portfolio_for_chat(user_id)
+
+            if user_config is None:
+                user_config = await self._get_user_config(user_id)
+
+            risk_preference = user_config.get("risk_tolerance", "medium")
+
+            # Run the comprehensive multi-strategy analysis
+            rebalancing_summary = await self.portfolio_risk.analyze_rebalancing_strategies(
+                user_id=user_id,
+                risk_profile=risk_preference,
+                rebalance_threshold=0.05,
+            )
+
+            if not rebalancing_summary.get("success"):
+                return {
+                    "needs_rebalancing": False,
+                    "analysis_type": "multi_strategy_rebalance",
+                    "error": rebalancing_summary.get("error", "Unable to perform rebalancing analysis"),
+                    "details": rebalancing_summary,
+                    "portfolio_snapshot": portfolio_snapshot,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+
+            # Enrich the summary with current risk diagnostics
+            risk_analysis = await self.portfolio_risk.risk_analysis(user_id)
+            if risk_analysis.get("success"):
+                rebalancing_summary["risk_snapshot"] = {
+                    "risk_metrics": risk_analysis.get("risk_metrics", {}),
+                    "risk_alerts": risk_analysis.get("risk_alerts", []),
+                    "analysis_parameters": risk_analysis.get("analysis_parameters", {}),
+                }
+            else:
+                rebalancing_summary["risk_snapshot"] = {
+                    "error": risk_analysis.get("error", "Risk analysis unavailable")
+                }
+
+            rebalancing_summary["portfolio_snapshot"] = portfolio_snapshot
+            rebalancing_summary["user_risk_profile"] = risk_preference
+
+            return rebalancing_summary
+
+        except Exception as e:
+            self.logger.error("Rebalancing analysis failed", error=str(e), user_id=user_id, exc_info=True)
+            return {
+                "needs_rebalancing": False,
+                "analysis_type": "multi_strategy_rebalance",
+                "error": f"Rebalancing service error: {str(e)}"
+            }
+
     async def get_service_status(self) -> Dict[str, Any]:
         """Get comprehensive service status."""
         return {

@@ -1180,74 +1180,95 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     
     async def _get_community_strategies(self, user_id: str) -> List[StrategyMarketplaceItem]:
         """Get community-published strategies."""
+
+        async def _load_with_session(active_session: AsyncSession) -> List[StrategyMarketplaceItem]:
+            stmt = select(TradingStrategy, StrategyPublisher).join(
+                StrategyPublisher, TradingStrategy.user_id == StrategyPublisher.user_id
+            ).where(
+                and_(
+                    TradingStrategy.is_active,
+                    StrategyPublisher.verified
+                )
+            ).order_by(desc(TradingStrategy.total_pnl))
+
+            result = await active_session.execute(stmt)
+            strategies = result.fetchall()
+
+            community_items: List[StrategyMarketplaceItem] = []
+            for strategy, publisher in strategies:
+                monthly_cost = self._calculate_strategy_pricing(strategy)
+
+                live_performance = await self._get_live_performance(
+                    str(strategy.id), session=active_session
+                )
+                live_quality = (
+                    live_performance.get("data_quality", "no_data")
+                    if isinstance(live_performance, dict)
+                    else "no_data"
+                )
+                live_badges: List[str] = []
+                if isinstance(live_performance, dict):
+                    live_badges = list(
+                        live_performance.get("badges")
+                        or self._build_performance_badges(live_quality)
+                    )
+                    live_performance.setdefault("badges", live_badges)
+                else:
+                    live_performance = {
+                        "data_quality": "no_data",
+                        "status": "no_data",
+                        "total_trades": 0,
+                        "badges": self._build_performance_badges("no_data"),
+                    }
+                    live_badges = live_performance["badges"]
+
+                item = StrategyMarketplaceItem(
+                    strategy_id=str(strategy.id),
+                    name=strategy.name,
+                    description=strategy.description or "Community-published strategy",
+                    category=strategy.strategy_type.value,
+                    publisher_id=str(publisher.id),
+                    publisher_name=publisher.display_name,
+                    is_ai_strategy=False,
+                    credit_cost_monthly=monthly_cost,
+                    credit_cost_per_execution=max(1, monthly_cost // 30),
+                    win_rate=self.normalize_win_rate_to_fraction(
+                        float(strategy.win_rate) if strategy.win_rate is not None else 0.0
+                    ),
+                    avg_return=(
+                        float(strategy.total_pnl / strategy.total_trades) / 100.0
+                        if strategy.total_trades > 0
+                        else 0.0
+                    ),
+                    sharpe_ratio=float(strategy.sharpe_ratio) if strategy.sharpe_ratio else None,
+                    max_drawdown=(
+                        float(strategy.max_drawdown) / 100.0
+                        if strategy.max_drawdown is not None
+                        else 0.0
+                    ),
+                    total_trades=strategy.total_trades,
+                    min_capital_usd=1000,
+                    risk_level=self._calculate_risk_level(strategy),
+                    timeframes=[strategy.timeframe],
+                    supported_symbols=strategy.target_symbols,
+                    backtest_results={},
+                    ab_test_results={},
+                    live_performance=live_performance,
+                    performance_badges=live_badges,
+                    data_quality=live_quality,
+                    created_at=strategy.created_at,
+                    last_updated=strategy.updated_at,
+                    is_active=strategy.is_active,
+                    tier="community",
+                )
+                community_items.append(item)
+
+            return community_items
+
         try:
             async with get_database() as db:
-                # Get published strategies from community
-                stmt = select(TradingStrategy, StrategyPublisher).join(
-                    StrategyPublisher, TradingStrategy.user_id == StrategyPublisher.user_id
-                ).where(
-                    and_(
-                        TradingStrategy.is_active == True,
-                        StrategyPublisher.verified == True
-                    )
-                ).order_by(desc(TradingStrategy.total_pnl))
-                
-                result = await db.execute(stmt)
-                strategies = result.fetchall()
-                
-                community_items = []
-                for strategy, publisher in strategies:
-                    # Calculate pricing based on performance
-                    monthly_cost = self._calculate_strategy_pricing(strategy)
+                return await _load_with_session(db)
 
-                    live_performance = await self._get_live_performance(str(strategy.id))
-                    live_quality = live_performance.get("data_quality", "no_data") if isinstance(live_performance, dict) else "no_data"
-                    live_badges = []
-                    if isinstance(live_performance, dict):
-                        live_badges = list(live_performance.get("badges") or self._build_performance_badges(live_quality))
-                        live_performance.setdefault("badges", live_badges)
-                    else:
-                        live_performance = {
-                            "data_quality": "no_data",
-                            "status": "no_data",
-                            "total_trades": 0,
-                            "badges": self._build_performance_badges("no_data")
-                        }
-                        live_badges = live_performance["badges"]
-
-                    item = StrategyMarketplaceItem(
-                        strategy_id=str(strategy.id),
-                        name=strategy.name,
-                        description=strategy.description or "Community-published strategy",
-                        category=strategy.strategy_type.value,
-                        publisher_id=str(publisher.id),
-                        publisher_name=publisher.display_name,
-                        is_ai_strategy=False,
-                        credit_cost_monthly=monthly_cost,
-                        credit_cost_per_execution=max(1, monthly_cost // 30),
-                        win_rate=strategy.win_rate,
-                        avg_return=float(strategy.total_pnl / strategy.total_trades) if strategy.total_trades > 0 else 0,
-                        sharpe_ratio=float(strategy.sharpe_ratio) if strategy.sharpe_ratio else None,
-                        max_drawdown=float(strategy.max_drawdown),
-                        total_trades=strategy.total_trades,
-                        min_capital_usd=1000,  # Default minimum
-                        risk_level=self._calculate_risk_level(strategy),
-                        timeframes=[strategy.timeframe],
-                        supported_symbols=strategy.target_symbols,
-                        backtest_results={},  # Would be populated from backtesting service
-                        ab_test_results={},   # Would be populated from A/B testing
-                        live_performance=live_performance,
-                        performance_badges=live_badges,
-                        data_quality=live_quality,
-                        created_at=strategy.created_at,
-                        last_updated=strategy.updated_at,
-                        is_active=strategy.is_active,
-                        tier="community"
-                    )
-                    community_items.append(item)
-                
-                return community_items
-                
         except Exception as e:
             self.logger.error("Failed to get community strategies", error=str(e))
             return []
@@ -1291,10 +1312,11 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         else:
             return "very_low"
     
-    async def _get_live_performance(self, strategy_id: str) -> Dict[str, Any]:
+    async def _get_live_performance(self, strategy_id: str, session: AsyncSession = None) -> Dict[str, Any]:
         """Get live performance metrics for strategy."""
         try:
-            async with get_database() as db:
+            if session:
+                db = session
                 # Get recent trades for this strategy
                 stmt = select(Trade).where(
                     and_(
@@ -1302,9 +1324,21 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                         Trade.created_at >= datetime.utcnow() - timedelta(days=30)
                     )
                 ).order_by(desc(Trade.created_at))
-                
+
                 result = await db.execute(stmt)
                 recent_trades = result.scalars().all()
+            else:
+                async with get_database() as db:
+                    # Get recent trades for this strategy
+                    stmt = select(Trade).where(
+                        and_(
+                            Trade.strategy_id == strategy_id,
+                            Trade.created_at >= datetime.utcnow() - timedelta(days=30)
+                        )
+                    ).order_by(desc(Trade.created_at))
+
+                    result = await db.execute(stmt)
+                    recent_trades = result.scalars().all()
 
                 if not recent_trades:
                     return {
