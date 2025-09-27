@@ -14,8 +14,8 @@ Revolutionary business model: Strategy subscriptions with performance-based pric
 import asyncio
 import json
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 
 import structlog
@@ -1742,18 +1742,89 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             if active_strategies is None:
                 active_strategies = set()  # Fallback to empty set if Redis fails
             raw_strategies = list(active_strategies)  # Store raw for debugging
-            
+
             # Handle both bytes and string responses from Redis
             active_strategies = [s.decode() if isinstance(s, bytes) else s for s in active_strategies]
-            
-            self.logger.info("🔍 REDIS STRATEGY RESULT",
-                           user_id=user_id,
-                           redis_key=redis_key,
-                           raw_count=len(raw_strategies),
-                           decoded_count=len(active_strategies),
-                           strategies=active_strategies,
-                           raw_data=raw_strategies[:5])  # Show first 5 raw items
-            
+
+            self.logger.info(
+                "🔍 REDIS STRATEGY RESULT",
+                user_id=user_id,
+                redis_key=redis_key,
+                raw_count=len(raw_strategies),
+                decoded_count=len(active_strategies),
+                strategies=active_strategies,
+                raw_data=raw_strategies[:5],
+            )  # Show first 5 raw items
+
+            # Cross-check Redis portfolio against authoritative database records
+            try:
+                db_access_records, db_ttl = await self._load_active_strategy_access_records(user_id)
+            except Exception as record_error:
+                self.logger.warning(
+                    "Failed to load strategy access records",
+                    user_id=user_id,
+                    error=str(record_error),
+                )
+                db_access_records, db_ttl = [], None
+            record_lookup = {record.strategy_id: record for record in db_access_records}
+
+            if record_lookup:
+                redis_only_ids = [
+                    strategy_id for strategy_id in active_strategies
+                    if strategy_id not in record_lookup
+                ]
+                if redis_only_ids:
+                    self.logger.info(
+                        "🧹 Removing Redis strategies without active access records",
+                        user_id=user_id,
+                        redis_only_ids=redis_only_ids,
+                    )
+                    active_strategies = [
+                        strategy_id for strategy_id in active_strategies
+                        if strategy_id in record_lookup
+                    ]
+                    if redis:
+                        await self._safe_redis_operation(redis.srem, redis_key, *redis_only_ids)
+
+                missing_strategy_ids = [
+                    strategy_id for strategy_id in record_lookup.keys()
+                    if strategy_id not in active_strategies
+                ]
+
+                if missing_strategy_ids:
+                    self.logger.info(
+                        "🔄 Reconciling Redis strategy set with database records",
+                        user_id=user_id,
+                        redis_count=len(active_strategies),
+                        db_count=len(record_lookup),
+                        missing_ids=missing_strategy_ids,
+                    )
+
+                    active_strategies.extend(missing_strategy_ids)
+
+                    if redis:
+                        for strategy_id in missing_strategy_ids:
+                            await self._safe_redis_operation(redis.sadd, redis_key, strategy_id)
+
+                if redis and db_ttl:
+                    await self._safe_redis_operation(redis.expire, redis_key, db_ttl)
+            else:
+                # CRITICAL: If DB returns no UserStrategyAccess records but Redis still contains IDs,
+                # we must drop the Redis set and reset in-memory state so revocations apply immediately
+                if active_strategies and redis:
+                    self.logger.warning(
+                        "🧹 Clearing stale Redis set - no valid access records found in database",
+                        user_id=user_id,
+                        stale_redis_ids=active_strategies,
+                        redis_key=redis_key
+                    )
+                    # Clear the stale Redis key
+                    await self._safe_redis_operation(redis.delete, redis_key)
+                    # Reset in-memory state
+                    active_strategies = []
+                    # Skip any TTL/expire logic since we cleared the key
+                record_lookup = {}
+
             # ENHANCED RECOVERY: If no strategies found, implement comprehensive recovery
             if not active_strategies:
                 self.logger.warning("🔍 Redis strategies empty, initiating recovery mechanism", user_id=user_id)
@@ -1763,6 +1834,12 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 if hydrated_strategies:
                     active_strategies = hydrated_strategies
                     raw_strategies = list(active_strategies)
+                    # Ensure record lookup is refreshed if needed (from st1bt7 improvements)
+                    if not record_lookup:
+                        refreshed_records, refreshed_ttl = await self._load_active_strategy_access_records(user_id)
+                        record_lookup = {record.strategy_id: record for record in refreshed_records}
+                        if redis and refreshed_ttl:
+                            await self._safe_redis_operation(redis.expire, redis_key, refreshed_ttl)
                     self.logger.info(
                         "✅ Strategy portfolio hydrated from database",
                         user_id=user_id,
@@ -1779,34 +1856,87 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                         raw_strategies = list(active_strategies)
                         self.logger.info("✅ Strategy recovery successful", user_id=user_id, strategies_recovered=len(active_strategies))
             
-            strategy_portfolio = []
-            total_monthly_cost = 0
-            
-            for strategy_id in active_strategies:
-                if strategy_id.startswith("ai_"):
+            # Ensure deterministic ordering and remove duplicates while preserving insertion order
+            active_strategy_ids = list(dict.fromkeys(active_strategies))
+
+            strategy_portfolio: List[Dict[str, Any]] = []
+            total_monthly_cost = 0.0
+
+            def _safe_numeric(value: Any, default: float = 0.0) -> float:
+                try:
+                    if isinstance(value, str):
+                        stripped = value.strip().replace("$", "")
+                        if not stripped:
+                            return default
+                        value = float(stripped)
+                    return float(value)
+                except (TypeError, ValueError):
+                    return default
+
+            for strategy_id in active_strategy_ids:
+                portfolio_entry: Optional[Dict[str, Any]] = None
+                performance: Dict[str, Any] = {}
+                is_ai_strategy = strategy_id.startswith("ai_")
+
+                if is_ai_strategy:
                     strategy_func = strategy_id.replace("ai_", "")
-                    if strategy_func in self.ai_strategy_catalog:
-                        config = self.ai_strategy_catalog[strategy_func]
-
-                        monthly_cost = config.get("credit_cost_monthly", 0)
-                        try:
-                            monthly_cost_value = float(monthly_cost)
-                        except (TypeError, ValueError):
-                            monthly_cost_value = 0.0
-
-                        total_monthly_cost += monthly_cost_value
-
+                    catalog_entry = self.ai_strategy_catalog.get(strategy_func)
+                    if catalog_entry:
                         performance = await self._get_ai_strategy_performance(strategy_func, user_id)
+                        monthly_cost = _safe_numeric(catalog_entry.get("credit_cost_monthly", 0), 0.0)
+                        total_monthly_cost += monthly_cost
 
-                        strategy_portfolio.append({
+                        portfolio_entry = {
                             "strategy_id": strategy_id,
-                            "name": config["name"],
-                            "category": config["category"],
-                            "monthly_cost": monthly_cost_value,
+                            "name": catalog_entry["name"],
+                            "category": catalog_entry["category"],
+                            "monthly_cost": monthly_cost,
                             "performance": performance,
-                            "is_ai_strategy": True
-                        })
-            
+                            "is_ai_strategy": True,
+                        }
+                if portfolio_entry is None:
+                    record = record_lookup.get(strategy_id)
+                    metadata = record.metadata_json or {} if record else {}
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+
+                    monthly_cost = _safe_numeric(
+                        metadata.get("monthly_cost")
+                        or metadata.get("credit_cost_monthly")
+                        or metadata.get("price"),
+                        _safe_numeric(getattr(record, "credits_paid", 0)),
+                    )
+                    total_monthly_cost += monthly_cost
+
+                    name = metadata.get("name") or metadata.get("display_name")
+                    if not name:
+                        if is_ai_strategy:
+                            derived_func = strategy_id.replace("ai_", "")
+                            name = self._generate_strategy_name(derived_func)
+                        else:
+                            name = strategy_id.replace("_", " ").title()
+
+                    category = metadata.get("category") or metadata.get("strategy_category") or (
+                        "portfolio" if is_ai_strategy else "custom"
+                    )
+
+                    performance = metadata.get("performance") or {}
+
+                    portfolio_entry = {
+                        "strategy_id": strategy_id,
+                        "name": name,
+                        "category": category,
+                        "monthly_cost": monthly_cost,
+                        "performance": performance,
+                        "is_ai_strategy": bool(record and record.strategy_type and record.strategy_type.value == "ai_strategy"),
+                        "subscription_type_override": metadata.get("subscription_type"),
+                        "publisher_name_override": metadata.get("publisher_name"),
+                        "risk_level_override": metadata.get("risk_level"),
+                        "metadata": metadata,
+                    }
+
+                strategy_portfolio.append(portfolio_entry)
+
             # Transform to frontend-expected format
             transformed_strategies = []
             total_pnl = 0
@@ -1816,35 +1946,31 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 pnl = perf.get("total_pnl", 0)
                 total_pnl += pnl
 
-                monthly_cost = strategy.get("monthly_cost", 0)
-                try:
-                    monthly_cost_value = float(monthly_cost)
-                except (TypeError, ValueError):
-                    monthly_cost_value = 0.0
-
-                if monthly_cost_value == 0.0:
-                    subscription_type = "welcome"
-                    credit_cost_per_execution = 0
-                else:
-                    subscription_type = "purchased"
-                    credit_cost_per_execution = max(1, int(monthly_cost_value / 30))
+                # Extract overrides from st1bt7 branch
+                subscription_type_override = strategy.get("subscription_type_override")
+                publisher_name_override = strategy.get("publisher_name_override")
+                risk_level_override = strategy.get("risk_level_override")
+                metadata = strategy.get("metadata", {})
 
                 transformed_strategy = {
                     "strategy_id": strategy["strategy_id"],
                     "name": strategy["name"],
                     "category": strategy["category"],
                     "is_ai_strategy": strategy["is_ai_strategy"],
-                    "publisher_name": "CryptoUniverse AI",
+                    "publisher_name": publisher_name_override or (
+                        "CryptoUniverse AI" if strategy["is_ai_strategy"] else "CryptoUniverse Marketplace"
+                    ),
 
                     # Status & Subscription
                     "is_active": True,
-                    "subscription_type": subscription_type,
+                    "subscription_type": subscription_type_override
+                    or ("welcome" if strategy["monthly_cost"] == 0 else "purchased"),
                     "activated_at": "2024-01-15T10:00:00Z",
                     "expires_at": None,
 
                     # Pricing
-                    "credit_cost_monthly": monthly_cost,
-                    "credit_cost_per_execution": credit_cost_per_execution,
+                    "credit_cost_monthly": strategy["monthly_cost"],
+                    "credit_cost_per_execution": 0.0 if strategy["monthly_cost"] == 0 else max(1, int(strategy["monthly_cost"] // 25) or 1),
 
                     # Performance Metrics
                     "total_trades": perf.get("total_trades", 45),
@@ -1855,17 +1981,17 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     "worst_trade_pnl": -abs(pnl) * 0.08,
                     "current_drawdown": 0.02,
                     "max_drawdown": 0.12,
-                    "sharpe_ratio": 1.5,
+                    "sharpe_ratio": perf.get("sharpe_ratio", 1.5),
 
                     # Risk & Configuration
-                    "risk_level": "medium",
-                    "allocation_percentage": 30,
-                    "max_position_size": 1000,
-                    "stop_loss_percentage": 0.05,
+                    "risk_level": risk_level_override or metadata.get("risk_level") or "medium",
+                    "allocation_percentage": metadata.get("allocation_percentage", 30),
+                    "max_position_size": metadata.get("max_position_size", 1000),
+                    "stop_loss_percentage": metadata.get("stop_loss_percentage", 0.05),
 
                     # Recent Performance
-                    "last_7_days_pnl": pnl * 0.1,
-                    "last_30_days_pnl": pnl * 0.6,
+                    "last_7_days_pnl": perf.get("last_7_days_pnl", pnl * 0.1),
+                    "last_30_days_pnl": perf.get("last_30_days_pnl", pnl * 0.6),
                     "recent_trades": []
                 }
                 transformed_strategies.append(transformed_strategy)
@@ -1906,68 +2032,91 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             if redis:
                 redis = None
 
-    async def _hydrate_strategies_from_db(self, user_id: str, redis_client) -> List[str]:
-        """Rebuild the user's strategy portfolio directly from the database."""
+    async def _load_active_strategy_access_records(
+        self, user_id: str
+    ) -> Tuple[List[UserStrategyAccess], Optional[int]]:
+        """Fetch active strategy access records and compute a safe TTL."""
 
         try:
             import uuid
 
-            try:
-                user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
-            except ValueError:
-                self.logger.warning("Cannot hydrate strategies from DB - invalid user_id format", user_id=user_id)
-                return []
+            user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+        except ValueError:
+            self.logger.warning(
+                "Cannot load strategy access records - invalid user_id format",
+                user_id=user_id,
+            )
+            return [], None
 
-            async with get_database_session() as db:
-                query = (
-                    select(UserStrategyAccess)
-                    .where(
-                        and_(
-                            UserStrategyAccess.user_id == user_uuid,
-                            UserStrategyAccess.is_active.is_(True)
-                        )
+        async with get_database_session() as db:
+            query = (
+                select(UserStrategyAccess)
+                .where(
+                    and_(
+                        UserStrategyAccess.user_id == user_uuid,
+                        UserStrategyAccess.is_active.is_(True),
                     )
                 )
-                result = await db.execute(query)
-                access_records = result.scalars().all()
+            )
+            result = await db.execute(query)
+            access_records = result.scalars().all()
+
+        if not access_records:
+            return [], None
+
+        valid_records = [record for record in access_records if record.is_valid()]
+        if not valid_records:
+            return [], None
+
+        ttl_seconds: Optional[int] = 24 * 60 * 60  # Default to 24 hours
+        expiry_candidates: List[int] = []
+
+        now = datetime.now(timezone.utc)
+        for record in valid_records:
+            if record.expires_at:
+                expiry = record.expires_at
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                ttl_delta = int((expiry - now).total_seconds())
+                if ttl_delta > 0:
+                    expiry_candidates.append(ttl_delta)
+
+        if expiry_candidates:
+            ttl_seconds = min(ttl_seconds or expiry_candidates[0], min(expiry_candidates))
+
+        return valid_records, ttl_seconds
+
+    async def _hydrate_strategies_from_db(self, user_id: str, redis_client) -> List[str]:
+        """Rebuild the user's strategy portfolio directly from the database."""
+
+        try:
+            # Use the improved _load_active_strategy_access_records method from st1bt7
+            access_records, ttl_seconds = await self._load_active_strategy_access_records(user_id)
 
             if not access_records:
                 self.logger.info("No database-backed strategies found during hydration", user_id=user_id)
                 return []
 
-            valid_strategy_ids = [record.strategy_id for record in access_records if record.is_valid()]
+            # Use st1bt7's simplified approach since _load_active_strategy_access_records already filters valid records
+            valid_strategy_ids = [record.strategy_id for record in access_records]
 
             if not valid_strategy_ids:
                 self.logger.info("Database strategies are inactive or expired", user_id=user_id)
                 return []
 
             redis_key = f"user_strategies:{user_id}"
-            ttl_seconds = 24 * 60 * 60  # default to 24 hours
             if redis_client:
                 await self._safe_redis_operation(redis_client.delete, redis_key)
                 for strategy_id in valid_strategy_ids:
                     await self._safe_redis_operation(redis_client.sadd, redis_key, strategy_id)
 
-                # If any strategies have an upcoming expiration, use the earliest expiry as TTL
-                expiry_candidates = [
-                    record.expires_at
-                    for record in access_records
-                    if record.is_valid() and record.expires_at
-                ]
-                if expiry_candidates:
-                    from datetime import datetime, timezone
-
-                    now = datetime.now(timezone.utc)
-                    soonest_expiry = min(expiry_candidates)
-                    ttl_from_expiry = int((soonest_expiry - now).total_seconds())
-                    if ttl_from_expiry > 0:
-                        ttl_seconds = min(ttl_seconds, ttl_from_expiry)
-
-                await self._safe_redis_operation(
-                    redis_client.expire,
-                    redis_key,
-                    ttl_seconds,
-                )
+                # Use st1bt7's simplified approach since TTL is already calculated in _load_active_strategy_access_records
+                if ttl_seconds:
+                    await self._safe_redis_operation(
+                        redis_client.expire,
+                        redis_key,
+                        ttl_seconds,
+                    )
 
             self.logger.info(
                 "Hydrated user strategies from database",
