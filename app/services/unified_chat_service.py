@@ -1900,15 +1900,10 @@ Provide a helpful response using the real data available. Never use placeholder 
             self.logger.info("Phase 4: Trade Execution")
 
             if conversation_mode == ConversationMode.PAPER_TRADING:
-                # Get quantity, only calculate from amount if not provided
+                # Use validated trade_payload (or trade_request) instead of raw trade_params
+                # This ensures decision-time edits merged into trade_payload are used
                 quantity = trade_payload.get("quantity")
-
-                # Only calculate quantity from amount if no explicit quantity was provided
-                if not quantity:
-                    notional_amount = trade_payload.get("amount") or trade_payload.get("position_size_usd")
-                # Use validated trade_request instead of raw trade_params
-                quantity = trade_request.get("quantity")
-                notional_amount = trade_request.get("amount") or trade_request.get("position_size_usd")
+                notional_amount = trade_payload.get("amount") or trade_payload.get("position_size_usd")
 
                 if not quantity and notional_amount and market_data.get("current_price"):
                     try:
@@ -1930,31 +1925,6 @@ Provide a helpful response using the real data available. Never use placeholder 
                     quantity=quantity,
                     strategy_used=trade_payload.get("strategy", "chat_trade"),
                     order_type=trade_payload.get("order_type", "market")
-                )
-                phases_completed.append("execution")
-
-                if not paper_result.get("success", False):
-                    return {
-                        "success": False,
-                        "message": paper_result.get("error", "Paper trade execution failed"),
-                        "phases_completed": phases_completed,
-                        "execution_details": paper_result
-                    }
-
-                monitoring = {"monitoring_active": False, "paper_trading": True}
-                phases_completed.append("monitoring")
-
-                # Use normalized values from validated trade_request
-                side = trade_request.get("side", trade_request.get("action", "buy")).lower()
-                order_type = trade_request.get("order_type", "market").lower()
-
-                paper_result = await self.paper_trading.execute_paper_trade(
-                    user_id=user_id,
-                    symbol=trade_request["symbol"],
-                    side=side,
-                    quantity=quantity,
-                    strategy_used=trade_request.get("strategy", "chat_trade"),
-                    order_type=order_type
                 )
                 phases_completed.append("execution")
 
