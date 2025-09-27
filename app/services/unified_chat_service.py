@@ -190,6 +190,20 @@ class UnifiedChatService(LoggerMixin):
 
         return bool(value)
 
+    def _determine_trading_mode(self, user_config: Dict[str, Any]) -> TradingMode:
+        """Resolve the user's configured trading mode with a safe fallback."""
+        trading_mode_value = user_config.get("trading_mode", TradingMode.BALANCED.value)
+
+        if isinstance(trading_mode_value, str):
+            normalized_value = trading_mode_value.lower()
+        else:
+            normalized_value = TradingMode.BALANCED.value
+
+        try:
+            return TradingMode(normalized_value)
+        except ValueError:
+            return TradingMode.BALANCED
+
     def _json_default(self, obj):
         """Default JSON serializer for complex types."""
         from decimal import Decimal
@@ -345,8 +359,12 @@ class UnifiedChatService(LoggerMixin):
         
         # Get or create session
         if not session_id:
-            session_id = str(uuid.uuid4())
-        
+            session_id = await self.start_chat_session(
+                user_id=user_id,
+                interface=interface,
+                conversation_mode=conversation_mode,
+            )
+
         session = await self._get_or_create_session(
             session_id, user_id, interface, conversation_mode
         )
@@ -421,7 +439,58 @@ class UnifiedChatService(LoggerMixin):
                 return error_stream()
             else:
                 return error_response
-    
+
+    async def start_chat_session(
+        self,
+        user_id: str,
+        session_type: str = "general",
+        interface: InterfaceType = InterfaceType.WEB_CHAT,
+        conversation_mode: ConversationMode = ConversationMode.LIVE_TRADING,
+        session_id: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Create a persistent chat session and hydrate in-memory state."""
+
+        session_context = dict(context or {})
+        session_context.setdefault("interface", interface.value)
+        session_context.setdefault("conversation_mode", conversation_mode.value)
+        session_context.setdefault("session_type", session_type)
+
+        user_config = await self._get_user_config(user_id)
+        trading_mode = self._determine_trading_mode(user_config)
+        session_context.setdefault("trading_mode", trading_mode.value)
+
+        created_session_id = await self.memory_service.create_session(
+            user_id=user_id,
+            session_type=session_type,
+            context=session_context,
+            session_id=session_id,
+        )
+
+        now = datetime.utcnow()
+        self.sessions[created_session_id] = ChatSession(
+            session_id=created_session_id,
+            user_id=user_id,
+            interface=interface,
+            conversation_mode=conversation_mode,
+            trading_mode=trading_mode,
+            created_at=now,
+            last_activity=now,
+            context=dict(session_context),
+            messages=[],
+        )
+
+        self.logger.info(
+            "Unified chat session created",
+            session_id=created_session_id,
+            user_id=user_id,
+            session_type=session_type,
+            interface=interface.value,
+            mode=conversation_mode.value,
+        )
+
+        return created_session_id
+
     async def _get_or_create_session(
         self,
         session_id: str,
@@ -431,24 +500,46 @@ class UnifiedChatService(LoggerMixin):
     ) -> ChatSession:
         """Get existing session or create new one."""
         if session_id not in self.sessions:
-            # Get user's trading mode
             user_config = await self._get_user_config(user_id)
-            trading_mode = TradingMode(user_config.get("trading_mode", "balanced").lower())
-            
+            trading_mode = self._determine_trading_mode(user_config)
+
+            session_context: Dict[str, Any] = {}
+            try:
+                persisted_context = await self.memory_service.get_conversation_context(session_id)
+            except Exception as exc:
+                persisted_context = {}
+                self.logger.debug(
+                    "Failed to load persisted session context",
+                    session_id=session_id,
+                    error=str(exc),
+                )
+
+            if persisted_context:
+                session_context = persisted_context.get("session_context", {}) or {}
+
+            if not session_context:
+                session_context = {
+                    "interface": interface.value,
+                    "conversation_mode": conversation_mode.value,
+                    "session_type": "general",
+                    "trading_mode": trading_mode.value,
+                }
+
+            now = datetime.utcnow()
             self.sessions[session_id] = ChatSession(
                 session_id=session_id,
                 user_id=user_id,
                 interface=interface,
                 conversation_mode=conversation_mode,
                 trading_mode=trading_mode,
-                created_at=datetime.utcnow(),
-                last_activity=datetime.utcnow(),
-                context={},
-                messages=[]
+                created_at=now,
+                last_activity=now,
+                context=session_context,
+                messages=[],
             )
         else:
             self.sessions[session_id].last_activity = datetime.utcnow()
-        
+
         return self.sessions[session_id]
     
     async def _analyze_intent_unified(
