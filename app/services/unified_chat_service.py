@@ -1131,6 +1131,55 @@ Respond naturally using ONLY the real data provided."""
         """
         Build specific prompts for each intent with REAL DATA.
         """
+        def _safe_int(value: Any, default: int = 0) -> int:
+            try:
+                if isinstance(value, str):
+                    value = value.strip()
+                    if not value:
+                        return default
+                return int(float(value))
+            except (TypeError, ValueError):
+                return default
+
+        def _safe_float(value: Any, default: Optional[float] = 0.0) -> Optional[float]:
+            try:
+                if isinstance(value, str):
+                    stripped = value.strip()
+                    if not stripped:
+                        return default
+                    if stripped.endswith("%"):
+                        stripped = stripped[:-1].strip()
+                    value = float(stripped)
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        def _safe_percentage(value: Any) -> Optional[float]:
+            raw_value = _safe_float(value, None)
+            if raw_value is None:
+                return None
+            normalized = raw_value * 100 if abs(raw_value) <= 1 else raw_value
+            return normalized
+
+        def _format_percentage(value: Any) -> Optional[str]:
+            candidate: Any = value
+            if isinstance(candidate, str):
+                stripped = candidate.strip()
+                if not stripped:
+                    return None
+                if stripped.endswith("%"):
+                    stripped = stripped[:-1].strip()
+                try:
+                    candidate = float(stripped)
+                except ValueError:
+                    return None
+            if not isinstance(candidate, (int, float)):
+                return None
+            numeric = float(candidate)
+            if abs(numeric) <= 1:
+                numeric *= 100
+            return f"{numeric:.1f}%"
+
         if intent == ChatIntent.PORTFOLIO_ANALYSIS:
             portfolio = context_data.get("portfolio", {})
             risk = context_data.get("risk_analysis", {})
@@ -1366,56 +1415,6 @@ REBALANCING ANALYSIS ERROR:
                 prompt_parts.append(
                     f"Strategy portfolio fingerprint: {user_profile['strategy_fingerprint']}"
                 )
-
-            # Helper functions for safe data conversion (essential for uz53pl's enhanced chat data flow)
-            def _safe_int(value: Any, default: int = 0) -> int:
-                try:
-                    if isinstance(value, str):
-                        value = value.strip()
-                        if not value:
-                            return default
-                    return int(float(value))
-                except (TypeError, ValueError):
-                    return default
-
-            def _safe_float(value: Any, default: Optional[float] = 0.0) -> Optional[float]:
-                try:
-                    if isinstance(value, str):
-                        stripped = value.strip()
-                        if not stripped:
-                            return default
-                        if stripped.endswith("%"):
-                            stripped = stripped[:-1].strip()
-                        value = float(stripped)
-                    return float(value)
-                except (TypeError, ValueError):
-                    return default
-
-            def _safe_percentage(value: Any) -> Optional[float]:
-                raw_value = _safe_float(value, None)
-                if raw_value is None:
-                    return None
-                normalized = raw_value * 100 if abs(raw_value) <= 1 else raw_value
-                return normalized
-
-            def _format_percentage(value: Any) -> Optional[str]:
-                candidate: Any = value
-                if isinstance(candidate, str):
-                    stripped = candidate.strip()
-                    if not stripped:
-                        return None
-                    if stripped.endswith("%"):
-                        stripped = stripped[:-1].strip()
-                    try:
-                        candidate = float(stripped)
-                    except ValueError:
-                        return None
-                if not isinstance(candidate, (int, float)):
-                    return None
-                numeric = float(candidate)
-                if abs(numeric) <= 1:
-                    numeric *= 100
-                return f"{numeric:.1f}%"
 
             # Strategy performance summary with uz53pl's enhanced chat data flow
 
