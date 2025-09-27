@@ -1340,33 +1340,33 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     result = await db.execute(stmt)
                     recent_trades = result.scalars().all()
 
-                if not recent_trades:
-                    return {
-                        "data_quality": "no_data",
-                        "status": "no_trades",
-                        "total_trades": 0,
-                        "total_pnl": 0.0,
-                        "win_rate": 0.0,
-                        "badges": self._build_performance_badges("no_data")
-                    }
-
-                # Calculate 30-day performance with consistent field names and units
-                total_pnl = sum(float(trade.profit_realized_usd) for trade in recent_trades)
-                winning_trades = sum(1 for trade in recent_trades if trade.profit_realized_usd > 0)
-                win_rate = winning_trades / len(recent_trades)  # Normalized 0-1 range
-
+            if not recent_trades:
                 return {
-                    "period": "30_days",
-                    "total_pnl": total_pnl,  # USD amount
-                    "win_rate": win_rate,    # 0-1 normalized fraction
-                    "total_trades": len(recent_trades),
-                    "avg_trade_pnl": total_pnl / len(recent_trades),
-                    "best_trade": max(float(trade.profit_realized_usd) for trade in recent_trades),
-                    "worst_trade": min(float(trade.profit_realized_usd) for trade in recent_trades),
-                    "data_quality": "verified_real_trades",
-                    "status": "live_trades",
-                    "badges": self._build_performance_badges("verified_real_trades")
+                    "data_quality": "no_data",
+                    "status": "no_trades",
+                    "total_trades": 0,
+                    "total_pnl": 0.0,
+                    "win_rate": 0.0,
+                    "badges": self._build_performance_badges("no_data")
                 }
+
+            # Calculate 30-day performance with consistent field names and units
+            total_pnl = sum(float(trade.profit_realized_usd) for trade in recent_trades)
+            winning_trades = sum(1 for trade in recent_trades if trade.profit_realized_usd > 0)
+            win_rate = winning_trades / len(recent_trades)  # Normalized 0-1 range
+
+            return {
+                "period": "30_days",
+                "total_pnl": total_pnl,  # USD amount
+                "win_rate": win_rate,    # 0-1 normalized fraction
+                "total_trades": len(recent_trades),
+                "avg_trade_pnl": total_pnl / len(recent_trades),
+                "best_trade": max(float(trade.profit_realized_usd) for trade in recent_trades),
+                "worst_trade": min(float(trade.profit_realized_usd) for trade in recent_trades),
+                "data_quality": "verified_real_trades",
+                "status": "live_trades",
+                "badges": self._build_performance_badges("verified_real_trades")
+            }
 
         except Exception as e:
             self.logger.error("Failed to get live performance", error=str(e))

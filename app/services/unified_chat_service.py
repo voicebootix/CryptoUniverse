@@ -896,10 +896,11 @@ class UnifiedChatService(LoggerMixin):
 
                 # Use the credit check results regardless of status (as long as we got credits)
                 available_credits = float(credit_check_result.get("available_credits", 0))
+                total_credits = float(credit_check_result.get("total_credits", available_credits))
                 context_data["credit_account"] = {
                     "available_credits": available_credits,
-                    "total_credits": available_credits,  # Use available as total approximation
-                    "profit_potential": available_credits * 4,  # 1 credit = $4 profit potential
+                    "total_credits": total_credits,  # Use actual total from credit check
+                    "profit_potential": total_credits * 4,  # 1 credit = $4 profit potential
                     "account_tier": credit_check_result.get("credit_tier", "standard"),
                     "account_status": credit_check_result.get("account_status", "unknown")
                 }
@@ -1691,10 +1692,10 @@ Provide a helpful response using the real data available. Never use placeholder 
             if not redis:
                 return {"success": False, "error": "Decision storage not available"}
             
-            decision_data = await redis.get(f"pending_decision:{decision_id}")
+            decision_data = await redis.get(f"pending_decision:{decision_id}", deserialize=False)
             if not decision_data:
                 return {"success": False, "error": "Decision not found or expired"}
-            
+
             decision = json.loads(decision_data)
 
             conversation_mode = None
