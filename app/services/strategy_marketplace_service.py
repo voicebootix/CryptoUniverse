@@ -1236,7 +1236,9 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     is_ai_strategy=False,
                     credit_cost_monthly=monthly_cost,
                     credit_cost_per_execution=max(1, monthly_cost // 30),
-                    win_rate=self.normalize_win_rate_to_fraction(float(strategy.win_rate)),
+                    win_rate=self.normalize_win_rate_to_fraction(
+                        float(strategy.win_rate) if strategy.win_rate is not None else 0.0
+                    ),
                     avg_return=(
                         float(strategy.total_pnl / strategy.total_trades) / 100.0
                         if strategy.total_trades > 0

@@ -7,6 +7,8 @@ import uuid
 from decimal import Decimal
 from pathlib import Path
 import types
+from typing import Any, Dict
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -34,6 +36,7 @@ from app.models.user import User, UserRole  # noqa: E402
 from app.services.strategy_marketplace_service import (  # noqa: E402
     StrategyMarketplaceService,
 )
+import app.services.strategy_submission_service as strategy_submission_module  # noqa: E402
 from app.services.strategy_submission_service import (  # noqa: E402
     StrategySubmissionService,
 )
@@ -84,13 +87,51 @@ async def _reset_database() -> None:
 
 
 @pytest.mark.asyncio()
-async def test_published_submission_appears_in_marketplace() -> None:
+async def test_published_submission_appears_in_marketplace(monkeypatch) -> None:
     original_cache_state = cache_manager.enabled
     cache_manager.enabled = False
 
     submission_service = StrategySubmissionService()
     marketplace_service = StrategyMarketplaceService()
     marketplace_service.strategy_pricing = {}
+
+    fake_store: Dict[str, Any] = {"unrelated:key": {"value": "keep"}}
+
+    class FakeRedisClient:
+        def __init__(self, store: Dict[str, Any]):
+            self.store = store
+
+        async def delete(self, *keys: str) -> int:
+            removed = 0
+            for raw_key in keys:
+                key = (
+                    raw_key.decode("utf-8")
+                    if isinstance(raw_key, (bytes, bytearray))
+                    else str(raw_key)
+                )
+                if key in self.store:
+                    del self.store[key]
+                    removed += 1
+            return removed
+
+        async def scan_iter(self, match: str | None = None, count: int | None = None):
+            prefix = ""
+            if match:
+                prefix = match[:-1] if match.endswith("*") else match
+            for key in list(self.store.keys()):
+                if not match or key.startswith(prefix):
+                    yield key
+
+    class FakeRedisManager:
+        def __init__(self, client: FakeRedisClient):
+            self._client = client
+
+        async def get_client(self) -> FakeRedisClient:
+            return self._client
+
+    class FakeRedisCacheManager:
+        def __init__(self, manager: FakeRedisManager):
+            self.redis = manager
 
     try:
         async with AsyncSessionLocal() as session:
@@ -127,17 +168,35 @@ async def test_published_submission_appears_in_marketplace() -> None:
             await session.commit()
             await session.refresh(publisher)
             await session.refresh(reviewer)
-            publisher_id = str(publisher.id)
-            reviewer_id = str(reviewer.id)
+            publisher_uuid = publisher.id
+            reviewer_uuid = reviewer.id
+            publisher_id = str(publisher_uuid)
+            reviewer_id = str(reviewer_uuid)
+
+            fake_store[f"marketplace:{publisher_id}:ai_True:community_True"] = {
+                "success": True
+            }
+            fake_client = FakeRedisClient(fake_store)
+            fake_manager = FakeRedisManager(fake_client)
+            fake_cache_manager = FakeRedisCacheManager(fake_manager)
+
+            monkeypatch.setattr(
+                strategy_submission_module, "redis_cache_manager", fake_cache_manager
+            )
+            monkeypatch.setattr(
+                strategy_submission_module.cache_manager,
+                "delete",
+                AsyncMock(return_value=0),
+            )
 
             user_rows = await session.execute(text("SELECT id FROM users"))
-            existing_user_ids = {row[0] for row in user_rows}
+            existing_user_ids = {str(uuid.UUID(row[0])) for row in user_rows}
             assert publisher_id in existing_user_ids
             assert reviewer_id in existing_user_ids
 
             source_strategy_id = str(uuid.uuid4())
             submission = StrategySubmission(
-                user_id=publisher_id,
+                user_id=str(publisher_uuid),
                 name="Community Momentum",
                 description="A momentum strategy from the community",
                 category="momentum",
@@ -168,7 +227,9 @@ async def test_published_submission_appears_in_marketplace() -> None:
             await session.commit()
             await session.refresh(submission)
 
-            reviewer_stub = types.SimpleNamespace(id=reviewer_id, email=reviewer_email)
+            reviewer_stub = types.SimpleNamespace(
+                id=str(reviewer_uuid), email=reviewer_email
+            )
 
             await submission_service.review_submission(
                 submission_id=submission.id,
@@ -180,7 +241,7 @@ async def test_published_submission_appears_in_marketplace() -> None:
 
         original_live_performance = marketplace_service._get_live_performance
 
-        async def _fake_live_performance(_strategy_id: str, _session=None):  # type: ignore[override]
+        async def _fake_live_performance(_strategy_id: str, session=None):  # type: ignore[override]
             return {
                 "data_quality": "no_data",
                 "status": "no_trades",
@@ -207,3 +268,5 @@ async def test_published_submission_appears_in_marketplace() -> None:
     names = {item["name"] for item in strategies["strategies"]}
     assert "Community Momentum" in names
     assert strategies["community_strategies_count"] == 1
+    assert "unrelated:key" in fake_store
+    assert all(not key.startswith("marketplace:") for key in fake_store)
