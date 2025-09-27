@@ -87,11 +87,7 @@ async def _reset_database() -> None:
 
 
 @pytest.mark.asyncio()
-<<<<<<< HEAD
 async def test_published_submission_appears_in_marketplace(monkeypatch) -> None:
-=======
-async def test_published_submission_appears_in_marketplace() -> None:
->>>>>>> main
     original_cache_state = cache_manager.enabled
     cache_manager.enabled = False
 
@@ -99,7 +95,6 @@ async def test_published_submission_appears_in_marketplace() -> None:
     marketplace_service = StrategyMarketplaceService()
     marketplace_service.strategy_pricing = {}
 
-<<<<<<< HEAD
     fake_store: Dict[str, Any] = {"unrelated:key": {"value": "keep"}}
 
     class FakeRedisClient:
@@ -138,8 +133,6 @@ async def test_published_submission_appears_in_marketplace() -> None:
         def __init__(self, manager: FakeRedisManager):
             self.redis = manager
 
-=======
->>>>>>> main
     try:
         async with AsyncSessionLocal() as session:
             tables = await session.execute(
@@ -175,7 +168,6 @@ async def test_published_submission_appears_in_marketplace() -> None:
             await session.commit()
             await session.refresh(publisher)
             await session.refresh(reviewer)
-<<<<<<< HEAD
             publisher_uuid = publisher.id
             reviewer_uuid = reviewer.id
             publisher_id = str(publisher_uuid)
@@ -199,23 +191,12 @@ async def test_published_submission_appears_in_marketplace() -> None:
 
             user_rows = await session.execute(text("SELECT id FROM users"))
             existing_user_ids = {str(uuid.UUID(row[0])) for row in user_rows}
-=======
-            publisher_id = str(publisher.id)
-            reviewer_id = str(reviewer.id)
-
-            user_rows = await session.execute(text("SELECT id FROM users"))
-            existing_user_ids = {row[0] for row in user_rows}
->>>>>>> main
             assert publisher_id in existing_user_ids
             assert reviewer_id in existing_user_ids
 
             source_strategy_id = str(uuid.uuid4())
             submission = StrategySubmission(
-<<<<<<< HEAD
                 user_id=publisher_uuid.hex,
-=======
-                user_id=publisher_id,
->>>>>>> main
                 name="Community Momentum",
                 description="A momentum strategy from the community",
                 category="momentum",
@@ -246,13 +227,9 @@ async def test_published_submission_appears_in_marketplace() -> None:
             await session.commit()
             await session.refresh(submission)
 
-<<<<<<< HEAD
             reviewer_stub = types.SimpleNamespace(
                 id=reviewer_uuid.hex, email=reviewer_email
             )
-=======
-            reviewer_stub = types.SimpleNamespace(id=reviewer_id, email=reviewer_email)
->>>>>>> main
 
             await submission_service.review_submission(
                 submission_id=submission.id,
@@ -264,11 +241,7 @@ async def test_published_submission_appears_in_marketplace() -> None:
 
         original_live_performance = marketplace_service._get_live_performance
 
-<<<<<<< HEAD
         async def _fake_live_performance(_strategy_id: str, session=None):  # type: ignore[override]
-=======
-        async def _fake_live_performance(_strategy_id: str, _session=None):  # type: ignore[override]
->>>>>>> main
             return {
                 "data_quality": "no_data",
                 "status": "no_trades",
@@ -295,8 +268,5 @@ async def test_published_submission_appears_in_marketplace() -> None:
     names = {item["name"] for item in strategies["strategies"]}
     assert "Community Momentum" in names
     assert strategies["community_strategies_count"] == 1
-<<<<<<< HEAD
     assert "unrelated:key" in fake_store
     assert all(not key.startswith("marketplace:") for key in fake_store)
-=======
->>>>>>> main
