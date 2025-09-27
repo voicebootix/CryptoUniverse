@@ -1315,12 +1315,18 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     async def _get_live_performance(self, strategy_id: str, session: AsyncSession = None) -> Dict[str, Any]:
         """Get live performance metrics for strategy."""
         try:
+            # Convert strategy_id to UUID once at the start
+            try:
+                strategy_uuid = uuid.UUID(strategy_id)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Invalid strategy_id UUID format: {strategy_id}") from e
+
             if session:
                 db = session
                 # Get recent trades for this strategy
                 stmt = select(Trade).where(
                     and_(
-                        Trade.strategy_id == strategy_id,
+                        Trade.strategy_id == strategy_uuid,
                         Trade.created_at >= datetime.utcnow() - timedelta(days=30)
                     )
                 ).order_by(desc(Trade.created_at))
@@ -1332,7 +1338,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     # Get recent trades for this strategy
                     stmt = select(Trade).where(
                         and_(
-                            Trade.strategy_id == strategy_id,
+                            Trade.strategy_id == strategy_uuid,
                             Trade.created_at >= datetime.utcnow() - timedelta(days=30)
                         )
                     ).order_by(desc(Trade.created_at))

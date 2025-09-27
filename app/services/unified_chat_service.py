@@ -189,7 +189,20 @@ class UnifiedChatService(LoggerMixin):
             return normalized not in {"false", "0", "no", "off"}
 
         return bool(value)
-    
+
+    def _json_default(self, obj):
+        """Default JSON serializer for complex types."""
+        from decimal import Decimal
+
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, Decimal):
+            return float(obj)
+        elif isinstance(obj, uuid.UUID):
+            return str(obj)
+        else:
+            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
     async def _ensure_redis(self):
         """Ensure Redis connection for caching."""
         if not self._redis_initialized:
@@ -816,7 +829,6 @@ class UnifiedChatService(LoggerMixin):
         elif intent == ChatIntent.TRADE_EXECUTION:
             # Get market data for trade analysis
             entities = intent_analysis.get("entities", {})
-            symbol = entities.get("symbol", "BTC")
             # Market data integration pending
             context_data["market_data"] = {"current_price": 0, "error": "Market data integration pending"}
             context_data["trade_validation"] = await self._prepare_trade_validation(entities, user_id)
@@ -1141,7 +1153,7 @@ Tell them the development team needs to investigate this specific error."""
 
 Portfolio Data (REAL):
 - Total Value: ${portfolio.get('total_value', 0):,.2f}
-- Daily P&L: ${portfolio.get('daily_pnl', 0):,.2f} ({portfolio.get('daily_pnl_pct', 0):.2f}%)
+- Daily P&L: ${portfolio.get('daily_pnl', 0):,.2f} ({_safe_float(portfolio.get('daily_pnl_pct', 0), 0.0):.2f}%)
 - Positions: {len(portfolio.get('positions', []))}
 - Risk Level: {risk.get('overall_risk', 'Unknown')}
 - Top Holdings: {', '.join([f"{p['symbol']} (${p['value_usd']:,.2f})" for p in portfolio.get('positions', [])[:3]])}
@@ -1156,7 +1168,7 @@ Provide a comprehensive portfolio analysis using this real data."""
 
 Market Data (REAL):
 - Current Price: ${market.get('current_price', 0):,.2f}
-- 24h Change: {market.get('change_24h', 0):.2f}%
+- 24h Change: {_safe_float(market.get('change_24h', 0), 0.0):.2f}%
 - Volume: ${market.get('volume_24h', 0):,.0f}
 - Trend: {market.get('trend', 'Unknown')}
 
@@ -1199,7 +1211,8 @@ REBALANCING ANALYSIS ERROR:
 
             def _pct(value: Any) -> Optional[str]:
                 try:
-                    return f"{float(value):.2%}"
+                    safe_value = _safe_float(value, 0.0)
+                    return f"{safe_value:.2%}" if safe_value is not None else "0.00%"
                 except (TypeError, ValueError):
                     return None
 
@@ -1255,13 +1268,13 @@ REBALANCING ANALYSIS ERROR:
             ranking_lines: List[str] = []
             for rank_idx, ranking in enumerate(strategy_rankings[:6], 1):
                 ranking_lines.append(
-                    "  {}. {} | score {:.3f} | trade volume {:.2%} | Sharpe {:.2f} | exp. return {:.2%}".format(
+                    "  {}. {} | score {:.3f} | trade volume {} | Sharpe {} | exp. return {}".format(
                         rank_idx,
                         ranking.get("strategy", "unknown"),
-                        ranking.get("score", 0.0),
-                        ranking.get("trade_volume_pct", 0.0),
-                        ranking.get("sharpe_ratio", 0.0),
-                        ranking.get("expected_return", 0.0),
+                        _safe_float(ranking.get("score", 0.0), 0.0) or 0.0,
+                        _format_percentage(ranking.get("trade_volume_pct", 0.0)) or "N/A",
+                        f"{_safe_float(ranking.get('sharpe_ratio', 0.0), 0.0):.2f}" if _safe_float(ranking.get('sharpe_ratio', 0.0)) is not None else "N/A",
+                        _format_percentage(ranking.get("expected_return", 0.0)) or "N/A",
                     )
                 )
 
@@ -1423,7 +1436,7 @@ REBALANCING ANALYSIS ERROR:
                     if total_potential:
                         summary_line += f" • ${total_potential:,.0f} potential"
                     if average_confidence is not None:
-                        summary_line += f" • {average_confidence:.1f}% avg confidence"
+                        summary_line += f" • {_safe_float(average_confidence, 0.0):.1f}% avg confidence"
                     prompt_parts.append(summary_line)
 
             # Detailed opportunities by strategy
@@ -1446,7 +1459,7 @@ REBALANCING ANALYSIS ERROR:
                     profit_usd_value = _safe_float(profit_usd_raw, 0.0)
 
                     prompt_parts.append(f"  {index}. {symbol}")
-                    prompt_parts.append(f"     Confidence: {confidence_value:.1f}%")
+                    prompt_parts.append(f"     Confidence: {_safe_float(confidence_value, 0.0):.1f}%")
                     prompt_parts.append(f"     Profit Potential: ${profit_usd_value:,.0f}")
 
                     action = metadata.get("signal_action") or opportunity.get("action")
@@ -1474,7 +1487,7 @@ REBALANCING ANALYSIS ERROR:
                         sharpe_ratio_value = _safe_float(sharpe_ratio_raw, None)
                         if sharpe_ratio_value is not None:
                             prompt_parts.append(
-                                f"     Sharpe Ratio: {sharpe_ratio_value:.2f}"
+                                f"     Sharpe Ratio: {_safe_float(sharpe_ratio_value, 0.0):.2f}"
                             )
 
                         risk_level = metadata.get("risk_level")
@@ -1483,7 +1496,7 @@ REBALANCING ANALYSIS ERROR:
                                 prompt_parts.append(f"     Risk Level: {risk_level}")
                             else:
                                 prompt_parts.append(
-                                    f"     Risk Level: {risk_level * 100:.1f}%"
+                                    f"     Risk Level: {_safe_float(risk_level, 0.0) * 100:.1f}%"
                                 )
 
                         allocation = metadata.get("amount")
@@ -1570,7 +1583,7 @@ AVAILABLE STRATEGIES:
 - Strategy Categories: {list(set([s.get('category', 'Unknown') for s in available_strategies.get('strategies', [])]))}
 
 Top Recommended Strategies:
-{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - Expected Return: {s.get('expected_return', 0)*100:.1f}%" for s in available_strategies.get('strategies', [])[:5]])}
+{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - Expected Return: {_safe_float(s.get('expected_return', 0), 0.0)*100:.1f}%" for s in available_strategies.get('strategies', [])[:5]])}
 
 Provide personalized strategy recommendations based on the user's current setup and available strategies."""
 
@@ -1685,7 +1698,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                 await redis.setex(
                     f"pending_decision:{decision_id}",
                     300,  # 5 minute expiry
-                    json.dumps(decision_data)
+                    json.dumps(decision_data, default=self._json_default)
                 )
         except Exception as e:
             self.logger.error("Failed to store pending decision", error=str(e))
@@ -1845,8 +1858,9 @@ Provide a helpful response using the real data available. Never use placeholder 
             self.logger.info("Phase 4: Trade Execution")
 
             if conversation_mode == ConversationMode.PAPER_TRADING:
-                quantity = trade_params.get("quantity")
-                notional_amount = trade_params.get("amount") or trade_params.get("position_size_usd")
+                # Use validated trade_request instead of raw trade_params
+                quantity = trade_request.get("quantity")
+                notional_amount = trade_request.get("amount") or trade_request.get("position_size_usd")
 
                 if not quantity and notional_amount and market_data.get("current_price"):
                     try:
@@ -1863,11 +1877,11 @@ Provide a helpful response using the real data available. Never use placeholder 
 
                 paper_result = await self.paper_trading.execute_paper_trade(
                     user_id=user_id,
-                    symbol=trade_params["symbol"],
-                    side=trade_params["action"],
+                    symbol=trade_request["symbol"],
+                    side=trade_request["action"],
                     quantity=quantity,
-                    strategy_used=trade_params.get("strategy", "chat_trade"),
-                    order_type=trade_params.get("order_type", "market")
+                    strategy_used=trade_request.get("strategy", "chat_trade"),
+                    order_type=trade_request.get("order_type", "market")
                 )
                 phases_completed.append("execution")
 
@@ -1891,15 +1905,20 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "monitoring_details": monitoring
                 }
 
-            simulation_mode = await self._get_user_simulation_mode(user_id)
-            if simulation_mode is None:
-                simulation_mode = True
+            # Use validated trade_request as the source of truth
+            # Only apply simulation mode if not explicitly set in the request
+            if "simulation_mode" not in trade_request:
+                simulation_mode = await self._get_user_simulation_mode(user_id)
+                if simulation_mode is None:
+                    simulation_mode = True
+            else:
+                simulation_mode = trade_request.get("simulation_mode", True)
 
-            trade_request = self._build_trade_request_for_execution(trade_params, market_data)
+            # Verify essential fields are present in validated trade_request
             if not trade_request.get("symbol") or not trade_request.get("action"):
                 return {
                     "success": False,
-                    "message": "Unable to build trade request for execution",
+                    "message": "Trade request missing essential fields after validation",
                     "phases_completed": phases_completed
                 }
 
