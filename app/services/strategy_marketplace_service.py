@@ -1656,8 +1656,26 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             record_lookup = {record.strategy_id: record for record in db_access_records}
 
             if record_lookup:
+                redis_only_ids = [
+                    strategy_id for strategy_id in active_strategies
+                    if strategy_id not in record_lookup
+                ]
+                if redis_only_ids:
+                    self.logger.info(
+                        "🧹 Removing Redis strategies without active access records",
+                        user_id=user_id,
+                        redis_only_ids=redis_only_ids,
+                    )
+                    active_strategies = [
+                        strategy_id for strategy_id in active_strategies
+                        if strategy_id in record_lookup
+                    ]
+                    if redis:
+                        await self._safe_redis_operation(redis.srem, redis_key, *redis_only_ids)
+
                 missing_strategy_ids = [
-                    strategy_id for strategy_id in record_lookup.keys() if strategy_id not in active_strategies
+                    strategy_id for strategy_id in record_lookup.keys()
+                    if strategy_id not in active_strategies
                 ]
 
                 if missing_strategy_ids:
