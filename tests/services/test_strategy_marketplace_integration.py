@@ -196,7 +196,7 @@ async def test_published_submission_appears_in_marketplace(monkeypatch) -> None:
 
             source_strategy_id = str(uuid.uuid4())
             submission = StrategySubmission(
-                user_id=publisher_uuid.hex,
+                user_id=str(publisher_uuid),
                 name="Community Momentum",
                 description="A momentum strategy from the community",
                 category="momentum",
@@ -228,7 +228,7 @@ async def test_published_submission_appears_in_marketplace(monkeypatch) -> None:
             await session.refresh(submission)
 
             reviewer_stub = types.SimpleNamespace(
-                id=reviewer_uuid.hex, email=reviewer_email
+                id=str(reviewer_uuid), email=reviewer_email
             )
 
             await submission_service.review_submission(
