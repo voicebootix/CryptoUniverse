@@ -1013,7 +1013,7 @@ class PortfolioRiskService(LoggerMixin):
     
     def _generate_request_id(self) -> str:
         """Generate unique request ID."""
-        return f"PRMS_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        return f"PRS_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     
     async def _generate_comprehensive_recommendations(
         self,
@@ -1204,9 +1204,9 @@ class PortfolioRiskService(LoggerMixin):
             }
 
     async def optimize_allocation(
-        self, 
-        user_id: str, 
-        strategy: str = "adaptive", 
+        self,
+        user_id: str,
+        strategy: str = "adaptive",
         constraints: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """Portfolio allocation optimization with multiple strategies - NO HARDCODED ASSETS."""
@@ -1272,6 +1272,226 @@ class PortfolioRiskService(LoggerMixin):
                 "function": "optimize_allocation",
                 "request_id": request_id,
                 "timestamp": datetime.utcnow().isoformat()
+            }
+
+    async def analyze_rebalancing_strategies(
+        self,
+        user_id: str,
+        risk_profile: str = "medium",
+        rebalance_threshold: float = 0.05,
+        target_allocation: Optional[Dict[str, float]] = None
+    ) -> Dict[str, Any]:
+        """Evaluate all optimization strategies and recommend the best rebalancing plan."""
+
+        request_id = self._generate_request_id()
+        normalized_risk_profile = self._normalize_risk_profile(risk_profile)
+        self.logger.info(
+            "Analyzing multi-strategy rebalancing",
+            user_id=user_id,
+            request_id=request_id,
+            risk_profile=normalized_risk_profile,
+            rebalance_threshold=rebalance_threshold,
+        )
+
+        try:
+            portfolio = await self.portfolio_connector.get_consolidated_portfolio(user_id)
+            positions = portfolio.get("positions", [])
+            total_value = portfolio.get("total_value_usd", 0) or portfolio.get("total_value", 0)
+
+            if not positions or total_value <= 0:
+                return {
+                    "success": False,
+                    "error": "No qualifying positions found for rebalancing analysis",
+                    "function": "analyze_rebalancing_strategies",
+                    "request_id": request_id,
+                }
+
+            current_weights = self._calculate_current_weights(portfolio, total_value)
+
+            # Baseline metrics for improvement calculations
+            expected_returns, covariance_matrix = await self.optimization_engine._get_optimization_inputs(positions)
+            symbols_order = list(expected_returns.keys())
+            current_weight_vector = np.array([current_weights.get(symbol, 0.0) for symbol in symbols_order])
+            expected_return_vector = np.array([expected_returns[symbol] for symbol in symbols_order])
+            baseline_return = float(np.dot(current_weight_vector, expected_return_vector))
+            baseline_volatility = float(
+                np.sqrt(np.dot(current_weight_vector, np.dot(covariance_matrix, current_weight_vector)))
+            )
+            baseline_diversification = 1.0 - max(current_weights.values(), default=0.0)
+
+            profile_weights = self._get_risk_profile_weights(normalized_risk_profile)
+            normalized_target = self._normalize_target_allocation(target_allocation)
+
+            strategy_results: List[Dict[str, Any]] = []
+            strategy_errors: List[Dict[str, str]] = []
+
+            for strategy in OptimizationStrategy:
+                try:
+                    optimization_result = await self.optimization_engine.optimize_portfolio(
+                        portfolio,
+                        strategy=strategy,
+                        constraints={"rebalance_threshold": rebalance_threshold},
+                    )
+
+                    trades = optimization_result.suggested_trades or []
+                    total_trade_value = self._calculate_trade_volume(trades)
+                    trade_volume_pct = (total_trade_value / total_value) if total_value > 0 else 0.0
+                    execution_ready = len(trades) > 0
+
+                    weight_delta = {
+                        symbol: optimization_result.weights.get(symbol, 0.0) - current_weights.get(symbol, 0.0)
+                        for symbol in set(current_weights.keys()) | set(optimization_result.weights.keys())
+                    }
+                    max_deviation = max((abs(delta) for delta in weight_delta.values()), default=0.0)
+                    avg_deviation = (
+                        sum(abs(delta) for delta in weight_delta.values()) / len(weight_delta)
+                        if weight_delta else 0.0
+                    )
+
+                    weight_values = list(optimization_result.weights.values())
+                    diversification_score = 1.0 - (max(weight_values) if weight_values else 0.0)
+                    alignment_score = self._calculate_alignment_score(
+                        optimization_result.weights, normalized_target
+                    )
+
+                    score = (
+                        profile_weights["return"] * float(optimization_result.expected_return)
+                        + profile_weights["sharpe"] * float(optimization_result.sharpe_ratio)
+                        - profile_weights["volatility"] * float(optimization_result.expected_volatility)
+                        + profile_weights["diversification"] * diversification_score
+                        - profile_weights["cost"] * trade_volume_pct
+                        + (profile_weights["target_alignment"] * alignment_score if alignment_score is not None else 0.0)
+                    )
+
+                    needs_rebalancing = (
+                        optimization_result.rebalancing_needed
+                        or max_deviation > rebalance_threshold
+                        or trade_volume_pct > 0.01
+                        or execution_ready
+                    )
+
+                    strategy_results.append(
+                        {
+                            "strategy": strategy.value,
+                            "score": float(score),
+                            "rebalancing_needed": needs_rebalancing,
+                            "execution_ready": execution_ready,
+                            "expected_return": float(optimization_result.expected_return),
+                            "expected_volatility": float(optimization_result.expected_volatility),
+                            "sharpe_ratio": float(optimization_result.sharpe_ratio),
+                            "max_deviation": float(max_deviation),
+                            "avg_deviation": float(avg_deviation),
+                            "diversification": float(diversification_score),
+                            "total_trade_value": float(total_trade_value),
+                            "trade_volume_pct": float(trade_volume_pct),
+                            "alignment_score": float(alignment_score) if alignment_score is not None else None,
+                            "recommended_trades": trades,
+                            "target_weights": optimization_result.weights,
+                        }
+                    )
+                except Exception as strategy_error:
+                    self.logger.error(
+                        "Strategy optimization failed",
+                        error=str(strategy_error),
+                        user_id=user_id,
+                        strategy=strategy.value,
+                        request_id=request_id,
+                    )
+                    strategy_errors.append({"strategy": strategy.value, "error": str(strategy_error)})
+
+            if not strategy_results:
+                return {
+                    "success": False,
+                    "error": "All strategy evaluations failed",
+                    "function": "analyze_rebalancing_strategies",
+                    "request_id": request_id,
+                    "failed_strategies": strategy_errors,
+                }
+
+            ranked_results = sorted(strategy_results, key=lambda item: item["score"], reverse=True)
+            best_strategy = ranked_results[0]
+
+            recommended_trades = best_strategy.get("recommended_trades", [])
+            expected_return_improvement = best_strategy["expected_return"] - baseline_return
+            risk_reduction = baseline_volatility - best_strategy["expected_volatility"]
+            diversification_gain = best_strategy["diversification"] - baseline_diversification
+
+            execution_plan = self._build_execution_plan(
+                strategy_snapshot=best_strategy,
+                recommended_trades=recommended_trades,
+                total_value=total_value,
+                baseline_metrics={
+                    "baseline_return": baseline_return,
+                    "baseline_volatility": baseline_volatility,
+                    "baseline_diversification": baseline_diversification,
+                    "expected_return_improvement": expected_return_improvement,
+                    "risk_reduction": risk_reduction,
+                    "diversification_gain": diversification_gain,
+                },
+                request_id=request_id,
+                risk_profile=normalized_risk_profile,
+            )
+
+            return {
+                "success": True,
+                "function": "analyze_rebalancing_strategies",
+                "analysis_type": "multi_strategy_rebalance",
+                "request_id": request_id,
+                "risk_profile": normalized_risk_profile,
+                "needs_rebalancing": execution_plan["execution_ready"],
+                "recommended_strategy": best_strategy["strategy"],
+                "recommended_trades": recommended_trades,
+                "recommended_allocation": best_strategy["target_weights"],
+                "current_allocation": current_weights,
+                "rebalance_threshold": rebalance_threshold,
+                "strategy_rankings": [
+                    {
+                        "strategy": result["strategy"],
+                        "score": result["score"],
+                        "rebalancing_needed": result["rebalancing_needed"],
+                        "execution_ready": result["execution_ready"],
+                        "expected_return": result["expected_return"],
+                        "expected_volatility": result["expected_volatility"],
+                        "sharpe_ratio": result["sharpe_ratio"],
+                        "max_deviation_pct": result["max_deviation"] * 100,
+                        "avg_deviation_pct": result["avg_deviation"] * 100,
+                        "trade_volume_pct": result["trade_volume_pct"],
+                        "alignment_score": result["alignment_score"],
+                        "top_trades": result["recommended_trades"][:3],
+                    }
+                    for result in ranked_results
+                ],
+                "execution_plan": execution_plan,
+                "analysis_metrics": {
+                    "baseline_expected_return": baseline_return,
+                    "baseline_expected_volatility": baseline_volatility,
+                    "expected_return_improvement": expected_return_improvement,
+                    "risk_reduction": risk_reduction,
+                    "diversification_gain": diversification_gain,
+                    "trade_volume_pct": best_strategy["trade_volume_pct"],
+                    "max_deviation_pct": best_strategy["max_deviation"] * 100,
+                    "alignment_score": best_strategy["alignment_score"],
+                },
+                "total_trade_value": best_strategy["total_trade_value"],
+                "portfolio_value": total_value,
+                "timestamp": datetime.utcnow().isoformat(),
+                "failed_strategies": strategy_errors,
+            }
+
+        except Exception as e:
+            self.logger.error(
+                "Multi-strategy rebalancing analysis failed",
+                error=str(e),
+                user_id=user_id,
+                request_id=request_id,
+                exc_info=True,
+            )
+            return {
+                "success": False,
+                "error": str(e),
+                "function": "analyze_rebalancing_strategies",
+                "request_id": request_id,
+                "timestamp": datetime.utcnow().isoformat(),
             }
     
     async def complete_assessment(
@@ -1351,10 +1571,6 @@ class PortfolioRiskService(LoggerMixin):
                 "timestamp": datetime.utcnow().isoformat()
             }
     
-    def _generate_request_id(self) -> str:
-        """Generate unique request ID."""
-        return f"PRS_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-    
     def _make_json_serializable(self, obj: Any) -> Any:
         """Convert objects to JSON-serializable format."""
         if isinstance(obj, dict):
@@ -1370,10 +1586,239 @@ class PortfolioRiskService(LoggerMixin):
         elif hasattr(obj, 'tolist'):  # numpy array
             return obj.tolist()
         return obj
-    
+
+    def _normalize_risk_profile(self, risk_profile: Optional[str]) -> str:
+        """Normalize different risk profile labels to core categories."""
+        if not risk_profile:
+            return "medium"
+
+        normalized = risk_profile.lower()
+        if normalized in {"low", "conservative", "defensive"}:
+            return "low"
+        if normalized in {"high", "aggressive", "beast", "beast_mode"}:
+            return "high"
+        return "medium"
+
+    def _get_risk_profile_weights(self, profile: str) -> Dict[str, float]:
+        """Return scoring weights for the supplied risk profile."""
+        weight_map = {
+            "low": {
+                "return": 0.25,
+                "sharpe": 0.45,
+                "volatility": 0.60,
+                "diversification": 0.40,
+                "cost": 0.35,
+                "target_alignment": 0.30,
+            },
+            "medium": {
+                "return": 0.40,
+                "sharpe": 0.40,
+                "volatility": 0.35,
+                "diversification": 0.25,
+                "cost": 0.30,
+                "target_alignment": 0.20,
+            },
+            "high": {
+                "return": 0.55,
+                "sharpe": 0.30,
+                "volatility": 0.20,
+                "diversification": 0.15,
+                "cost": 0.15,
+                "target_alignment": 0.10,
+            },
+        }
+        return weight_map.get(profile, weight_map["medium"])
+
+    def _normalize_target_allocation(
+        self, target_allocation: Optional[Dict[str, float]]
+    ) -> Dict[str, float]:
+        """Normalize optional user target allocation into weights."""
+        if not target_allocation:
+            return {}
+
+        total = sum(value for value in target_allocation.values() if value is not None)
+        if total <= 0:
+            return {}
+
+        return {
+            symbol: float(value) / total
+            for symbol, value in target_allocation.items()
+            if value is not None
+        }
+
+    def _calculate_current_weights(
+        self, portfolio: Dict[str, Any], total_value: float
+    ) -> Dict[str, float]:
+        """Aggregate current portfolio weights by symbol."""
+
+        weights: Dict[str, float] = {}
+        if total_value <= 0:
+            return weights
+
+        for position in portfolio.get("positions", []):
+            symbol = position.get("symbol")
+            if not symbol:
+                continue
+
+            value = self._extract_position_value(position)
+            if value <= 0:
+                continue
+
+            weights[symbol] = weights.get(symbol, 0.0) + (value / total_value)
+
+        return weights
+
+    def _extract_position_value(self, position: Dict[str, Any]) -> float:
+        """Extract numeric position value from various supported keys."""
+        for key in ("value_usd", "usd_value", "value", "market_value", "current_value"):
+            value = position.get(key)
+            if value is not None:
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    continue
+        return 0.0
+
+    def _calculate_trade_volume(self, trades: List[Dict[str, Any]]) -> float:
+        """Aggregate absolute USD volume across suggested trades."""
+        volume = 0.0
+        for trade in trades or []:
+            raw_value = (
+                trade.get("value_change")
+                or trade.get("value_usd")
+                or trade.get("amount")
+                or trade.get("notional_usd")
+                or 0.0
+            )
+            try:
+                volume += abs(float(raw_value))
+            except (TypeError, ValueError):
+                continue
+        return volume
+
+    def _calculate_alignment_score(
+        self,
+        recommended_allocation: Dict[str, float],
+        target_allocation: Dict[str, float],
+    ) -> Optional[float]:
+        """Calculate how closely the recommendation matches target allocation."""
+        if not target_allocation:
+            return None
+
+        symbols = set(recommended_allocation.keys()) | set(target_allocation.keys())
+        total_deviation = 0.0
+        for symbol in symbols:
+            target_weight = target_allocation.get(symbol, 0.0)
+            recommended_weight = recommended_allocation.get(symbol, 0.0)
+            total_deviation += abs(target_weight - recommended_weight)
+
+        # Normalize to 0-1 range (1 is perfect alignment)
+        return max(0.0, 1.0 - (total_deviation / 2.0))
+
+    def _extract_trade_notional(self, trade: Dict[str, Any]) -> float:
+        """Extract absolute notional value for a trade recommendation."""
+        for key in (
+            "notional_usd",
+            "value_change",
+            "amount",
+            "value_usd",
+            "trade_value",
+        ):
+            value = trade.get(key)
+            if value is None:
+                continue
+            try:
+                return abs(float(value))
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    def _build_execution_plan(
+        self,
+        strategy_snapshot: Dict[str, Any],
+        recommended_trades: List[Dict[str, Any]],
+        total_value: float,
+        baseline_metrics: Dict[str, float],
+        request_id: str,
+        risk_profile: str,
+    ) -> Dict[str, Any]:
+        """Create an execution-ready plan for rebalancing automation."""
+
+        generated_at = datetime.utcnow()
+        steps: List[Dict[str, Any]] = []
+
+        for idx, trade in enumerate(recommended_trades, start=1):
+            notional = self._extract_trade_notional(trade)
+            reference_price = trade.get("reference_price") or trade.get("price")
+            quantity = trade.get("quantity_change") or trade.get("quantity")
+
+            if (quantity is None or quantity == 0) and reference_price not in (None, 0):
+                try:
+                    quantity = notional / float(reference_price)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    quantity = None
+
+            step = {
+                "step": idx,
+                "symbol": trade.get("symbol"),
+                "action": trade.get("action"),
+                "notional_usd": round(notional, 2),
+                "target_weight": trade.get("target_weight"),
+                "current_weight": trade.get("current_weight"),
+                "weight_change": trade.get("weight_change"),
+                "exchange": trade.get("exchange"),
+                "status": "pending_execution",
+            }
+
+            if quantity is not None:
+                try:
+                    step["quantity"] = round(float(quantity), 8)
+                except (TypeError, ValueError):
+                    pass
+            if reference_price not in (None, 0):
+                try:
+                    step["reference_price"] = round(float(reference_price), 8)
+                except (TypeError, ValueError):
+                    pass
+
+            steps.append(step)
+
+        execution_ready = len(steps) > 0
+        next_review_at = generated_at + timedelta(hours=4)
+
+        return {
+            "plan_id": request_id,
+            "strategy": strategy_snapshot.get("strategy"),
+            "risk_profile": risk_profile,
+            "execution_ready": execution_ready,
+            "trade_count": len(steps),
+            "total_notional": float(strategy_snapshot.get("total_trade_value", 0.0)),
+            "expected_return_improvement": baseline_metrics.get("expected_return_improvement", 0.0),
+            "risk_reduction": baseline_metrics.get("risk_reduction", 0.0),
+            "diversification_gain": baseline_metrics.get("diversification_gain", 0.0),
+            "baseline": {
+                "portfolio_value": total_value,
+                "expected_return": baseline_metrics.get("baseline_return", 0.0),
+                "expected_volatility": baseline_metrics.get("baseline_volatility", 0.0),
+                "diversification": baseline_metrics.get("baseline_diversification", 0.0),
+            },
+            "steps": steps,
+            "generated_at": generated_at.isoformat(),
+            "next_review_at": next_review_at.isoformat(),
+            "journal_entry": {
+                "status": "pending" if execution_ready else "monitor",
+                "last_updated": generated_at.isoformat(),
+                "notes": (
+                    f"Prepare {len(steps)} trade(s) using {strategy_snapshot.get('strategy')} strategy"
+                    if execution_ready
+                    else "Portfolio is within thresholds; continue monitoring"
+                ),
+            },
+        }
+
     async def _generate_rebalancing_trades(
-        self, 
-        current_portfolio: Dict[str, Any], 
+        self,
+        current_portfolio: Dict[str, Any],
         optimal_weights: Dict[str, float]
     ) -> List[Dict[str, Any]]:
         """Generate trades needed for rebalancing to optimal weights - FIXED VERSION."""
@@ -1450,6 +1895,7 @@ class PortfolioRiskService(LoggerMixin):
                     "symbol": symbol,
                     "action": "BUY" if value_difference > 0 else "SELL",
                     "amount": abs(round(value_difference, 2)),  # FIX: Add amount field that chat system expects
+                    "notional_usd": abs(round(value_difference, 2)),
                     "target_value": round(target_value, 2),
                     "current_value": round(current_value, 2),
                     "value_change": round(value_difference, 2),
