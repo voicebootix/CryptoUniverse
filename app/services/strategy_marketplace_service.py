@@ -23,7 +23,7 @@ from sqlalchemy import select, and_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import AsyncSessionLocal, get_database_session
+from app.core.database import get_database
 from app.core.logging import LoggerMixin
 from app.core.async_session_manager import DatabaseSessionMixin
 from app.models.trading import TradingStrategy, Trade
@@ -1178,11 +1178,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             "improvement": 22.7
         }
     
-    async def _get_community_strategies(
-        self,
-        _user_id: str,
-        session: Optional[AsyncSession] = None,
-    ) -> List[StrategyMarketplaceItem]:
+    async def _get_community_strategies(self, user_id: str) -> List[StrategyMarketplaceItem]:
         """Get community-published strategies."""
 
         async def _load_with_session(active_session: AsyncSession) -> List[StrategyMarketplaceItem]:
@@ -1270,19 +1266,8 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             return community_items
 
         try:
-            if session is not None:
-                try:
-                    return await _load_with_session(session)
-                except Exception:
-                    await session.rollback()
-                    raise
-
-            async with AsyncSessionLocal() as owned_session:
-                try:
-                    return await _load_with_session(owned_session)
-                except Exception:
-                    await owned_session.rollback()
-                    raise
+            async with get_database() as db:
+                return await _load_with_session(db)
 
         except Exception as e:
             self.logger.error("Failed to get community strategies", error=str(e))
@@ -1327,50 +1312,59 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         else:
             return "very_low"
     
-    async def _get_live_performance(
-        self,
-        strategy_id: str,
-        session: Optional[AsyncSession] = None,
-    ) -> Dict[str, Any]:
+    async def _get_live_performance(self, strategy_id: str, session: AsyncSession = None) -> Dict[str, Any]:
         """Get live performance metrics for strategy."""
-
-        def _no_data_response() -> Dict[str, Any]:
-            return {
-                "data_quality": "no_data",
-                "status": "no_trades",
-                "total_trades": 0,
-                "total_pnl": 0.0,
-                "win_rate": 0.0,
-                "badges": self._build_performance_badges("no_data")
-            }
-
         try:
-            strategy_uuid = uuid.UUID(strategy_id)
-        except Exception:
-            return _no_data_response()
+            # Convert strategy_id to UUID once at the start
+            try:
+                strategy_uuid = uuid.UUID(strategy_id)
+            except (ValueError, TypeError) as e:
+                raise ValueError(f"Invalid strategy_id UUID format: {strategy_id}") from e
 
-        async def _load_with_session(active_session: AsyncSession) -> Dict[str, Any]:
-            stmt = select(Trade).where(
-                and_(
-                    Trade.strategy_id == strategy_uuid,
-                    Trade.created_at >= datetime.utcnow() - timedelta(days=30)
-                )
-            ).order_by(desc(Trade.created_at))
+            if session:
+                db = session
+                # Get recent trades for this strategy
+                stmt = select(Trade).where(
+                    and_(
+                        Trade.strategy_id == strategy_uuid,
+                        Trade.created_at >= datetime.utcnow() - timedelta(days=30)
+                    )
+                ).order_by(desc(Trade.created_at))
 
-            result = await active_session.execute(stmt)
-            recent_trades = result.scalars().all()
+                result = await db.execute(stmt)
+                recent_trades = result.scalars().all()
+            else:
+                async with get_database() as db:
+                    # Get recent trades for this strategy
+                    stmt = select(Trade).where(
+                        and_(
+                            Trade.strategy_id == strategy_uuid,
+                            Trade.created_at >= datetime.utcnow() - timedelta(days=30)
+                        )
+                    ).order_by(desc(Trade.created_at))
+
+                    result = await db.execute(stmt)
+                    recent_trades = result.scalars().all()
 
             if not recent_trades:
-                return _no_data_response()
+                return {
+                    "data_quality": "no_data",
+                    "status": "no_trades",
+                    "total_trades": 0,
+                    "total_pnl": 0.0,
+                    "win_rate": 0.0,
+                    "badges": self._build_performance_badges("no_data")
+                }
 
+            # Calculate 30-day performance with consistent field names and units
             total_pnl = sum(float(trade.profit_realized_usd) for trade in recent_trades)
             winning_trades = sum(1 for trade in recent_trades if trade.profit_realized_usd > 0)
-            win_rate = winning_trades / len(recent_trades)
+            win_rate = winning_trades / len(recent_trades)  # Normalized 0-1 range
 
             return {
                 "period": "30_days",
-                "total_pnl": total_pnl,
-                "win_rate": win_rate,
+                "total_pnl": total_pnl,  # USD amount
+                "win_rate": win_rate,    # 0-1 normalized fraction
                 "total_trades": len(recent_trades),
                 "avg_trade_pnl": total_pnl / len(recent_trades),
                 "best_trade": max(float(trade.profit_realized_usd) for trade in recent_trades),
@@ -1379,21 +1373,6 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 "status": "live_trades",
                 "badges": self._build_performance_badges("verified_real_trades")
             }
-
-        try:
-            if session is not None:
-                try:
-                    return await _load_with_session(session)
-                except Exception:
-                    await session.rollback()
-                    raise
-
-            async with AsyncSessionLocal() as owned_session:
-                try:
-                    return await _load_with_session(owned_session)
-                except Exception:
-                    await owned_session.rollback()
-                    raise
 
         except Exception as e:
             self.logger.error("Failed to get live performance", error=str(e))
@@ -1413,7 +1392,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     ) -> Dict[str, Any]:
         """Purchase access to strategy using credits."""
         try:
-            async with get_database_session() as db:
+            async with get_database() as db:
                 # Get user's credit account
                 credit_stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
                 credit_result = await db.execute(credit_stmt)
@@ -1542,157 +1521,106 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         """Get user's purchased/active strategies with enterprise reliability."""
         import asyncio
         
-        # Add method-level timeout for entire operation to protect chat responsiveness
+        # Add method-level timeout for entire operation (increased for Redis reliability)
         try:
-            async with asyncio.timeout(22.0):
-                portfolio = await self._get_user_strategy_portfolio_impl(user_id)
-                if portfolio.get("success"):
-                    return portfolio
-                # If we received a structured but unsuccessful payload, fall back to AI snapshot
-                return self._build_fallback_ai_strategy_portfolio(user_id, "portfolio_error")
+            async with asyncio.timeout(60.0):  # 60 second timeout for entire method
+                return await self._get_user_strategy_portfolio_impl(user_id)
         except asyncio.TimeoutError:
             self.logger.error("❌ Portfolio fetch timeout", user_id=user_id)
-            return self._build_fallback_ai_strategy_portfolio(user_id, "portfolio_timeout")
-        except Exception as e:
-            self.logger.error("Failed to get user strategy portfolio", error=str(e), user_id=user_id)
-            return self._build_fallback_ai_strategy_portfolio(user_id, "portfolio_exception")
-    
-    def _compose_strategy_portfolio_response(
-        self,
-        strategies: List[Dict[str, Any]],
-        *,
-        source: str,
-        degraded: bool,
-        success: bool = True
-    ) -> Dict[str, Any]:
-        """Format strategy entries into the standard portfolio response payload."""
-
-        total_monthly_cost = sum(strategy.get("credit_cost_monthly", 0) for strategy in strategies)
-        summary = {
-            "total_strategies": len(strategies),
-            "active_strategies": len(strategies),
-            "welcome_strategies": len([s for s in strategies if s.get("credit_cost_monthly", 0) == 0]),
-            "purchased_strategies": len([s for s in strategies if s.get("credit_cost_monthly", 0) > 0]),
-            "total_portfolio_value": 10000.0,
-            "total_pnl_usd": 0.0,
-            "total_pnl_percentage": 0.0,
-            "monthly_credit_cost": total_monthly_cost,
-            "profit_potential_used": 0.0,
-            "profit_potential_remaining": 100000.0
-        }
-
-        return {
-            "success": success,
-            "active_strategies": strategies,
-            "strategies": strategies,
-            "total_strategies": len(strategies),
-            "total_monthly_cost": total_monthly_cost,
-            "summary": summary,
-            "cached": False,
-            "degraded": degraded,
-            "source": source
-        }
-
-    def _build_ai_strategy_entries(self) -> List[Dict[str, Any]]:
-        """Generate the canonical AI strategy entries used for admin and fallback flows."""
-
-        strategies: List[Dict[str, Any]] = []
-        for strategy_func, config in self.ai_strategy_catalog.items():
-            monthly_cost = config.get("credit_cost_monthly", 25)
-
-            try:
-                monthly_cost_value = float(monthly_cost)
-            except (TypeError, ValueError):
-                monthly_cost_value = 0.0
-
-            if monthly_cost_value == 0.0:
-                subscription_type = "welcome"
-                credit_cost_per_execution = 0
-            else:
-                subscription_type = "purchased"
-                credit_cost_per_execution = max(1, int(monthly_cost_value / 30))
-
-            strategy_record = {
-                "strategy_id": f"ai_{strategy_func}",
-                "name": config["name"],
-                "category": config["category"],
-                "is_ai_strategy": True,
-                "publisher_name": "CryptoUniverse AI",
-                "is_active": True,
-                "subscription_type": subscription_type,
-                "activated_at": "2024-01-01T00:00:00Z",
-                "credit_cost_monthly": monthly_cost,
-                "credit_cost_per_execution": credit_cost_per_execution,
-                "total_trades": 0,
-                "winning_trades": 0,
-                "win_rate": 0.0,
-                "total_pnl_usd": 0.0,
-                "best_trade_pnl": 0.0,
-                "worst_trade_pnl": 0.0,
-                "current_drawdown": 0.0,
-                "max_drawdown": 0.0,
-                "sharpe_ratio": None,
-                "risk_level": config["risk_level"],
-                "allocation_percentage": 10.0,
-                "max_position_size": 1000.0,
-                "stop_loss_percentage": 5.0,
-                "last_7_days_pnl": 0.0,
-                "last_30_days_pnl": 0.0,
-                "recent_trades": []
+            # Return degraded state to prevent credit deductions for free strategies
+            return {
+                "success": False,
+                "degraded": True,
+                "active_strategies": [],
+                "total_strategies": 0,
+                "total_monthly_cost": 0,
+                "error": "timeout",
+                "cached": False
             }
-            strategies.append(strategy_record)
-
-        return strategies
-
-    async def _get_admin_portfolio_fast_path(self, user_id: str) -> Dict[str, Any]:
-        """Fast database-independent path for admin users to bypass Redis timeouts."""
+        except Exception as e:
+            self.logger.error("Failed to get user strategy portfolio", error=str(e))
+            return {"success": False, "error": str(e)}
+    
+    async def _get_admin_portfolio_fast_path(self, user_id: str, db) -> Dict[str, Any]:
+        """Fast database-only path for admin users to bypass Redis timeouts."""
         try:
             self.logger.info("⚡ ADMIN FAST PATH: Generating all strategies without Redis", user_id=user_id)
 
-            strategies = self._build_ai_strategy_entries()
-            self.logger.info(
-                "⚡ ADMIN FAST PATH SUCCESS",
-                user_id=user_id,
-                strategies_count=len(strategies)
-            )
+            # Get all AI strategies from catalog (no Redis lookup needed)
+            all_strategies = []
 
-            return self._compose_strategy_portfolio_response(
-                strategies,
-                source="admin_fast_path",
-                degraded=False,
-                success=True
-            )
+            for strategy_func, config in self.ai_strategy_catalog.items():
+                # Create strategy record without Redis performance lookup (admin gets all)
+                strategy_record = {
+                    "strategy_id": f"ai_{strategy_func}",
+                    "name": config["name"],
+                    "category": config["category"],
+                    "is_ai_strategy": True,
+                    "publisher_name": "CryptoUniverse AI",
+                    "is_active": True,  # Admin strategies are always active
+                    "subscription_type": "purchased",  # Admin has purchased access
+                    "activated_at": "2024-01-01T00:00:00Z",
+                    "credit_cost_monthly": config.get("credit_cost_monthly", 25),
+                    "credit_cost_per_execution": max(1, config.get("credit_cost_monthly", 25) // 30),
+                    # Default performance metrics (neutral for display)
+                    "total_trades": 0,
+                    "winning_trades": 0,
+                    "win_rate": 0.0,
+                    "total_pnl_usd": 0.0,
+                    "best_trade_pnl": 0.0,
+                    "worst_trade_pnl": 0.0,
+                    "current_drawdown": 0.0,
+                    "max_drawdown": 0.0,
+                    "sharpe_ratio": None,
+                    "risk_level": config["risk_level"],
+                    "allocation_percentage": 10.0,
+                    "max_position_size": 1000.0,
+                    "stop_loss_percentage": 5.0,
+                    "last_7_days_pnl": 0.0,
+                    "last_30_days_pnl": 0.0,
+                    "recent_trades": []
+                }
+                all_strategies.append(strategy_record)
+
+            self.logger.info("⚡ ADMIN FAST PATH SUCCESS",
+                           user_id=user_id,
+                           strategies_count=len(all_strategies))
+
+            # Return portfolio format expected by frontend
+            return {
+                "success": True,
+                "active_strategies": all_strategies,
+                "total_strategies": len(all_strategies),
+                "total_monthly_cost": sum(s["credit_cost_monthly"] for s in all_strategies),
+                "summary": {
+                    "total_strategies": len(all_strategies),
+                    "active_strategies": len(all_strategies),
+                    "welcome_strategies": 3,  # Admin gets welcome strategies
+                    "purchased_strategies": len(all_strategies) - 3,
+                    "total_portfolio_value": 10000.0,
+                    "total_pnl_usd": 0.0,
+                    "total_pnl_percentage": 0.0,
+                    "monthly_credit_cost": sum(s["credit_cost_monthly"] for s in all_strategies),
+                    "profit_potential_used": 0.0,
+                    "profit_potential_remaining": 100000.0
+                },
+                "strategies": all_strategies  # Also provide in this format for compatibility
+            }
 
         except Exception as e:
             self.logger.error("Admin fast path failed", error=str(e))
             raise e
-
-    def _build_fallback_ai_strategy_portfolio(self, user_id: str, reason: str) -> Dict[str, Any]:
-        """Return a deterministic AI strategy portfolio snapshot as a degraded fallback."""
-
-        self.logger.warning(
-            "Using AI strategy fallback portfolio",
-            user_id=user_id,
-            reason=reason
-        )
-
-        return self._compose_strategy_portfolio_response(
-            self._build_ai_strategy_entries(),
-            source=reason,
-            degraded=True,
-            success=False
-        )
 
     async def _get_user_strategy_portfolio_impl(self, user_id: str) -> Dict[str, Any]:
         """Actual implementation with enterprise resource management."""
 
         # ADMIN BYPASS: For admin users, check if we should use fast database path
         try:
-            from app.core.database import get_database_session
+            from app.core.database import get_database
             from app.models.user import User, UserRole
             from sqlalchemy import select
 
-            async with get_database_session() as db:
+            async with get_database() as db:
                 # Check if this is an admin user (convert string UUID to proper UUID)
                 import uuid
                 try:
@@ -1710,7 +1638,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
 
                 if user_role == UserRole.ADMIN:
                     self.logger.info("🔧 Using admin fast path for portfolio", user_id=user_id)
-                    return await self._get_admin_portfolio_fast_path(user_id)
+                    return await self._get_admin_portfolio_fast_path(user_id, db)
                 else:
                     self.logger.info("Not admin user, using Redis path", user_id=user_id, user_role=user_role)
         except Exception as e:
@@ -1734,10 +1662,10 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                            redis_key=redis_key,
                            redis_available=bool(redis))
             
-            # Get strategies with timeout to prevent hanging
+            # Get strategies with timeout to prevent hanging (increased for reliability)
             active_strategies = await asyncio.wait_for(
                 self._safe_redis_operation(redis.smembers, redis_key),
-                timeout=8.0
+                timeout=45.0
             )
             if active_strategies is None:
                 active_strategies = set()  # Fallback to empty set if Redis fails
@@ -1769,6 +1697,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             record_lookup = {record.strategy_id: record for record in db_access_records}
 
             if record_lookup:
+                # Keep HEAD's Redis cleanup logic for data consistency, but use uz53pl's cleaner syntax
                 redis_only_ids = [
                     strategy_id for strategy_id in active_strategies
                     if strategy_id not in record_lookup
@@ -1787,8 +1716,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                         await self._safe_redis_operation(redis.srem, redis_key, *redis_only_ids)
 
                 missing_strategy_ids = [
-                    strategy_id for strategy_id in record_lookup.keys()
-                    if strategy_id not in active_strategies
+                    strategy_id for strategy_id in record_lookup.keys() if strategy_id not in active_strategies
                 ]
 
                 if missing_strategy_ids:
@@ -1834,7 +1762,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 if hydrated_strategies:
                     active_strategies = hydrated_strategies
                     raw_strategies = list(active_strategies)
-                    # Ensure record lookup is refreshed if needed (from st1bt7 improvements)
+                    # Keep uz53pl's cleaner approach while maintaining data flow improvements
                     if not record_lookup:
                         refreshed_records, refreshed_ttl = await self._load_active_strategy_access_records(user_id)
                         record_lookup = {record.strategy_id: record for record in refreshed_records}
@@ -1896,6 +1824,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                         }
                 if portfolio_entry is None:
                     record = record_lookup.get(strategy_id)
+                    # Combine uz53pl's cleaner syntax with HEAD's defensive programming
                     metadata = record.metadata_json or {} if record else {}
                     if not isinstance(metadata, dict):
                         metadata = {}
@@ -1946,7 +1875,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 pnl = perf.get("total_pnl", 0)
                 total_pnl += pnl
 
-                # Extract overrides from st1bt7 branch
+                # Extract strategy configuration overrides for enhanced data flow
                 subscription_type_override = strategy.get("subscription_type_override")
                 publisher_name_override = strategy.get("publisher_name_override")
                 risk_level_override = strategy.get("risk_level_override")
@@ -2011,12 +1940,15 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 "profit_potential_remaining": 10000.0 - abs(total_pnl)
             }
 
-            return self._compose_strategy_portfolio_response(
-                transformed_strategies,
-                source="redis_user_portfolio",
-                degraded=False,
-                success=True
-            )
+            return {
+                "success": True,
+                "active_strategies": transformed_strategies,
+                "summary": portfolio_summary,
+                "strategies": transformed_strategies,
+                "total_strategies": len(strategy_portfolio),
+                "total_monthly_cost": total_monthly_cost,
+                "cached": False
+            }
             
         except asyncio.TimeoutError:
             self.logger.error("❌ Redis operation timeout", user_id=user_id)
@@ -2090,14 +2022,14 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         """Rebuild the user's strategy portfolio directly from the database."""
 
         try:
-            # Use the improved _load_active_strategy_access_records method from st1bt7
+            # Use improved strategy access record loading for better data flow
             access_records, ttl_seconds = await self._load_active_strategy_access_records(user_id)
 
             if not access_records:
                 self.logger.info("No database-backed strategies found during hydration", user_id=user_id)
                 return []
 
-            # Use st1bt7's simplified approach since _load_active_strategy_access_records already filters valid records
+            # Use uz53pl's cleaner approach with enhanced validation
             valid_strategy_ids = [record.strategy_id for record in access_records]
 
             if not valid_strategy_ids:
@@ -2110,7 +2042,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 for strategy_id in valid_strategy_ids:
                     await self._safe_redis_operation(redis_client.sadd, redis_key, strategy_id)
 
-                # Use st1bt7's simplified approach since TTL is already calculated in _load_active_strategy_access_records
+                # TTL is properly calculated in _load_active_strategy_access_records for optimal data flow
                 if ttl_seconds:
                     await self._safe_redis_operation(
                         redis_client.expire,

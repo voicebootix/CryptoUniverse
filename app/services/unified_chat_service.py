@@ -23,7 +23,7 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
-from app.core.database import AsyncSessionLocal, get_database_session
+from app.core.database import AsyncSessionLocal
 from app.core.redis import get_redis_client
 
 # Import the new ChatAI service for conversations
@@ -189,7 +189,20 @@ class UnifiedChatService(LoggerMixin):
             return normalized not in {"false", "0", "no", "off"}
 
         return bool(value)
-    
+
+    def _json_default(self, obj):
+        """Default JSON serializer for complex types."""
+        from decimal import Decimal
+
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, Decimal):
+            return float(obj)
+        elif isinstance(obj, uuid.UUID):
+            return str(obj)
+        else:
+            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
     async def _ensure_redis(self):
         """Ensure Redis connection for caching."""
         if not self._redis_initialized:
@@ -577,12 +590,12 @@ class UnifiedChatService(LoggerMixin):
         Uses the same credit lookup logic as the API endpoint.
         """
         try:
-            from decimal import Decimal
+            from app.core.database import get_database
             from app.models.credit import CreditAccount
             from sqlalchemy import select
             import uuid
 
-            async with get_database_session() as db:
+            async with get_database() as db:
                 # Try multiple lookup methods to find existing account
                 credit_account = None
 
@@ -610,27 +623,15 @@ class UnifiedChatService(LoggerMixin):
                         "account_status": "no_account"
                     }
 
-                # Found existing account - normalise numeric fields for downstream prompts
-                available_credits = int(max(0, credit_account.available_credits or 0))
-                total_credits = int(max(available_credits, credit_account.total_credits or 0))
-                used_credits = int(max(0, credit_account.used_credits or 0))
+                # Found existing account - use it
+                available_credits = max(0, credit_account.available_credits or 0)
                 required_credits = self.live_trading_credit_requirement
-
-                try:
-                    profit_potential = float(credit_account.calculate_profit_potential())
-                except Exception:
-                    profit_potential = float(Decimal(available_credits) * Decimal(4))
-
-                profit_earned = float(credit_account.total_profit_realized_usd or 0)
 
                 return {
                     "has_credits": available_credits >= required_credits,
                     "available_credits": available_credits,
                     "required_credits": required_credits,
-                    "total_credits": total_credits,
-                    "used_credits": used_credits,
-                    "profit_potential": profit_potential,
-                    "profit_realized": profit_earned,
+                    "total_credits": credit_account.total_credits,
                     "credit_tier": "premium" if available_credits > 100 else "standard",
                     "account_status": "active"
                 }
@@ -712,10 +713,11 @@ class UnifiedChatService(LoggerMixin):
             # Use EXACT same code path as working trading API endpoint
             import asyncio
             from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
+            from app.core.database import get_database
 
             # Fix: Apply timeout at the correct level to avoid async context conflicts
             async def _fetch_portfolio():
-                async with get_database_session() as db:
+                async with get_database() as db:
                     return await get_user_portfolio_from_exchanges(str(user_id), db)
 
             portfolio_data = await asyncio.wait_for(_fetch_portfolio(), timeout=15.0)
@@ -810,11 +812,7 @@ class UnifiedChatService(LoggerMixin):
         # Always get basic portfolio data with error handling
         try:
             # For general queries, use placeholder to avoid expensive calls
-            context_data["portfolio"] = {
-                "total_value": 0,
-                "positions": [],
-                "note": "Use PORTFOLIO_ANALYSIS intent for real data"
-            }
+            context_data["portfolio"] = {"total_value": 0, "positions": [], "note": "Use PORTFOLIO_ANALYSIS intent for real data"}
         except Exception as e:
             self.logger.error("Failed to get portfolio summary", error=str(e), user_id=user_id)
             context_data["portfolio"] = {"error": "Portfolio data unavailable"}
@@ -824,40 +822,22 @@ class UnifiedChatService(LoggerMixin):
             # Get REAL portfolio data from exchanges
             context_data["portfolio"] = await self._transform_portfolio_for_chat(user_id)
 
-            # Get real risk analysis
-            try:
-                risk_data = await self.portfolio_risk.risk_analysis(user_id)
-                context_data["risk_analysis"] = risk_data
-            except Exception as e:
-                self.logger.error("Failed to get risk analysis", error=str(e), user_id=user_id)
-                context_data["risk_analysis"] = {"overall_risk": "Medium", "error": f"Risk analysis unavailable: {str(e)}"}
+            # Risk analysis integration pending
+            context_data["risk_analysis"] = {"overall_risk": "Medium", "error": "Risk analysis integration pending"}
             context_data["performance"] = await self._get_performance_metrics(user_id)
             
         elif intent == ChatIntent.TRADE_EXECUTION:
             # Get market data for trade analysis
             entities = intent_analysis.get("entities", {})
-            symbol = entities.get("symbol", "BTC")
-            # Get real market data
-            try:
-                market_data = await self._get_real_market_data(symbol)
-                context_data["market_data"] = market_data
-            except Exception as e:
-                self.logger.error("Failed to get market data", error=str(e), symbol=symbol)
-                context_data["market_data"] = {"current_price": 0, "error": f"Market data unavailable: {str(e)}", "symbol": symbol}
+            # Market data integration pending
+            context_data["market_data"] = {"current_price": 0, "error": "Market data integration pending"}
             context_data["trade_validation"] = await self._prepare_trade_validation(entities, user_id)
             
         elif intent == ChatIntent.MARKET_ANALYSIS:
             # Get comprehensive market analysis
             context_data["market_overview"] = await self.market_analysis.get_market_overview()
-            # Get technical analysis
-            try:
-                entities = intent_analysis.get("entities", {})
-                symbol = entities.get("symbol", "BTC")
-                technical_data = await self._get_technical_analysis(symbol)
-                context_data["technical_analysis"] = technical_data
-            except Exception as e:
-                self.logger.error("Failed to get technical analysis", error=str(e))
-                context_data["technical_analysis"] = {"signals": [], "error": f"Technical analysis unavailable: {str(e)}"}
+            # Technical analysis integration pending
+            context_data["technical_analysis"] = {"signals": [], "error": "Technical analysis integration pending"}
             
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
             # Get real opportunities with error handling
@@ -878,13 +858,8 @@ class UnifiedChatService(LoggerMixin):
         elif intent == ChatIntent.RISK_ASSESSMENT:
             # Get comprehensive risk metrics
             context_data["risk_metrics"] = await self.portfolio_risk.risk_analysis(user_id)
-            # Get market risk analysis
-            try:
-                market_risk = await self._get_market_risk_analysis(user_id)
-                context_data["market_risk"] = market_risk
-            except Exception as e:
-                self.logger.error("Failed to get market risk analysis", error=str(e), user_id=user_id)
-                context_data["market_risk"] = {"factors": [], "error": f"Market risk analysis unavailable: {str(e)}"}
+            # Market risk integration pending
+            context_data["market_risk"] = {"factors": [], "error": "Market risk integration pending"}
             
         elif intent == ChatIntent.STRATEGY_RECOMMENDATION:
             # Get strategy recommendations with error handling
@@ -934,15 +909,10 @@ class UnifiedChatService(LoggerMixin):
                 # Use the credit check results regardless of status (as long as we got credits)
                 available_credits = float(credit_check_result.get("available_credits", 0))
                 total_credits = float(credit_check_result.get("total_credits", available_credits))
-                profit_potential = float(credit_check_result.get("profit_potential", available_credits * 4))
-                profit_realized = float(credit_check_result.get("profit_realized", credit_check_result.get("profit_earned", 0)))
-
                 context_data["credit_account"] = {
                     "available_credits": available_credits,
-                    "total_credits": total_credits,
-                    "used_credits": float(credit_check_result.get("used_credits", 0)),
-                    "profit_potential": profit_potential,
-                    "profit_realized": profit_realized,
+                    "total_credits": total_credits,  # Use actual total from credit check
+                    "profit_potential": total_credits * 4,  # 1 credit = $4 profit potential
                     "account_tier": credit_check_result.get("credit_tier", "standard"),
                     "account_status": credit_check_result.get("account_status", "unknown")
                 }
@@ -969,7 +939,6 @@ class UnifiedChatService(LoggerMixin):
             except Exception as e:
                 self.logger.error("Failed to get rebalancing analysis", error=str(e), user_id=user_id)
                 context_data["rebalance_analysis"] = {"needs_rebalancing": False, "error": f"Rebalancing analysis unavailable: {str(e)}"}
-
         # Add user context
         context_data["user_config"] = user_config
         context_data["session_context"] = session.context
@@ -1184,7 +1153,7 @@ Tell them the development team needs to investigate this specific error."""
 
 Portfolio Data (REAL):
 - Total Value: ${portfolio.get('total_value', 0):,.2f}
-- Daily P&L: ${portfolio.get('daily_pnl', 0):,.2f} ({portfolio.get('daily_pnl_pct', 0):.2f}%)
+- Daily P&L: ${portfolio.get('daily_pnl', 0):,.2f} ({_safe_float(portfolio.get('daily_pnl_pct', 0), 0.0):.2f}%)
 - Positions: {len(portfolio.get('positions', []))}
 - Risk Level: {risk.get('overall_risk', 'Unknown')}
 - Top Holdings: {', '.join([f"{p['symbol']} (${p['value_usd']:,.2f})" for p in portfolio.get('positions', [])[:3]])}
@@ -1199,7 +1168,7 @@ Provide a comprehensive portfolio analysis using this real data."""
 
 Market Data (REAL):
 - Current Price: ${market.get('current_price', 0):,.2f}
-- 24h Change: {market.get('change_24h', 0):.2f}%
+- 24h Change: {_safe_float(market.get('change_24h', 0), 0.0):.2f}%
 - Volume: ${market.get('volume_24h', 0):,.0f}
 - Trend: {market.get('trend', 'Unknown')}
 
@@ -1242,7 +1211,8 @@ REBALANCING ANALYSIS ERROR:
 
             def _pct(value: Any) -> Optional[str]:
                 try:
-                    return f"{float(value):.2%}"
+                    safe_value = _safe_float(value, 0.0)
+                    return f"{safe_value:.2%}" if safe_value is not None else "0.00%"
                 except (TypeError, ValueError):
                     return None
 
@@ -1298,13 +1268,13 @@ REBALANCING ANALYSIS ERROR:
             ranking_lines: List[str] = []
             for rank_idx, ranking in enumerate(strategy_rankings[:6], 1):
                 ranking_lines.append(
-                    "  {}. {} | score {:.3f} | trade volume {:.2%} | Sharpe {:.2f} | exp. return {:.2%}".format(
+                    "  {}. {} | score {:.3f} | trade volume {} | Sharpe {} | exp. return {}".format(
                         rank_idx,
                         ranking.get("strategy", "unknown"),
-                        ranking.get("score", 0.0),
-                        ranking.get("trade_volume_pct", 0.0),
-                        ranking.get("sharpe_ratio", 0.0),
-                        ranking.get("expected_return", 0.0),
+                        _safe_float(ranking.get("score", 0.0), 0.0) or 0.0,
+                        _format_percentage(ranking.get("trade_volume_pct", 0.0)) or "N/A",
+                        f"{_safe_float(ranking.get('sharpe_ratio', 0.0), 0.0):.2f}" if _safe_float(ranking.get('sharpe_ratio', 0.0)) is not None else "N/A",
+                        _format_percentage(ranking.get("expected_return", 0.0)) or "N/A",
                     )
                 )
 
@@ -1359,20 +1329,13 @@ REBALANCING ANALYSIS ERROR:
             return "\n".join(instructions)
 
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-            # Combine both approaches for maximum safety and functionality
+            # Use uz53pl's enhanced data flow structure for better chat logic
             opportunities_data = context_data.get("opportunities", {})
+            opportunities = opportunities_data.get("opportunities", [])
+            strategy_performance = opportunities_data.get("strategy_performance", {})
+            user_profile = opportunities_data.get("user_profile", {})
 
-            # Ensure payload is always a dict - handle None, non-dict values safely
-            payload = opportunities_data.get("payload") or opportunities_data or {}
-            if not isinstance(payload, dict):
-                payload = {}
-
-            # Extract data with fallbacks from both branches
-            opportunities = payload.get("opportunities") or opportunities_data.get("opportunities", [])
-            strategy_performance = payload.get("strategy_performance") or opportunities_data.get("strategy_performance", {})
-            user_profile = payload.get("user_profile") or opportunities_data.get("user_profile", {})
-
-            # Group opportunities by strategy with improved naming from st1bt7
+            # Group opportunities by strategy with deterministic naming
             opportunities_by_strategy: Dict[str, List[Dict[str, Any]]] = {}
             for opportunity in opportunities:
                 strategy_name = (
@@ -1383,11 +1346,12 @@ REBALANCING ANALYSIS ERROR:
                 normalized_strategy = strategy_name.replace("_", " ").title()
                 opportunities_by_strategy.setdefault(normalized_strategy, []).append(opportunity)
 
+            # uz53pl approach: cleaner data extraction without duplication
             # Build comprehensive prompt
             prompt_parts = [f'User asked: "{message}"']
             prompt_parts.append(f"\nTotal opportunities found: {len(opportunities)}")
             prompt_parts.append(f"User risk profile: {user_profile.get('risk_profile', 'balanced')}")
-            # Use the robust coercion logic from HEAD branch for better data handling
+            # Use robust data coercion for better chat logic (enhanced from uz53pl intent)
             active_strategies_raw = user_profile.get("active_strategies")
             if isinstance(active_strategies_raw, (list, tuple, set)):
                 active_strategies_total = len(active_strategies_raw)
@@ -1405,7 +1369,7 @@ REBALANCING ANALYSIS ERROR:
                     f"Strategy portfolio fingerprint: {user_profile['strategy_fingerprint']}"
                 )
 
-            # Helper functions for safe data conversion (moved outside conditional - critical bug fix from st1bt7)
+            # Helper functions for safe data conversion (essential for uz53pl's enhanced chat data flow)
             def _safe_int(value: Any, default: int = 0) -> int:
                 try:
                     if isinstance(value, str):
@@ -1437,12 +1401,26 @@ REBALANCING ANALYSIS ERROR:
                 return normalized
 
             def _format_percentage(value: Any) -> Optional[str]:
-                percent_value = _safe_percentage(value)
-                if percent_value is None:
+                candidate: Any = value
+                if isinstance(candidate, str):
+                    stripped = candidate.strip()
+                    if not stripped:
+                        return None
+                    if stripped.endswith("%"):
+                        stripped = stripped[:-1].strip()
+                    try:
+                        candidate = float(stripped)
+                    except ValueError:
+                        return None
+                if not isinstance(candidate, (int, float)):
                     return None
-                return f"{percent_value:.1f}%"
+                numeric = float(candidate)
+                if abs(numeric) <= 1:
+                    numeric *= 100
+                return f"{numeric:.1f}%"
 
-            # Strategy performance summary with improved safe conversion
+            # Strategy performance summary with uz53pl's enhanced chat data flow
+
             if strategy_performance:
                 prompt_parts.append("\n📊 STRATEGY PERFORMANCE:")
                 for strat, performance in strategy_performance.items():
@@ -1459,7 +1437,7 @@ REBALANCING ANALYSIS ERROR:
                     if total_potential:
                         summary_line += f" • ${total_potential:,.0f} potential"
                     if average_confidence is not None:
-                        summary_line += f" • {average_confidence:.1f}% avg confidence"
+                        summary_line += f" • {_safe_float(average_confidence, 0.0):.1f}% avg confidence"
                     prompt_parts.append(summary_line)
 
             # Detailed opportunities by strategy
@@ -1469,7 +1447,7 @@ REBALANCING ANALYSIS ERROR:
 
                 for index, opportunity in enumerate(strategy_opps[:3], start=1):
                     symbol = opportunity.get("symbol", "N/A")
-                    # Use improved safe conversion from st1bt7
+                    # uz53pl's enhanced opportunity data processing
                     confidence_raw = opportunity.get("confidence_score", 0.0)
                     profit_usd_raw = opportunity.get("profit_potential_usd", 0.0)
                     metadata = opportunity.get("metadata", {}) or {}
@@ -1482,7 +1460,7 @@ REBALANCING ANALYSIS ERROR:
                     profit_usd_value = _safe_float(profit_usd_raw, 0.0)
 
                     prompt_parts.append(f"  {index}. {symbol}")
-                    prompt_parts.append(f"     Confidence: {confidence_value:.1f}%")
+                    prompt_parts.append(f"     Confidence: {_safe_float(confidence_value, 0.0):.1f}%")
                     prompt_parts.append(f"     Profit Potential: ${profit_usd_value:,.0f}")
 
                     action = metadata.get("signal_action") or opportunity.get("action")
@@ -1493,10 +1471,9 @@ REBALANCING ANALYSIS ERROR:
                     if "portfolio" in strategy_name_lower:
                         strategy_variant = metadata.get("strategy")
                         if strategy_variant:
-                            # Use HEAD's safe string coercion to prevent errors
-                            strategy_str = str(strategy_variant)
+                            # uz53pl's clean approach with safe string handling
                             prompt_parts.append(
-                                f"     Strategy: {strategy_str.replace('_', ' ').title()}"
+                                f"     Strategy: {strategy_variant.replace('_', ' ').title()}"
                             )
 
                         expected_return = metadata.get("expected_annual_return")
@@ -1507,15 +1484,12 @@ REBALANCING ANALYSIS ERROR:
                                     f"     Expected Return: {formatted_expected}"
                                 )
 
-                        sharpe_ratio = metadata.get("sharpe_ratio")
-                        if sharpe_ratio is not None:
-                            try:
-                                # Safe coercion to float for formatting
-                                numeric_sharpe = float(sharpe_ratio)
-                                prompt_parts.append(f"     Sharpe Ratio: {numeric_sharpe:.2f}")
-                            except (TypeError, ValueError):
-                                # Preserve original value when coercion fails
-                                prompt_parts.append(f"     Sharpe Ratio: {sharpe_ratio}")
+                        sharpe_ratio_raw = metadata.get("sharpe_ratio")
+                        sharpe_ratio_value = _safe_float(sharpe_ratio_raw, None)
+                        if sharpe_ratio_value is not None:
+                            prompt_parts.append(
+                                f"     Sharpe Ratio: {_safe_float(sharpe_ratio_value, 0.0):.2f}"
+                            )
 
                         risk_level = metadata.get("risk_level")
                         if risk_level is not None:
@@ -1523,7 +1497,7 @@ REBALANCING ANALYSIS ERROR:
                                 prompt_parts.append(f"     Risk Level: {risk_level}")
                             else:
                                 prompt_parts.append(
-                                    f"     Risk Level: {risk_level * 100:.1f}%"
+                                    f"     Risk Level: {_safe_float(risk_level, 0.0) * 100:.1f}%"
                                 )
 
                         allocation = metadata.get("amount")
@@ -1544,6 +1518,7 @@ REBALANCING ANALYSIS ERROR:
                         urgency = metadata.get("urgency")
                         if urgency is not None:
                             prompt_parts.append(f"     Urgency: {urgency}")
+
             prompt_parts.append(f"""
 
 INSTRUCTIONS FOR AI MONEY MANAGER:
@@ -1583,22 +1558,8 @@ MARKETPLACE SUMMARY:
 
 Provide a comprehensive overview of the user's strategy portfolio, subscription status, and actionable recommendations for strategy management."""
             else:
-                # Check if this is a degraded response (timeout/error fallback)
-                if user_strategies.get("degraded", False):
-                    source = user_strategies.get("source", "unknown")
-                    return f"""User asked: "{message}"
-
-STRATEGY ACCESS STATUS:
-- Current Access: Temporarily Unable to Load (System Issue)
-- Cause: {source.replace('_', ' ').title()}
-- Available Marketplace Strategies: {len(marketplace_strategies.get('strategies', []))}
-
-Important: Your actual strategy portfolio could not be loaded at this time due to a temporary system issue.
-Please try again in a few moments. Do NOT make any strategy purchase decisions based on this response.
-If the issue persists, please contact support."""
-                else:
-                    error = user_strategies.get("error", "Unknown error")
-                    return f"""User asked: "{message}"
+                error = user_strategies.get("error", "Unknown error")
+                return f"""User asked: "{message}"
 
 STRATEGY ACCESS STATUS:
 - Current Access: Limited or None
@@ -1623,7 +1584,7 @@ AVAILABLE STRATEGIES:
 - Strategy Categories: {list(set([s.get('category', 'Unknown') for s in available_strategies.get('strategies', [])]))}
 
 Top Recommended Strategies:
-{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - Expected Return: {s.get('expected_return', 0)*100:.1f}%" for s in available_strategies.get('strategies', [])[:5]])}
+{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - Expected Return: {_safe_float(s.get('expected_return', 0), 0.0)*100:.1f}%" for s in available_strategies.get('strategies', [])[:5]])}
 
 Provide personalized strategy recommendations based on the user's current setup and available strategies."""
 
@@ -1635,9 +1596,7 @@ Provide personalized strategy recommendations based on the user's current setup 
 CREDIT ACCOUNT SUMMARY:
 - Available Credits: {credit_account.get('available_credits', 0):,.0f} credits
 - Total Credits Purchased: {credit_account.get('total_credits', 0):,.0f} credits
-- Credits Used To Date: {credit_account.get('used_credits', 0):,.0f} credits
-- Profit Potential Remaining: ${credit_account.get('profit_potential', 0):,.2f}
-- Profit Already Realized: ${credit_account.get('profit_realized', 0):,.2f}
+- Profit Potential: ${credit_account.get('profit_potential', 0):,.2f}
 - Account Tier: {credit_account.get('account_tier', 'standard').title()}
 
 CREDIT CONVERSION RATE:
@@ -1654,7 +1613,6 @@ Provide a clear explanation of the user's credit balance, what it means for thei
 
 CREDIT MANAGEMENT OVERVIEW:
 - Current Balance: {credit_account.get('available_credits', 0):,.0f} credits
-- Credits Used: {credit_account.get('used_credits', 0):,.0f} credits
 - Account Tier: {credit_account.get('account_tier', 'standard').title()}
 - Profit Potential: ${credit_account.get('profit_potential', 0):,.2f}
 
@@ -1738,16 +1696,10 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "created_at": datetime.utcnow().isoformat(),
                     "expires_at": (datetime.utcnow() + timedelta(minutes=5)).isoformat()
                 }
-                def json_serializer(obj):
-                    """Convert non-serializable objects to strings."""
-                    if hasattr(obj, 'isoformat'):  # datetime objects
-                        return obj.isoformat()
-                    return str(obj)
-
                 await redis.setex(
                     f"pending_decision:{decision_id}",
                     300,  # 5 minute expiry
-                    json.dumps(decision_data, default=json_serializer)
+                    json.dumps(decision_data, default=self._json_default)
                 )
         except Exception as e:
             self.logger.error("Failed to store pending decision", error=str(e))
@@ -1768,8 +1720,8 @@ Provide a helpful response using the real data available. Never use placeholder 
             redis = await self._ensure_redis()
             if not redis:
                 return {"success": False, "error": "Decision storage not available"}
-
-            decision_data = await redis.get(f"pending_decision:{decision_id}")
+            
+            decision_data = await redis.get(f"pending_decision:{decision_id}", deserialize=False)
             if not decision_data:
                 return {"success": False, "error": "Decision not found or expired"}
 
@@ -1786,13 +1738,14 @@ Provide a helpful response using the real data available. Never use placeholder 
             # Verify user
             if decision["user_id"] != user_id:
                 return {"success": False, "error": "Unauthorized"}
-
+            
             if not approved:
                 return {"success": True, "message": "Decision rejected by user"}
+            
             # Execute based on intent
             intent = ChatIntent(decision["intent"])
             context_data = decision["context_data"]
-
+            
             if intent == ChatIntent.TRADE_EXECUTION:
                 # 5-PHASE EXECUTION PRESERVED
                 return await self._execute_trade_with_validation(
@@ -1831,7 +1784,6 @@ Provide a helpful response using the real data available. Never use placeholder 
         """
         # Merge both approaches for robust trade execution
         trade_payload = dict(trade_params or {})
-        trade_params = trade_params or {}
 
         if modifications:
             trade_payload.update(modifications)
@@ -1860,8 +1812,9 @@ Provide a helpful response using the real data available. Never use placeholder 
 
             # Phase 2: AI Consensus (ONLY for trade validation)
             self.logger.info("Phase 2: AI Consensus Validation")
-            consensus = await self.ai_consensus.validate_trade(
-                analysis,  # Pass analysis as first argument
+            consensus = await self.ai_consensus.validate_trade_decision(
+                trade_params=trade_payload,
+                market_analysis=analysis,
                 confidence_threshold=85.0,
                 user_id=user_id
             )
@@ -1900,7 +1853,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                 }
 
             trade_request = validation.get("trade_request", trade_request)
-            trade_request["side"] = trade_request.get("action", trade_request.get("side", "BUY")).lower()
+            trade_request.setdefault("side", trade_request.get("action", "BUY").lower())
 
             # Phase 4: Execution
             self.logger.info("Phase 4: Trade Execution")
@@ -1952,61 +1905,66 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "execution_details": paper_result,
                     "monitoring_details": monitoring
                 }
-            else:
+
+            # Use validated trade_payload as the source of truth
+            # Only apply simulation mode if not explicitly set in the request
+            if "simulation_mode" not in trade_payload:
                 simulation_mode = await self._get_user_simulation_mode(user_id)
                 if simulation_mode is None:
                     simulation_mode = True
+            else:
+                simulation_mode = trade_payload.get("simulation_mode", True)
 
-                trade_request = self._build_trade_request_for_execution(trade_payload, market_data)
-                if not trade_request.get("symbol") or not trade_request.get("action"):
-                    return {
-                        "success": False,
-                        "message": "Validated trade request missing required fields",
-                        "phases_completed": phases_completed
-                    }
-
-                execution = await self.trade_executor.execute_trade(
-                    trade_request,
-                    user_id,
-                    simulation_mode
-                )
-                phases_completed.append("execution")
-
-                if not execution.get("success", False):
-                    return {
-                        "success": False,
-                        "message": "Trade execution failed",
-                        "reason": execution.get("error", "Unknown error"),
-                        "phases_completed": phases_completed
-                    }
-
-                trade_id = execution.get("trade_id")
-                simulation_identifier = execution.get("simulation_result", {}).get("order_id")
-                derived_trade_id = trade_id or simulation_identifier
-
-                if trade_id:
-                    # Phase 5: Monitoring
-                    self.logger.info("Phase 5: Trade Monitoring")
-                    monitoring = await self._initiate_trade_monitoring(
-                        trade_id,
-                        user_id
-                    )
-                    phases_completed.append("monitoring")
-                else:
-                    monitoring = {
-                        "monitoring_active": False,
-                        "reason": "Trade monitoring skipped - no trade ID available",
-                        "simulation": simulation_identifier is not None
-                    }
-
+            # Verify essential fields are present in validated trade_payload
+            if not trade_payload.get("symbol") or not trade_payload.get("action"):
                 return {
-                    "success": True,
-                    "message": execution.get("message", "Trade executed successfully"),
-                    "trade_id": derived_trade_id,
-                    "phases_completed": phases_completed,
-                    "execution_details": execution,
-                    "monitoring_details": monitoring
+                    "success": False,
+                    "message": "Trade payload missing essential fields after validation",
+                    "phases_completed": phases_completed
                 }
+
+            execution = await self.trade_executor.execute_trade(
+                trade_payload,
+                user_id,
+                simulation_mode
+            )
+            phases_completed.append("execution")
+
+            if not execution.get("success", False):
+                return {
+                    "success": False,
+                    "message": "Trade execution failed",
+                    "reason": execution.get("error", "Unknown error"),
+                    "phases_completed": phases_completed
+                }
+
+            trade_id = execution.get("trade_id")
+            simulation_identifier = execution.get("simulation_result", {}).get("order_id")
+            derived_trade_id = trade_id or simulation_identifier
+
+            if trade_id:
+                # Phase 5: Monitoring
+                self.logger.info("Phase 5: Trade Monitoring")
+                monitoring = await self._initiate_trade_monitoring(
+                    trade_id,
+                    user_id
+                )
+                phases_completed.append("monitoring")
+            else:
+                monitoring = {
+                    "monitoring_active": False,
+                    "reason": "Trade monitoring skipped - no trade ID available",
+                    "simulation": simulation_identifier is not None
+                }
+
+            return {
+                "success": True,
+                "message": execution.get("message", "Trade executed successfully"),
+                "trade_id": derived_trade_id,
+                "phases_completed": phases_completed,
+                "execution_details": execution,
+                "monitoring_details": monitoring
+            }
 
         except Exception as e:
             self.logger.exception("Trade execution error", error=str(e))
@@ -2025,7 +1983,7 @@ Provide a helpful response using the real data available. Never use placeholder 
             except (ValueError, TypeError):
                 user_identifier = user_id
 
-            async with get_database_session() as session:
+            async with AsyncSessionLocal() as session:
                 result = await session.execute(
                     select(User.simulation_mode).where(User.id == user_identifier)
                 )
@@ -2058,11 +2016,7 @@ Provide a helpful response using the real data available. Never use placeholder 
         if action:
             normalized_action = action.upper() if isinstance(action, str) else action
             trade_request["action"] = normalized_action
-            trade_request["side"] = (
-                normalized_action.lower()
-                if isinstance(normalized_action, str)
-                else normalized_action
-            )
+            trade_request["side"] = normalized_action
 
         order_type = trade_params.get("order_type")
         if isinstance(order_type, str):
@@ -2076,17 +2030,14 @@ Provide a helpful response using the real data available. Never use placeholder 
         amount = trade_params.get("amount") or trade_params.get("position_size_usd")
         if amount:
             trade_request["position_size_usd"] = amount
-
-            # Only calculate quantity from amount if not already set
-            if not trade_request.get("quantity"):
-                price = market_data.get("current_price")
-                if price:
-                    try:
-                        quantity = float(amount) / float(price)
-                        if quantity > 0:
-                            trade_request.setdefault("quantity", quantity)
-                    except (TypeError, ZeroDivisionError):
-                        pass
+            price = market_data.get("current_price")
+            if price:
+                try:
+                    quantity = float(amount) / float(price)
+                    if quantity > 0:
+                        trade_request.setdefault("quantity", quantity)
+                except (TypeError, ZeroDivisionError):
+                    pass
 
         for optional_key in [
             "price",
@@ -2102,7 +2053,7 @@ Provide a helpful response using the real data available. Never use placeholder 
 
         action_value = trade_request.get("action")
         if isinstance(action_value, str) and action_value:
-            trade_request["side"] = trade_request.get("side", action_value).lower()
+            trade_request.setdefault("side", action_value.lower())
 
         return trade_request
 
@@ -2125,8 +2076,9 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "symbol": trade.get("symbol"),
                     "action": trade.get("action") or trade.get("side"),
                     "amount": trade.get("amount"),
-                    "position_size_usd": trade.get("position_size_usd") or trade.get("amount"),
-                    "quantity": trade.get("quantity"),
+                    "position_size_usd": trade.get("position_size_usd")
+                    or trade.get("amount"),
+                    "quantity": trade.get("quantity", trade.get("amount")),
                     "order_type": trade.get("order_type", "market"),
                     "price": trade.get("price"),
                     "exchange": trade.get("exchange"),
@@ -2145,25 +2097,21 @@ Provide a helpful response using the real data available. Never use placeholder 
                     self.logger.exception(
                         "Rebalancing trade validation crashed",
                         error=str(validation_error),
-                        trade=base_request,
+                        trade=base_request
                     )
-                    results.append(
-                        {
-                            "success": False,
-                            "error": str(validation_error),
-                            "trade_request": base_request,
-                        }
-                    )
+                    results.append({
+                        "success": False,
+                        "error": str(validation_error),
+                        "trade_request": base_request
+                    })
                     continue
 
                 if not validation.get("valid", False):
-                    results.append(
-                        {
-                            "success": False,
-                            "error": validation.get("reason", "Invalid parameters"),
-                            "trade_request": validation.get("trade_request", base_request),
-                        }
-                    )
+                    results.append({
+                        "success": False,
+                        "error": validation.get("reason", "Invalid parameters"),
+                        "trade_request": validation.get("trade_request", base_request)
+                    })
                     continue
 
                 normalized_request = validation.get("trade_request", base_request)
@@ -2195,7 +2143,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                 "success": False,
                 "error": str(e),
             }
-
+    
     async def _initiate_trade_monitoring(
         self,
         trade_id: str,
@@ -2229,20 +2177,20 @@ Provide a helpful response using the real data available. Never use placeholder 
         try:
             # Save user message
             await self.memory_service.add_message(
-                session_id=session_id,
-                user_id=user_id,
-                message_type=ChatMessageType.USER,
-                content=user_message,
-                metadata={"intent": intent.value, "confidence": confidence}
+            session_id=session_id,
+            user_id=user_id,
+            message_type=ChatMessageType.USER,
+            content=user_message,
+            metadata={"intent": intent.value, "confidence": confidence}
             )
-
+            
             # Save assistant response
             await self.memory_service.add_message(
-                session_id=session_id,
-                user_id=user_id,
-                message_type=ChatMessageType.ASSISTANT,
-                content=assistant_message,
-                metadata={"intent": intent.value}
+            session_id=session_id,
+            user_id=user_id,
+            message_type=ChatMessageType.ASSISTANT,
+            content=assistant_message,
+            metadata={"intent": intent.value}
             )
         except Exception as e:
             self.logger.error("Failed to save conversation", error=str(e))
