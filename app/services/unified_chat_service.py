@@ -1420,6 +1420,7 @@ REBALANCING ANALYSIS ERROR:
                 return f"{numeric:.1f}%"
 
             # Strategy performance summary with uz53pl's enhanced chat data flow
+
             if strategy_performance:
                 prompt_parts.append("\n📊 STRATEGY PERFORMANCE:")
                 for strat, performance in strategy_performance.items():
@@ -1858,9 +1859,10 @@ Provide a helpful response using the real data available. Never use placeholder 
             self.logger.info("Phase 4: Trade Execution")
 
             if conversation_mode == ConversationMode.PAPER_TRADING:
-                # Use validated trade_request instead of raw trade_params
-                quantity = trade_request.get("quantity")
-                notional_amount = trade_request.get("amount") or trade_request.get("position_size_usd")
+                # Use validated trade_payload (or trade_request) instead of raw trade_params
+                # This ensures decision-time edits merged into trade_payload are used
+                quantity = trade_payload.get("quantity")
+                notional_amount = trade_payload.get("amount") or trade_payload.get("position_size_usd")
 
                 if not quantity and notional_amount and market_data.get("current_price"):
                     try:
@@ -1877,11 +1879,11 @@ Provide a helpful response using the real data available. Never use placeholder 
 
                 paper_result = await self.paper_trading.execute_paper_trade(
                     user_id=user_id,
-                    symbol=trade_request["symbol"],
-                    side=trade_request["action"],
+                    symbol=trade_payload["symbol"],
+                    side=trade_payload["action"],
                     quantity=quantity,
-                    strategy_used=trade_request.get("strategy", "chat_trade"),
-                    order_type=trade_request.get("order_type", "market")
+                    strategy_used=trade_payload.get("strategy", "chat_trade"),
+                    order_type=trade_payload.get("order_type", "market")
                 )
                 phases_completed.append("execution")
 
@@ -1895,7 +1897,6 @@ Provide a helpful response using the real data available. Never use placeholder 
 
                 monitoring = {"monitoring_active": False, "paper_trading": True}
                 phases_completed.append("monitoring")
-
                 return {
                     "success": True,
                     "message": paper_result.get("message", "Paper trade executed successfully"),
@@ -1905,25 +1906,25 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "monitoring_details": monitoring
                 }
 
-            # Use validated trade_request as the source of truth
+            # Use validated trade_payload as the source of truth
             # Only apply simulation mode if not explicitly set in the request
-            if "simulation_mode" not in trade_request:
+            if "simulation_mode" not in trade_payload:
                 simulation_mode = await self._get_user_simulation_mode(user_id)
                 if simulation_mode is None:
                     simulation_mode = True
             else:
-                simulation_mode = trade_request.get("simulation_mode", True)
+                simulation_mode = trade_payload.get("simulation_mode", True)
 
-            # Verify essential fields are present in validated trade_request
-            if not trade_request.get("symbol") or not trade_request.get("action"):
+            # Verify essential fields are present in validated trade_payload
+            if not trade_payload.get("symbol") or not trade_payload.get("action"):
                 return {
                     "success": False,
-                    "message": "Trade request missing essential fields after validation",
+                    "message": "Trade payload missing essential fields after validation",
                     "phases_completed": phases_completed
                 }
 
             execution = await self.trade_executor.execute_trade(
-                trade_request,
+                trade_payload,
                 user_id,
                 simulation_mode
             )

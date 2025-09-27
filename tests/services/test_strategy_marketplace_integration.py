@@ -36,7 +36,7 @@ from app.models.user import User, UserRole  # noqa: E402
 from app.services.strategy_marketplace_service import (  # noqa: E402
     StrategyMarketplaceService,
 )
-import app.services.strategy_submission_service as strategy_submission_module  # noqa: E402
+import app.services.strategy_submission_service as strategy_submission_module
 from app.services.strategy_submission_service import (  # noqa: E402
     StrategySubmissionService,
 )
@@ -114,7 +114,7 @@ async def test_published_submission_appears_in_marketplace(monkeypatch) -> None:
                     removed += 1
             return removed
 
-        async def scan_iter(self, match: str | None = None, count: int | None = None):
+        async def scan_iter(self, match: str | None = None, _count: int | None = None):
             prefix = ""
             if match:
                 prefix = match[:-1] if match.endswith("*") else match

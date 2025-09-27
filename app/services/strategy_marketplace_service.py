@@ -1737,6 +1737,20 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 if redis and db_ttl:
                     await self._safe_redis_operation(redis.expire, redis_key, db_ttl)
             else:
+                # CRITICAL: If DB returns no UserStrategyAccess records but Redis still contains IDs,
+                # we must drop the Redis set and reset in-memory state so revocations apply immediately
+                if active_strategies and redis:
+                    self.logger.warning(
+                        "🧹 Clearing stale Redis set - no valid access records found in database",
+                        user_id=user_id,
+                        stale_redis_ids=active_strategies,
+                        redis_key=redis_key
+                    )
+                    # Clear the stale Redis key
+                    await self._safe_redis_operation(redis.delete, redis_key)
+                    # Reset in-memory state
+                    active_strategies = []
+                    # Skip any TTL/expire logic since we cleared the key
                 record_lookup = {}
 
             # ENHANCED RECOVERY: If no strategies found, implement comprehensive recovery
@@ -1966,7 +1980,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             )
             return [], None
 
-        async with get_database() as db:
+        async with get_database_session() as db:
             query = (
                 select(UserStrategyAccess)
                 .where(
