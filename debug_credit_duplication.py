@@ -13,7 +13,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'app'))
 async def debug_credit_accounts():
     print("=== INVESTIGATING CREDIT ACCOUNT DUPLICATION ===")
 
-    from app.core.database import get_database
+    from app.core.database import get_database_session
     from app.models.credit import CreditAccount
     from app.models.user import User
     from sqlalchemy import select, text
@@ -23,7 +23,7 @@ async def debug_credit_accounts():
     user_id_str = "7a1ee8cd-bfc9-4e4e-85b2-69c8e91054af"
     user_uuid = uuid.UUID(user_id_str)
 
-    async with get_database() as db:
+    async with get_database_session() as db:
         print(f"1. Searching for ALL credit accounts for user_id: {user_id_str}")
 
         # Search by UUID

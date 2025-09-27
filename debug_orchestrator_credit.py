@@ -21,14 +21,14 @@ async def debug_orchestrator_credit():
 
     try:
         # Test the exact same logic as orchestrator
-        from app.core.database import get_database
+        from app.core.database import get_database_session
         from app.api.v1.endpoints.credits import get_or_create_credit_account
 
         # Convert string user_id to UUID (same as credit API)
         user_uuid = uuid.UUID(user_id_str)
         print(f"Converted to UUID: {user_uuid} (type: {type(user_uuid)})")
 
-        async with get_database() as db:
+        async with get_database_session() as db:
             print("Calling get_or_create_credit_account...")
             # Use the EXACT same function as credit API
             credit_account = await get_or_create_credit_account(user_uuid, db)

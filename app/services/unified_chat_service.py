@@ -23,7 +23,7 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, get_database_session
 from app.core.redis import get_redis_client
 
 # Import the new ChatAI service for conversations
@@ -590,12 +590,11 @@ class UnifiedChatService(LoggerMixin):
         Uses the same credit lookup logic as the API endpoint.
         """
         try:
-            from app.core.database import get_database
             from app.models.credit import CreditAccount
             from sqlalchemy import select
             import uuid
 
-            async with get_database() as db:
+            async with get_database_session() as db:
                 # Try multiple lookup methods to find existing account
                 credit_account = None
 
@@ -713,11 +712,10 @@ class UnifiedChatService(LoggerMixin):
             # Use EXACT same code path as working trading API endpoint
             import asyncio
             from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
-            from app.core.database import get_database
 
             # Fix: Apply timeout at the correct level to avoid async context conflicts
             async def _fetch_portfolio():
-                async with get_database() as db:
+                async with get_database_session() as db:
                     return await get_user_portfolio_from_exchanges(str(user_id), db)
 
             portfolio_data = await asyncio.wait_for(_fetch_portfolio(), timeout=15.0)
