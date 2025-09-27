@@ -240,14 +240,10 @@ class EnhancedAIChatEngine(LoggerMixin):
                     )
                     return last_session["session_id"]
             
-            # Generate proper UUID for new session
-            session_id = str(uuid.uuid4())
-            
-            # Create new session with the UUID
+            # Create new session
             created_session_id = await self.memory.create_session(
                 user_id=user_id,
                 session_type=session_type,
-                session_id=session_id,  # Pass the UUID to ensure proper format
                 context={
                     "preferences": {},
                     "active_strategies": [],
@@ -255,9 +251,11 @@ class EnhancedAIChatEngine(LoggerMixin):
                     "created_via": "chat_interface"
                 }
             )
-            
-            # Use the created session ID (should be the same UUID we passed)
-            session_id = created_session_id if created_session_id else session_id
+
+            if not created_session_id:
+                raise ValueError("Chat session was not created successfully")
+
+            session_id = created_session_id
             
             # Add welcome message
             await self.memory.save_message(

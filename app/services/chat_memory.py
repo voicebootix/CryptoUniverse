@@ -9,6 +9,7 @@ features like summarization and context management.
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
+import uuid
 from sqlalchemy import desc, asc, and_, or_, select, text, func
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError
@@ -37,10 +38,11 @@ class ChatMemoryService:
         self.session_timeout_hours = 24  # Hours before session becomes inactive
     
     async def create_session(
-        self, 
-        user_id: str, 
+        self,
+        user_id: str,
         session_type: str = "general",
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None
     ) -> str:
         """
         Create a new chat session.
@@ -49,13 +51,25 @@ class ChatMemoryService:
             user_id: User identifier
             session_type: Type of session (general, trading, analysis)
             context: Initial session context
+            session_id: Optional pre-generated session identifier
             
         Returns:
             Session ID string
         """
         try:
+            provided_session_id: Optional[uuid.UUID] = None
+            if session_id:
+                if isinstance(session_id, uuid.UUID):
+                    provided_session_id = session_id
+                else:
+                    try:
+                        provided_session_id = uuid.UUID(str(session_id))
+                    except ValueError as exc:
+                        raise ValueError("session_id must be a valid UUID") from exc
+
             async for db in get_database():
                 session = ChatSession(
+                    session_id=provided_session_id,
                     user_id=user_id,
                     session_type=session_type,
                     context=context or {},
