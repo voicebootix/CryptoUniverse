@@ -12,13 +12,13 @@ from uuid import UUID
 sys.path.append(os.path.join(os.path.dirname(__file__), 'app'))
 
 async def debug_exchanges():
-    from app.core.database import get_database
+    from app.core.database import get_database_session
     from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance, ApiKeyStatus, ExchangeStatus
     from sqlalchemy import select, and_, or_
 
     user_id = '7a1ee8cd-bfc9-4e4e-85b2-69c8e91054af'
 
-    async with get_database() as db:
+    async with get_database_session() as db:
         print(f"\n=== DEBUGGING EXCHANGE ACCOUNTS FOR USER {user_id} ===\n")
 
         # 1. Check all exchange accounts for this user

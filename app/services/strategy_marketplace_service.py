@@ -23,7 +23,7 @@ from sqlalchemy import select, and_, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.database import get_database
+from app.core.database import get_database_session
 from app.core.logging import LoggerMixin
 from app.core.async_session_manager import DatabaseSessionMixin
 from app.models.trading import TradingStrategy, Trade
@@ -1266,7 +1266,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             return community_items
 
         try:
-            async with get_database() as db:
+            async with get_database_session() as db:
                 return await _load_with_session(db)
 
         except Exception as e:
@@ -1334,7 +1334,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 result = await db.execute(stmt)
                 recent_trades = result.scalars().all()
             else:
-                async with get_database() as db:
+                async with get_database_session() as db:
                     # Get recent trades for this strategy
                     stmt = select(Trade).where(
                         and_(
@@ -1392,7 +1392,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     ) -> Dict[str, Any]:
         """Purchase access to strategy using credits."""
         try:
-            async with get_database() as db:
+            async with get_database_session() as db:
                 # Get user's credit account
                 credit_stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
                 credit_result = await db.execute(credit_stmt)
@@ -1616,11 +1616,11 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
 
         # ADMIN BYPASS: For admin users, check if we should use fast database path
         try:
-            from app.core.database import get_database
+            from app.core.database import get_database_session
             from app.models.user import User, UserRole
             from sqlalchemy import select
 
-            async with get_database() as db:
+            async with get_database_session() as db:
                 # Check if this is an admin user (convert string UUID to proper UUID)
                 import uuid
                 try:
