@@ -1407,6 +1407,7 @@ REBALANCING ANALYSIS ERROR:
                 return f"{numeric:.1f}%"
 
             # Strategy performance summary with uz53pl's enhanced chat data flow
+
             if strategy_performance:
                 prompt_parts.append("\n📊 STRATEGY PERFORMANCE:")
                 for strat, performance in strategy_performance.items():
@@ -1845,8 +1846,10 @@ Provide a helpful response using the real data available. Never use placeholder 
             self.logger.info("Phase 4: Trade Execution")
 
             if conversation_mode == ConversationMode.PAPER_TRADING:
-                quantity = trade_params.get("quantity")
-                notional_amount = trade_params.get("amount") or trade_params.get("position_size_usd")
+                # Use validated trade_payload (or trade_request) instead of raw trade_params
+                # This ensures decision-time edits merged into trade_payload are used
+                quantity = trade_payload.get("quantity")
+                notional_amount = trade_payload.get("amount") or trade_payload.get("position_size_usd")
 
                 if not quantity and notional_amount and market_data.get("current_price"):
                     try:
@@ -1881,7 +1884,6 @@ Provide a helpful response using the real data available. Never use placeholder 
 
                 monitoring = {"monitoring_active": False, "paper_trading": True}
                 phases_completed.append("monitoring")
-
                 return {
                     "success": True,
                     "message": paper_result.get("message", "Paper trade executed successfully"),
