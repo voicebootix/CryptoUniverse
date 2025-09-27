@@ -13,6 +13,7 @@ Revolutionary business model: Strategy subscriptions with performance-based pric
 
 import asyncio
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass

@@ -1,10 +1,16 @@
-import React from 'react';
+import { Toaster as SonnerToaster } from 'sonner';
 
-// Simple toast implementation for now
-// In production, you'd use a proper toast library like react-hot-toast or sonner
-
-export const Toaster: React.FC = () => {
-  return null; // Placeholder for toast notifications
-};
+export const Toaster = () => (
+  <SonnerToaster
+    position="top-right"
+    richColors
+    expand={false}
+    closeButton
+    theme="dark"
+    toastOptions={{
+      duration: 5000,
+    }}
+  />
+);
 
 export default Toaster;

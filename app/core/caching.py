@@ -15,7 +15,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from typing import (
-    Any, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVar, Union, cast
+    Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVar, Union, cast
 )
 from functools import wraps
 import pickle
@@ -407,6 +407,9 @@ cache = CacheManager(
     default_ttl=300,  # 5 minutes
     enabled=not settings.DEBUG
 )
+
+# Alias for backward compatibility
+cache_manager = cache
 
 # Helper functions for backward compatibility
 async def get_cache() -> CacheManager:

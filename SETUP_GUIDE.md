@@ -96,6 +96,13 @@ pytest
 pytest --cov=app --cov-report=html
 ```
 
+### **Test Database Driver**
+
+- Production deployments use PostgreSQL via the `postgresql+asyncpg://` driver specified in `DATABASE_URL`.
+- The automated test suite overrides `DATABASE_URL` to `sqlite+aiosqlite:///...` so unit tests can run without a PostgreSQL server.
+- Install `aiosqlite>=0.20` in your development environment (already listed in `requirements.txt`) to satisfy the async SQLite driver import that pytest performs.
+- When running the application locally against PostgreSQL, keep your `.env` pointing to the real database URL; the SQLite override only applies inside individual test modules.
+
 ### **Database Migrations**
 ```bash
 # Create new migration

@@ -1,34 +1,34 @@
-import { useState } from 'react';
+import { useCallback } from 'react';
+import { toast as sonnerToast } from 'sonner';
 
-interface Toast {
-  id: string;
+export type ToastVariant = 'default' | 'destructive';
+
+export interface ToastOptions {
   title: string;
   description?: string;
-  variant?: 'default' | 'destructive';
+  variant?: ToastVariant;
+  duration?: number;
 }
 
-const toasts: Toast[] = [];
-let toastId = 0;
-
 export const useToast = () => {
-  const [, forceUpdate] = useState({});
-  
-  const toast = ({ title, description, variant = 'default' }: Omit<Toast, 'id'>) => {
-    const id = (toastId++).toString();
-    const newToast: Toast = { id, title, description, variant };
-    
-    toasts.push(newToast);
-    forceUpdate({});
-    
-    // Auto remove after 5 seconds
-    setTimeout(() => {
-      const index = toasts.findIndex(t => t.id === id);
-      if (index > -1) {
-        toasts.splice(index, 1);
-        forceUpdate({});
+  const toast = useCallback(
+    ({ title, description, variant = 'default', duration = 5000 }: ToastOptions) => {
+      const options = { description, duration } as const;
+
+      if (variant === 'destructive') {
+        return sonnerToast.error(title, options);
       }
-    }, 5000);
-  };
-  
-  return { toast };
+
+      return sonnerToast(title, options);
+    },
+    []
+  );
+
+  const dismiss = useCallback((toastId?: string | number) => {
+    if (toastId !== undefined) {
+      sonnerToast.dismiss(toastId);
+    }
+  }, []);
+
+  return { toast, dismiss };
 };
