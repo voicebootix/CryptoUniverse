@@ -6,6 +6,7 @@ Simple endpoints to verify server functionality and diagnose issues.
 import time
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_database
 from app.core.redis import get_redis_client
@@ -42,7 +43,7 @@ async def database_health(db: AsyncSession = Depends(get_database)):
     """Check database connectivity."""
     try:
         # Simple database query
-        result = await db.execute("SELECT 1")
+        result = await db.execute(text("SELECT 1"))
         row = result.fetchone()
         
         return {
@@ -87,7 +88,7 @@ async def full_health_check(db: AsyncSession = Depends(get_database)):
     
     # Database check
     try:
-        result = await db.execute("SELECT 1")
+        result = await db.execute(text("SELECT 1"))
         row = result.fetchone()
         health_status["checks"]["database"] = {"status": "healthy", "connected": True}
     except Exception as e:
