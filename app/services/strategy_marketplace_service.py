@@ -1768,7 +1768,9 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                         }
                 if portfolio_entry is None:
                     record = record_lookup.get(strategy_id)
-                    metadata = record.metadata_json if record else {}
+                    metadata = record.metadata_json or {} if record else {}
+                    if not isinstance(metadata, dict):
+                        metadata = {}
 
                     monthly_cost = _safe_numeric(
                         metadata.get("monthly_cost")

@@ -1190,57 +1190,59 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
                     f"Strategy portfolio fingerprint: {user_profile['strategy_fingerprint']}"
                 )
 
+            # Helper functions for safe data conversion
+            def _safe_int(value: Any, default: int = 0) -> int:
+                try:
+                    if isinstance(value, str):
+                        value = value.strip()
+                        if not value:
+                            return default
+                    return int(float(value))
+                except (TypeError, ValueError):
+                    return default
+
+            def _safe_float(value: Any, default: Optional[float] = 0.0) -> Optional[float]:
+                try:
+                    if isinstance(value, str):
+                        stripped = value.strip()
+                        if not stripped:
+                            return default
+                        if stripped.endswith("%"):
+                            stripped = stripped[:-1].strip()
+                        value = float(stripped)
+                    return float(value)
+                except (TypeError, ValueError):
+                    return default
+
+            def _safe_percentage(value: Any) -> Optional[float]:
+                raw_value = _safe_float(value, None)
+                if raw_value is None:
+                    return None
+                normalized = raw_value * 100 if abs(raw_value) <= 1 else raw_value
+                return normalized
+
+            def _format_percentage(value: Any) -> Optional[str]:
+                candidate: Any = value
+                if isinstance(candidate, str):
+                    stripped = candidate.strip()
+                    if not stripped:
+                        return None
+                    if stripped.endswith("%"):
+                        stripped = stripped[:-1].strip()
+                    try:
+                        candidate = float(stripped)
+                    except ValueError:
+                        return None
+                if not isinstance(candidate, (int, float)):
+                    return None
+                numeric = float(candidate)
+                if abs(numeric) <= 1:
+                    numeric *= 100
+                return f"{numeric:.1f}%"
+
             # Strategy performance summary
             if strategy_performance:
                 prompt_parts.append("\n📊 STRATEGY PERFORMANCE:")
-                def _safe_int(value: Any, default: int = 0) -> int:
-                    try:
-                        if isinstance(value, str):
-                            value = value.strip()
-                            if not value:
-                                return default
-                        return int(float(value))
-                    except (TypeError, ValueError):
-                        return default
-
-                def _safe_float(value: Any, default: Optional[float] = 0.0) -> Optional[float]:
-                    try:
-                        if isinstance(value, str):
-                            stripped = value.strip()
-                            if not stripped:
-                                return default
-                            if stripped.endswith("%"):
-                                stripped = stripped[:-1].strip()
-                            value = float(stripped)
-                        return float(value)
-                    except (TypeError, ValueError):
-                        return default
-
-                def _safe_percentage(value: Any) -> Optional[float]:
-                    raw_value = _safe_float(value, None)
-                    if raw_value is None:
-                        return None
-                    normalized = raw_value * 100 if abs(raw_value) <= 1 else raw_value
-                    return normalized
-
-                def _format_percentage(value: Any) -> Optional[str]:
-                    candidate: Any = value
-                    if isinstance(candidate, str):
-                        stripped = candidate.strip()
-                        if not stripped:
-                            return None
-                        if stripped.endswith("%"):
-                            stripped = stripped[:-1].strip()
-                        try:
-                            candidate = float(stripped)
-                        except ValueError:
-                            return None
-                    if not isinstance(candidate, (int, float)):
-                        return None
-                    numeric = float(candidate)
-                    if abs(numeric) <= 1:
-                        numeric *= 100
-                    return f"{numeric:.1f}%"
 
                 for strat, performance in strategy_performance.items():
                     if isinstance(performance, dict):
@@ -1303,7 +1305,12 @@ Analyze this trade request and provide recommendations. If viable, explain the 5
 
                         sharpe_ratio = metadata.get("sharpe_ratio")
                         if sharpe_ratio is not None:
-                            prompt_parts.append(f"     Sharpe Ratio: {sharpe_ratio:.2f}")
+                            try:
+                                sharpe_ratio_value = float(sharpe_ratio)
+                                prompt_parts.append(f"     Sharpe Ratio: {sharpe_ratio_value:.2f}")
+                            except (TypeError, ValueError):
+                                # Skip invalid sharpe_ratio values
+                                pass
 
                         risk_level = metadata.get("risk_level")
                         if risk_level is not None:
@@ -1610,7 +1617,7 @@ Provide a helpful response using the real data available. Never use placeholder 
         simulation_mode = self._coerce_to_bool(trade_payload.get("simulation_mode"), True)
         try:
             missing_fields = [
-                field for field in ("symbol", "action") if not trade_params.get(field)
+                field for field in ("symbol", "action") if not trade_payload.get(field)
             ]
             if missing_fields:
                 return {
