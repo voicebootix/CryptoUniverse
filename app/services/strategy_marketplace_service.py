@@ -2048,7 +2048,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             )
             return [], None
 
-        async with get_database() as db:
+        async with get_database_session() as db:
             query = (
                 select(UserStrategyAccess)
                 .where(
