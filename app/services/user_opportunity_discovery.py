@@ -1349,8 +1349,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         if amount_fraction is None:
                             amount_fraction = weight_change_fraction
                         if amount_fraction is None:
-                            amount_fraction = _to_fraction(rebal.get("amount"))
-
+                            raw_amount = _to_float(rebal.get("amount"))
+                            if raw_amount is not None and abs(raw_amount) <= 1:
+                                amount_fraction = raw_amount
                         value_change = _to_float(rebal.get("value_change"))
                         notional_usd = _to_float(rebal.get("notional_usd"))
                         trade_value_usd = value_change if value_change is not None else notional_usd
