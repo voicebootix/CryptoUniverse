@@ -1944,6 +1944,8 @@ Rebalancing can still proceed but with reduced features.""",
         max_attempts = 3
         base_delay = 2  # seconds
         
+        raw_symbol = (trade.get("symbol", "") or "").upper().strip()
+
         try:
             # Get user's simulation preference from database
             simulation_mode = False  # Default to live mode if can't determine
@@ -1981,7 +1983,6 @@ Rebalancing can still proceed but with reduced features.""",
                 )
 
             # Pre-execution validation
-            raw_symbol = (trade.get("symbol", "") or "").upper().strip()
             action = (trade.get("action", "") or "").lower().strip()
             notional_usd = float(trade.get("amount", 0) or 0)
 
@@ -2046,8 +2047,12 @@ Rebalancing can still proceed but with reduced features.""",
             if attempt < max_attempts:
                 # Exponential backoff retry
                 delay = base_delay ** attempt
-                self.logger.warning(f"Trade execution timeout, retrying in {delay}s", 
-                                  symbol=symbol, attempt=attempt, user_id=user_id)
+                self.logger.warning(
+                    f"Trade execution timeout, retrying in {delay}s",
+                    symbol=raw_symbol,
+                    attempt=attempt,
+                    user_id=user_id
+                )
                 await asyncio.sleep(delay)
                 return await self._execute_trade_with_safety(trade, user_id, attempt + 1)
             else:
@@ -2056,8 +2061,13 @@ Rebalancing can still proceed but with reduced features.""",
         except Exception as e:
             if attempt < max_attempts:
                 delay = base_delay ** attempt
-                self.logger.warning(f"Trade execution error, retrying in {delay}s", 
-                                  error=str(e), symbol=symbol, attempt=attempt, user_id=user_id)
+                self.logger.warning(
+                    f"Trade execution error, retrying in {delay}s",
+                    error=str(e),
+                    symbol=raw_symbol,
+                    attempt=attempt,
+                    user_id=user_id
+                )
                 await asyncio.sleep(delay)
                 return await self._execute_trade_with_safety(trade, user_id, attempt + 1)
             else:
