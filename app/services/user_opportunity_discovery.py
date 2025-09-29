@@ -1934,23 +1934,32 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         if isinstance(value, str):
             stripped = value.strip()
+            # Normalize Unicode minus (U+2212) to ASCII hyphen
+            stripped = stripped.replace("\u2212", "-")
+            # Parentheses-negatives: "(3.5)" -> -3.5
+            paren_negative = stripped.startswith("(") and stripped.endswith(")")
+            if paren_negative:
+                stripped = stripped[1:-1]
             if not stripped:
                 return None
 
             # Remove common formatting (commas, currency symbols, percentage signs, spaces)
             cleaned = stripped.replace(",", "")
+            # European format like "1.234,56" -> "1234.56"
+            if re.match(r"^\d{1,3}(\.\d{3})+,\d+$", cleaned):
+                cleaned = cleaned.replace(".", "").replace(",", ".")
             cleaned = re.sub(r"[^0-9eE+\-.]", "", cleaned)
 
             if not cleaned or cleaned in {"-", "+", ".", "-.", "+."}:
                 return None
 
             try:
-                return float(cleaned)
+                val = float(cleaned)
+                return -val if paren_negative else val
             except ValueError:
                 return None
 
         return None
-
     def _to_fraction(self, value: Any) -> Optional[float]:
         """Convert values that may represent percentages into fractions."""
 
