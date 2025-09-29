@@ -526,6 +526,15 @@ class CryptoPaymentService(LoggerMixin):
                     db.add(credit_account)
                     await db.flush()
 
+                # Idempotency: skip if we already recorded this payment
+                existing = await db.execute(
+                    select(CreditTransaction).where(CreditTransaction.reference_id == payment_id)
+                )
+                if existing.scalar_one_or_none():
+                    self.logger.info("Duplicate payment webhook ignored", payment_id=payment_id)
+                    await db.commit()
+                    return
+
                 await credit_ledger.add_credits(
                     db,
                     credit_account,
@@ -533,6 +542,7 @@ class CryptoPaymentService(LoggerMixin):
                     transaction_type=CreditTransactionType.PURCHASE,
                     description=f"Crypto payment allocation ({payment_id})",
                     source="crypto_payment",
+                    provider="coinbase_commerce",
                     reference_id=payment_id,
                     metadata={"payment_id": payment_id},
                 )
