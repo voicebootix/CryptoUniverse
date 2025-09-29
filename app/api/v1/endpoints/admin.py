@@ -499,7 +499,6 @@ async def get_credit_transactions(
 
             rows = await db.execute(fallback_query)
             transactions = _build_transactions(rows.all(), include_financials=False)
-
         return {
             "transactions": transactions,
             "count": len(transactions),
