@@ -23,11 +23,12 @@ from app.models.user import User, UserRole, UserStatus
 from app.models.tenant import Tenant
 from app.models.trading import Trade, Position
 from app.models.exchange import ExchangeAccount
-from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
+from app.models.credit import CreditAccount, CreditTransactionType
 from app.models.system import SystemHealth, AuditLog
 from app.services.master_controller import MasterSystemController
 from app.services.background import BackgroundServiceManager
 from app.services.rate_limit import rate_limiter
+from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -1176,7 +1177,7 @@ async def manage_user(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Credit amount required for reset_credits action"
                 )
-            
+
             # Get or create credit account using async query
             credit_result = await db.execute(
                 select(CreditAccount).where(
@@ -1184,29 +1185,52 @@ async def manage_user(
                 )
             )
             credit_account = credit_result.scalar_one_or_none()
-            
+
             if not credit_account:
-                credit_account = CreditAccount(
-                    user_id=target_user.id,
-                    available_credits=request.credit_amount
-                )
+                credit_account = CreditAccount(user_id=target_user.id)
                 db.add(credit_account)
-            else:
-                credit_account.available_credits = request.credit_amount
-            
-            # Record transaction
-            credit_tx = CreditTransaction(
-                account_id=credit_account.id,
-                amount=request.credit_amount,
-                transaction_type=CreditTransactionType.ADJUSTMENT,
-                description=f"Admin credit reset by {current_user.email}",
-                balance_before=credit_account.available_credits - request.credit_amount,
-                balance_after=credit_account.available_credits,
-                source="admin"
-            )
-            db.add(credit_tx)
-            
-            action_taken = f"Credits reset to {request.credit_amount}"
+                await db.flush()
+
+            current_balance = int(credit_account.available_credits or 0)
+            target_balance = int(request.credit_amount)
+            delta = target_balance - current_balance
+
+            metadata = {
+                "requested_by": current_user.email,
+                "reason": request.reason,
+                "target_balance": target_balance,
+            }
+
+            if delta > 0:
+                await credit_ledger.add_credits(
+                    db,
+                    credit_account,
+                    credits=delta,
+                    transaction_type=CreditTransactionType.ADJUSTMENT,
+                    description=f"Admin credit reset increase by {current_user.email}",
+                    source="admin_console",
+                    metadata=metadata,
+                    track_lifetime=False,
+                )
+            elif delta < 0:
+                try:
+                    await credit_ledger.consume_credits(
+                        db,
+                        credit_account,
+                        credits=abs(delta),
+                        description=f"Admin credit reset decrease by {current_user.email}",
+                        source="admin_console",
+                        transaction_type=CreditTransactionType.ADJUSTMENT,
+                        metadata=metadata,
+                        track_usage=False,
+                    )
+                except InsufficientCreditsError:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Cannot reduce credits below zero",
+                    )
+
+            action_taken = f"Credits set to {target_balance}"
         
         # Create audit log with proper transaction handling
         audit_log = AuditLog(

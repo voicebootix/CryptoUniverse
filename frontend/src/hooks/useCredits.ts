@@ -83,8 +83,12 @@ export const useCredits = () => {
       // Normalize response data to handle null/undefined values
       const balanceData = {
         available_credits: Number(response.data?.available_credits) || 0,
-        total_purchased_credits: Number(response.data?.total_credits) || 0,
-        total_used_credits: Number(response.data?.used_credits) || 0,
+        total_purchased_credits:
+          Number(
+            response.data?.total_purchased_credits ?? response.data?.total_credits
+          ) || 0,
+        total_used_credits:
+          Number(response.data?.total_used_credits ?? response.data?.used_credits) || 0,
         profit_potential: Number(response.data?.profit_potential) || 0,
         profit_earned_to_date: Number(response.data?.profit_earned_to_date) || 0,
         remaining_potential: Number(response.data?.remaining_potential) || 0,

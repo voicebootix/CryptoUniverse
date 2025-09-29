@@ -70,13 +70,12 @@ async def get_or_create_credit_account(user_id: str, db: AsyncSession, user: Opt
             initial_credits = getattr(settings, 'admin_initial_credits', 0)
 
     # Create new account with role-based initial credits
-    credit_account = CreditAccount(
-        user_id=user_id,
-        total_credits=initial_credits,
-        available_credits=initial_credits,
-        used_credits=0,
-        expired_credits=0
-    )
+    credit_account = CreditAccount(user_id=user_id)
+
+    if initial_credits > 0:
+        credit_account.register_credit_increase(initial_credits)
+    else:
+        credit_account.synchronize_profit_tracking()
 
     db.add(credit_account)
 
@@ -129,8 +128,10 @@ class CreditPurchaseRequest(BaseModel):
 
 class CreditBalanceResponse(BaseModel):
     available_credits: int
-    total_credits: int  # Updated field name
-    used_credits: int   # Updated field name
+    total_credits: int
+    used_credits: int
+    total_purchased_credits: int
+    total_used_credits: int
     profit_potential: Decimal
     profit_earned_to_date: Decimal
     remaining_potential: Decimal
@@ -186,10 +187,16 @@ async def get_credit_balance(
                    available_credits=credit_account.available_credits,
                    total_credits=credit_account.total_credits)
         
+        # Ensure derived values are up to date before responding
+        credit_account.synchronize_profit_tracking()
+
         # Calculate profit potential using domain model method
         await profit_sharing_service.ensure_pricing_loaded()  # Ensure pricing loaded if needed by model
-        
+
         profit_potential = credit_account.calculate_profit_potential()
+
+        total_purchased = int(credit_account.total_purchased_credits or credit_account.total_credits or 0)
+        total_used = int(credit_account.total_used_credits or credit_account.used_credits or 0)
         
         # Get total profit earned to date with safe query
         try:
@@ -215,8 +222,10 @@ async def get_credit_balance(
         
         return CreditBalanceResponse(
             available_credits=int(credit_account.available_credits or 0),
-            total_credits=int(credit_account.total_credits or 0),
+            total_credits=total_purchased,
             used_credits=int(credit_account.used_credits or 0),
+            total_purchased_credits=total_purchased,
+            total_used_credits=total_used,
             profit_potential=max(Decimal("0"), profit_potential),
             profit_earned_to_date=max(Decimal("0"), profit_earned),
             remaining_potential=max(Decimal("0"), remaining_potential),
@@ -687,14 +696,17 @@ async def _process_confirmed_payment(
                     
                     return
                 
-                # Update credit account with correct field names
-                credit_account.available_credits += credit_amount
-                credit_account.total_credits += credit_amount  # Use correct field name
-                credit_account.last_purchase_at = datetime.utcnow()
-                
+                # Update credit account using centralized ledger rules
+                credit_account.register_credit_increase(credit_amount)
+
                 # Update transaction status
                 transaction.status = "completed"
                 transaction.processed_at = datetime.utcnow()
+                transaction.meta_data = {
+                    **(transaction.meta_data or {}),
+                    "payment_id": payment_id,
+                    "transaction_hash": verification_result.get("transaction_hash"),
+                }
                 
                 # Commit all changes in single transaction
                 await db_session.commit()

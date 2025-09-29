@@ -28,9 +28,10 @@ from app.core.config import get_settings
 from app.core.database import get_database
 from app.core.logging import LoggerMixin
 from app.models.user import User
-from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
+from app.models.credit import CreditAccount, CreditTransactionType
 from app.services.strategy_marketplace_service import strategy_marketplace_service
 from app.core.redis import get_redis_client
+from app.services.credit_ledger import credit_ledger
 import json
 
 settings = get_settings()
@@ -234,33 +235,25 @@ class UserOnboardingService(LoggerMixin):
             
             if not credit_account:
                 # Create new credit account
-                credit_account = CreditAccount(
-                    user_id=user_id,
-                    available_credits=welcome_credits,
-                    total_credits=welcome_credits,
-                    used_credits=0,
-                    updated_at=datetime.utcnow()
-                )
+                credit_account = CreditAccount(user_id=user_id)
                 db.add(credit_account)
                 await db.flush()  # Get ID
-                
-                # Create welcome bonus transaction
-                welcome_transaction = CreditTransaction(
-                    account_id=credit_account.id,
-                    amount=welcome_credits,
+
+                await credit_ledger.add_credits(
+                    db,
+                    credit_account,
+                    credits=welcome_credits,
                     transaction_type=CreditTransactionType.BONUS,
                     description=f"Welcome bonus credits - {self.welcome_bonus_credits} + {self.referral_bonus_credits if referral_code else 0} referral",
-                    balance_before=0,
-                    balance_after=welcome_credits,
-                    source="system"
+                    source="onboarding_welcome",
+                    metadata={"referral_code": referral_code},
                 )
-                db.add(welcome_transaction)
-                
+
                 self.logger.info("💰 Credit account created",
                                onboarding_id=onboarding_id,
                                user_id=user_id,
                                welcome_credits=welcome_credits)
-                
+
                 return {
                     "success": True,
                     "action": "created",
@@ -271,23 +264,16 @@ class UserOnboardingService(LoggerMixin):
             else:
                 # Update existing account with welcome bonus if not already given
                 if credit_account.total_credits == 0:
-                    balance_before = credit_account.available_credits
-                    credit_account.available_credits += welcome_credits
-                    credit_account.total_credits += welcome_credits
-                    credit_account.updated_at = datetime.utcnow()
-                    
-                    # Create transaction
-                    welcome_transaction = CreditTransaction(
-                        account_id=credit_account.id,
-                        amount=welcome_credits,
+                    await credit_ledger.add_credits(
+                        db,
+                        credit_account,
+                        credits=welcome_credits,
                         transaction_type=CreditTransactionType.BONUS,
-                        description=f"Welcome bonus credits - onboarding completion",
-                        balance_before=balance_before,
-                        balance_after=balance_before + welcome_credits,
-                        source="system"
+                        description="Welcome bonus credits - onboarding completion",
+                        source="onboarding_welcome",
+                        metadata={"referral_code": referral_code},
                     )
-                    db.add(welcome_transaction)
-                    
+
                     self.logger.info("💰 Credit account updated with welcome bonus",
                                    onboarding_id=onboarding_id,
                                    user_id=user_id,
@@ -460,22 +446,15 @@ class UserOnboardingService(LoggerMixin):
             credit_account = credit_result.scalar_one_or_none()
             
             if credit_account:
-                # Create premium bonus transaction
-                balance_before = credit_account.available_credits
-                credit_account.available_credits += premium_bonus_credits
-                credit_account.total_credits += premium_bonus_credits
-                balance_after = credit_account.available_credits
-                
-                premium_transaction = CreditTransaction(
-                    account_id=credit_account.id,
-                    amount=premium_bonus_credits,
+                await credit_ledger.add_credits(
+                    db,
+                    credit_account,
+                    credits=premium_bonus_credits,
                     transaction_type=CreditTransactionType.BONUS,
                     description="Premium welcome package bonus",
-                    balance_before=balance_before,
-                    balance_after=balance_after,
-                    source="system"
+                    source="onboarding_premium",
+                    metadata={"package": "premium"},
                 )
-                db.add(premium_transaction)
             
             # Provision premium strategy
             premium_strategy_results = []
@@ -537,22 +516,15 @@ class UserOnboardingService(LoggerMixin):
             referrer_bonus = 75  # Referrer gets 75 credits
             
             if referrer_credit_account:
-                balance_before = referrer_credit_account.available_credits
-                referrer_credit_account.available_credits += referrer_bonus
-                referrer_credit_account.total_credits += referrer_bonus
-                balance_after = referrer_credit_account.available_credits
-                
-                # Create referrer bonus transaction
-                referrer_transaction = CreditTransaction(
-                    account_id=referrer_credit_account.id,
-                    amount=referrer_bonus,
+                await credit_ledger.add_credits(
+                    db,
+                    referrer_credit_account,
+                    credits=referrer_bonus,
                     transaction_type=CreditTransactionType.BONUS,
                     description=f"Referral bonus - new user {user_id[:8]}...",
-                    balance_before=balance_before,
-                    balance_after=balance_after,
-                    source="system"
+                    source="onboarding_referral",
+                    metadata={"referral_code": referral_code},
                 )
-                db.add(referrer_transaction)
             
             # Referee (new user) already got their referral bonus in _initialize_credit_account
             

@@ -46,11 +46,12 @@ from app.services.strategy_marketplace_service import strategy_marketplace_servi
 from app.services.paper_trading_engine import paper_trading_engine
 from app.services.user_opportunity_discovery import user_opportunity_discovery
 from app.services.user_onboarding_service import user_onboarding_service
+from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
 
 # Models
 from app.models.user import User
 from app.models.trading import TradingStrategy, Trade, Position
-from app.models.credit import CreditAccount
+from app.models.credit import CreditAccount, CreditTransactionType
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -82,6 +83,27 @@ class ChatIntent(str, Enum):
     OPPORTUNITY_DISCOVERY = "opportunity_discovery"
     HELP = "help"
     UNKNOWN = "unknown"
+
+
+CHARGEABLE_CHAT_INTENTS = {
+    ChatIntent.PORTFOLIO_ANALYSIS,
+    ChatIntent.TRADE_EXECUTION,
+    ChatIntent.MARKET_ANALYSIS,
+    ChatIntent.RISK_ASSESSMENT,
+    ChatIntent.STRATEGY_RECOMMENDATION,
+    ChatIntent.STRATEGY_MANAGEMENT,
+    ChatIntent.REBALANCING,
+    ChatIntent.PERFORMANCE_REVIEW,
+    ChatIntent.POSITION_MANAGEMENT,
+    ChatIntent.OPPORTUNITY_DISCOVERY,
+}
+
+NON_BILLABLE_CHAT_INTENTS = {
+    ChatIntent.GREETING,
+    ChatIntent.HELP,
+    ChatIntent.CREDIT_INQUIRY,
+    ChatIntent.CREDIT_MANAGEMENT,
+}
 
 
 class ConversationMode(str, Enum):
@@ -162,7 +184,9 @@ class UnifiedChatService(LoggerMixin):
         self.live_trading_credit_requirement = 10  # Credits required for live trading operations
         self.opportunity_discovery = user_opportunity_discovery
         self.onboarding_service = user_onboarding_service
-        
+        self.default_chat_credit_cost = max(0, getattr(settings, "CHAT_CREDIT_COST_DEFAULT", 1))
+        self.chat_credit_cost_overrides = settings.chat_credit_cost_overrides
+
         # Redis for state management
         self.redis = None
         self._redis_initialized = False
@@ -203,6 +227,44 @@ class UnifiedChatService(LoggerMixin):
             return TradingMode(normalized_value)
         except ValueError:
             return TradingMode.BALANCED
+
+    @staticmethod
+    def _normalize_user_identifier(user_id: Union[str, uuid.UUID]) -> Union[str, uuid.UUID]:
+        """Return a UUID instance when possible to guarantee consistent lookups."""
+
+        if isinstance(user_id, uuid.UUID):
+            return user_id
+
+        try:
+            return uuid.UUID(str(user_id))
+        except (TypeError, ValueError):
+            return str(user_id)
+
+    def _should_charge_intent(self, intent: ChatIntent) -> bool:
+        """Determine if a chat intent should consume credits."""
+
+        return intent in CHARGEABLE_CHAT_INTENTS
+
+    def _resolve_chat_credit_cost(
+        self,
+        intent: ChatIntent,
+        conversation_mode: ConversationMode,
+    ) -> int:
+        """Resolve the credit cost for a chat interaction."""
+
+        if conversation_mode == ConversationMode.PAPER_TRADING:
+            return 0
+
+        if conversation_mode.value in self.chat_credit_cost_overrides:
+            return max(0, int(self.chat_credit_cost_overrides[conversation_mode.value]))
+
+        if intent.value in self.chat_credit_cost_overrides:
+            return max(0, int(self.chat_credit_cost_overrides[intent.value]))
+
+        if intent == ChatIntent.TRADE_EXECUTION:
+            return max(self.default_chat_credit_cost, self.live_trading_credit_requirement)
+
+        return self.default_chat_credit_cost
 
     def _json_default(self, obj):
         """Default JSON serializer for complex types."""
@@ -380,15 +442,19 @@ class UnifiedChatService(LoggerMixin):
             message_length=len(message)
         )
         
+        charge_context: Optional[Dict[str, Any]] = None
+
         try:
             # Step 1: Analyze intent using ChatAI (fast)
             intent_analysis = await self._analyze_intent_unified(message, session.context)
-            
+
             # Step 2: Check requirements (credits, strategies, etc.)
             requirements_check = await self._check_requirements(
                 intent_analysis, user_id, conversation_mode
             )
-            
+
+            charge_request = requirements_check.get("credit_charge")
+
             if not requirements_check["allowed"]:
                 # Return requirement failure message
                 response = {
@@ -420,17 +486,47 @@ class UnifiedChatService(LoggerMixin):
                 user_strategies=prefetched_user_strategies,
                 marketplace_strategies=prefetched_marketplace
             )
-            
+
             # Step 4: Generate response
             if stream:
                 return self._generate_streaming_response(
-                    message, intent_analysis, session, context_data
+                    message,
+                    intent_analysis,
+                    session,
+                    context_data,
+                    charge_request=charge_request,
+                    user_id=user_id,
                 )
             else:
-                return await self._generate_complete_response(
+                response = await self._generate_complete_response(
                     message, intent_analysis, session, context_data
                 )
-                
+
+                if response.get("success") and charge_request:
+                    try:
+                        charge_context = await self._charge_chat_interaction(
+                            user_id,
+                            charge_request["intent"],
+                            charge_request["conversation_mode"],
+                            charge_request["credits"],
+                        )
+                    except InsufficientCreditsError:
+                        return {
+                            "success": False,
+                            "session_id": session.session_id,
+                            "message_id": str(uuid.uuid4()),
+                            "content": "Insufficient credits for this operation. Please purchase additional credits to continue.",
+                            "intent": intent_analysis["intent"].value if hasattr(intent_analysis["intent"], "value") else intent_analysis["intent"],
+                            "requires_action": True,
+                            "action_data": {
+                                "type": "credit_purchase",
+                                "required_credits": charge_request["credits"],
+                            },
+                            "timestamp": datetime.utcnow(),
+                        }
+
+                return response
+
         except Exception as e:
             self.logger.exception("Error processing message", error=str(e))
             error_response = {
@@ -439,7 +535,14 @@ class UnifiedChatService(LoggerMixin):
                 "session_id": session_id,
                 "timestamp": datetime.utcnow()
             }
-            
+
+            if charge_context:
+                await self._refund_chat_charge(
+                    user_id,
+                    charge_context,
+                    "Chat processing failed after credit deduction",
+                )
+
             if stream:
                 async def error_stream():
                     yield error_response
@@ -627,33 +730,42 @@ class UnifiedChatService(LoggerMixin):
         requirements_result: Dict[str, Any] = {"allowed": True, "message": "All checks passed"}
 
         # Check credit requirements for paid operations
-        if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
-            if conversation_mode == ConversationMode.LIVE_TRADING:
-                # Real credit check - NO MOCKS
+        if conversation_mode != ConversationMode.PAPER_TRADING and self._should_charge_intent(intent):
+            required_credits = self._resolve_chat_credit_cost(intent, conversation_mode)
+            if required_credits > 0:
                 credit_check = await self._check_user_credits(user_id)
+                self.logger.info(
+                    "Credit check result for chat",
+                    user_id=user_id,
+                    intent=intent.value,
+                    available_credits=credit_check.get("available_credits", 0),
+                    required_credits=required_credits,
+                )
+                requirements_result["credit_check"] = credit_check
+                requirements_result["required_credits"] = required_credits
 
-                # Debug logging to understand the credit check results
-                self.logger.info("Credit check result for chat",
-                               user_id=user_id,
-                               intent=intent,
-                               available_credits=credit_check.get('available_credits', 0),
-                               required_credits=credit_check.get('required_credits', 0),
-                               has_credits=credit_check.get('has_credits', False),
-                               account_status=credit_check.get('account_status', 'unknown'))
-
-                if not credit_check["has_credits"]:
+                available = int(credit_check.get("available_credits", 0))
+                if available < required_credits:
                     return {
                         "allowed": False,
-                        "message": f"Insufficient credits. You have {credit_check['available_credits']} credits. "
-                                  f"This operation requires {credit_check['required_credits']} credits. "
-                                  f"Switch to paper trading mode or purchase more credits.",
+                        "message": (
+                            f"Insufficient credits. You have {available} credits. "
+                            f"This operation requires {required_credits} credits. "
+                            "Purchase more credits to continue."
+                        ),
                         "requires_action": True,
                         "action_data": {
                             "type": "credit_purchase",
-                            "current_credits": credit_check['available_credits'],
-                            "required_credits": credit_check['required_credits']
-                        }
+                            "current_credits": available,
+                            "required_credits": required_credits,
+                        },
                     }
+
+                requirements_result["credit_charge"] = {
+                    "credits": required_credits,
+                    "intent": intent,
+                    "conversation_mode": conversation_mode,
+                }
 
         # Check strategy access for strategy-related operations
         if intent in [ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
@@ -694,28 +806,14 @@ class UnifiedChatService(LoggerMixin):
         Uses the same credit lookup logic as the API endpoint.
         """
         try:
-            from app.models.credit import CreditAccount
-            from sqlalchemy import select
-            import uuid
+            normalized_user_id = self._normalize_user_identifier(user_id)
 
             async with get_database_session() as db:
-                # Try multiple lookup methods to find existing account
-                credit_account = None
-
-                # First try: search by string user_id
-                stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
-                result = await db.execute(stmt)
-                credit_account = result.scalar_one_or_none()
-
-                # Second try: convert to UUID if string didn't work
-                if not credit_account and isinstance(user_id, str) and len(user_id) == 36:
-                    try:
-                        user_uuid = uuid.UUID(user_id)
-                        stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
-                        result = await db.execute(stmt)
-                        credit_account = result.scalar_one_or_none()
-                    except ValueError:
-                        pass
+                credit_account = await credit_ledger.get_account(
+                    db,
+                    normalized_user_id,
+                    for_update=False,
+                )
 
                 if not credit_account:
                     return {
@@ -723,10 +821,9 @@ class UnifiedChatService(LoggerMixin):
                         "available_credits": 0,
                         "required_credits": self.live_trading_credit_requirement,
                         "credit_tier": "none",
-                        "account_status": "no_account"
+                        "account_status": "no_account",
                     }
 
-                # Found existing account - use it
                 available_credits = max(0, credit_account.available_credits or 0)
                 required_credits = self.live_trading_credit_requirement
 
@@ -735,19 +832,122 @@ class UnifiedChatService(LoggerMixin):
                     "available_credits": available_credits,
                     "required_credits": required_credits,
                     "total_credits": credit_account.total_credits,
+                    "total_purchased_credits": credit_account.total_purchased_credits,
+                    "total_used_credits": credit_account.total_used_credits,
                     "credit_tier": "premium" if available_credits > 100 else "standard",
-                    "account_status": "active"
+                    "account_status": "active",
                 }
 
         except Exception as e:
-            self.logger.error("Credit check failed", error=str(e), user_id=user_id)
+            self.logger.error("Credit check failed", error=str(e), user_id=str(user_id))
             return {
                 "has_credits": False,
                 "available_credits": 0,
                 "required_credits": self.live_trading_credit_requirement,
                 "error": str(e),
-                "account_status": "error"
+                "account_status": "error",
             }
+
+    async def _charge_chat_interaction(
+        self,
+        user_id: str,
+        intent: ChatIntent,
+        conversation_mode: ConversationMode,
+        credits: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Deduct credits for a chat interaction and return transaction context."""
+
+        if credits <= 0:
+            return None
+
+        normalized_user_id = self._normalize_user_identifier(user_id)
+
+        async with get_database_session() as db:
+            try:
+                credit_account = await credit_ledger.get_account(
+                    db,
+                    normalized_user_id,
+                    for_update=True,
+                )
+
+                if not credit_account:
+                    raise InsufficientCreditsError("Credit account not found")
+
+                transaction = await credit_ledger.consume_credits(
+                    db,
+                    credit_account,
+                    credits=credits,
+                    description=f"Chat interaction: {intent.value}",
+                    source="chat",
+                    transaction_type=CreditTransactionType.USAGE,
+                    metadata={
+                        "intent": intent.value,
+                        "conversation_mode": conversation_mode.value,
+                        **(metadata or {}),
+                    },
+                )
+
+                await db.commit()
+
+            except Exception:
+                await db.rollback()
+                raise
+
+        return {
+            "transaction_id": str(transaction.id),
+            "credits": credits,
+            "intent": intent.value,
+            "conversation_mode": conversation_mode.value,
+        }
+
+    async def _refund_chat_charge(
+        self,
+        user_id: str,
+        charge_context: Optional[Dict[str, Any]],
+        reason: str,
+    ) -> None:
+        """Refund credits if chat processing fails after charging."""
+
+        if not charge_context:
+            return
+
+        credits = int(charge_context.get("credits", 0))
+        if credits <= 0:
+            return
+
+        normalized_user_id = self._normalize_user_identifier(user_id)
+
+        async with get_database_session() as db:
+            try:
+                credit_account = await credit_ledger.get_account(
+                    db,
+                    normalized_user_id,
+                    for_update=True,
+                )
+
+                if not credit_account:
+                    self.logger.warning("Unable to refund chat credits: account missing", user_id=str(user_id))
+                    await db.rollback()
+                    return
+
+                await credit_ledger.refund_credits(
+                    db,
+                    credit_account,
+                    credits=credits,
+                    description=reason,
+                    source="chat_refund",
+                    metadata={
+                        "intent": charge_context.get("intent"),
+                        "conversation_mode": charge_context.get("conversation_mode"),
+                    },
+                    reference_transaction_id=charge_context.get("transaction_id"),
+                )
+
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
     
     async def _check_strategy_access(self, user_id: str) -> Dict[str, Any]:
         """Check user's strategy access - REAL check with admin support."""
@@ -1029,9 +1229,13 @@ class UnifiedChatService(LoggerMixin):
                 # Use the credit check results regardless of status (as long as we got credits)
                 available_credits = float(credit_check_result.get("available_credits", 0))
                 total_credits = float(credit_check_result.get("total_credits", available_credits))
+                total_purchased = float(credit_check_result.get("total_purchased_credits", total_credits))
+                total_used = float(credit_check_result.get("total_used_credits", 0))
                 context_data["credit_account"] = {
                     "available_credits": available_credits,
                     "total_credits": total_credits,  # Use actual total from credit check
+                    "total_purchased_credits": total_purchased,
+                    "total_used_credits": total_used,
                     "profit_potential": total_credits * 4,  # 1 credit = $4 profit potential
                     "account_tier": credit_check_result.get("credit_tier", "standard"),
                     "account_status": credit_check_result.get("account_status", "unknown")
@@ -1173,21 +1377,40 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
         message: str,
         intent_analysis: Dict[str, Any],
         session: ChatSession,
-        context_data: Dict[str, Any]
+        context_data: Dict[str, Any],
+        charge_request: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Generate streaming response for real-time conversation feel.
         """
+        charge_context: Optional[Dict[str, Any]] = None
+        if charge_request and user_id:
+            try:
+                charge_context = await self._charge_chat_interaction(
+                    user_id,
+                    charge_request["intent"],
+                    charge_request["conversation_mode"],
+                    charge_request["credits"],
+                )
+            except InsufficientCreditsError:
+                yield {
+                    "type": "error",
+                    "content": "Insufficient credits for this operation. Please purchase additional credits to continue.",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+                return
+
         # Yield initial processing messages
         yield {
             "type": "processing",
             "content": "Analyzing your request...",
             "timestamp": datetime.utcnow().isoformat()
         }
-        
+
         intent = intent_analysis["intent"]
         personality = self.personalities[session.trading_mode]
-        
+
         # Build system message
         system_message = f"""You are {personality['name']}, a {personality['style']} cryptocurrency trading AI assistant.
 
@@ -1198,47 +1421,56 @@ Respond naturally using ONLY the real data provided."""
 
         # Build prompt
         prompt = self._build_response_prompt(message, intent, context_data)
-        
+
         # Stream the response
         full_response = ""
-        async for chunk in self.chat_ai.stream_response(prompt, system_message):
-            full_response += chunk
-            yield {
-            "type": "response",
-            "content": chunk,
-            "timestamp": datetime.utcnow().isoformat(),
-            "personality": personality["name"]
-            }
-        
-        # Handle action requirements
-        if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
-            decision_id = str(uuid.uuid4())
-            await self._store_pending_decision(
-            decision_id,
-            intent_analysis,
-            context_data,
-            session.user_id,
-            session.conversation_mode
+        try:
+            async for chunk in self.chat_ai.stream_response(prompt, system_message):
+                full_response += chunk
+                yield {
+                    "type": "response",
+                    "content": chunk,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "personality": personality["name"]
+                }
+
+            # Handle action requirements
+            if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
+                decision_id = str(uuid.uuid4())
+                await self._store_pending_decision(
+                    decision_id,
+                    intent_analysis,
+                    context_data,
+                    session.user_id,
+                    session.conversation_mode
+                )
+
+                yield {
+                    "type": "action_required",
+                    "content": "This action requires your confirmation. Would you like to proceed?",
+                    "action": "confirm_action",
+                    "decision_id": decision_id,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+
+            # Save conversation
+            await self._save_conversation(
+                session.session_id,
+                session.user_id,
+                message,
+                full_response,
+                intent,
+                intent_analysis["confidence"]
             )
-            
-            yield {
-            "type": "action_required",
-            "content": "This action requires your confirmation. Would you like to proceed?",
-            "action": "confirm_action",
-            "decision_id": decision_id,
-            "timestamp": datetime.utcnow().isoformat()
-            }
-        
-        # Save conversation
-        await self._save_conversation(
-            session.session_id,
-            session.user_id,
-            message,
-            full_response,
-            intent,
-            intent_analysis["confidence"]
-        )
-        
+        except Exception:
+            if charge_context:
+                await self._refund_chat_charge(
+                    session.user_id,
+                    charge_context,
+                    "Streaming response failed",
+                )
+            raise
+
         yield {
             "type": "complete",
             "timestamp": datetime.utcnow().isoformat()
