@@ -585,6 +585,7 @@ class ProfitSharingService(LoggerMixin):
                     metadata={
                         "welcome_profit_potential": welcome_profit_potential,
                     },
+                    track_lifetime=False,
                 )
 
                 await db.commit()

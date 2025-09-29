@@ -43,7 +43,13 @@ def upgrade() -> None:
             """
             UPDATE credit_accounts
             SET total_profit_potential_usd = COALESCE(total_credits, 0) * 4,
-                current_profit_limit_usd = GREATEST(COALESCE(total_credits, 0), COALESCE(available_credits, 0)) * 4
+                current_profit_limit_usd = (
+                    CASE
+                        WHEN COALESCE(total_credits, 0) >= COALESCE(available_credits, 0)
+                            THEN COALESCE(total_credits, 0)
+                        ELSE COALESCE(available_credits, 0)
+                    END
+                ) * 4
             """
         )
     )

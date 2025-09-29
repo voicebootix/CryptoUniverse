@@ -32,9 +32,15 @@ from app.core.config import get_settings
 from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User, UserRole
-from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
+from app.models.credit import (
+    CreditAccount,
+    CreditStatus,
+    CreditTransaction,
+    CreditTransactionType,
+)
 from app.models.trading import Trade, TradeStatus
 from app.models.exchange import ExchangeAccount
+from app.services.credit_ledger import credit_ledger
 from app.services.profit_sharing_service import profit_sharing_service
 from app.services.rate_limit import rate_limiter
 
@@ -560,7 +566,14 @@ async def _store_pending_payment(
             description=f"Credit purchase: {credit_amount} credits for ${payment_data['amount_usd']}",
             balance_before=credit_account.available_credits,
             balance_after=credit_account.available_credits + credit_amount,
-            source="api"
+            source="api",
+            reference_id=payment_data["payment_id"],
+            stripe_payment_intent_id=payment_data["payment_id"],
+            meta_data={
+                "payment_state": "pending",
+                "payment_id": payment_data["payment_id"],
+                "payment_method": payment_data.get("crypto_currency"),
+            },
         )
         db.add(transaction)
         await db.commit()
@@ -645,7 +658,7 @@ async def _process_confirmed_payment(
         import json
         payment_info = json.loads(pending_data)
         user_id = payment_info["user_id"]
-        credit_amount = payment_info["credit_amount"]
+        credit_amount = int(payment_info["credit_amount"])
         
         # Acquire Redis lock for idempotent processing
         lock_key = f"payment_processing:{payment_id}"
@@ -660,10 +673,20 @@ async def _process_confirmed_payment(
             
             # Process payment with database row locks for idempotency
             async for db_session in get_database():
+                bind = db_session.get_bind()
+                dialect = getattr(bind, "dialect", None)
+                if dialect is None and hasattr(bind, "sync_engine"):
+                    dialect = getattr(bind.sync_engine, "dialect", None)
+                dialect_name = (getattr(dialect, "name", "") or "").lower()
+
+                for_update_supported = dialect_name != "sqlite"
+
                 # Acquire row locks to prevent concurrent processing
                 credit_stmt = select(CreditAccount).where(
                     CreditAccount.user_id == user_id
-                ).with_for_update()
+                )
+                if for_update_supported:
+                    credit_stmt = credit_stmt.with_for_update()
                 
                 credit_result = await db_session.execute(credit_stmt)
                 credit_account = credit_result.scalar_one_or_none()
@@ -674,8 +697,10 @@ async def _process_confirmed_payment(
                 
                 # Check transaction with row lock
                 tx_stmt = select(CreditTransaction).where(
-                    CreditTransaction.stripe_payment_intent_id == payment_id
-                ).with_for_update()
+                    CreditTransaction.reference_id == payment_id
+                )
+                if for_update_supported:
+                    tx_stmt = tx_stmt.with_for_update()
                 
                 tx_result = await db_session.execute(tx_stmt)
                 transaction = tx_result.scalar_one_or_none()
@@ -683,11 +708,12 @@ async def _process_confirmed_payment(
                 if not transaction:
                     logger.error(f"Transaction not found for payment {payment_id}")
                     return
-                
+
                 # Check if already completed (idempotency check)
-                if transaction.status == "completed":
+                transaction_metadata = transaction.meta_data or {}
+                if transaction_metadata.get("payment_state") == "completed":
                     logger.info(f"Payment {payment_id} already completed - skipping")
-                    
+
                     # Clean up pending payment key
                     try:
                         await redis.delete(f"pending_payment:{payment_id}")
@@ -697,17 +723,33 @@ async def _process_confirmed_payment(
                     return
                 
                 # Update credit account using centralized ledger rules
-                credit_account.register_credit_increase(credit_amount)
+                await credit_ledger.add_credits(
+                    db_session,
+                    credit_account,
+                    credits=credit_amount,
+                    transaction_type=CreditTransactionType.PURCHASE,
+                    description=f"Crypto payment allocation ({payment_id})",
+                    source="crypto_payment",
+                    reference_id=payment_id,
+                    metadata={
+                        "payment_id": payment_id,
+                        "transaction_hash": verification_result.get("transaction_hash"),
+                    },
+                )
 
                 # Update transaction status
-                transaction.status = "completed"
+                transaction.status = CreditStatus.ACTIVE
                 transaction.processed_at = datetime.utcnow()
-                transaction.meta_data = {
-                    **(transaction.meta_data or {}),
-                    "payment_id": payment_id,
-                    "transaction_hash": verification_result.get("transaction_hash"),
-                }
-                
+                updated_metadata = {**transaction_metadata}
+                updated_metadata.update(
+                    {
+                        "payment_id": payment_id,
+                        "transaction_hash": verification_result.get("transaction_hash"),
+                        "payment_state": "completed",
+                    }
+                )
+                transaction.meta_data = updated_metadata
+
                 # Commit all changes in single transaction
                 await db_session.commit()
                 

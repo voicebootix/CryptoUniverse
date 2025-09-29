@@ -1222,7 +1222,6 @@ async def manage_user(
                         source="admin_console",
                         transaction_type=CreditTransactionType.ADJUSTMENT,
                         metadata=metadata,
-                        track_usage=False,
                     )
                 except InsufficientCreditsError:
                     raise HTTPException(

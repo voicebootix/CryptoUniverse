@@ -247,6 +247,7 @@ class UserOnboardingService(LoggerMixin):
                     description=f"Welcome bonus credits - {self.welcome_bonus_credits} + {self.referral_bonus_credits if referral_code else 0} referral",
                     source="onboarding_welcome",
                     metadata={"referral_code": referral_code},
+                    track_lifetime=False,
                 )
 
                 self.logger.info("💰 Credit account created",
@@ -272,6 +273,7 @@ class UserOnboardingService(LoggerMixin):
                         description="Welcome bonus credits - onboarding completion",
                         source="onboarding_welcome",
                         metadata={"referral_code": referral_code},
+                        track_lifetime=False,
                     )
 
                     self.logger.info("💰 Credit account updated with welcome bonus",
@@ -454,6 +456,7 @@ class UserOnboardingService(LoggerMixin):
                     description="Premium welcome package bonus",
                     source="onboarding_premium",
                     metadata={"package": "premium"},
+                    track_lifetime=False,
                 )
             
             # Provision premium strategy
@@ -524,6 +527,7 @@ class UserOnboardingService(LoggerMixin):
                     description=f"Referral bonus - new user {user_id[:8]}...",
                     source="onboarding_referral",
                     metadata={"referral_code": referral_code},
+                    track_lifetime=False,
                 )
             
             # Referee (new user) already got their referral bonus in _initialize_credit_account

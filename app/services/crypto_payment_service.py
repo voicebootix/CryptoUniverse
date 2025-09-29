@@ -533,12 +533,13 @@ class CryptoPaymentService(LoggerMixin):
                     transaction_type=CreditTransactionType.PURCHASE,
                     description=f"Crypto payment allocation ({payment_id})",
                     source="crypto_payment",
+                    reference_id=payment_id,
                     metadata={"payment_id": payment_id},
                 )
 
-                # Update transaction status - use stripe_payment_intent_id field instead
+                # Update transaction status using shared reference_id for reconciliation
                 tx_stmt = select(CreditTransaction).where(
-                    CreditTransaction.stripe_payment_intent_id == payment_id
+                    CreditTransaction.reference_id == payment_id
                 )
                 tx_result = await db.execute(tx_stmt)
                 transaction = tx_result.scalar_one_or_none()
@@ -552,8 +553,8 @@ class CryptoPaymentService(LoggerMixin):
                     "Credits allocated successfully",
                     user_id=user_id,
                     credits=credit_amount,
-                        payment_id=payment_id
-                    )
+                    payment_id=payment_id,
+                )
         
         except Exception as e:
             self.logger.error("Credit allocation failed", error=str(e))

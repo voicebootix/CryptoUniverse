@@ -67,7 +67,18 @@ class CreditLedger:
 
         stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
         if for_update:
-            stmt = stmt.with_for_update()
+            bind = db.get_bind()
+            dialect_name = ""
+            if bind is not None:
+                # AsyncEngine exposes dialect directly; AsyncConnection stores it on .dialect
+                dialect = getattr(bind, "dialect", None)
+                if dialect is None and hasattr(bind, "sync_engine"):
+                    dialect = getattr(bind.sync_engine, "dialect", None)
+                if dialect is not None:
+                    dialect_name = getattr(dialect, "name", "")
+
+            if dialect_name and dialect_name.lower() != "sqlite":
+                stmt = stmt.with_for_update()
 
         result = await db.execute(stmt)
         account = result.scalar_one_or_none()
