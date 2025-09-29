@@ -220,22 +220,31 @@ async def execute_manual_trade(
             "user_id": str(current_user.id)
         }
         
+        # Pre-calculate credit requirement for live trades
+        credit_cost: Optional[int] = None
+        if not simulation_mode:
+            credit_cost = calculate_credit_cost(request.amount, request.symbol)
+            if credit_account.available_credits < credit_cost:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Insufficient credits for trading",
+                )
+
         # Execute trade
         result = await trade_executor.execute_trade(
             trade_data,
             str(current_user.id),
             simulation_mode=simulation_mode
         )
-        
+
         if not result.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=result.get("error", "Trade execution failed")
             )
-        
-        # Deduct credits for real trades
-        if not simulation_mode:
-            credit_cost = calculate_credit_cost(request.amount, request.symbol)
+
+        # Deduct credits for real trades after successful execution
+        if credit_cost is not None:
             try:
                 await credit_ledger.consume_credits(
                     db,
