@@ -52,6 +52,7 @@ from app.services.user_onboarding_service import user_onboarding_service
 from app.models.user import User
 from app.models.trading import TradingStrategy, Trade, Position
 from app.models.credit import CreditAccount
+from app.models.analytics import PerformanceMetric, MetricType
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -223,6 +224,39 @@ class UnifiedChatService(LoggerMixin):
             return float(value)
         except (TypeError, ValueError):
             return default
+
+    @staticmethod
+    def _coerce_to_float(value: Any, default: float = 0.0) -> float:
+        """Safely convert values to floats, handling Decimal and string inputs."""
+        if value is None:
+            return default
+        if isinstance(value, float):
+            return value
+        if isinstance(value, Decimal):
+            return float(value)
+        if isinstance(value, int):
+            return float(value)
+        try:
+            return float(str(value))
+        except (TypeError, ValueError):
+            return default
+
+    def _infer_overall_risk_level(self, risk_metrics: Dict[str, Any]) -> str:
+        """Derive a qualitative risk level from quantitative metrics."""
+
+        if not risk_metrics:
+            return "Unknown"
+
+        var_95 = abs(self._coerce_to_float(risk_metrics.get("var_95")))
+        max_drawdown = abs(self._coerce_to_float(risk_metrics.get("maximum_drawdown")))
+        sharpe_ratio = self._coerce_to_float(risk_metrics.get("sharpe_ratio"))
+        volatility = abs(self._coerce_to_float(risk_metrics.get("volatility_annual")))
+
+        if var_95 >= 0.20 or max_drawdown >= 0.45 or volatility >= 0.85:
+            return "High"
+        if var_95 <= 0.07 and max_drawdown <= 0.25 and sharpe_ratio >= 1.0:
+            return "Low"
+        return "Medium"
 
     @staticmethod
     def _extract_trade_notional(trade: Dict[str, Any]) -> Optional[float]:
@@ -1030,8 +1064,30 @@ class UnifiedChatService(LoggerMixin):
             # Get REAL portfolio data from exchanges
             context_data["portfolio"] = await self._transform_portfolio_for_chat(user_id)
 
-            # Risk analysis integration pending
-            context_data["risk_analysis"] = {"overall_risk": "Medium", "error": "Risk analysis integration pending"}
+            try:
+                risk_result = await self.portfolio_risk.risk_analysis(user_id)
+                if risk_result.get("success"):
+                    risk_metrics = risk_result.get("risk_metrics", {}) or {}
+                    overall_risk = self._infer_overall_risk_level(risk_metrics)
+                    context_data["risk_analysis"] = {
+                        "overall_risk": overall_risk,
+                        "risk_metrics": risk_metrics,
+                        "risk_alerts": risk_result.get("risk_alerts", []),
+                        "portfolio_value": risk_result.get("portfolio_value"),
+                        "analysis_parameters": risk_result.get("analysis_parameters", {}),
+                    }
+                else:
+                    context_data["risk_analysis"] = {
+                        "overall_risk": "Unknown",
+                        "error": risk_result.get("error", "Risk analysis unavailable"),
+                    }
+            except Exception as e:
+                self.logger.error("Failed to gather risk analysis", error=str(e), user_id=user_id)
+                context_data["risk_analysis"] = {
+                    "overall_risk": "Unknown",
+                    "error": "Risk analysis temporarily unavailable",
+                }
+
             context_data["performance"] = await self._get_performance_metrics(user_id)
             
         elif intent == ChatIntent.TRADE_EXECUTION:
@@ -1915,13 +1971,57 @@ Provide a helpful response using the real data available. Never use placeholder 
     async def _get_performance_metrics(self, user_id: str) -> Dict[str, Any]:
         """Get performance metrics - REAL data."""
         try:
-            # Connect to your performance tracking service
-            return {
-            "total_return": 0.0,
-            "win_rate": 0.0,
-            "sharpe_ratio": 0.0,
-            "max_drawdown": 0.0
+            try:
+                user_uuid = uuid.UUID(str(user_id))
+            except (ValueError, TypeError):
+                user_uuid = user_id
+
+            metrics_map = {
+                MetricType.RETURN: "total_return",
+                MetricType.WIN_RATE: "win_rate",
+                MetricType.SHARPE_RATIO: "sharpe_ratio",
+                MetricType.MAX_DRAWDOWN: "max_drawdown",
             }
+
+            metric_values: Dict[str, float] = {}
+            latest_period: Optional[datetime] = None
+
+            async with get_database_session() as db:
+                for metric_type, key in metrics_map.items():
+                    stmt = (
+                        select(PerformanceMetric.value, PerformanceMetric.period_end)
+                        .where(
+                            PerformanceMetric.user_id == user_uuid,
+                            PerformanceMetric.metric_type == metric_type,
+                        )
+                        .order_by(PerformanceMetric.period_end.desc())
+                        .limit(1)
+                    )
+                    result = await db.execute(stmt)
+                    row = result.first()
+                    if not row:
+                        continue
+
+                    value, period_end = row
+                    metric_values[key] = self._coerce_to_float(value)
+                    if period_end and (
+                        latest_period is None or period_end > latest_period
+                    ):
+                        latest_period = period_end
+
+            performance = {
+                "total_return": metric_values.get("total_return", 0.0),
+                "win_rate": metric_values.get("win_rate", 0.0),
+                "sharpe_ratio": metric_values.get("sharpe_ratio", 0.0),
+                "max_drawdown": metric_values.get("max_drawdown", 0.0),
+            }
+
+            performance["data_available"] = bool(metric_values)
+
+            if latest_period:
+                performance["last_updated"] = latest_period.isoformat()
+
+            return performance
         except Exception as e:
             self.logger.error("Failed to get performance metrics", error=str(e))
             return {}

@@ -143,109 +143,321 @@ class OptimizationResult:
 
 
 class ExchangePortfolioConnector(LoggerMixin):
-    """
-    Exchange Portfolio Connector - retrieves real portfolio data
-    
-    Handles connections to multiple exchanges for portfolio retrieval:
-    - Real-time balance fetching
-    - Position aggregation across exchanges
-    - Multi-exchange portfolio consolidation
-    """
-    
+    """Enterprise portfolio aggregation with real exchange connectivity."""
+
     def __init__(self):
         self.exchange_configs = {
             "binance": {
                 "api_url": "https://api.binance.com",
-                "endpoints": {
-                    "account": "/api/v3/account",
-                    "positions": "/api/v3/openOrders"
-                }
+                "endpoints": {"account": "/api/v3/account", "positions": "/api/v3/openOrders"},
             },
             "kraken": {
                 "api_url": "https://api.kraken.com",
-                "endpoints": {
-                    "balance": "/0/private/Balance",
-                    "positions": "/0/private/OpenPositions"
-                }
+                "endpoints": {"balance": "/0/private/Balance", "positions": "/0/private/OpenPositions"},
             },
             "kucoin": {
                 "api_url": "https://api.kucoin.com",
-                "endpoints": {
-                    "accounts": "/api/v1/accounts",
-                    "positions": "/api/v1/positions"
-                }
-            }
+                "endpoints": {"accounts": "/api/v1/accounts", "positions": "/api/v1/positions"},
+            },
         }
         self.portfolio_cache = {}
         self.cache_ttl = 60  # 1 minute cache
-    
+        environment = getattr(settings, "ENVIRONMENT", "development") or "development"
+        self.environment = environment.lower()
+        self.allow_simulation = self.environment in {"development", "dev", "local", "test"}
+
     async def get_consolidated_portfolio(
         self,
         user_id: str,
-        exchange_filter: List[str] = None
+        exchange_filter: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Get consolidated portfolio across all exchanges."""
-        
-        if exchange_filter is None:
-            exchange_filter = ["binance", "kraken", "kucoin"]
-        
-        # Check cache first
-        cache_key = f"portfolio_{user_id}_{','.join(sorted(exchange_filter))}"
+        """Return consolidated portfolio using live exchange aggregation."""
+
+        exchange_filter = exchange_filter or ["binance", "kraken", "kucoin"]
+        normalized_filter = {ex.lower() for ex in exchange_filter}
+
+        cache_key = f"portfolio_{user_id}_{','.join(sorted(normalized_filter))}"
         cached_portfolio = await self._get_cached_portfolio(cache_key)
         if cached_portfolio:
             return cached_portfolio
-        
+
+        live_portfolio: Optional[Dict[str, Any]] = None
+        try:
+            live_portfolio = await self._fetch_live_portfolio(user_id)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.error(
+                "Live portfolio aggregation failed",
+                user_id=user_id,
+                error=str(exc),
+                exc_info=True,
+            )
+
+        if live_portfolio:
+            transformed = self._transform_live_portfolio(
+                user_id, live_portfolio, normalized_filter
+            )
+            if transformed["source"] == "live" and live_portfolio.get("success") is True:
+                await self._cache_portfolio(cache_key, transformed)
+                return transformed
+
+            # Use simulation fallback for any non-success response when allowed
+            if (transformed["source"] != "live" or live_portfolio.get("success") is not True) and self.allow_simulation:
+                simulated = await self._build_simulated_portfolio(user_id, exchange_filter)
+                await self._cache_portfolio(cache_key, simulated)
+                return simulated
+
+        if live_portfolio is None and self.allow_simulation:
+            simulated = await self._build_simulated_portfolio(user_id, exchange_filter)
+            await self._cache_portfolio(cache_key, simulated)
+            return simulated
+
+        empty_portfolio = self._empty_portfolio(user_id, exchange_filter)
+        if live_portfolio:
+            empty_portfolio["source"] = "live"
+            if live_portfolio.get("error"):
+                empty_portfolio["error"] = live_portfolio.get("error")
+            if live_portfolio.get("message"):
+                empty_portfolio["message"] = live_portfolio.get("message")
+
+        await self._cache_portfolio(cache_key, empty_portfolio)
+        return empty_portfolio
+
+    async def _fetch_live_portfolio(self, user_id: str) -> Dict[str, Any]:
+        """Fetch portfolio from the real exchange aggregation service."""
+
+        from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
+
+        async with AsyncSessionLocal() as db:
+            return await get_user_portfolio_from_exchanges(str(user_id), db)
+
+    def _transform_live_portfolio(
+        self,
+        user_id: str,
+        live_portfolio: Dict[str, Any],
+        normalized_filter: Optional[set],
+    ) -> Dict[str, Any]:
+        """Convert live exchange data into the unified portfolio structure."""
+
+        allowed_exchanges = normalized_filter or set()
+        balances = live_portfolio.get("balances", []) or []
+        exchange_summaries = {
+            (summary.get("exchange") or "").lower(): summary
+            for summary in live_portfolio.get("exchanges", []) or []
+        }
+
+        positions: List[Dict[str, Any]] = []
+        normalized_balances: List[Dict[str, Any]] = []
+        exchange_breakdown: Dict[str, Dict[str, Any]] = {}
+        total_value = 0.0
+
+        for raw_balance in balances:
+            exchange_name = str(raw_balance.get("exchange") or "unknown")
+            exchange_key = exchange_name.lower()
+            if allowed_exchanges and exchange_key not in allowed_exchanges:
+                continue
+
+            normalized_balance = {
+                "asset": raw_balance.get("asset") or raw_balance.get("symbol"),
+                "exchange": exchange_name,
+                "free": self._safe_float(raw_balance.get("free")),
+                "locked": self._safe_float(raw_balance.get("locked")),
+                "total": self._safe_float(
+                    raw_balance.get("total")
+                    or raw_balance.get("amount")
+                    or raw_balance.get("quantity")
+                ),
+                "value_usd": self._safe_float(
+                    raw_balance.get("value_usd") or raw_balance.get("usd_value")
+                ),
+            }
+
+            normalized_balances.append(normalized_balance)
+
+            quantity = normalized_balance["total"]
+            value_usd = normalized_balance["value_usd"]
+            if value_usd <= 0 and quantity <= 0:
+                continue
+
+            avg_price = value_usd / quantity if quantity > 0 else 0.0
+
+            position = {
+                "symbol": normalized_balance["asset"],
+                "exchange": exchange_name,
+                "quantity": quantity,
+                "value_usd": value_usd,
+                "percentage": 0.0,
+                "avg_entry_price": avg_price,
+                "current_price": avg_price,
+                "unrealized_pnl": 0.0,
+                "unrealized_pnl_pct": 0.0,
+                "risk_contribution": 0.0,
+            }
+
+            positions.append(position)
+            total_value += value_usd
+
+            breakdown = exchange_breakdown.setdefault(
+                exchange_key,
+                {
+                    "exchange": exchange_name,
+                    "total_value": 0.0,
+                    "positions": [],
+                    "balances": [],
+                },
+            )
+            breakdown["total_value"] += value_usd
+            breakdown["balances"].append(normalized_balance)
+
+        for key, summary in exchange_summaries.items():
+            if allowed_exchanges and key not in allowed_exchanges:
+                continue
+
+            breakdown = exchange_breakdown.setdefault(
+                key,
+                {
+                    "exchange": summary.get("exchange"),
+                    "total_value": 0.0,
+                    "positions": [],
+                    "balances": [],
+                },
+            )
+            breakdown.setdefault("metadata", {})
+            breakdown["metadata"].update(
+                {
+                    "account_id": summary.get("account_id"),
+                    "asset_count": summary.get("asset_count"),
+                    "fetch_time_ms": summary.get("fetch_time_ms"),
+                    "success": summary.get("success", True),
+                    "error": summary.get("error"),
+                }
+            )
+            if summary.get("total_value_usd") is not None:
+                breakdown["total_value"] = self._safe_float(summary.get("total_value_usd"))
+
+        if total_value > 0:
+            for position in positions:
+                position["percentage"] = (position["value_usd"] / total_value) * 100
+
+        # Now add positions to exchange breakdowns with correct percentages
+        for position in positions:
+            exchange_name = position.get("exchange", "unknown")
+            exchange_key = exchange_name.lower()
+            if exchange_key in exchange_breakdown:
+                exchange_breakdown[exchange_key]["positions"].append(dict(position))
+
+        positions.sort(key=lambda item: item.get("value_usd", 0), reverse=True)
+
         portfolio_data = {
+            "user_id": user_id,
+            "total_value_usd": round(total_value, 2),
+            "positions": positions,
+            "balances": normalized_balances,
+            "exchange_breakdown": exchange_breakdown,
+            "last_updated": live_portfolio.get("last_updated")
+            or datetime.utcnow().isoformat(),
+            "source": "live",
+        }
+
+        if live_portfolio.get("performance_metrics"):
+            portfolio_data["performance_metrics"] = live_portfolio.get("performance_metrics")
+
+        return portfolio_data
+
+    def _should_use_simulation_fallback(self, live_portfolio: Dict[str, Any]) -> bool:
+        """Determine whether to fall back to simulated data (dev/test only)."""
+
+        if not self.allow_simulation:
+            return False
+
+        message = str(
+            live_portfolio.get("message")
+            or live_portfolio.get("error")
+            or ""
+        ).lower()
+
+        return "no active validated exchanges" in message
+
+    async def _build_simulated_portfolio(
+        self, user_id: str, exchange_filter: List[str]
+    ) -> Dict[str, Any]:
+        """Aggregate simulated portfolio data for development environments."""
+
+        portfolio = self._empty_portfolio(user_id, exchange_filter)
+        portfolio["source"] = "simulated"
+
+        for exchange in exchange_filter:
+            method_name = f"_simulate_{exchange.lower()}_portfolio"
+            simulate_method = getattr(self, method_name, None)
+            if not simulate_method:
+                continue
+
+            exchange_data = await simulate_method(user_id)
+            total_value = self._safe_float(
+                exchange_data.get("total_value")
+                or exchange_data.get("total_value_usd")
+            )
+
+            portfolio["total_value_usd"] += total_value
+            portfolio_positions = exchange_data.get("positions", []) or []
+
+            for position in portfolio_positions:
+                value_usd = self._safe_float(position.get("value_usd"))
+                position["percentage"] = 0.0
+                portfolio["positions"].append(position)
+
+            portfolio["exchange_breakdown"][exchange.lower()] = {
+                "exchange": exchange,
+                "total_value": total_value,
+                "positions": portfolio_positions,
+                "balances": exchange_data.get("balances", {}),
+            }
+
+        if portfolio["total_value_usd"] > 0:
+            for position in portfolio["positions"]:
+                value = self._safe_float(position.get("value_usd"))
+                position["percentage"] = (value / portfolio["total_value_usd"]) * 100
+
+        portfolio["last_updated"] = datetime.utcnow().isoformat()
+        return portfolio
+
+    def _empty_portfolio(
+        self, user_id: str, exchange_filter: Optional[List[str]]
+    ) -> Dict[str, Any]:
+        """Return an empty portfolio scaffold."""
+
+        exchanges = exchange_filter or ["binance", "kraken", "kucoin"]
+        breakdown = {
+            exchange.lower(): {
+                "exchange": exchange,
+                "total_value": 0.0,
+                "positions": [],
+                "balances": [],
+            }
+            for exchange in exchanges
+        }
+
+        return {
             "user_id": user_id,
             "total_value_usd": 0.0,
             "positions": [],
-            "balances": {},
-            "exchange_breakdown": {},
-            "last_updated": datetime.utcnow().isoformat()
+            "balances": [],
+            "exchange_breakdown": breakdown,
+            "last_updated": datetime.utcnow().isoformat(),
+            "source": "empty",
         }
-        
-        # Fetch from each exchange
-        for exchange in exchange_filter:
-            try:
-                exchange_data = await self._get_exchange_portfolio(exchange, user_id)
-                
-                # Add to consolidated portfolio
-                portfolio_data["total_value_usd"] += exchange_data.get("total_value", 0)
-                portfolio_data["positions"].extend(exchange_data.get("positions", []))
-                portfolio_data["exchange_breakdown"][exchange] = exchange_data
-                
-            except Exception as e:
-                self.logger.warning(f"Failed to get portfolio from {exchange}", error=str(e))
-                portfolio_data["exchange_breakdown"][exchange] = {
-                    "error": str(e),
-                    "total_value": 0,
-                    "positions": []
-                }
-        
-        # Calculate position percentages
-        if portfolio_data["total_value_usd"] > 0:
-            for position in portfolio_data["positions"]:
-                position["percentage"] = (position["value_usd"] / portfolio_data["total_value_usd"]) * 100
-        
-        # Cache the result
-        await self._cache_portfolio(cache_key, portfolio_data)
-        
-        return portfolio_data
-    
-    async def _get_exchange_portfolio(self, exchange: str, user_id: str) -> Dict[str, Any]:
-        """Get portfolio data from specific exchange."""
-        
-        # In production, this would make real API calls to each exchange
-        # For now, simulate realistic portfolio data
-        
-        if exchange == "binance":
-            return await self._simulate_binance_portfolio(user_id)
-        elif exchange == "kraken":
-            return await self._simulate_kraken_portfolio(user_id)
-        elif exchange == "kucoin":
-            return await self._simulate_kucoin_portfolio(user_id)
-        else:
-            return {"total_value": 0, "positions": []}
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        """Safely convert values to float for downstream calculations."""
+
+        if value is None:
+            return default
+        if isinstance(value, Decimal):
+            return float(value)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
     
     async def _simulate_binance_portfolio(self, user_id: str) -> Dict[str, Any]:
         """Simulate Binance portfolio data."""
