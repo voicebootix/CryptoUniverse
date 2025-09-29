@@ -1313,13 +1313,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         improvement_normalized = 0.0
                         if improvement_raw is not None:
                             try:
+                                is_percent = False
                                 if isinstance(improvement_raw, str):
                                     improvement_str = improvement_raw.strip()
                                     if improvement_str.endswith("%"):
                                         improvement_str = improvement_str[:-1]
-                                    improvement_normalized = float(improvement_str)
+                                        is_percent = True
+                                    improvement_value = float(improvement_str)
                                 else:
-                                    improvement_normalized = float(improvement_raw)
+                                    improvement_value = float(improvement_raw)
+
+                                if is_percent or improvement_value > 1.0:
+                                    improvement_value /= 100.0
+
+                                improvement_normalized = max(0.0, min(improvement_value, 1.0))
                             except (TypeError, ValueError):
                                 improvement_normalized = 0.0
 
@@ -1341,7 +1348,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             metadata={
                                 "rebalance_action": rebal.get("action", ""),
                                 "strategy_used": strategy_name,
-                                "improvement_potential": improvement_normalized,
+                                "improvement_potential": improvement_raw,
                                 "normalized_improvement": improvement_normalized,
                                 "risk_reduction": rebal.get("risk_reduction", 0),
                                 "amount": rebal.get("amount", 0),
