@@ -1276,41 +1276,6 @@ Respond naturally using ONLY the real data provided."""
             except (TypeError, ValueError):
                 return default
 
-        def _fraction_from(
-            value: Any,
-            allow_percent_conversion: bool = False,
-        ) -> Optional[float]:
-            """Normalize numeric inputs into a canonical fraction (0-1)."""
-
-            if value is None:
-                return None
-
-            if isinstance(value, str):
-                original_value = value.strip()
-                if not original_value:
-                    return None
-
-                if allow_percent_conversion and "%" in original_value:
-                    numeric_portion = original_value.replace("%", "").strip()
-                    try:
-                        parsed = float(numeric_portion)
-                    except ValueError:
-                        return None
-                    return parsed / 100.0
-
-            numeric_value = _safe_float(value, None)
-            if numeric_value is None:
-                return None
-
-            if allow_percent_conversion:
-                magnitude = abs(numeric_value)
-                if magnitude <= 1:
-                    return numeric_value
-                if magnitude <= 100:
-                    return numeric_value / 100.0
-                return None
-
-            return numeric_value
 
         def _safe_percentage(value: Any) -> Optional[float]:
             fraction_value = _fraction_from(value, allow_percent_conversion=True)

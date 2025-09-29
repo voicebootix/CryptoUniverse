@@ -1337,15 +1337,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         raw_improvement = rebal.get("improvement_potential")
                         strategy_name = rebal.get("strategy", "UNKNOWN")
 
-                        # Use existing class methods for conversion
-                        improvement_numeric = self._to_float(raw_improvement)
-                        improvement_normalized = 0.0
-                        if improvement_numeric is not None:
-                            if isinstance(raw_improvement, str) and "%" in raw_improvement:
-                                improvement_normalized = improvement_numeric / 100
-                            else:
-                                improvement_normalized = improvement_numeric
-                        improvement_normalized = float(improvement_normalized)
+                        # Use the helper function for consistent normalization
+                        improvement_normalized = _normalize_improvement(raw_improvement)
 
                         target_weight_fraction = self._to_fraction(rebal.get("target_weight"))
                         target_percentage_fraction = self._to_fraction(rebal.get("target_percentage"))
@@ -1362,9 +1355,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         notional_usd = self._to_float(rebal.get("notional_usd"))
                         trade_value_usd = value_change if value_change is not None else notional_usd
                         if trade_value_usd is None:
-                            # Fallback to historical behaviour for legacy payloads
-                            fallback_amount = self._to_float(rebal.get("amount", 0.0)) or 0.0
-                            trade_value_usd = fallback_amount * 10000
+                            # Fallback for legacy payloads: interpret amount as a fraction when appropriate.
+                            fallback_frac = self._to_fraction(rebal.get("amount", 0.0))
+                            if fallback_frac is not None and -1.0 <= fallback_frac <= 1.0:
+                                trade_value_usd = fallback_frac * 10000.0  # keep legacy $10k baseline
+                            else:
+                                # If caller provided an absolute notional, use that directly.
+                                fallback_abs = self._to_float(rebal.get("amount"))
+                                trade_value_usd = fallback_abs if fallback_abs is not None else None
 
                         required_capital = abs(float(trade_value_usd)) if trade_value_usd is not None else 0.0
 
@@ -1376,9 +1374,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             "urgency": rebal.get("urgency", "MEDIUM")
                         }
 
-                        # Amount should reflect desired weight (or change) as a fraction
-                        if amount_fraction is not None:
+                        # Amount should reflect desired weight (or change) as a fraction in [-1,1].
+                        if amount_fraction is not None and -1.0 <= amount_fraction <= 1.0:
                             metadata["amount"] = amount_fraction
+                        else:
+                            # If caller provided a notional amount, preserve it explicitly.
+                            amt_usd = self._to_float(rebal.get("amount"))
+                            if amt_usd is not None:
+                                metadata["amount_usd"] = float(amt_usd)
 
                         if target_weight_fraction is not None:
                             metadata["target_weight"] = target_weight_fraction
