@@ -1308,30 +1308,115 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 if rebalancing_recommendations:
                     for rebal in rebalancing_recommendations:
                         # Include all recommendations, not filtered by improvement
-                        improvement = rebal.get("improvement_potential", 0)
+                        raw_improvement = rebal.get("improvement_potential")
                         strategy_name = rebal.get("strategy", "UNKNOWN")
-                        
+
+                        def _to_float(value: Any) -> Optional[float]:
+                            """Safely convert common numeric formats (including percentages) to float."""
+
+                            if value is None:
+                                return None
+                            try:
+                                if isinstance(value, str):
+                                    stripped = value.strip()
+                                    if not stripped:
+                                        return None
+                                    if stripped.endswith("%"):
+                                        stripped = stripped[:-1].strip()
+                                    value = float(stripped)
+                                return float(value)
+                            except (TypeError, ValueError):
+                                return None
+
+                        def _to_fraction(value: Any) -> Optional[float]:
+                            """Normalize weights provided either as fractions or percentages."""
+
+                            percent_in_input = isinstance(value, str) and "%" in value
+                            numeric = _to_float(value)
+                            if numeric is None:
+                                return None
+                            if percent_in_input:
+                                return numeric / 100
+                            if abs(numeric) <= 1:
+                                return numeric
+                            if abs(numeric) <= 100:
+                                return numeric / 100
+                            return None
+
+                        improvement_numeric = _to_float(raw_improvement)
+                        improvement_normalized = 0.0
+                        if improvement_numeric is not None:
+                            if isinstance(raw_improvement, str) and "%" in raw_improvement:
+                                improvement_normalized = improvement_numeric / 100
+                            else:
+                                improvement_normalized = improvement_numeric
+                        improvement_normalized = float(improvement_normalized)
+
+                        target_weight_fraction = _to_fraction(rebal.get("target_weight"))
+                        target_percentage_fraction = _to_fraction(rebal.get("target_percentage"))
+                        weight_change_fraction = _to_fraction(rebal.get("weight_change"))
+                        amount_fraction = target_weight_fraction
+                        if amount_fraction is None:
+                            amount_fraction = target_percentage_fraction
+                        if amount_fraction is None:
+                            amount_fraction = weight_change_fraction
+                        if amount_fraction is None:
+                            amount_fraction = _to_fraction(rebal.get("amount"))
+
+                        value_change = _to_float(rebal.get("value_change"))
+                        notional_usd = _to_float(rebal.get("notional_usd"))
+                        trade_value_usd = value_change if value_change is not None else notional_usd
+                        if trade_value_usd is None:
+                            # Fallback to historical behaviour for legacy payloads
+                            fallback_amount = _to_float(rebal.get("amount", 0.0)) or 0.0
+                            trade_value_usd = fallback_amount * 10000
+
+                        required_capital = abs(float(trade_value_usd)) if trade_value_usd is not None else 0.0
+
+                        metadata: Dict[str, Any] = {
+                            "rebalance_action": rebal.get("action", ""),
+                            "strategy_used": strategy_name,
+                            "improvement_potential": improvement_normalized,
+                            "risk_reduction": rebal.get("risk_reduction", 0),
+                            "urgency": rebal.get("urgency", "MEDIUM")
+                        }
+
+                        # Amount should reflect desired weight (or change) as a fraction
+                        if amount_fraction is not None:
+                            metadata["amount"] = amount_fraction
+
+                        if target_weight_fraction is not None:
+                            metadata["target_weight"] = target_weight_fraction
+
+                        if weight_change_fraction is not None:
+                            metadata["weight_change"] = weight_change_fraction
+
+                        target_percentage_value = _to_float(rebal.get("target_percentage"))
+                        if target_percentage_value is not None:
+                            metadata["target_percentage"] = target_percentage_value
+
+                        if trade_value_usd is not None:
+                            metadata["trade_value_usd"] = float(trade_value_usd)
+
+                        if value_change is not None and value_change != trade_value_usd:
+                            metadata["value_change"] = value_change
+
+                        metadata["normalized_improvement"] = improvement_normalized
+
                         opportunity = OpportunityResult(
                             strategy_id="ai_portfolio_optimization",
                             strategy_name=f"AI Portfolio Optimization - {strategy_name}",
                             opportunity_type="portfolio_rebalance",
                             symbol=rebal.get("symbol", rebal.get("target_asset", "")),
                             exchange="multiple",
-                            profit_potential_usd=float(improvement * 10000),  # Assume $10k portfolio
+                            profit_potential_usd=float(improvement_normalized * 10000),  # Assume $10k portfolio
                             confidence_score=80.0,  # High confidence in optimization
                             risk_level="low",
-                            required_capital_usd=float(rebal.get("amount", 0.1) * 10000),
+                            required_capital_usd=required_capital,
                             estimated_timeframe="1-3 months",
                             entry_price=None,
                             exit_price=None,
-                            metadata={
-                                "rebalance_action": rebal.get("action", ""),
-                                "strategy_used": strategy_name,
-                                "improvement_potential": improvement,
-                                "risk_reduction": rebal.get("risk_reduction", 0),
-                                "amount": rebal.get("amount", 0),
-                                "urgency": rebal.get("urgency", "MEDIUM")
-                            },
+                            metadata=metadata,
                             discovered_at=datetime.utcnow()
                         )
                         opportunities.append(opportunity)
