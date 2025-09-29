@@ -1276,41 +1276,6 @@ Respond naturally using ONLY the real data provided."""
             except (TypeError, ValueError):
                 return default
 
-        def _fraction_from(
-            value: Any,
-            allow_percent_conversion: bool = False,
-        ) -> Optional[float]:
-            """Normalize numeric inputs into a canonical fraction (0-1)."""
-
-            if value is None:
-                return None
-
-            if isinstance(value, str):
-                original_value = value.strip()
-                if not original_value:
-                    return None
-
-                if allow_percent_conversion and "%" in original_value:
-                    numeric_portion = original_value.replace("%", "").strip()
-                    try:
-                        parsed = float(numeric_portion)
-                    except ValueError:
-                        return None
-                    return parsed / 100.0
-
-            numeric_value = _safe_float(value, None)
-            if numeric_value is None:
-                return None
-
-            if allow_percent_conversion:
-                magnitude = abs(numeric_value)
-                if magnitude <= 1:
-                    return numeric_value
-                if magnitude <= 100:
-                    return numeric_value / 100.0
-                return None
-
-            return numeric_value
 
         def _safe_percentage(value: Any) -> Optional[float]:
             fraction_value = _fraction_from(value, allow_percent_conversion=True)
@@ -1323,6 +1288,27 @@ Respond naturally using ONLY the real data provided."""
             if fraction_value is None:
                 return None
             return f"{fraction_value * 100:.1f}%"
+
+        def _fraction_from(value: Any, *, allow_percent_conversion: bool = True) -> Optional[float]:
+            if isinstance(value, str):
+                stripped = value.strip()
+                if not stripped:
+                    return None
+                if allow_percent_conversion and "%" in stripped:
+                    try:
+                        numeric_part = float(stripped.replace("%", "").strip())
+                    except ValueError:
+                        return None
+                    return numeric_part / 100
+
+            numeric = _safe_float(value, None)
+            if numeric is None:
+                return None
+            if abs(numeric) <= 1:
+                return numeric
+            if allow_percent_conversion and abs(numeric) <= 100:
+                return numeric / 100
+            return None
 
         if intent == ChatIntent.PORTFOLIO_ANALYSIS:
             portfolio = context_data.get("portfolio", {})
@@ -1642,13 +1628,41 @@ REBALANCING ANALYSIS ERROR:
                                         f"     Risk Level: {risk_fraction * 100:.1f}%"
                                     )
 
-                        allocation = metadata.get("amount")
-                        if allocation is not None:
-                            formatted_allocation = _format_percentage(allocation)
+                        target_fraction = (
+                            _fraction_from(metadata.get("target_weight"))
+                            or _fraction_from(metadata.get("target_percentage"))
+                        )
+                        allocation_fraction = _fraction_from(
+                            metadata.get("amount"),
+                            allow_percent_conversion=False,
+                        )
+                        weight_change_fraction = _fraction_from(metadata.get("weight_change"))
+
+                        display_fraction = target_fraction or allocation_fraction
+                        if display_fraction is not None:
+                            formatted_allocation = _format_percentage(display_fraction)
                             if formatted_allocation:
                                 prompt_parts.append(
-                                    f"     Allocation: {formatted_allocation} of portfolio"
+                                    f"     Allocation Target: {formatted_allocation} of portfolio"
                                 )
+
+                        if weight_change_fraction is not None:
+                            weight_change_text = _format_percentage(weight_change_fraction)
+                            if weight_change_text:
+                                prompt_parts.append(
+                                    f"     Weight Change: {weight_change_text}"
+                                )
+
+                        trade_value = (
+                            metadata.get("trade_value_usd")
+                            or metadata.get("value_change")
+                            or opportunity.get("required_capital_usd")
+                        )
+                        trade_value_numeric = _safe_float(trade_value, None)
+                        if trade_value_numeric is not None and trade_value_numeric != 0:
+                            prompt_parts.append(
+                                f"     Trade Size: ≈ ${abs(trade_value_numeric):,.2f}"
+                            )
 
                     elif "risk" in strategy_name_lower:
                         prompt_parts.append(
