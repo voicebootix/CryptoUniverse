@@ -1943,13 +1943,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             if not stripped:
                 return None
 
-            # Remove common formatting (commas, currency symbols, percentage signs, spaces)
-            cleaned = stripped.replace(",", "")
-            # European format like "1.234,56" -> "1234.56"
-            if re.match(r"^\d{1,3}(\.\d{3})+,\d+$", cleaned):
-                cleaned = cleaned.replace(".", "").replace(",", ".")
-            cleaned = re.sub(r"[^0-9eE+\-.]", "", cleaned)
-
+            # Handle European format first on the original string (thousand sep . or space, decimal ,)
+            s = stripped
+            if re.match(r"^\d{1,3}(?:[.\s]\d{3})+,\d+$", s):
+                s = s.replace(" ", "").replace(".", "").replace(",", ".")
+            else:
+                # Remove US-style thousands commas
+                s = s.replace(",", "")
+            cleaned = re.sub(r"[^0-9eE+\-.]", "", s)
             if not cleaned or cleaned in {"-", "+", ".", "-.", "+."}:
                 return None
 
