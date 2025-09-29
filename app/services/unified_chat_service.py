@@ -410,8 +410,15 @@ class UnifiedChatService(LoggerMixin):
                     return response
             
             # Step 3: Gather required data
+            prefetched_user_strategies = requirements_check.get("user_strategies")
+            prefetched_marketplace = requirements_check.get("marketplace_strategies")
+
             context_data = await self._gather_context_data(
-                intent_analysis, user_id, session
+                intent_analysis,
+                user_id,
+                session,
+                user_strategies=prefetched_user_strategies,
+                marketplace_strategies=prefetched_marketplace
             )
             
             # Step 4: Generate response
@@ -617,6 +624,8 @@ class UnifiedChatService(LoggerMixin):
         if conversation_mode == ConversationMode.PAPER_TRADING:
             return {"allowed": True, "message": "Paper trading mode active"}
         
+        requirements_result: Dict[str, Any] = {"allowed": True, "message": "All checks passed"}
+
         # Check credit requirements for paid operations
         if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
             if conversation_mode == ConversationMode.LIVE_TRADING:
@@ -645,12 +654,15 @@ class UnifiedChatService(LoggerMixin):
                             "required_credits": credit_check['required_credits']
                         }
                     }
-        
+
         # Check strategy access for strategy-related operations
         if intent in [ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
             strategy_check = await self._check_strategy_access(user_id)
+            requirements_result["strategy_access"] = strategy_check
+            requirements_result["user_strategies"] = strategy_check.get("portfolio_data")
+            requirements_result["marketplace_strategies"] = strategy_check.get("marketplace_data")
             if not strategy_check["has_access"] and intent == ChatIntent.STRATEGY_RECOMMENDATION:
-                return {
+                requirements_result.update({
                     "allowed": False,
                     "message": f"You need to purchase strategy access. "
                               f"Available strategies: {strategy_check['available_count']}. "
@@ -660,9 +672,10 @@ class UnifiedChatService(LoggerMixin):
                         "type": "strategy_purchase",
                         "available_strategies": strategy_check['available_strategies']
                     }
-                }
+                })
+                return requirements_result
             # For STRATEGY_MANAGEMENT, we allow access even without purchased strategies (show what they can buy)
-        
+
         # Check trading limits
         if intent == ChatIntent.TRADE_EXECUTION:
             limit_check = await self._check_trading_limits(user_id)
@@ -672,8 +685,8 @@ class UnifiedChatService(LoggerMixin):
                     "message": limit_check["message"],
                     "requires_action": False
                 }
-        
-        return {"allowed": True, "message": "All checks passed"}
+
+        return requirements_result
     
     async def _check_user_credits(self, user_id: str) -> Dict[str, Any]:
         """
@@ -761,7 +774,9 @@ class UnifiedChatService(LoggerMixin):
                 "active_strategies": active_strategies,
                 "available_count": len(available.get("strategies", [])),
                 "available_strategies": available.get("strategies", [])[:5],  # Top 5
-                "portfolio_success": portfolio_success
+                "portfolio_success": portfolio_success,
+                "portfolio_data": portfolio,
+                "marketplace_data": available
             }
         except Exception as e:
             self.logger.error("Strategy check failed", error=str(e))
@@ -770,7 +785,9 @@ class UnifiedChatService(LoggerMixin):
                 "active_strategies": [],
                 "available_count": 0,
                 "error": str(e),
-                "portfolio_success": False
+                "portfolio_success": False,
+                "portfolio_data": None,
+                "marketplace_data": None
             }
     
     async def _check_trading_limits(self, user_id: str) -> Dict[str, Any]:
@@ -888,7 +905,9 @@ class UnifiedChatService(LoggerMixin):
         self,
         intent_analysis: Dict[str, Any],
         user_id: str,
-        session: ChatSession
+        session: ChatSession,
+        user_strategies: Optional[Dict[str, Any]] = None,
+        marketplace_strategies: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Gather ALL required data based on intent.
@@ -958,30 +977,42 @@ class UnifiedChatService(LoggerMixin):
                 self.logger.error("Failed to get active strategy", error=str(e), user_id=user_id)
                 context_data["active_strategy"] = None
 
-            try:
-                context_data["available_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
-            except Exception as e:
-                self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
-                context_data["available_strategies"] = {"strategies": []}
+            if user_strategies is not None:
+                context_data["user_strategies"] = user_strategies
+
+            if marketplace_strategies is not None:
+                context_data["available_strategies"] = marketplace_strategies
+            else:
+                try:
+                    context_data["available_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
+                except Exception as e:
+                    self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
+                    context_data["available_strategies"] = {"strategies": []}
 
         elif intent == ChatIntent.STRATEGY_MANAGEMENT:
             # Get user's purchased/active strategies
-            try:
-                context_data["user_strategies"] = await self.strategy_marketplace.get_user_strategy_portfolio(user_id)
-            except Exception as e:
-                self.logger.error("Failed to get user strategy portfolio", error=str(e), user_id=user_id)
-                context_data["user_strategies"] = {
-                    "success": False,
-                    "active_strategies": [],
-                    "total_strategies": 0,
-                    "error": str(e)
-                }
+            if user_strategies is not None:
+                context_data["user_strategies"] = user_strategies
+            else:
+                try:
+                    context_data["user_strategies"] = await self.strategy_marketplace.get_user_strategy_portfolio(user_id)
+                except Exception as e:
+                    self.logger.error("Failed to get user strategy portfolio", error=str(e), user_id=user_id)
+                    context_data["user_strategies"] = {
+                        "success": False,
+                        "active_strategies": [],
+                        "total_strategies": 0,
+                        "error": str(e)
+                    }
 
-            try:
-                context_data["marketplace_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
-            except Exception as e:
-                self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
-                context_data["marketplace_strategies"] = {"strategies": []}
+            if marketplace_strategies is not None:
+                context_data["marketplace_strategies"] = marketplace_strategies
+            else:
+                try:
+                    context_data["marketplace_strategies"] = await self.strategy_marketplace.get_marketplace_strategies(user_id)
+                except Exception as e:
+                    self.logger.error("Failed to get marketplace strategies", error=str(e), user_id=user_id)
+                    context_data["marketplace_strategies"] = {"strategies": []}
 
         elif intent in [ChatIntent.CREDIT_INQUIRY, ChatIntent.CREDIT_MANAGEMENT]:
             # Get credit account information using same logic as _check_user_credits
@@ -1245,31 +1276,53 @@ Respond naturally using ONLY the real data provided."""
             except (TypeError, ValueError):
                 return default
 
-        def _safe_percentage(value: Any) -> Optional[float]:
-            raw_value = _safe_float(value, None)
-            if raw_value is None:
+        def _fraction_from(
+            value: Any,
+            allow_percent_conversion: bool = False,
+        ) -> Optional[float]:
+            """Normalize numeric inputs into a canonical fraction (0-1)."""
+
+            if value is None:
                 return None
-            normalized = raw_value * 100 if abs(raw_value) <= 1 else raw_value
-            return normalized
+
+            if isinstance(value, str):
+                original_value = value.strip()
+                if not original_value:
+                    return None
+
+                if allow_percent_conversion and "%" in original_value:
+                    numeric_portion = original_value.replace("%", "").strip()
+                    try:
+                        parsed = float(numeric_portion)
+                    except ValueError:
+                        return None
+                    return parsed / 100.0
+
+            numeric_value = _safe_float(value, None)
+            if numeric_value is None:
+                return None
+
+            if allow_percent_conversion:
+                magnitude = abs(numeric_value)
+                if magnitude <= 1:
+                    return numeric_value
+                if magnitude <= 100:
+                    return numeric_value / 100.0
+                return None
+
+            return numeric_value
+
+        def _safe_percentage(value: Any) -> Optional[float]:
+            fraction_value = _fraction_from(value, allow_percent_conversion=True)
+            if fraction_value is None:
+                return None
+            return fraction_value * 100
 
         def _format_percentage(value: Any) -> Optional[str]:
-            candidate: Any = value
-            if isinstance(candidate, str):
-                stripped = candidate.strip()
-                if not stripped:
-                    return None
-                if stripped.endswith("%"):
-                    stripped = stripped[:-1].strip()
-                try:
-                    candidate = float(stripped)
-                except ValueError:
-                    return None
-            if not isinstance(candidate, (int, float)):
+            fraction_value = _fraction_from(value, allow_percent_conversion=True)
+            if fraction_value is None:
                 return None
-            numeric = float(candidate)
-            if abs(numeric) <= 1:
-                numeric *= 100
-            return f"{numeric:.1f}%"
+            return f"{fraction_value * 100:.1f}%"
 
         def _fraction_from(value: Any, *, allow_percent_conversion: bool = True) -> Optional[float]:
             if isinstance(value, str):
@@ -1369,23 +1422,20 @@ REBALANCING ANALYSIS ERROR:
             risk_profile = rebalance.get("user_risk_profile", "medium")
 
             def _pct(value: Any) -> Optional[str]:
-                try:
-                    safe_value = _safe_float(value, 0.0)
-                    return f"{safe_value:.2%}" if safe_value is not None else "0.00%"
-                except (TypeError, ValueError):
+                fraction_value = _fraction_from(value, allow_percent_conversion=True)
+                if fraction_value is None:
                     return None
+                return f"{fraction_value:.2%}"
 
             plan_status = "REBALANCE REQUIRED" if needs_rebalancing else "PORTFOLIO WITHIN THRESHOLD"
             execution_ready = execution_plan.get("execution_ready", False)
             trade_volume_pct_raw = metrics.get("trade_volume_pct", 0.0)
-            try:
-                trade_volume_pct = float(trade_volume_pct_raw)
-            except (TypeError, ValueError):
+            trade_volume_pct = _fraction_from(trade_volume_pct_raw, allow_percent_conversion=True)
+            if trade_volume_pct is None:
                 trade_volume_pct = 0.0
             total_notional_raw = execution_plan.get("total_notional")
-            try:
-                total_notional = float(total_notional_raw)
-            except (TypeError, ValueError):
+            total_notional = _safe_float(total_notional_raw, None)
+            if total_notional is None:
                 total_notional = trade_volume_pct * portfolio_value
 
             trade_lines: List[str] = []
@@ -1605,9 +1655,13 @@ REBALANCING ANALYSIS ERROR:
                             if isinstance(risk_level, str):
                                 prompt_parts.append(f"     Risk Level: {risk_level}")
                             else:
-                                prompt_parts.append(
-                                    f"     Risk Level: {_safe_float(risk_level, 0.0) * 100:.1f}%"
+                                risk_fraction = _fraction_from(
+                                    risk_level, allow_percent_conversion=True
                                 )
+                                if risk_fraction is not None:
+                                    prompt_parts.append(
+                                        f"     Risk Level: {risk_fraction * 100:.1f}%"
+                                    )
 
                         target_fraction = (
                             _fraction_from(metadata.get("target_weight"))
@@ -1721,7 +1775,7 @@ AVAILABLE STRATEGIES:
 - Strategy Categories: {list(set([s.get('category', 'Unknown') for s in available_strategies.get('strategies', [])]))}
 
 Top Recommended Strategies:
-{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - Expected Return: {_safe_float(s.get('expected_return', 0), 0.0)*100:.1f}%" for s in available_strategies.get('strategies', [])[:5]])}
+{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - Expected Return: {(_fraction_from(s.get('expected_return', 0), allow_percent_conversion=True) or 0.0) * 100:.1f}%" for s in available_strategies.get('strategies', [])[:5]])}
 
 Provide personalized strategy recommendations based on the user's current setup and available strategies."""
 

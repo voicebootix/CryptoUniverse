@@ -1,6 +1,8 @@
 import os
+from datetime import datetime
 from pathlib import Path
 import sys
+import uuid
 from unittest.mock import AsyncMock
 
 import pytest
@@ -15,7 +17,14 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from app.services.unified_chat_service import ChatIntent, UnifiedChatService
+from app.services.unified_chat_service import (
+    ChatIntent,
+    ChatSession,
+    ConversationMode,
+    InterfaceType,
+    TradingMode,
+    UnifiedChatService,
+)
 
 
 def test_unified_chat_service_initializes_key_attributes():
@@ -189,3 +198,75 @@ def test_opportunity_prompt_uses_fractional_weights_and_trade_values():
     assert "Allocation Target: 15.0% of portfolio" in prompt
     assert "Weight Change: 0.5%" in prompt
     assert "Trade Size: ≈ $1,500.00" in prompt
+
+
+@pytest.mark.asyncio
+async def test_strategy_management_prefetches_portfolio_once():
+    service = UnifiedChatService()
+
+    portfolio_payload = {
+        "success": True,
+        "active_strategies": [
+            {"id": "alpha", "name": "Alpha Momentum"}
+        ],
+        "total_strategies": 1,
+    }
+    marketplace_payload = {
+        "strategies": [
+            {"id": "beta", "name": "Beta Mean Reversion"}
+        ]
+    }
+
+    service.strategy_marketplace.get_user_strategy_portfolio = AsyncMock(
+        return_value=portfolio_payload
+    )
+    service.strategy_marketplace.get_marketplace_strategies = AsyncMock(
+        return_value=marketplace_payload
+    )
+
+    service._analyze_intent_unified = AsyncMock(
+        return_value={
+            "intent": ChatIntent.STRATEGY_MANAGEMENT,
+            "confidence": 0.92,
+            "requires_action": False,
+            "entities": {},
+        }
+    )
+
+    expected_response = {"success": True, "content": "ok"}
+    service._generate_complete_response = AsyncMock(return_value=expected_response)
+
+    user_id = str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
+    conversation_mode = ConversationMode.PAPER_TRADING
+
+    service.sessions[session_id] = ChatSession(
+        session_id=session_id,
+        user_id=user_id,
+        interface=InterfaceType.WEB_CHAT,
+        conversation_mode=conversation_mode,
+        trading_mode=TradingMode.BALANCED,
+        created_at=datetime.utcnow(),
+        last_activity=datetime.utcnow(),
+        context={
+            "interface": InterfaceType.WEB_CHAT.value,
+            "conversation_mode": conversation_mode.value,
+            "trading_mode": TradingMode.BALANCED.value,
+        },
+        messages=[],
+    )
+
+    result = await service.process_message(
+        message="Show my strategies",
+        user_id=user_id,
+        session_id=session_id,
+        conversation_mode=conversation_mode,
+    )
+
+    assert result == expected_response
+    service.strategy_marketplace.get_user_strategy_portfolio.assert_awaited_once()
+    service.strategy_marketplace.get_marketplace_strategies.assert_awaited_once()
+
+    _, _, _, context_arg = service._generate_complete_response.await_args.args
+    assert context_arg["user_strategies"] is portfolio_payload
+    assert context_arg["marketplace_strategies"] is marketplace_payload

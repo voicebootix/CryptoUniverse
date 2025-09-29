@@ -16,6 +16,8 @@ Date: 2025-09-12
 
 import asyncio
 import json
+import math
+import re
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -1306,44 +1308,37 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 # Process recommendations from all strategies
                 if rebalancing_recommendations:
+                    def _normalize_improvement(value: Any) -> float:
+                        """Convert raw improvement values to a 0-1 range."""
+                        if value is None:
+                            return 0.0
+
+                        try:
+                            is_percent = False
+
+                            if isinstance(value, str):
+                                cleaned_value = value.strip()
+                                if cleaned_value.endswith("%"):
+                                    cleaned_value = cleaned_value[:-1]
+                                    is_percent = True
+                                parsed_value = float(cleaned_value)
+                            else:
+                                parsed_value = float(value)
+
+                            if is_percent or parsed_value > 1.0:
+                                parsed_value /= 100.0
+
+                            return max(0.0, min(parsed_value, 1.0))
+                        except (TypeError, ValueError):
+                            return 0.0
+
                     for rebal in rebalancing_recommendations:
                         # Include all recommendations, not filtered by improvement
                         raw_improvement = rebal.get("improvement_potential")
                         strategy_name = rebal.get("strategy", "UNKNOWN")
 
-                        def _to_float(value: Any) -> Optional[float]:
-                            """Safely convert common numeric formats (including percentages) to float."""
-
-                            if value is None:
-                                return None
-                            try:
-                                if isinstance(value, str):
-                                    stripped = value.strip()
-                                    if not stripped:
-                                        return None
-                                    if stripped.endswith("%"):
-                                        stripped = stripped[:-1].strip()
-                                    value = float(stripped)
-                                return float(value)
-                            except (TypeError, ValueError):
-                                return None
-
-                        def _to_fraction(value: Any) -> Optional[float]:
-                            """Normalize weights provided either as fractions or percentages."""
-
-                            percent_in_input = isinstance(value, str) and "%" in value
-                            numeric = _to_float(value)
-                            if numeric is None:
-                                return None
-                            if percent_in_input:
-                                return numeric / 100
-                            if abs(numeric) <= 1:
-                                return numeric
-                            if abs(numeric) <= 100:
-                                return numeric / 100
-                            return None
-
-                        improvement_numeric = _to_float(raw_improvement)
+                        # Use existing class methods for conversion
+                        improvement_numeric = self._to_float(raw_improvement)
                         improvement_normalized = 0.0
                         if improvement_numeric is not None:
                             if isinstance(raw_improvement, str) and "%" in raw_improvement:
@@ -1352,23 +1347,23 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 improvement_normalized = improvement_numeric
                         improvement_normalized = float(improvement_normalized)
 
-                        target_weight_fraction = _to_fraction(rebal.get("target_weight"))
-                        target_percentage_fraction = _to_fraction(rebal.get("target_percentage"))
-                        weight_change_fraction = _to_fraction(rebal.get("weight_change"))
+                        target_weight_fraction = self._to_fraction(rebal.get("target_weight"))
+                        target_percentage_fraction = self._to_fraction(rebal.get("target_percentage"))
+                        weight_change_fraction = self._to_fraction(rebal.get("weight_change"))
                         amount_fraction = target_weight_fraction
                         if amount_fraction is None:
                             amount_fraction = target_percentage_fraction
                         if amount_fraction is None:
                             amount_fraction = weight_change_fraction
                         if amount_fraction is None:
-                            amount_fraction = _to_fraction(rebal.get("amount"))
+                            amount_fraction = self._to_fraction(rebal.get("amount"))
 
-                        value_change = _to_float(rebal.get("value_change"))
-                        notional_usd = _to_float(rebal.get("notional_usd"))
+                        value_change = self._to_float(rebal.get("value_change"))
+                        notional_usd = self._to_float(rebal.get("notional_usd"))
                         trade_value_usd = value_change if value_change is not None else notional_usd
                         if trade_value_usd is None:
                             # Fallback to historical behaviour for legacy payloads
-                            fallback_amount = _to_float(rebal.get("amount", 0.0)) or 0.0
+                            fallback_amount = self._to_float(rebal.get("amount", 0.0)) or 0.0
                             trade_value_usd = fallback_amount * 10000
 
                         required_capital = abs(float(trade_value_usd)) if trade_value_usd is not None else 0.0
@@ -1391,7 +1386,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         if weight_change_fraction is not None:
                             metadata["weight_change"] = weight_change_fraction
 
-                        target_percentage_value = _to_float(rebal.get("target_percentage"))
+                        target_percentage_value = self._to_float(rebal.get("target_percentage"))
                         if target_percentage_value is not None:
                             metadata["target_percentage"] = target_percentage_value
 
@@ -1402,7 +1397,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             metadata["value_change"] = value_change
 
                         metadata["normalized_improvement"] = improvement_normalized
-
                         opportunity = OpportunityResult(
                             strategy_id="ai_portfolio_optimization",
                             strategy_name=f"AI Portfolio Optimization - {strategy_name}",
@@ -1986,7 +1980,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     
     def _get_correlation_pairs(self, discovered_assets: Dict[str, List[Any]], max_pairs: int = 10) -> List[Tuple[str, str]]:
         """Get symbol pairs likely to be correlated for pairs trading."""
-        
+
         # Get top symbols
         top_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
         
@@ -2001,8 +1995,93 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     break
             if len(pairs) >= max_pairs:
                 break
-                
+
         return pairs[:max_pairs]
+
+    def _to_float(self, value: Any) -> Optional[float]:
+        """Convert common numeric string formats to float safely."""
+
+        if value is None:
+            return None
+
+        if isinstance(value, (int, float)):
+            float_val = float(value)
+            return float_val if math.isfinite(float_val) else None
+
+        if isinstance(value, Decimal):
+            if not value.is_finite():
+                return None
+            return float(value)
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            # Normalize Unicode minus (U+2212) to ASCII hyphen
+            stripped = stripped.replace("\u2212", "-")
+            # Parentheses-negatives: handle signs correctly
+            paren_negative = stripped.startswith("(") and stripped.endswith(")")
+            inner_sign_negative = False
+            if paren_negative:
+                inner = stripped[1:-1].strip()
+                if inner.startswith(('+', '-')):
+                    inner_sign_negative = inner.startswith('-')
+                    stripped = inner[1:]
+                else:
+                    stripped = inner
+            if not stripped:
+                return None
+
+            # Handle European format first on the original string (thousand sep . or space, decimal ,)
+            s = stripped
+            # Check for complex EU thousands pattern first
+            if re.match(r"^\d{1,3}(?:[.\s]\d{3})+,\d+$", s):
+                s = s.replace(" ", "").replace(".", "").replace(",", ".")
+            # Check for simple EU decimal pattern (digits,comma,digits with no dots or spaces)
+            elif re.match(r"^\d+,\d+$", s) and "." not in s:
+                s = s.replace(",", ".")
+            else:
+                # Remove US-style thousands commas
+                s = s.replace(",", "")
+            cleaned = re.sub(r"[^0-9eE+\-.]", "", s)
+            if not cleaned or cleaned in {"-", "+", ".", "-.", "+."}:
+                return None
+
+            try:
+                val = float(cleaned)
+                if paren_negative:
+                    # Apply parentheses negation only if inner sign wasn't already negative
+                    return -val if not inner_sign_negative else val
+                else:
+                    return val
+            except ValueError:
+                return None
+
+        return None
+    def _to_fraction(self, value: Any) -> Optional[float]:
+        """Convert values that may represent percentages into fractions."""
+
+        original = value if isinstance(value, str) else None
+        numeric = self._to_float(value)
+
+        if numeric is None:
+            return None
+
+        # Reject non-finite numeric values
+        if not math.isfinite(numeric):
+            return None
+
+        # Check for percent markers (including fullwidth percent sign U+FF05)
+        if original:
+            normalized = original.strip().replace('％', '%')  # Replace fullwidth percent
+            if "%" in normalized:
+                return numeric / 100.0
+
+        absolute = abs(numeric)
+        if absolute <= 1:
+            return numeric
+        if absolute <= 100:
+            return numeric / 100.0
+
+        return numeric
     
     async def _rank_and_filter_opportunities(
         self,
