@@ -16,6 +16,8 @@ Date: 2025-09-12
 
 import asyncio
 import json
+import math
+import re
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -1928,7 +1930,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     
     def _get_correlation_pairs(self, discovered_assets: Dict[str, List[Any]], max_pairs: int = 10) -> List[Tuple[str, str]]:
         """Get symbol pairs likely to be correlated for pairs trading."""
-        
+
         # Get top symbols
         top_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
         
@@ -1943,8 +1945,93 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     break
             if len(pairs) >= max_pairs:
                 break
-                
+
         return pairs[:max_pairs]
+
+    def _to_float(self, value: Any) -> Optional[float]:
+        """Convert common numeric string formats to float safely."""
+
+        if value is None:
+            return None
+
+        if isinstance(value, (int, float)):
+            float_val = float(value)
+            return float_val if math.isfinite(float_val) else None
+
+        if isinstance(value, Decimal):
+            if not value.is_finite():
+                return None
+            return float(value)
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            # Normalize Unicode minus (U+2212) to ASCII hyphen
+            stripped = stripped.replace("\u2212", "-")
+            # Parentheses-negatives: handle signs correctly
+            paren_negative = stripped.startswith("(") and stripped.endswith(")")
+            inner_sign_negative = False
+            if paren_negative:
+                inner = stripped[1:-1].strip()
+                if inner.startswith(('+', '-')):
+                    inner_sign_negative = inner.startswith('-')
+                    stripped = inner[1:]
+                else:
+                    stripped = inner
+            if not stripped:
+                return None
+
+            # Handle European format first on the original string (thousand sep . or space, decimal ,)
+            s = stripped
+            # Check for complex EU thousands pattern first
+            if re.match(r"^\d{1,3}(?:[.\s]\d{3})+,\d+$", s):
+                s = s.replace(" ", "").replace(".", "").replace(",", ".")
+            # Check for simple EU decimal pattern (digits,comma,digits with no dots or spaces)
+            elif re.match(r"^\d+,\d+$", s) and "." not in s:
+                s = s.replace(",", ".")
+            else:
+                # Remove US-style thousands commas
+                s = s.replace(",", "")
+            cleaned = re.sub(r"[^0-9eE+\-.]", "", s)
+            if not cleaned or cleaned in {"-", "+", ".", "-.", "+."}:
+                return None
+
+            try:
+                val = float(cleaned)
+                if paren_negative:
+                    # Apply parentheses negation only if inner sign wasn't already negative
+                    return -val if not inner_sign_negative else val
+                else:
+                    return val
+            except ValueError:
+                return None
+
+        return None
+    def _to_fraction(self, value: Any) -> Optional[float]:
+        """Convert values that may represent percentages into fractions."""
+
+        original = value if isinstance(value, str) else None
+        numeric = self._to_float(value)
+
+        if numeric is None:
+            return None
+
+        # Reject non-finite numeric values
+        if not math.isfinite(numeric):
+            return None
+
+        # Check for percent markers (including fullwidth percent sign U+FF05)
+        if original:
+            normalized = original.strip().replace('％', '%')  # Replace fullwidth percent
+            if "%" in normalized:
+                return numeric / 100.0
+
+        absolute = abs(numeric)
+        if absolute <= 1:
+            return numeric
+        if absolute <= 100:
+            return numeric / 100.0
+
+        return numeric
     
     async def _rank_and_filter_opportunities(
         self,
