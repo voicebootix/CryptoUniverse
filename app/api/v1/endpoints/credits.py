@@ -77,13 +77,22 @@ async def get_or_create_credit_account(user_id: str, db: AsyncSession, user: Opt
 
     # Create new account with role-based initial credits
     credit_account = CreditAccount(user_id=user_id)
-
-    if initial_credits > 0:
-        credit_account.register_credit_increase(initial_credits)
-    else:
-        credit_account.synchronize_profit_tracking()
+    credit_account.synchronize_profit_tracking()
 
     db.add(credit_account)
+    await db.flush()  # Ensure account is persisted/attached to session
+
+    # Use credit ledger API for initial credits to ensure proper transaction recording
+    if initial_credits > 0:
+        await credit_ledger.add_credits(
+            db,
+            credit_account,
+            credits=initial_credits,
+            description=f"Initial role-based credits for {user.role.value if user else 'user'}",
+            source="system",
+            transaction_type=CreditTransactionType.BONUS,
+            track_lifetime=False,
+        )
 
     try:
         await db.commit()

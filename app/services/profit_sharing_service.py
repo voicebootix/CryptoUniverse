@@ -349,6 +349,8 @@ class ProfitSharingService(LoggerMixin):
                     transaction_type=CreditTransactionType.PURCHASE,
                     description=f"Profit sharing purchase: Paid ${platform_fee:.2f}, earned {credits_earned} credits",
                     source="profit_sharing",
+                    provider=payment_method,
+                    reference_id=payment_result.get("payment_id"),
                     usd_value=platform_fee,
                     metadata={
                         "payment_method": payment_method,

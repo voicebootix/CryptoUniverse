@@ -1223,11 +1223,11 @@ async def manage_user(
                         transaction_type=CreditTransactionType.ADJUSTMENT,
                         metadata=metadata,
                     )
-                except InsufficientCreditsError:
+                except InsufficientCreditsError as e:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Cannot reduce credits below zero",
-                    )
+                    ) from e
 
             action_taken = f"Credits set to {target_balance}"
         

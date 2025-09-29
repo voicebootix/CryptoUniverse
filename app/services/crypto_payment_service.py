@@ -514,6 +514,7 @@ class CryptoPaymentService(LoggerMixin):
             from app.core.database import get_database
             from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
             from sqlalchemy import select
+            from sqlalchemy.exc import IntegrityError
 
             async for db in get_database():
                 # Get user's credit account
@@ -526,26 +527,39 @@ class CryptoPaymentService(LoggerMixin):
                     db.add(credit_account)
                     await db.flush()
 
-                # Idempotency: skip if we already recorded this payment
-                existing = await db.execute(
-                    select(CreditTransaction).where(CreditTransaction.reference_id == payment_id)
-                )
-                if existing.scalar_one_or_none():
-                    self.logger.info("Duplicate payment webhook ignored", payment_id=payment_id)
-                    await db.commit()
-                    return
+                # Idempotency: Atomic check and add using row lock to prevent race conditions
+                try:
+                    # Acquire row lock on credit account to serialize concurrent webhooks
+                    await db.execute(
+                        select(CreditAccount).where(CreditAccount.user_id == user_id).with_for_update()
+                    )
 
-                await credit_ledger.add_credits(
-                    db,
-                    credit_account,
-                    credits=credit_amount,
-                    transaction_type=CreditTransactionType.PURCHASE,
-                    description=f"Crypto payment allocation ({payment_id})",
-                    source="crypto_payment",
-                    provider="coinbase_commerce",
-                    reference_id=payment_id,
-                    metadata={"payment_id": payment_id},
-                )
+                    # Re-check for existing payment after acquiring lock
+                    existing = await db.execute(
+                        select(CreditTransaction).where(CreditTransaction.reference_id == payment_id)
+                    )
+                    if existing.scalar_one_or_none():
+                        self.logger.info("Duplicate payment webhook ignored", payment_id=payment_id)
+                        await db.commit()
+                        return
+
+                    await credit_ledger.add_credits(
+                        db,
+                        credit_account,
+                        credits=credit_amount,
+                        transaction_type=CreditTransactionType.PURCHASE,
+                        description=f"Crypto payment allocation ({payment_id})",
+                        source="crypto_payment",
+                        provider="coinbase_commerce",
+                        reference_id=payment_id,
+                        metadata={"payment_id": payment_id},
+                    )
+                except IntegrityError as e:
+                    # If duplicate reference_id constraint violation occurs, log and ignore
+                    self.logger.info("Duplicate payment detected via constraint violation",
+                                   payment_id=payment_id, error=str(e))
+                    await db.rollback()
+                    return
 
                 # Update transaction status using shared reference_id for reconciliation
                 tx_stmt = select(CreditTransaction).where(

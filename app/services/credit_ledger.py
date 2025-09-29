@@ -91,7 +91,15 @@ class CreditLedger:
         await db.flush()
 
         if initial_credits > 0:
-            account.register_credit_increase(initial_credits)
+            await self.add_credits(
+                db,
+                account,
+                credits=initial_credits,
+                transaction_type=CreditTransactionType.BONUS,
+                description="Initial account credits",
+                source="system",
+                track_lifetime=False,
+            )
             await db.flush()
 
         return account
