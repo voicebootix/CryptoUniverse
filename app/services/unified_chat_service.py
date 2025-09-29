@@ -14,6 +14,7 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Dict, List, Optional, Any, AsyncGenerator, Union
 from dataclasses import dataclass
 from enum import Enum
@@ -189,6 +190,105 @@ class UnifiedChatService(LoggerMixin):
             return normalized not in {"false", "0", "no", "off"}
 
         return bool(value)
+
+    @staticmethod
+    def _safe_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+        """Safely convert common numeric representations into floats."""
+        if value is None:
+            return default
+
+        if isinstance(value, bool):
+            return float(value)
+
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        if isinstance(value, Decimal):
+            return float(value)
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return default
+
+            if stripped.endswith("%"):
+                stripped = stripped[:-1].strip()
+
+            try:
+                return float(stripped.replace(",", ""))
+            except ValueError:
+                return default
+
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _extract_trade_notional(trade: Dict[str, Any]) -> Optional[float]:
+        """Derive the USD notional requested for a rebalancing trade."""
+        for key in (
+            "position_size_usd",
+            "notional_usd",
+            "trade_value",
+            "value_change",
+            "amount",
+            "value_usd",
+        ):
+            raw_value = trade.get(key)
+            value = UnifiedChatService._safe_float(raw_value)
+            if value is None:
+                continue
+            if key == "value_change":
+                value = abs(value)
+            if value != 0:
+                return abs(value)
+
+        return None
+
+    @staticmethod
+    def _extract_trade_quantity(trade: Dict[str, Any]) -> Optional[float]:
+        """Derive the requested quantity (if any) for a rebalancing trade."""
+        for key in ("quantity", "quantity_change"):
+            value = UnifiedChatService._safe_float(trade.get(key))
+            if value is not None and value != 0:
+                return abs(value)
+
+        return None
+
+    @staticmethod
+    def _extract_price_hint(trade: Dict[str, Any]) -> Optional[float]:
+        """Extract an indicative price from the trade payload if provided."""
+        for key in ("reference_price", "price", "current_price", "average_price"):
+            value = UnifiedChatService._safe_float(trade.get(key))
+            if value is not None and value > 0:
+                return value
+
+        return None
+
+    async def _resolve_rebalance_price(
+        self,
+        symbol: Optional[str],
+        exchange: Optional[str]
+    ) -> Optional[float]:
+        """Resolve a live price for rebalancing conversions when none supplied."""
+        if not symbol:
+            return None
+
+        try:
+            price = await self.trade_executor._get_current_price(
+                symbol.upper(),
+                (exchange or "auto")
+            )
+            return price or None
+        except Exception as price_error:
+            self.logger.warning(
+                "Failed to resolve price for rebalancing trade",
+                symbol=symbol,
+                exchange=exchange,
+                error=str(price_error)
+            )
+            return None
 
     def _determine_trading_mode(self, user_config: Dict[str, Any]) -> TradingMode:
         """Resolve the user's configured trading mode with a safe fallback."""
@@ -1413,20 +1513,29 @@ REBALANCING ANALYSIS ERROR:
                     notional = float(raw_notional)
                 except (TypeError, ValueError):
                     notional = 0.0
-                weight_change = trade.get("weight_change")
                 exchange = trade.get("exchange") or "multi-exchange"
                 price = trade.get("reference_price") or trade.get("price")
-                if not isinstance(weight_change, (int, float)):
-                    try:
-                        weight_change = float(weight_change)
-                    except (TypeError, ValueError):
-                        weight_change = None
-                weight_text = f", weight Δ {weight_change:+.2%}" if isinstance(weight_change, (int, float)) else ""
+
+                weight_details: List[str] = []
+                weight_delta = _safe_float(trade.get("weight_change"), None)
+                if weight_delta is not None:
+                    weight_details.append(f"Δ {weight_delta:+.2%}")
+
+                target_weight = _format_percentage(trade.get("target_weight"))
+                if target_weight:
+                    weight_details.append(f"target {target_weight}")
+
+                current_weight = _format_percentage(trade.get("current_weight"))
+                if current_weight:
+                    weight_details.append(f"current {current_weight}")
+
+                weight_text = f" ({'; '.join(weight_details)})" if weight_details else ""
+
                 try:
                     price_value = float(price)
                 except (TypeError, ValueError):
                     price_value = None
-                price_text = f" @ ${price_value:,.2f}" if price_value else ""
+                price_text = f" @ ${price_value:,.2f}" if price_value is not None else ""
                 trade_lines.append(
                     f"  {idx}. {action} {symbol} ≈ ${notional:,.2f}{price_text} on {exchange}{weight_text}"
                 )
@@ -2190,28 +2299,84 @@ Provide a helpful response using the real data available. Never use placeholder 
                 pass
 
             results: List[Dict[str, Any]] = []
+            default_simulation_mode: Optional[bool] = None
+
             for trade in trades:
-                base_request = {
-                    "symbol": trade.get("symbol"),
-                    "action": trade.get("action") or trade.get("side"),
-                    "amount": trade.get("amount"),
-                    "position_size_usd": trade.get("position_size_usd")
-                    or trade.get("amount"),
-                    "quantity": trade.get("quantity", trade.get("amount")),
-                    "order_type": trade.get("order_type", "market"),
-                    "price": trade.get("price"),
+                action_value = trade.get("action") or trade.get("side")
+                symbol_value = trade.get("symbol")
+                order_type_raw = trade.get("order_type", "market")
+                order_type_value = (
+                    order_type_raw.upper()
+                    if isinstance(order_type_raw, str)
+                    else "MARKET"
+                )
+
+                usd_notional = self._extract_trade_notional(trade)
+                quantity_value = self._extract_trade_quantity(trade)
+                price_hint = self._extract_price_hint(trade)
+
+                base_request: Dict[str, Any] = {
+                    "symbol": symbol_value,
+                    "action": action_value,
+                    "order_type": order_type_value,
                     "exchange": trade.get("exchange"),
-                    "stop_loss": trade.get("stop_loss"),
+                    "time_in_force": trade.get("time_in_force"),
                     "take_profit": trade.get("take_profit"),
+                    "stop_loss": trade.get("stop_loss"),
+                    "opportunity_data": trade.get("opportunity_data"),
+                    "strategy": trade.get("strategy"),
                 }
+
+                if usd_notional is not None:
+                    base_request["position_size_usd"] = usd_notional
+                    base_request["amount"] = usd_notional
+
+                if quantity_value is not None:
+                    base_request["quantity"] = quantity_value
+
+                if price_hint is None and symbol_value:
+                    price_hint = await self._resolve_rebalance_price(
+                        symbol_value,
+                        trade.get("exchange")
+                    )
+
+                if (
+                    quantity_value is None
+                    and usd_notional is not None
+                    and price_hint
+                    and price_hint > 0
+                ):
+                    try:
+                        quantity_value = round(usd_notional / price_hint, 8)
+                        if quantity_value > 0:
+                            base_request["quantity"] = quantity_value
+                    except ZeroDivisionError:
+                        pass
+
+                if price_hint is not None and price_hint > 0:
+                    base_request["reference_price"] = price_hint
+                    if order_type_value == "LIMIT":
+                        base_request.setdefault("price", price_hint)
 
                 base_request = {k: v for k, v in base_request.items() if v is not None}
 
                 if "action" not in base_request and "side" in base_request:
                     base_request["action"] = base_request["side"]
 
+                rebalance_metadata = {
+                    "symbol": symbol_value,
+                    "action": action_value.upper() if isinstance(action_value, str) else action_value,
+                    "requested_notional_usd": usd_notional,
+                    "requested_quantity": base_request.get("quantity"),
+                    "reference_price": price_hint,
+                    "exchange": base_request.get("exchange"),
+                }
+
                 try:
-                    validation = await self.trade_executor.validate_trade(dict(base_request), user_id)
+                    validation = await self.trade_executor.validate_trade(
+                        dict(base_request),
+                        user_id
+                    )
                 except Exception as validation_error:
                     self.logger.exception(
                         "Rebalancing trade validation crashed",
@@ -2221,7 +2386,8 @@ Provide a helpful response using the real data available. Never use placeholder 
                     results.append({
                         "success": False,
                         "error": str(validation_error),
-                        "trade_request": base_request
+                        "trade_request": base_request,
+                        "rebalance_execution": rebalance_metadata,
                     })
                     continue
 
@@ -2229,7 +2395,8 @@ Provide a helpful response using the real data available. Never use placeholder 
                     results.append({
                         "success": False,
                         "error": validation.get("reason", "Invalid parameters"),
-                        "trade_request": validation.get("trade_request", base_request)
+                        "trade_request": validation.get("trade_request", base_request),
+                        "rebalance_execution": rebalance_metadata,
                     })
                     continue
 
@@ -2239,14 +2406,77 @@ Provide a helpful response using the real data available. Never use placeholder 
                     normalized_request.get("action", "BUY").lower(),
                 )
 
-                simulation_mode = self._coerce_to_bool(trade.get("simulation_mode"), True)
+                if usd_notional is not None:
+                    normalized_request.setdefault("position_size_usd", usd_notional)
 
-                result = await self.trade_executor.execute_trade(
+                if price_hint is not None and price_hint > 0:
+                    normalized_request.setdefault("reference_price", price_hint)
+                    if (
+                        normalized_request.get("order_type") == "LIMIT"
+                        and "price" not in normalized_request
+                    ):
+                        normalized_request["price"] = price_hint
+
+                if quantity_value is not None:
+                    normalized_request.setdefault("quantity", quantity_value)
+
+                simulation_flag = trade.get("simulation_mode")
+                if simulation_flag is None:
+                    if default_simulation_mode is None:
+                        default_simulation_mode = await self._get_user_simulation_mode(user_id)
+                        if default_simulation_mode is None:
+                            default_simulation_mode = True
+                    simulation_mode = default_simulation_mode
+                else:
+                    simulation_mode = self._coerce_to_bool(simulation_flag, True)
+
+                rebalance_metadata.update({
+                    "requested_quantity": normalized_request.get("quantity"),
+                    "requested_notional_usd": normalized_request.get("position_size_usd", usd_notional),
+                    "simulation_mode": simulation_mode,
+                })
+
+                execution_result = await self.trade_executor.execute_trade(
                     normalized_request,
                     user_id,
                     simulation_mode,
                 )
-                results.append(result)
+
+                filled_quantity = None
+                fill_price = None
+                filled_value = None
+
+                simulation_payload = execution_result.get("simulation_result")
+                execution_payload = execution_result.get("execution_result")
+
+                if isinstance(simulation_payload, dict):
+                    filled_quantity = self._safe_float(simulation_payload.get("quantity"))
+                    fill_price = self._safe_float(simulation_payload.get("execution_price"))
+                    if filled_quantity is not None and fill_price is not None:
+                        filled_value = filled_quantity * fill_price
+                elif isinstance(execution_payload, dict):
+                    filled_quantity = self._safe_float(execution_payload.get("executed_quantity"))
+                    fill_price = self._safe_float(execution_payload.get("execution_price"))
+                    if filled_quantity is not None and fill_price is not None:
+                        filled_value = filled_quantity * fill_price
+                    else:
+                        filled_value = self._safe_float(
+                            execution_result.get("position_value_usd")
+                        )
+                else:
+                    filled_value = self._safe_float(execution_result.get("position_value_usd"))
+
+                if filled_quantity is not None:
+                    rebalance_metadata["filled_quantity"] = filled_quantity
+                if fill_price is not None:
+                    rebalance_metadata["fill_price"] = fill_price
+                if filled_value is not None:
+                    rebalance_metadata["filled_value_usd"] = filled_value
+
+                execution_snapshot = dict(execution_result)
+                execution_snapshot["rebalance_execution"] = rebalance_metadata
+
+                results.append(execution_snapshot)
 
             return {
                 "success": True,

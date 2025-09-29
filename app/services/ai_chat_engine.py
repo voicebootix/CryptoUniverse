@@ -1572,8 +1572,14 @@ This might indicate insufficient portfolio size or market conditions. Try again 
             for trade in recommended_trades[:5]:  # Show top 5 trades
                 action = trade.get("action", "").upper()
                 symbol = trade.get("symbol", "")
-                amount = trade.get("amount", 0)
-                trade_summary.append(f"• {action} {amount:.6f} {symbol}")
+                notional_value = float(trade.get("amount", 0) or 0)
+                target_pct = trade.get("target_percentage")
+                summary_line = f"• {action} ${notional_value:,.2f} of {symbol}"
+
+                if target_pct is not None:
+                    summary_line += f" → target {target_pct:.1f}%"
+
+                trade_summary.append(summary_line)
             
             trade_display = "\n".join(trade_summary)
             
@@ -1946,15 +1952,24 @@ Rebalancing can still proceed but with reduced features.""",
                 from app.models.user import User
 
                 async for db in get_database():
+                    try:
+                        user_uuid = user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(str(user_id))
+                    except (TypeError, ValueError):
+                        self.logger.warning(
+                            "Invalid user_id format while checking simulation mode",
+                            user_id=user_id
+                        )
+                        break
+
                     result = await db.execute(
-                        select(User).where(User.id == user_id)
+                        select(User).where(User.id == user_uuid)
                     )
                     user = result.scalar_one_or_none()
                     if user:
-                        simulation_mode = user.simulation_mode
+                        simulation_mode = bool(getattr(user, "simulation_mode", False))
                         self.logger.info(
                             "User simulation preference retrieved",
-                            user_id=user_id,
+                            user_id=str(user_uuid),
                             simulation_mode=simulation_mode
                         )
                     break
@@ -1966,28 +1981,55 @@ Rebalancing can still proceed but with reduced features.""",
                 )
 
             # Pre-execution validation
-            symbol = trade.get("symbol", "").upper().strip()
-            action = trade.get("action", "").lower().strip()
-            amount = float(trade.get("amount", 0))
+            raw_symbol = (trade.get("symbol", "") or "").upper().strip()
+            action = (trade.get("action", "") or "").lower().strip()
+            notional_usd = float(trade.get("amount", 0) or 0)
 
-            if not all([symbol, action in ["buy", "sell"], amount > 0]):
+            if "/" in raw_symbol:
+                # Convert trading pairs like BTC/USDT → BTC for execution & pricing
+                raw_symbol = raw_symbol.split("/")[0]
+
+            if not all([raw_symbol, action in ["buy", "sell"], notional_usd > 0]):
                 return {
                     "success": False,
-                    "error": f"Invalid trade parameters: symbol={symbol}, action={action}, amount={amount}"
+                    "error": f"Invalid trade parameters: symbol={raw_symbol}, action={action}, notional={notional_usd}"
                 }
-            
+
+            exchange_preference = (trade.get("exchange") or "binance").lower()
+            if exchange_preference == "auto":
+                exchange_preference = "binance"
+
+            # Convert USD notional into asset quantity using live pricing
+            current_price = await self.trade_executor._get_current_price(raw_symbol, exchange_preference)
+            if current_price <= 0:
+                return {
+                    "success": False,
+                    "error": f"Unable to get current price for {raw_symbol} on {exchange_preference}"
+                }
+
+            quantity = round(notional_usd / current_price, 8)
+            if quantity <= 0:
+                return {
+                    "success": False,
+                    "error": f"Calculated trade quantity is invalid for {raw_symbol}"
+                }
+
             # Prepare trade request in correct format for TradeExecutionService
             trade_request = {
-                "symbol": symbol,
-                "quantity": amount,  # TradeExecutionService expects 'quantity', not 'amount'
-                "exchange": trade.get("exchange", "auto"),
+                "symbol": raw_symbol,
+                "quantity": quantity,
+                "position_size_usd": notional_usd,
+                "notional_usd": notional_usd,
+                "exchange": exchange_preference,
+                "action": action.upper(),
                 "side": action,      # 'buy' or 'sell'
                 "order_type": "market",
                 "source": "rebalancing",
+                "reference_price": current_price,
                 "opportunity_data": trade.get("opportunity_data"),
                 "safety_checks": True
             }
-            
+
             # Execute trade with timeout using correct signature, respecting user's preference
             execution_result = await asyncio.wait_for(
                 self.trade_executor.execute_trade(
@@ -1997,7 +2039,7 @@ Rebalancing can still proceed but with reduced features.""",
                 ),
                 timeout=30.0  # 30 second timeout per trade
             )
-            
+
             return execution_result
             
         except asyncio.TimeoutError:
@@ -2129,10 +2171,19 @@ Your portfolio and trades have been analyzed to prevent potential losses.""",
                         execution_result = await self._execute_trade_with_safety(trade, user_id)
                         
                         if execution_result.get("success"):
+                            simulation_result = execution_result.get("simulation_result", {})
+                            order_details = execution_result.get("order_details", {})
+                            executed_quantity = (
+                                order_details.get("executed_quantity")
+                                or simulation_result.get("quantity")
+                                or execution_result.get("quantity")
+                            )
+
                             executed_trades.append({
                                 "symbol": trade.get("symbol"),
                                 "action": trade.get("action"),
-                                "amount": trade.get("amount"),
+                                "notional_usd": trade.get("amount"),
+                                "filled_quantity": executed_quantity,
                                 "trade_id": execution_result.get("trade_id")
                             })
                             self.logger.info("Rebalancing trade executed successfully", 
@@ -2143,7 +2194,7 @@ Your portfolio and trades have been analyzed to prevent potential losses.""",
                             failed_trades.append({
                                 "symbol": trade.get("symbol"),
                                 "action": trade.get("action"),
-                                "amount": trade.get("amount"),
+                                "notional_usd": trade.get("amount"),
                                 "error": execution_result.get("error", "Unknown error")
                             })
                             self.logger.warning("Rebalancing trade failed", 
@@ -2155,7 +2206,7 @@ Your portfolio and trades have been analyzed to prevent potential losses.""",
                         failed_trades.append({
                             "symbol": trade.get("symbol"),
                             "action": trade.get("action"),
-                            "amount": trade.get("amount"),
+                            "notional_usd": trade.get("amount"),
                             "error": str(e)
                         })
                 
@@ -2188,7 +2239,8 @@ Your portfolio and trades have been analyzed to prevent potential losses.""",
             if len(executed_trades) == len(trades):
                 # All trades succeeded
                 trade_summary = "\n".join([
-                    f"✅ {trade['action'].upper()} {trade['amount']:.6f} {trade['symbol']}"
+                    f"✅ {trade['action'].upper()} ${float(trade.get('notional_usd') or 0):,.2f} of {trade['symbol']}"
+                    + (f" (filled {trade['filled_quantity']:.6f} units)" if trade.get("filled_quantity") else "")
                     for trade in executed_trades
                 ])
                 
@@ -2220,11 +2272,12 @@ Portfolio rebalancing complete! 🚀""",
             elif len(executed_trades) > 0:
                 # Partial success
                 executed_summary = "\n".join([
-                    f"✅ {trade['action'].upper()} {trade['amount']:.6f} {trade['symbol']}"
+                    f"✅ {trade['action'].upper()} ${float(trade.get('notional_usd') or 0):,.2f} of {trade['symbol']}"
+                    + (f" (filled {trade['filled_quantity']:.6f} units)" if trade.get("filled_quantity") else "")
                     for trade in executed_trades
                 ])
                 failed_summary = "\n".join([
-                    f"❌ {trade['action'].upper()} {trade['amount']:.6f} {trade['symbol']} - {trade['error']}"
+                    f"❌ {trade['action'].upper()} ${float(trade.get('notional_usd') or 0):,.2f} of {trade['symbol']} - {trade['error']}"
                     for trade in failed_trades
                 ])
                 
@@ -2255,7 +2308,7 @@ Portfolio rebalancing complete! 🚀""",
             else:
                 # All trades failed
                 failed_summary = "\n".join([
-                    f"❌ {trade['action'].upper()} {trade['amount']:.6f} {trade['symbol']} - {trade['error']}"
+                    f"❌ {trade['action'].upper()} ${float(trade.get('notional_usd') or 0):,.2f} of {trade['symbol']} - {trade['error']}"
                     for trade in failed_trades
                 ])
                 

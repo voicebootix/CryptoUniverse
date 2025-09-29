@@ -115,7 +115,10 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
     service.trade_executor.execute_trade = AsyncMock(
         return_value={
             "success": True,
-            "trade_id": "trade-456",
+            "simulation_result": {
+                "quantity": 1.95,
+                "execution_price": 2050.0,
+            },
         }
     )
 
@@ -124,7 +127,8 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
             {
                 "symbol": "ethusdt",
                 "action": "buy",
-                "amount": "2",
+                "amount": "4000",
+                "reference_price": "2000",
                 "order_type": "limit",
                 "simulation_mode": "false",
             }
@@ -142,6 +146,8 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
     assert validation_user_arg == "user-abc"
     assert validation_request_arg["symbol"] == "ethusdt"
     assert validation_request_arg["action"] == "buy"
+    assert validation_request_arg["position_size_usd"] == 4000.0
+    assert validation_request_arg["quantity"] == 2.0
 
     execution_call = service.trade_executor.execute_trade.await_args
     exec_request_arg, exec_user_arg, exec_simulation_mode = execution_call.args
@@ -153,10 +159,21 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
     assert exec_request_arg["side"] == "buy"
     assert exec_request_arg["quantity"] == 2.0
     assert exec_request_arg["order_type"] == "LIMIT"
+    assert exec_request_arg["position_size_usd"] == 4000.0
+    assert exec_request_arg["reference_price"] == 2000.0
+    assert exec_request_arg["price"] == 2000.0
 
     assert result["success"] is True
     assert result["trades_executed"] == 1
     assert result["trades_failed"] == 0
+
+    execution_metadata = result["results"][0]["rebalance_execution"]
+    assert execution_metadata["requested_notional_usd"] == 4000.0
+    assert execution_metadata["requested_quantity"] == 2.0
+    assert execution_metadata["simulation_mode"] is False
+    assert execution_metadata["filled_quantity"] == pytest.approx(1.95)
+    assert execution_metadata["fill_price"] == pytest.approx(2050.0)
+    assert execution_metadata["filled_value_usd"] == pytest.approx(1.95 * 2050.0)
 
 
 @pytest.mark.asyncio
