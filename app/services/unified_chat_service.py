@@ -2016,9 +2016,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                 "max_drawdown": metric_values.get("max_drawdown", 0.0),
             }
 
-            performance["data_available"] = any(
-                abs(value) > 0 for value in performance.values()
-            )
+            performance["data_available"] = bool(metric_values)
 
             if latest_period:
                 performance["last_updated"] = latest_period.isoformat()
