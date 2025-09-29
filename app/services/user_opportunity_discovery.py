@@ -1306,18 +1306,44 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 # Process recommendations from all strategies
                 if rebalancing_recommendations:
+                    def _normalize_improvement(value: Any) -> float:
+                        """Convert raw improvement values to a 0-1 range."""
+                        if value is None:
+                            return 0.0
+
+                        try:
+                            is_percent = False
+
+                            if isinstance(value, str):
+                                cleaned_value = value.strip()
+                                if cleaned_value.endswith("%"):
+                                    cleaned_value = cleaned_value[:-1]
+                                    is_percent = True
+                                parsed_value = float(cleaned_value)
+                            else:
+                                parsed_value = float(value)
+
+                            if is_percent or parsed_value > 1.0:
+                                parsed_value /= 100.0
+
+                            return max(0.0, min(parsed_value, 1.0))
+                        except (TypeError, ValueError):
+                            return 0.0
+
                     for rebal in rebalancing_recommendations:
                         # Include all recommendations, not filtered by improvement
-                        improvement = rebal.get("improvement_potential", 0)
+                        improvement_raw = rebal.get("improvement_potential", 0)
+                        improvement_normalized = _normalize_improvement(improvement_raw)
+
                         strategy_name = rebal.get("strategy", "UNKNOWN")
-                        
+
                         opportunity = OpportunityResult(
                             strategy_id="ai_portfolio_optimization",
                             strategy_name=f"AI Portfolio Optimization - {strategy_name}",
                             opportunity_type="portfolio_rebalance",
                             symbol=rebal.get("symbol", rebal.get("target_asset", "")),
                             exchange="multiple",
-                            profit_potential_usd=float(improvement * 10000),  # Assume $10k portfolio
+                            profit_potential_usd=float(improvement_normalized * 10000),  # Assume $10k portfolio
                             confidence_score=80.0,  # High confidence in optimization
                             risk_level="low",
                             required_capital_usd=float(rebal.get("amount", 0.1) * 10000),
@@ -1327,7 +1353,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             metadata={
                                 "rebalance_action": rebal.get("action", ""),
                                 "strategy_used": strategy_name,
-                                "improvement_potential": improvement,
+                                "improvement_potential": improvement_raw,
+                                "normalized_improvement": improvement_normalized,
                                 "risk_reduction": rebal.get("risk_reduction", 0),
                                 "amount": rebal.get("amount", 0),
                                 "urgency": rebal.get("urgency", "MEDIUM")
