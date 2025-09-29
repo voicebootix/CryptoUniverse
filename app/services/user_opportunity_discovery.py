@@ -1306,11 +1306,36 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 # Process recommendations from all strategies
                 if rebalancing_recommendations:
+                    def _normalize_weight(value: Any) -> Optional[float]:
+                        if value is None:
+                            return None
+                        try:
+                            fraction = float(value)
+                        except (TypeError, ValueError):
+                            return None
+                        if abs(fraction) > 1.0:
+                            fraction /= 100.0
+                        return fraction
+
                     for rebal in rebalancing_recommendations:
                         # Include all recommendations, not filtered by improvement
                         improvement = rebal.get("improvement_potential", 0)
                         strategy_name = rebal.get("strategy", "UNKNOWN")
-                        
+
+                        trade_value = rebal.get("notional_usd")
+                        if trade_value is None:
+                            trade_value = rebal.get("value_change")
+                        if trade_value is None:
+                            trade_value = rebal.get("amount")
+                        trade_value = float(trade_value or 0.0)
+                        trade_value = abs(trade_value)
+
+                        allocation_fraction = (
+                            _normalize_weight(rebal.get("weight_change"))
+                            or _normalize_weight(rebal.get("target_weight"))
+                            or _normalize_weight(rebal.get("target_percentage"))
+                        )
+
                         opportunity = OpportunityResult(
                             strategy_id="ai_portfolio_optimization",
                             strategy_name=f"AI Portfolio Optimization - {strategy_name}",
@@ -1320,7 +1345,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             profit_potential_usd=float(improvement * 10000),  # Assume $10k portfolio
                             confidence_score=80.0,  # High confidence in optimization
                             risk_level="low",
-                            required_capital_usd=float(rebal.get("amount", 0.1) * 10000),
+                            required_capital_usd=trade_value,
                             estimated_timeframe="1-3 months",
                             entry_price=None,
                             exit_price=None,
@@ -1329,7 +1354,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 "strategy_used": strategy_name,
                                 "improvement_potential": improvement,
                                 "risk_reduction": rebal.get("risk_reduction", 0),
-                                "amount": rebal.get("amount", 0),
+                                "amount": allocation_fraction,
+                                "weight_change": rebal.get("weight_change"),
+                                "target_weight": rebal.get("target_weight"),
+                                "target_percentage": rebal.get("target_percentage"),
+                                "current_weight": rebal.get("current_weight"),
+                                "trade_value_usd": trade_value,
+                                "current_value_usd": rebal.get("current_value"),
+                                "target_value_usd": rebal.get("target_value"),
                                 "urgency": rebal.get("urgency", "MEDIUM")
                             },
                             discovered_at=datetime.utcnow()
