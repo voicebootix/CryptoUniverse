@@ -16,6 +16,7 @@ Date: 2025-09-12
 
 import asyncio
 import json
+import math
 import re
 import time
 import uuid
@@ -1927,26 +1928,39 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             return None
 
         if isinstance(value, (int, float)):
-            return float(value)
+            float_val = float(value)
+            return float_val if math.isfinite(float_val) else None
 
         if isinstance(value, Decimal):
+            if not value.is_finite():
+                return None
             return float(value)
 
         if isinstance(value, str):
             stripped = value.strip()
             # Normalize Unicode minus (U+2212) to ASCII hyphen
             stripped = stripped.replace("\u2212", "-")
-            # Parentheses-negatives: "(3.5)" -> -3.5
+            # Parentheses-negatives: handle signs correctly
             paren_negative = stripped.startswith("(") and stripped.endswith(")")
+            inner_sign_negative = False
             if paren_negative:
-                stripped = stripped[1:-1]
+                inner = stripped[1:-1].strip()
+                if inner.startswith(('+', '-')):
+                    inner_sign_negative = inner.startswith('-')
+                    stripped = inner[1:]
+                else:
+                    stripped = inner
             if not stripped:
                 return None
 
             # Handle European format first on the original string (thousand sep . or space, decimal ,)
             s = stripped
+            # Check for complex EU thousands pattern first
             if re.match(r"^\d{1,3}(?:[.\s]\d{3})+,\d+$", s):
                 s = s.replace(" ", "").replace(".", "").replace(",", ".")
+            # Check for simple EU decimal pattern (digits,comma,digits with no dots or spaces)
+            elif re.match(r"^\d+,\d+$", s) and "." not in s:
+                s = s.replace(",", ".")
             else:
                 # Remove US-style thousands commas
                 s = s.replace(",", "")
@@ -1956,7 +1970,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             try:
                 val = float(cleaned)
-                return -val if paren_negative else val
+                if paren_negative:
+                    # Apply parentheses negation only if inner sign wasn't already negative
+                    return -val if not inner_sign_negative else val
+                else:
+                    return val
             except ValueError:
                 return None
 
@@ -1970,8 +1988,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         if numeric is None:
             return None
 
-        if original and "%" in original:
-            return numeric / 100.0
+        # Reject non-finite numeric values
+        if not math.isfinite(numeric):
+            return None
+
+        # Check for percent markers (including fullwidth percent sign U+FF05)
+        if original:
+            normalized = original.strip().replace('％', '%')  # Replace fullwidth percent
+            if "%" in normalized:
+                return numeric / 100.0
 
         absolute = abs(numeric)
         if absolute <= 1:
