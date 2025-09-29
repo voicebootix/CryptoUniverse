@@ -16,6 +16,7 @@ Date: 2025-09-12
 
 import asyncio
 import json
+import re
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -1901,7 +1902,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     
     def _get_correlation_pairs(self, discovered_assets: Dict[str, List[Any]], max_pairs: int = 10) -> List[Tuple[str, str]]:
         """Get symbol pairs likely to be correlated for pairs trading."""
-        
+
         # Get top symbols
         top_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
         
@@ -1916,8 +1917,59 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     break
             if len(pairs) >= max_pairs:
                 break
-                
+
         return pairs[:max_pairs]
+
+    def _to_float(self, value: Any) -> Optional[float]:
+        """Convert common numeric string formats to float safely."""
+
+        if value is None:
+            return None
+
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        if isinstance(value, Decimal):
+            return float(value)
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+
+            # Remove common formatting (commas, currency symbols, percentage signs, spaces)
+            cleaned = stripped.replace(",", "")
+            cleaned = re.sub(r"[^0-9eE+\-.]", "", cleaned)
+
+            if not cleaned or cleaned in {"-", "+", ".", "-.", "+."}:
+                return None
+
+            try:
+                return float(cleaned)
+            except ValueError:
+                return None
+
+        return None
+
+    def _to_fraction(self, value: Any) -> Optional[float]:
+        """Convert values that may represent percentages into fractions."""
+
+        original = value if isinstance(value, str) else None
+        numeric = self._to_float(value)
+
+        if numeric is None:
+            return None
+
+        if original and "%" in original:
+            return numeric / 100.0
+
+        absolute = abs(numeric)
+        if absolute <= 1:
+            return numeric
+        if absolute <= 100:
+            return numeric / 100.0
+
+        return numeric
     
     async def _rank_and_filter_opportunities(
         self,
