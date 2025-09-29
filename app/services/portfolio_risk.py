@@ -196,15 +196,12 @@ class ExchangePortfolioConnector(LoggerMixin):
             transformed = self._transform_live_portfolio(
                 user_id, live_portfolio, normalized_filter
             )
-            if transformed["source"] == "live" and (
-                transformed["positions"]
-                or transformed["balances"]
-                or live_portfolio.get("success")
-            ):
+            if transformed["source"] == "live" and live_portfolio.get("success") is True:
                 await self._cache_portfolio(cache_key, transformed)
                 return transformed
 
-            if self._should_use_simulation_fallback(live_portfolio):
+            # Use simulation fallback for any non-success response when allowed
+            if (transformed["source"] != "live" or live_portfolio.get("success") is not True) and self.allow_simulation:
                 simulated = await self._build_simulated_portfolio(user_id, exchange_filter)
                 await self._cache_portfolio(cache_key, simulated)
                 return simulated
@@ -310,7 +307,6 @@ class ExchangePortfolioConnector(LoggerMixin):
             )
             breakdown["total_value"] += value_usd
             breakdown["balances"].append(normalized_balance)
-            breakdown["positions"].append(dict(position))
 
         for key, summary in exchange_summaries.items():
             if allowed_exchanges and key not in allowed_exchanges:
@@ -341,6 +337,13 @@ class ExchangePortfolioConnector(LoggerMixin):
         if total_value > 0:
             for position in positions:
                 position["percentage"] = (position["value_usd"] / total_value) * 100
+
+        # Now add positions to exchange breakdowns with correct percentages
+        for position in positions:
+            exchange_name = position.get("exchange", "unknown")
+            exchange_key = exchange_name.lower()
+            if exchange_key in exchange_breakdown:
+                exchange_breakdown[exchange_key]["positions"].append(dict(position))
 
         positions.sort(key=lambda item: item.get("value_usd", 0), reverse=True)
 
