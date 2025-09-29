@@ -16,6 +16,8 @@ Date: 2025-09-12
 
 import asyncio
 import json
+import math
+import re
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -1306,64 +1308,112 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 # Process recommendations from all strategies
                 if rebalancing_recommendations:
-                    def _normalize_weight(value: Any) -> Optional[float]:
+                    def _normalize_improvement(value: Any) -> float:
+                        """Convert raw improvement values to a 0-1 range."""
                         if value is None:
-                            return None
+                            return 0.0
+
                         try:
-                            fraction = float(value)
+                            is_percent = False
+
+                            if isinstance(value, str):
+                                cleaned_value = value.strip()
+                                if cleaned_value.endswith("%"):
+                                    cleaned_value = cleaned_value[:-1]
+                                    is_percent = True
+                                parsed_value = float(cleaned_value)
+                            else:
+                                parsed_value = float(value)
+
+                            if is_percent or parsed_value > 1.0:
+                                parsed_value /= 100.0
+
+                            return max(0.0, min(parsed_value, 1.0))
                         except (TypeError, ValueError):
-                            return None
-                        if abs(fraction) > 1.0:
-                            fraction /= 100.0
-                        return fraction
+                            return 0.0
 
                     for rebal in rebalancing_recommendations:
                         # Include all recommendations, not filtered by improvement
-                        improvement = rebal.get("improvement_potential", 0)
+                        raw_improvement = rebal.get("improvement_potential")
                         strategy_name = rebal.get("strategy", "UNKNOWN")
 
-                        trade_value = rebal.get("notional_usd")
-                        if trade_value is None:
-                            trade_value = rebal.get("value_change")
-                        if trade_value is None:
-                            trade_value = rebal.get("amount")
-                        trade_value = float(trade_value or 0.0)
-                        trade_value = abs(trade_value)
+                        # Use the helper function for consistent normalization
+                        improvement_normalized = _normalize_improvement(raw_improvement)
 
-                        allocation_fraction = (
-                            _normalize_weight(rebal.get("weight_change"))
-                            or _normalize_weight(rebal.get("target_weight"))
-                            or _normalize_weight(rebal.get("target_percentage"))
-                        )
+                        target_weight_fraction = self._to_fraction(rebal.get("target_weight"))
+                        target_percentage_fraction = self._to_fraction(rebal.get("target_percentage"))
+                        weight_change_fraction = self._to_fraction(rebal.get("weight_change"))
+                        amount_fraction = target_weight_fraction
+                        if amount_fraction is None:
+                            amount_fraction = target_percentage_fraction
+                        if amount_fraction is None:
+                            amount_fraction = weight_change_fraction
+                        if amount_fraction is None:
+                            amount_fraction = self._to_fraction(rebal.get("amount"))
 
+                        value_change = self._to_float(rebal.get("value_change"))
+                        notional_usd = self._to_float(rebal.get("notional_usd"))
+                        trade_value_usd = value_change if value_change is not None else notional_usd
+                        if trade_value_usd is None:
+                            # Fallback for legacy payloads: interpret amount as a fraction when appropriate.
+                            fallback_frac = self._to_fraction(rebal.get("amount", 0.0))
+                            if fallback_frac is not None and -1.0 <= fallback_frac <= 1.0:
+                                trade_value_usd = fallback_frac * 10000.0  # keep legacy $10k baseline
+                            else:
+                                # If caller provided an absolute notional, use that directly.
+                                fallback_abs = self._to_float(rebal.get("amount"))
+                                trade_value_usd = fallback_abs if fallback_abs is not None else None
+
+                        required_capital = abs(float(trade_value_usd)) if trade_value_usd is not None else 0.0
+
+                        metadata: Dict[str, Any] = {
+                            "rebalance_action": rebal.get("action", ""),
+                            "strategy_used": strategy_name,
+                            "improvement_potential": improvement_normalized,
+                            "risk_reduction": rebal.get("risk_reduction", 0),
+                            "urgency": rebal.get("urgency", "MEDIUM")
+                        }
+
+                        # Amount should reflect desired weight (or change) as a fraction in [-1,1].
+                        if amount_fraction is not None and -1.0 <= amount_fraction <= 1.0:
+                            metadata["amount"] = amount_fraction
+                        else:
+                            # If caller provided a notional amount, preserve it explicitly.
+                            amt_usd = self._to_float(rebal.get("amount"))
+                            if amt_usd is not None:
+                                metadata["amount_usd"] = float(amt_usd)
+
+                        if target_weight_fraction is not None:
+                            metadata["target_weight"] = target_weight_fraction
+
+                        if weight_change_fraction is not None:
+                            metadata["weight_change"] = weight_change_fraction
+
+                        target_percentage_value = self._to_float(rebal.get("target_percentage"))
+                        if target_percentage_value is not None:
+                            metadata["target_percentage"] = target_percentage_value
+
+                        if trade_value_usd is not None:
+                            metadata["trade_value_usd"] = float(trade_value_usd)
+
+                        if value_change is not None and value_change != trade_value_usd:
+                            metadata["value_change"] = value_change
+
+                        metadata["normalized_improvement"] = improvement_normalized
                         opportunity = OpportunityResult(
                             strategy_id="ai_portfolio_optimization",
                             strategy_name=f"AI Portfolio Optimization - {strategy_name}",
                             opportunity_type="portfolio_rebalance",
                             symbol=rebal.get("symbol", rebal.get("target_asset", "")),
                             exchange="multiple",
-                            profit_potential_usd=float(improvement * 10000),  # Assume $10k portfolio
+                            profit_potential_usd=float(improvement_normalized * 10000),  # Assume $10k portfolio
                             confidence_score=80.0,  # High confidence in optimization
                             risk_level="low",
-                            required_capital_usd=trade_value,
+                            required_capital_usd=required_capital,
                             estimated_timeframe="1-3 months",
                             entry_price=None,
                             exit_price=None,
-                            metadata={
-                                "rebalance_action": rebal.get("action", ""),
-                                "strategy_used": strategy_name,
-                                "improvement_potential": improvement,
-                                "risk_reduction": rebal.get("risk_reduction", 0),
-                                "amount": allocation_fraction,
-                                "weight_change": rebal.get("weight_change"),
-                                "target_weight": rebal.get("target_weight"),
-                                "target_percentage": rebal.get("target_percentage"),
-                                "current_weight": rebal.get("current_weight"),
-                                "trade_value_usd": trade_value,
-                                "current_value_usd": rebal.get("current_value"),
-                                "target_value_usd": rebal.get("target_value"),
-                                "urgency": rebal.get("urgency", "MEDIUM")
-                            },
+                            metadata=metadata,
                             discovered_at=datetime.utcnow()
                         )
                         opportunities.append(opportunity)
@@ -1933,7 +1983,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     
     def _get_correlation_pairs(self, discovered_assets: Dict[str, List[Any]], max_pairs: int = 10) -> List[Tuple[str, str]]:
         """Get symbol pairs likely to be correlated for pairs trading."""
-        
+
         # Get top symbols
         top_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
         
@@ -1948,8 +1998,93 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     break
             if len(pairs) >= max_pairs:
                 break
-                
+
         return pairs[:max_pairs]
+
+    def _to_float(self, value: Any) -> Optional[float]:
+        """Convert common numeric string formats to float safely."""
+
+        if value is None:
+            return None
+
+        if isinstance(value, (int, float)):
+            float_val = float(value)
+            return float_val if math.isfinite(float_val) else None
+
+        if isinstance(value, Decimal):
+            if not value.is_finite():
+                return None
+            return float(value)
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            # Normalize Unicode minus (U+2212) to ASCII hyphen
+            stripped = stripped.replace("\u2212", "-")
+            # Parentheses-negatives: handle signs correctly
+            paren_negative = stripped.startswith("(") and stripped.endswith(")")
+            inner_sign_negative = False
+            if paren_negative:
+                inner = stripped[1:-1].strip()
+                if inner.startswith(('+', '-')):
+                    inner_sign_negative = inner.startswith('-')
+                    stripped = inner[1:]
+                else:
+                    stripped = inner
+            if not stripped:
+                return None
+
+            # Handle European format first on the original string (thousand sep . or space, decimal ,)
+            s = stripped
+            # Check for complex EU thousands pattern first
+            if re.match(r"^\d{1,3}(?:[.\s]\d{3})+,\d+$", s):
+                s = s.replace(" ", "").replace(".", "").replace(",", ".")
+            # Check for simple EU decimal pattern (digits,comma,digits with no dots or spaces)
+            elif re.match(r"^\d+,\d+$", s) and "." not in s:
+                s = s.replace(",", ".")
+            else:
+                # Remove US-style thousands commas
+                s = s.replace(",", "")
+            cleaned = re.sub(r"[^0-9eE+\-.]", "", s)
+            if not cleaned or cleaned in {"-", "+", ".", "-.", "+."}:
+                return None
+
+            try:
+                val = float(cleaned)
+                if paren_negative:
+                    # Apply parentheses negation only if inner sign wasn't already negative
+                    return -val if not inner_sign_negative else val
+                else:
+                    return val
+            except ValueError:
+                return None
+
+        return None
+    def _to_fraction(self, value: Any) -> Optional[float]:
+        """Convert values that may represent percentages into fractions."""
+
+        original = value if isinstance(value, str) else None
+        numeric = self._to_float(value)
+
+        if numeric is None:
+            return None
+
+        # Reject non-finite numeric values
+        if not math.isfinite(numeric):
+            return None
+
+        # Check for percent markers (including fullwidth percent sign U+FF05)
+        if original:
+            normalized = original.strip().replace('％', '%')  # Replace fullwidth percent
+            if "%" in normalized:
+                return numeric / 100.0
+
+        absolute = abs(numeric)
+        if absolute <= 1:
+            return numeric
+        if absolute <= 100:
+            return numeric / 100.0
+
+        return numeric
     
     async def _rank_and_filter_opportunities(
         self,

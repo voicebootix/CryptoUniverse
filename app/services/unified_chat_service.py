@@ -1333,31 +1333,39 @@ Respond naturally using ONLY the real data provided."""
             except (TypeError, ValueError):
                 return default
 
+
         def _safe_percentage(value: Any) -> Optional[float]:
-            raw_value = _safe_float(value, None)
-            if raw_value is None:
+            fraction_value = _fraction_from(value, allow_percent_conversion=True)
+            if fraction_value is None:
                 return None
-            normalized = raw_value * 100 if abs(raw_value) <= 1 else raw_value
-            return normalized
+            return fraction_value * 100
 
         def _format_percentage(value: Any) -> Optional[str]:
-            candidate: Any = value
-            if isinstance(candidate, str):
-                stripped = candidate.strip()
+            fraction_value = _fraction_from(value, allow_percent_conversion=True)
+            if fraction_value is None:
+                return None
+            return f"{fraction_value * 100:.1f}%"
+
+        def _fraction_from(value: Any, *, allow_percent_conversion: bool = True) -> Optional[float]:
+            if isinstance(value, str):
+                stripped = value.strip()
                 if not stripped:
                     return None
-                if stripped.endswith("%"):
-                    stripped = stripped[:-1].strip()
-                try:
-                    candidate = float(stripped)
-                except ValueError:
-                    return None
-            if not isinstance(candidate, (int, float)):
+                if allow_percent_conversion and "%" in stripped:
+                    try:
+                        numeric_part = float(stripped.replace("%", "").strip())
+                    except ValueError:
+                        return None
+                    return numeric_part / 100
+
+            numeric = _safe_float(value, None)
+            if numeric is None:
                 return None
-            numeric = float(candidate)
             if abs(numeric) <= 1:
-                numeric *= 100
-            return f"{numeric:.1f}%"
+                return numeric
+            if allow_percent_conversion and abs(numeric) <= 100:
+                return numeric / 100
+            return None
 
         if intent == ChatIntent.PORTFOLIO_ANALYSIS:
             portfolio = context_data.get("portfolio", {})
@@ -1436,23 +1444,20 @@ REBALANCING ANALYSIS ERROR:
             risk_profile = rebalance.get("user_risk_profile", "medium")
 
             def _pct(value: Any) -> Optional[str]:
-                try:
-                    safe_value = _safe_float(value, 0.0)
-                    return f"{safe_value:.2%}" if safe_value is not None else "0.00%"
-                except (TypeError, ValueError):
+                fraction_value = _fraction_from(value, allow_percent_conversion=True)
+                if fraction_value is None:
                     return None
+                return f"{fraction_value:.2%}"
 
             plan_status = "REBALANCE REQUIRED" if needs_rebalancing else "PORTFOLIO WITHIN THRESHOLD"
             execution_ready = execution_plan.get("execution_ready", False)
             trade_volume_pct_raw = metrics.get("trade_volume_pct", 0.0)
-            try:
-                trade_volume_pct = float(trade_volume_pct_raw)
-            except (TypeError, ValueError):
+            trade_volume_pct = _fraction_from(trade_volume_pct_raw, allow_percent_conversion=True)
+            if trade_volume_pct is None:
                 trade_volume_pct = 0.0
             total_notional_raw = execution_plan.get("total_notional")
-            try:
-                total_notional = float(total_notional_raw)
-            except (TypeError, ValueError):
+            total_notional = _safe_float(total_notional_raw, None)
+            if total_notional is None:
                 total_notional = trade_volume_pct * portfolio_value
 
             trade_lines: List[str] = []
@@ -1672,25 +1677,48 @@ REBALANCING ANALYSIS ERROR:
                             if isinstance(risk_level, str):
                                 prompt_parts.append(f"     Risk Level: {risk_level}")
                             else:
-                                prompt_parts.append(
-                                    f"     Risk Level: {_safe_float(risk_level, 0.0) * 100:.1f}%"
+                                risk_fraction = _fraction_from(
+                                    risk_level, allow_percent_conversion=True
                                 )
+                                if risk_fraction is not None:
+                                    prompt_parts.append(
+                                        f"     Risk Level: {risk_fraction * 100:.1f}%"
+                                    )
 
-                        allocation = metadata.get("amount")
-                        if allocation is not None:
-                            formatted_allocation = _format_percentage(allocation)
+                        target_fraction = (
+                            _fraction_from(metadata.get("target_weight"))
+                            or _fraction_from(metadata.get("target_percentage"))
+                        )
+                        allocation_fraction = _fraction_from(
+                            metadata.get("amount"),
+                            allow_percent_conversion=False,
+                        )
+                        weight_change_fraction = _fraction_from(metadata.get("weight_change"))
+
+                        display_fraction = target_fraction or allocation_fraction
+                        if display_fraction is not None:
+                            formatted_allocation = _format_percentage(display_fraction)
                             if formatted_allocation:
                                 prompt_parts.append(
-                                    f"     Allocation: {formatted_allocation} of portfolio"
+                                    f"     Allocation Target: {formatted_allocation} of portfolio"
                                 )
 
-                        trade_value = metadata.get("trade_value_usd")
-                        if trade_value is None:
-                            trade_value = opportunity.get("required_capital_usd")
+                        if weight_change_fraction is not None:
+                            weight_change_text = _format_percentage(weight_change_fraction)
+                            if weight_change_text:
+                                prompt_parts.append(
+                                    f"     Weight Change: {weight_change_text}"
+                                )
+
+                        trade_value = (
+                            metadata.get("trade_value_usd")
+                            or metadata.get("value_change")
+                            or opportunity.get("required_capital_usd")
+                        )
                         trade_value_numeric = _safe_float(trade_value, None)
-                        if trade_value_numeric is not None and trade_value_numeric > 0:
+                        if trade_value_numeric is not None and trade_value_numeric != 0:
                             prompt_parts.append(
-                                f"     Trade Size: ${trade_value_numeric:,.0f}"
+                                f"     Trade Size: ≈ ${abs(trade_value_numeric):,.2f}"
                             )
 
                     elif "risk" in strategy_name_lower:
@@ -1769,7 +1797,7 @@ AVAILABLE STRATEGIES:
 - Strategy Categories: {list(set([s.get('category', 'Unknown') for s in available_strategies.get('strategies', [])]))}
 
 Top Recommended Strategies:
-{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - Expected Return: {_safe_float(s.get('expected_return', 0), 0.0)*100:.1f}%" for s in available_strategies.get('strategies', [])[:5]])}
+{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - Expected Return: {(_fraction_from(s.get('expected_return', 0), allow_percent_conversion=True) or 0.0) * 100:.1f}%" for s in available_strategies.get('strategies', [])[:5]])}
 
 Provide personalized strategy recommendations based on the user's current setup and available strategies."""
 
