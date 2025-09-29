@@ -1276,31 +1276,53 @@ Respond naturally using ONLY the real data provided."""
             except (TypeError, ValueError):
                 return default
 
-        def _safe_percentage(value: Any) -> Optional[float]:
-            raw_value = _safe_float(value, None)
-            if raw_value is None:
+        def _fraction_from(
+            value: Any,
+            allow_percent_conversion: bool = False,
+        ) -> Optional[float]:
+            """Normalize numeric inputs into a canonical fraction (0-1)."""
+
+            if value is None:
                 return None
-            normalized = raw_value * 100 if abs(raw_value) <= 1 else raw_value
-            return normalized
+
+            if isinstance(value, str):
+                original_value = value.strip()
+                if not original_value:
+                    return None
+
+                if allow_percent_conversion and "%" in original_value:
+                    numeric_portion = original_value.replace("%", "").strip()
+                    try:
+                        parsed = float(numeric_portion)
+                    except ValueError:
+                        return None
+                    return parsed / 100.0
+
+            numeric_value = _safe_float(value, None)
+            if numeric_value is None:
+                return None
+
+            if allow_percent_conversion:
+                magnitude = abs(numeric_value)
+                if magnitude <= 1:
+                    return numeric_value
+                if magnitude <= 100:
+                    return numeric_value / 100.0
+                return None
+
+            return numeric_value
+
+        def _safe_percentage(value: Any) -> Optional[float]:
+            fraction_value = _fraction_from(value, allow_percent_conversion=True)
+            if fraction_value is None:
+                return None
+            return fraction_value * 100
 
         def _format_percentage(value: Any) -> Optional[str]:
-            candidate: Any = value
-            if isinstance(candidate, str):
-                stripped = candidate.strip()
-                if not stripped:
-                    return None
-                if stripped.endswith("%"):
-                    stripped = stripped[:-1].strip()
-                try:
-                    candidate = float(stripped)
-                except ValueError:
-                    return None
-            if not isinstance(candidate, (int, float)):
+            fraction_value = _fraction_from(value, allow_percent_conversion=True)
+            if fraction_value is None:
                 return None
-            numeric = float(candidate)
-            if abs(numeric) <= 1:
-                numeric *= 100
-            return f"{numeric:.1f}%"
+            return f"{fraction_value * 100:.1f}%"
 
         if intent == ChatIntent.PORTFOLIO_ANALYSIS:
             portfolio = context_data.get("portfolio", {})
@@ -1379,23 +1401,20 @@ REBALANCING ANALYSIS ERROR:
             risk_profile = rebalance.get("user_risk_profile", "medium")
 
             def _pct(value: Any) -> Optional[str]:
-                try:
-                    safe_value = _safe_float(value, 0.0)
-                    return f"{safe_value:.2%}" if safe_value is not None else "0.00%"
-                except (TypeError, ValueError):
+                fraction_value = _fraction_from(value, allow_percent_conversion=True)
+                if fraction_value is None:
                     return None
+                return f"{fraction_value:.2%}"
 
             plan_status = "REBALANCE REQUIRED" if needs_rebalancing else "PORTFOLIO WITHIN THRESHOLD"
             execution_ready = execution_plan.get("execution_ready", False)
             trade_volume_pct_raw = metrics.get("trade_volume_pct", 0.0)
-            try:
-                trade_volume_pct = float(trade_volume_pct_raw)
-            except (TypeError, ValueError):
+            trade_volume_pct = _fraction_from(trade_volume_pct_raw, allow_percent_conversion=True)
+            if trade_volume_pct is None:
                 trade_volume_pct = 0.0
             total_notional_raw = execution_plan.get("total_notional")
-            try:
-                total_notional = float(total_notional_raw)
-            except (TypeError, ValueError):
+            total_notional = _safe_float(total_notional_raw, None)
+            if total_notional is None:
                 total_notional = trade_volume_pct * portfolio_value
 
             trade_lines: List[str] = []
@@ -1615,9 +1634,13 @@ REBALANCING ANALYSIS ERROR:
                             if isinstance(risk_level, str):
                                 prompt_parts.append(f"     Risk Level: {risk_level}")
                             else:
-                                prompt_parts.append(
-                                    f"     Risk Level: {_safe_float(risk_level, 0.0) * 100:.1f}%"
+                                risk_fraction = _fraction_from(
+                                    risk_level, allow_percent_conversion=True
                                 )
+                                if risk_fraction is not None:
+                                    prompt_parts.append(
+                                        f"     Risk Level: {risk_fraction * 100:.1f}%"
+                                    )
 
                         allocation = metadata.get("amount")
                         if allocation is not None:
@@ -1703,7 +1726,7 @@ AVAILABLE STRATEGIES:
 - Strategy Categories: {list(set([s.get('category', 'Unknown') for s in available_strategies.get('strategies', [])]))}
 
 Top Recommended Strategies:
-{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - Expected Return: {_safe_float(s.get('expected_return', 0), 0.0)*100:.1f}%" for s in available_strategies.get('strategies', [])[:5]])}
+{chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - Expected Return: {(_fraction_from(s.get('expected_return', 0), allow_percent_conversion=True) or 0.0) * 100:.1f}%" for s in available_strategies.get('strategies', [])[:5]])}
 
 Provide personalized strategy recommendations based on the user's current setup and available strategies."""
 
