@@ -80,7 +80,7 @@ interface PendingStrategy {
   profit_share_percentage?: number;
   
   // Status and Timeline
-  status: 'submitted' | 'under_review' | 'changes_requested' | 'approved' | 'rejected' | 'published';
+  status: 'submitted' | 'under_review' | 'changes_requested' | 'approved' | 'rejected';
   submitted_at: string;
   assigned_reviewer?: string;
   review_started_at?: string;
@@ -226,7 +226,6 @@ const StrategyApproval: React.FC = () => {
       case 'under_review': return 'bg-yellow-500';
       case 'changes_requested': return 'bg-orange-500';
       case 'approved':
-      case 'published':
         return 'bg-green-500';
       case 'rejected': return 'bg-red-500';
       default: return 'bg-gray-500';
@@ -239,7 +238,6 @@ const StrategyApproval: React.FC = () => {
       case 'under_review': return <Clock className="h-4 w-4" />;
       case 'changes_requested': return <Edit className="h-4 w-4" />;
       case 'approved':
-      case 'published':
         return <CheckCircle className="h-4 w-4" />;
       case 'rejected': return <XCircle className="h-4 w-4" />;
       default: return <FileText className="h-4 w-4" />;
@@ -247,8 +245,8 @@ const StrategyApproval: React.FC = () => {
   };
 
   const getStatusLabel = (status: PendingStrategy['status']) => {
-    if (status === 'published') {
-      return 'Published';
+    if (status === 'approved') {
+      return 'APPROVED / PUBLISHED';
     }
     return status.replace('_', ' ').toUpperCase();
   };
@@ -424,8 +422,7 @@ const StrategyApproval: React.FC = () => {
                 <SelectItem value="submitted">Submitted</SelectItem>
                 <SelectItem value="under_review">Under Review</SelectItem>
                 <SelectItem value="changes_requested">Changes Requested</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
-                <SelectItem value="published">Published</SelectItem>
+                <SelectItem value="approved">Approved / Published</SelectItem>
                 <SelectItem value="rejected">Rejected</SelectItem>
                 <SelectItem value="all">All Strategies</SelectItem>
               </SelectContent>
@@ -603,16 +600,12 @@ const StrategyApproval: React.FC = () => {
                         <Badge
                           variant="outline"
                           className={
-                            strategy.status === 'approved' || strategy.status === 'published'
+                            strategy.status === 'approved'
                               ? 'text-green-600'
                               : 'text-red-600'
                           }
                         >
-                          {strategy.status === 'published'
-                            ? 'Published'
-                            : strategy.status === 'approved'
-                              ? 'Approved'
-                              : 'Rejected'}
+                          {strategy.status === 'approved' ? 'Approved / Published' : 'Rejected'}
                         </Badge>
                       )}
                     </div>

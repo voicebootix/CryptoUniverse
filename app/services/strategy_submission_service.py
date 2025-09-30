@@ -256,13 +256,12 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
     ) -> ReviewStats:
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
-        changes_requested_status = getattr(StrategyStatus, "CHANGES_REQUESTED", None)
-        pending_statuses = [StrategyStatus.SUBMITTED, StrategyStatus.UNDER_REVIEW]
-        if changes_requested_status:
-            pending_statuses.append(changes_requested_status)
-
         total_pending_stmt = select(func.count(StrategySubmission.id)).where(
-            StrategySubmission.status.in_(pending_statuses)
+            StrategySubmission.status.in_([
+                StrategyStatus.SUBMITTED,
+                StrategyStatus.UNDER_REVIEW,
+                StrategyStatus.CHANGES_REQUESTED
+            ])
         )
         under_review_stmt = select(func.count(StrategySubmission.id)).where(
             StrategySubmission.status == StrategyStatus.UNDER_REVIEW
@@ -327,7 +326,9 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
             .where(
                 StrategySubmission.status.in_(
                     [
-                        *pending_statuses,
+                        StrategyStatus.SUBMITTED,
+                        StrategyStatus.UNDER_REVIEW,
+                        StrategyStatus.CHANGES_REQUESTED,
                         StrategyStatus.APPROVED,
                         StrategyStatus.REJECTED,
                         StrategyStatus.PUBLISHED,
