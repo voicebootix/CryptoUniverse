@@ -143,6 +143,37 @@ async def test_get_optimization_inputs_uses_market_data_and_cache():
 
 
 @pytest.mark.asyncio
+async def test_missing_symbol_receives_fallback_risk_profile():
+    btc_prices = [10000, 10200, 10500, 10300, 10400]
+
+    stub_service = StubMarketDataService(
+        {
+            "BTC/USDT": _build_ohlcv_series(btc_prices),
+        }
+    )
+
+    engine = PortfolioOptimizationEngine(market_data_service=stub_service)
+    positions = [
+        {"symbol": "BTC", "value_usd": 10000},
+        {"symbol": "NEW", "value_usd": 5000},
+    ]
+
+    expected_returns, covariance_matrix = await engine._get_optimization_inputs(positions)
+
+    btc_expected = _annualized_log_return(btc_prices)
+    assert expected_returns["BTC"] == pytest.approx(btc_expected, rel=1e-3)
+
+    # Fallback profile should be used for the missing series
+    assert expected_returns["NEW"] == pytest.approx(0.18, rel=1e-6)
+
+    # BTC variance comes from observed prices while NEW uses fallback volatility
+    assert covariance_matrix.shape == (2, 2)
+    assert covariance_matrix[1, 1] == pytest.approx(0.12, rel=1e-6)
+    assert covariance_matrix[1, 0] == pytest.approx(0.0, abs=1e-9)
+    assert covariance_matrix[0, 1] == pytest.approx(0.0, abs=1e-9)
+
+
+@pytest.mark.asyncio
 async def test_equal_weight_expected_return_reflects_market_data():
     scenario_a = {
         "BTC/USDT": _build_ohlcv_series([30000, 30300, 30600, 31000, 31500]),

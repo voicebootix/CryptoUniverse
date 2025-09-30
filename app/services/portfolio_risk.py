@@ -1238,17 +1238,31 @@ class PortfolioOptimizationEngine(LoggerMixin):
             self._latest_symbols_with_data = set()
             return self._fallback_optimization_inputs(symbols)
 
-        # Ensure all portfolio symbols are represented
-        missing_symbols = [symbol for symbol in symbols if symbol not in returns_df.columns]
-        for symbol in missing_symbols:
-            returns_df[symbol] = 0.0
-
-        returns_df = returns_df.reindex(columns=symbols)
+        fallback_expected, fallback_covariance = self._fallback_optimization_inputs(symbols)
 
         mean_returns = returns_df.mean() * 252.0
-        expected_returns = {symbol: float(mean_returns.get(symbol, 0.0)) for symbol in symbols}
+        expected_returns: Dict[str, float] = {}
+        for symbol in symbols:
+            symbol_mean = mean_returns.get(symbol)
+            if pd.isna(symbol_mean):
+                expected_returns[symbol] = float(fallback_expected.get(symbol, 0.0))
+            else:
+                expected_returns[symbol] = float(symbol_mean)
 
         covariance_df = returns_df.cov().fillna(0.0) * 252.0
+        covariance_df = covariance_df.reindex(index=symbols, columns=symbols)
+        covariance_df = covariance_df.fillna(0.0)
+
+        fallback_cov_df = pd.DataFrame(
+            fallback_covariance,
+            index=symbols,
+            columns=symbols,
+        )
+
+        for symbol in symbols:
+            if symbol not in returns_df.columns or covariance_df.loc[symbol, symbol] <= 0.0:
+                covariance_df.loc[symbol, symbol] = float(fallback_cov_df.loc[symbol, symbol])
+
         covariance_matrix = covariance_df.to_numpy()
 
         self._latest_price_frame = price_df
