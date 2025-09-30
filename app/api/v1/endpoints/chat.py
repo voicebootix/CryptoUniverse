@@ -179,14 +179,22 @@ async def send_message(
         # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
-        logger.error("Chat message processing failed", 
-                    error=str(e), 
+        logger.error("Chat message processing failed",
+                    error=str(e),
                     error_type=type(e).__name__,
                     user_id=current_user.id,
                     exc_info=True)
+        friendly_message = (
+            "Our AI assistant couldn't complete that request because a supporting service took too long to respond. "
+            "Please try again in a few moments or contact support if the issue continues."
+        )
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Chat processing error: {str(e)}"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "chat_service_unavailable",
+                "message": friendly_message,
+                "reason": str(e),
+            }
         )
 
 
