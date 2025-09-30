@@ -207,15 +207,63 @@ def test_opportunity_prompt_uses_fractional_weights_and_trade_values():
         }
     }
 
+    context["user_config"] = {
+        "risk_tolerance": "balanced",
+        "investment_amount": 25000,
+        "time_horizon": "medium_term",
+        "investment_objectives": ["growth"],
+        "constraints": [],
+    }
+    context["allowed_symbols"] = ["BTCUSDT"]
+    context["portfolio_optimization"] = {
+        "primary_strategy": "risk_parity",
+        "strategies": [
+            {
+                "strategy": "risk_parity",
+                "expected_return": 0.15,
+                "expected_volatility": 0.09,
+                "sharpe_ratio": 1.2,
+                "confidence": 0.85,
+                "result": {"weights": {"BTCUSDT": 0.15}},
+                "suggested_trades": [
+                    {
+                        "symbol": "BTCUSDT",
+                        "action": "buy",
+                        "notional_value": 1500,
+                        "quantity": 0.05,
+                        "target_weight": 0.15,
+                        "weight_change": 0.005,
+                        "reference_price": 30000,
+                    }
+                ],
+            }
+        ],
+    }
+
     prompt = service._build_response_prompt(
         "Show me portfolio optimization opportunities",
         ChatIntent.OPPORTUNITY_DISCOVERY,
         context,
     )
 
-    assert "Allocation Target: 15.0% of portfolio" in prompt
-    assert "Weight Change: 0.5%" in prompt
-    assert "Trade Size: ≈ $1,500.00" in prompt
+    assert "Expected annual return" in prompt
+    assert "Target Allocation: 15.0%" in prompt
+    assert "Suggested Trade Size: ≈ $1,500.00" in prompt
+
+
+def test_profile_parser_extracts_amount_and_constraints():
+    service = UnifiedChatService()
+
+    message = "I can invest $20k, avoid leverage and DOGE, but otherwise flexible"
+    updates = service._parse_investor_profile_response(
+        message,
+        list(service.INVESTOR_PROFILE_FIELDS),
+    )
+
+    assert updates.get("investment_amount") == pytest.approx(20000.0)
+    constraints = updates.get("constraints")
+    assert constraints is not None
+    assert "no_leverage" in constraints
 
 
 @pytest.mark.asyncio
@@ -290,6 +338,74 @@ async def test_strategy_management_prefetches_portfolio_once():
     assert context_arg["marketplace_strategies"] is marketplace_payload
 
 
+@pytest.mark.asyncio
+async def test_strategy_guidance_requires_investor_profile_before_response():
+    service = UnifiedChatService()
+
+    # Avoid hitting external systems during the test
+    service.memory_service.create_session = AsyncMock(return_value="session-test")
+    service.memory_service.update_session_context = AsyncMock(return_value=True)
+    service._analyze_intent_unified = AsyncMock(
+        return_value={
+            "intent": ChatIntent.OPPORTUNITY_DISCOVERY,
+            "confidence": 0.88,
+            "requires_action": False,
+            "entities": {},
+        }
+    )
+    service._gather_context_data = AsyncMock()
+    service._generate_complete_response = AsyncMock()
+
+    user_id = str(uuid.uuid4())
+
+    first_response = await service.process_message(
+        message="Find me the best opportunities",
+        user_id=user_id,
+        conversation_mode=ConversationMode.LIVE_TRADING,
+    )
+
+    assert first_response["success"] is False
+    assert first_response["requires_action"] is True
+    assert "risk tolerance" in first_response["content"].lower()
+    service._generate_complete_response.assert_not_awaited()
+
+    session_id = first_response["session_id"]
+    pending_context = service.sessions[session_id].context
+    assert "awaiting_profile_fields" in pending_context
+
+    second_prompt = await service.process_message(
+        message="I'm conservative with a long-term horizon focused on income",
+        user_id=user_id,
+        session_id=session_id,
+        conversation_mode=ConversationMode.LIVE_TRADING,
+    )
+
+    assert second_prompt["success"] is False
+    assert second_prompt.get("requires_action") is True
+    assert "capital you want the plan to manage" in second_prompt["content"].lower()
+
+    final_ack = await service.process_message(
+        message="I can invest $15,000 and have no constraints",
+        user_id=user_id,
+        session_id=session_id,
+        conversation_mode=ConversationMode.LIVE_TRADING,
+    )
+
+    assert final_ack["success"] is True
+    assert final_ack.get("metadata", {}).get("preference_update") is True
+
+    assert "awaiting_profile_fields" not in service.sessions[session_id].context
+
+    stored_config = await service._get_user_config(user_id)
+    assert stored_config.get("risk_tolerance") == "conservative"
+    assert stored_config.get("time_horizon") == "long_term"
+    assert stored_config.get("investment_amount") == pytest.approx(15000.0)
+    assert stored_config.get("constraints") == []
+    assert stored_config.get("investment_objectives") == ["income"]
+
+    service._generate_complete_response.reset_mock()
+
+
 def test_resolve_chat_credit_cost_prefers_overrides():
     service = UnifiedChatService()
     service.chat_credit_cost_overrides = {
@@ -340,114 +456,179 @@ async def test_process_message_charges_credits_when_required():
         return_value={
             "allowed": True,
             "message": "All checks passed",
-            "credit_charge": {
-                "credits": 4,
-                "intent": ChatIntent.MARKET_ANALYSIS,
-                "conversation_mode": ConversationMode.LIVE_TRADING,
+            "user_config": {
+                "risk_tolerance": "conservative",
+                "investment_amount": 15000.0,
+                "time_horizon": "long_term",
+                "investment_objectives": ["income"],
+                "constraints": [],
+                "trading_mode": TradingMode.CONSERVATIVE.value,
+                "operation_mode": "assisted",
             },
-        }
-    )
-    service._gather_context_data = AsyncMock(return_value={})
-    service._generate_complete_response = AsyncMock(
-        return_value={
-            "success": True,
-            "session_id": session_id,
-            "message_id": str(uuid.uuid4()),
-            "content": "analysis",
-            "intent": ChatIntent.MARKET_ANALYSIS.value,
-            "confidence": 0.96,
-            "timestamp": datetime.utcnow(),
-        }
-    )
-    service._charge_chat_interaction = AsyncMock(
-        return_value={
-            "transaction_id": str(uuid.uuid4()),
-            "credits": 4,
-            "intent": ChatIntent.MARKET_ANALYSIS.value,
-            "conversation_mode": ConversationMode.LIVE_TRADING.value,
-        }
+        },
     )
 
-    result = await service.process_message(
-        "Give me a market update",
-        user_id,
+    service._gather_context_data.reset_mock()
+    service._gather_context_data.return_value = {
+        "opportunities": {"opportunities": [], "user_profile": {}},
+        "user_config": {
+            "risk_tolerance": "conservative",
+            "investment_amount": 15000.0,
+            "time_horizon": "long_term",
+            "investment_objectives": ["income"],
+            "constraints": [],
+        },
+    }
+
+    service._generate_complete_response.return_value = {"success": True, "content": "ready"}
+
+    final_response = await service.process_message(
+        message="Find me the best opportunities",
+        user_id=user_id,
         session_id=session_id,
         conversation_mode=ConversationMode.LIVE_TRADING,
-        stream=False,
     )
 
-    service._charge_chat_interaction.assert_awaited_once_with(
-        user_id,
-        ChatIntent.MARKET_ANALYSIS,
-        ConversationMode.LIVE_TRADING,
-        4,
-    )
-    assert result["success"] is True
+    assert final_response["success"] is True
+    service._generate_complete_response.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_process_message_returns_action_when_credits_insufficient():
+async def test_opportunity_prompts_reflect_profile_differences():
     service = UnifiedChatService()
-    session_id = str(uuid.uuid4())
-    user_id = str(uuid.uuid4())
 
-    service.sessions[session_id] = ChatSession(
-        session_id=session_id,
-        user_id=user_id,
-        interface=InterfaceType.WEB_CHAT,
-        conversation_mode=ConversationMode.LIVE_TRADING,
-        trading_mode=TradingMode.BALANCED,
-        created_at=datetime.utcnow(),
-        last_activity=datetime.utcnow(),
-        context={},
-        messages=[],
-    )
+    service.memory_service.create_session = AsyncMock(return_value="session-pref")
+    service.memory_service.update_session_context = AsyncMock(return_value=True)
+    service._save_conversation = AsyncMock(return_value=None)
 
-    intent_payload = {
-        "intent": ChatIntent.MARKET_ANALYSIS,
-        "confidence": 0.91,
-        "requires_action": False,
-        "entities": {},
+    conservative_config = {
+        "risk_tolerance": "conservative",
+        "investment_amount": 20000.0,
+        "time_horizon": "long_term",
+        "investment_objectives": ["income"],
+        "constraints": [],
+        "trading_mode": TradingMode.CONSERVATIVE.value,
+        "operation_mode": "assisted",
+    }
+    aggressive_config = {
+        "risk_tolerance": "aggressive",
+        "investment_amount": 5000.0,
+        "time_horizon": "short_term",
+        "investment_objectives": ["growth"],
+        "constraints": ["no_leverage"],
+        "trading_mode": TradingMode.AGGRESSIVE.value,
+        "operation_mode": "assisted",
     }
 
-    service._analyze_intent_unified = AsyncMock(return_value=intent_payload)
-    service._check_requirements = AsyncMock(
-        return_value={
-            "allowed": True,
-            "message": "All checks passed",
-            "credit_charge": {
-                "credits": 6,
-                "intent": ChatIntent.MARKET_ANALYSIS,
-                "conversation_mode": ConversationMode.LIVE_TRADING,
+    base_opportunities = [
+        {
+            "strategy_name": "AI Portfolio Optimization - Core",
+            "symbol": "BTCUSDT",
+            "confidence_score": 0.9,
+            "profit_potential_usd": 1200,
+            "metadata": {
+                "risk_level": "low",
+                "time_horizon": "long_term",
+                "objective": "income",
+                "amount": "10%",
+            },
+        },
+        {
+            "strategy_name": "High Beta Momentum",
+            "symbol": "DOGEUSDT",
+            "confidence_score": 0.75,
+            "profit_potential_usd": 2500,
+            "metadata": {
+                "risk_level": "high",
+                "time_horizon": "short_term",
+                "objective": "growth",
+                "amount": "8%",
+            },
+        },
+    ]
+
+    async def gather_context_side_effect(*args, **kwargs):
+        user_config = kwargs.get("user_config") or {}
+        risk = user_config.get("risk_tolerance", "balanced")
+        if risk == "conservative":
+            allowed = ["BTCUSDT"]
+            strategy_tag = "risk_parity"
+        else:
+            allowed = ["BTCUSDT", "DOGEUSDT"]
+            strategy_tag = "kelly_criterion"
+
+        return {
+            "opportunities": {
+                "opportunities": list(base_opportunities),
+                "user_profile": {"risk_profile": user_config.get("risk_tolerance", "balanced")},
+            },
+            "user_config": user_config,
+            "allowed_symbols": allowed,
+            "portfolio_optimization": {
+                "primary_strategy": strategy_tag,
+                "strategies": [
+                    {
+                        "strategy": strategy_tag,
+                        "expected_return": 0.12 if risk == "conservative" else 0.25,
+                        "expected_volatility": 0.06 if risk == "conservative" else 0.2,
+                        "sharpe_ratio": 1.3,
+                        "confidence": 0.8,
+                        "result": {"weights": {symbol: 0.5 for symbol in allowed}},
+                        "suggested_trades": [],
+                    }
+                ],
             },
         }
-    )
-    service._gather_context_data = AsyncMock(return_value={})
-    service._generate_complete_response = AsyncMock(
+
+    service._analyze_intent_unified = AsyncMock(
         return_value={
-            "success": True,
-            "session_id": session_id,
-            "message_id": str(uuid.uuid4()),
-            "content": "analysis",
-            "intent": ChatIntent.MARKET_ANALYSIS.value,
-            "confidence": 0.91,
-            "timestamp": datetime.utcnow(),
+            "intent": ChatIntent.OPPORTUNITY_DISCOVERY,
+            "confidence": 0.95,
+            "requires_action": False,
+            "entities": {},
         }
     )
-    service._charge_chat_interaction = AsyncMock(
-        side_effect=InsufficientCreditsError("insufficient")
+
+    service._check_requirements = AsyncMock(
+        side_effect=[
+            {
+                "allowed": True,
+                "message": "All checks passed",
+                "user_config": conservative_config,
+            },
+            {
+                "allowed": True,
+                "message": "All checks passed",
+                "user_config": aggressive_config,
+            },
+        ]
     )
 
-    result = await service.process_message(
-        "Give me a market update",
-        user_id,
-        session_id=session_id,
+    service._gather_context_data = AsyncMock(side_effect=gather_context_side_effect)
+    service.chat_ai.generate_response = AsyncMock(
+        return_value={"success": True, "content": "ok", "elapsed_time": 0.1}
+    )
+
+    conservative_response = await service.process_message(
+        message="Share personalized opportunities",
+        user_id="profile-user",
         conversation_mode=ConversationMode.LIVE_TRADING,
-        stream=False,
     )
+    assert conservative_response["success"] is True
 
-    service._charge_chat_interaction.assert_awaited_once()
-    assert result["success"] is False
-    assert result["requires_action"] is True
-    assert result["action_data"]["type"] == "credit_purchase"
-    assert result["action_data"]["required_credits"] == 6
+    conservative_prompt = service.chat_ai.generate_response.await_args_list[0].kwargs["prompt"]
+    assert "BTCUSDT" in conservative_prompt
+    assert "DOGEUSDT" not in conservative_prompt
+    assert "risk tolerance conservative" in conservative_prompt.lower()
+
+    aggressive_response = await service.process_message(
+        message="Share personalized opportunities",
+        user_id="profile-user",
+        session_id=conservative_response["session_id"],
+        conversation_mode=ConversationMode.LIVE_TRADING,
+    )
+    assert aggressive_response["success"] is True
+
+    aggressive_prompt = service.chat_ai.generate_response.await_args_list[1].kwargs["prompt"]
+    assert "DOGEUSDT" in aggressive_prompt
+    assert "risk tolerance aggressive" in aggressive_prompt.lower()

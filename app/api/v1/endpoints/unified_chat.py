@@ -55,7 +55,9 @@ class UnifiedChatResponse(BaseModel):
     intent: str
     confidence: float
     requires_approval: bool = False
+    requires_action: bool = False
     decision_id: Optional[str] = None
+    action_data: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
     timestamp: datetime
 
@@ -137,20 +139,51 @@ async def send_message(
             stream=False  # Regular endpoint doesn't stream
         )
         
+        intent_value = result.get("intent")
+        if hasattr(intent_value, "value"):
+            intent_value = intent_value.value
+
         if result["success"]:
             return UnifiedChatResponse(
                 success=True,
                 session_id=result["session_id"],
                 message_id=result["message_id"],
                 content=result["content"],
-                intent=result["intent"],
+                intent=intent_value or "",
                 confidence=result["confidence"],
                 requires_approval=result.get("requires_approval", False),
+                requires_action=result.get("requires_action", False),
                 decision_id=result.get("decision_id"),
+                action_data=result.get("action_data"),
                 metadata=result.get("metadata", {}),
                 timestamp=result["timestamp"]
             )
         else:
+            if result.get("requires_action"):
+                metadata = result.get("metadata") or {}
+                action_data = result.get("action_data")
+                if action_data:
+                    metadata = {**metadata, "action_data": action_data}
+
+                confidence = result.get("confidence")
+                if confidence is None:
+                    confidence = 0.0
+
+                return UnifiedChatResponse(
+                    success=False,
+                    session_id=result.get("session_id", result.get("session", "")),
+                    message_id=result.get("message_id", str(uuid.uuid4())),
+                    content=result.get("content", ""),
+                    intent=intent_value or "",
+                    confidence=confidence,
+                    requires_approval=result.get("requires_approval", False),
+                    requires_action=True,
+                    decision_id=result.get("decision_id"),
+                    action_data=action_data,
+                    metadata=metadata,
+                    timestamp=result.get("timestamp", datetime.utcnow())
+                )
+
             # Check if this is a requirements failure (credit/access) rather than a system error
             error_detail = result.get("error", "Chat processing failed")
             content_detail = result.get("content", "")
