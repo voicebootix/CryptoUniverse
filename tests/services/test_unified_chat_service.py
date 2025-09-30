@@ -25,6 +25,7 @@ from app.services.unified_chat_service import (
     TradingMode,
     UnifiedChatService,
 )
+from app.services.credit_ledger import InsufficientCreditsError
 
 
 def test_unified_chat_service_initializes_key_attributes():
@@ -403,6 +404,54 @@ async def test_strategy_guidance_requires_investor_profile_before_response():
     assert stored_config.get("investment_objectives") == ["income"]
 
     service._generate_complete_response.reset_mock()
+
+
+def test_resolve_chat_credit_cost_prefers_overrides():
+    service = UnifiedChatService()
+    service.chat_credit_cost_overrides = {
+        ConversationMode.ANALYSIS.value: 3,
+        ChatIntent.MARKET_ANALYSIS.value: 5,
+    }
+
+    mode_override = service._resolve_chat_credit_cost(
+        ChatIntent.PORTFOLIO_ANALYSIS,
+        ConversationMode.ANALYSIS,
+    )
+    intent_override = service._resolve_chat_credit_cost(
+        ChatIntent.MARKET_ANALYSIS,
+        ConversationMode.LIVE_TRADING,
+    )
+
+    assert mode_override == 3
+    assert intent_override == 5
+
+
+@pytest.mark.asyncio
+async def test_process_message_charges_credits_when_required():
+    service = UnifiedChatService()
+    session_id = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
+
+    service.sessions[session_id] = ChatSession(
+        session_id=session_id,
+        user_id=user_id,
+        interface=InterfaceType.WEB_CHAT,
+        conversation_mode=ConversationMode.LIVE_TRADING,
+        trading_mode=TradingMode.BALANCED,
+        created_at=datetime.utcnow(),
+        last_activity=datetime.utcnow(),
+        context={},
+        messages=[],
+    )
+
+    intent_payload = {
+        "intent": ChatIntent.MARKET_ANALYSIS,
+        "confidence": 0.96,
+        "requires_action": False,
+        "entities": {},
+    }
+
+    service._analyze_intent_unified = AsyncMock(return_value=intent_payload)
     service._check_requirements = AsyncMock(
         return_value={
             "allowed": True,

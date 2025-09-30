@@ -35,26 +35,26 @@ const RISK_OPTIONS = [
 ];
 
 const HORIZON_OPTIONS = [
-  { value: '0-12 months', label: '0-12 months' },
-  { value: '1-3 years', label: '1-3 years' },
-  { value: '3-5 years', label: '3-5 years' },
-  { value: '5+ years', label: '5+ years' }
+  { value: 'short_term', label: '0-12 months' },
+  { value: 'medium_term', label: '1-3 years' },
+  { value: 'long_term', label: '3-5 years' },
+  { value: 'very_long_term', label: '5+ years' }
 ];
 
 const OBJECTIVE_OPTIONS = [
-  'Capital preservation',
-  'Steady income',
-  'Balanced growth',
-  'Aggressive growth',
-  'Speculative opportunities'
+  { value: 'capital_preservation', label: 'Capital preservation' },
+  { value: 'income', label: 'Steady income' },
+  { value: 'growth', label: 'Balanced growth' },
+  { value: 'aggressive_growth', label: 'Aggressive growth' },
+  { value: 'speculation', label: 'Speculative opportunities' }
 ];
 
 const CONSTRAINT_OPTIONS = [
-  'None',
-  'Limited liquidity',
-  'Tax sensitive',
-  'No leverage',
-  'ESG or sustainability focus'
+  { value: 'none', label: 'None' },
+  { value: 'limited_liquidity', label: 'Limited liquidity' },
+  { value: 'tax_sensitive', label: 'Tax sensitive' },
+  { value: 'no_leverage', label: 'No leverage' },
+  { value: 'esg_focus', label: 'ESG or sustainability focus' }
 ];
 
 const isFieldRequired = (field: string, missingFields: string[]) => missingFields.includes(field);
@@ -97,11 +97,11 @@ const InvestorProfilePrompt: React.FC<InvestorProfilePromptProps> = ({
 
   const toggleConstraint = (value: string) => {
     setConstraints((prev) => {
-      if (value === 'None') {
-        return prev.includes('None') ? [] : ['None'];
+      if (value === 'none') {
+        return prev.includes('none') ? [] : ['none'];
       }
 
-      const withoutNone = prev.filter((option) => option !== 'None');
+      const withoutNone = prev.filter((option) => option !== 'none');
       return withoutNone.includes(value)
         ? withoutNone.filter((option) => option !== value)
         : [...withoutNone, value];
@@ -208,12 +208,12 @@ const InvestorProfilePrompt: React.FC<InvestorProfilePromptProps> = ({
               </Label>
               <div className="grid grid-cols-1 gap-2">
                 {OBJECTIVE_OPTIONS.map((option) => (
-                  <label key={option} className="flex items-center gap-2 text-sm">
+                  <label key={option.value} className="flex items-center gap-2 text-sm">
                     <Checkbox
-                      checked={objectives.includes(option)}
-                      onCheckedChange={() => toggleObjective(option)}
+                      checked={objectives.includes(option.value)}
+                      onCheckedChange={() => toggleObjective(option.value)}
                     />
-                    <span>{option}</span>
+                    <span>{option.label}</span>
                   </label>
                 ))}
               </div>
@@ -233,12 +233,12 @@ const InvestorProfilePrompt: React.FC<InvestorProfilePromptProps> = ({
               </Label>
               <div className="grid grid-cols-1 gap-2">
                 {CONSTRAINT_OPTIONS.map((option) => (
-                  <label key={option} className="flex items-center gap-2 text-sm">
+                  <label key={option.value} className="flex items-center gap-2 text-sm">
                     <Checkbox
-                      checked={constraints.includes(option)}
-                      onCheckedChange={() => toggleConstraint(option)}
+                      checked={constraints.includes(option.value)}
+                      onCheckedChange={() => toggleConstraint(option.value)}
                     />
-                    <span>{option}</span>
+                    <span>{option.label}</span>
                   </label>
                 ))}
               </div>

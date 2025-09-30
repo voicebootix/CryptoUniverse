@@ -270,3 +270,78 @@ async def test_published_submission_appears_in_marketplace(monkeypatch) -> None:
     assert strategies["community_strategies_count"] == 1
     assert "unrelated:key" in fake_store
     assert all(not key.startswith("marketplace:") for key in fake_store)
+
+
+@pytest.mark.asyncio()
+async def test_request_changes_sets_changes_requested_status(monkeypatch) -> None:
+    submission_service = StrategySubmissionService()
+
+    monkeypatch.setattr(
+        strategy_submission_module.cache_manager,
+        "delete",
+        AsyncMock(return_value=0),
+    )
+
+    class DummyRedisClient:
+        async def delete(self, *keys: str) -> int:  # pragma: no cover - simple stub
+            return 0
+
+        async def scan_iter(self, match: str | None = None, count: int | None = None):
+            if False:  # pragma: no cover - no keys to yield
+                yield ""  # pragma: no cover
+
+    class DummyRedisManager:
+        async def get_client(self) -> DummyRedisClient:  # pragma: no cover - simple stub
+            return DummyRedisClient()
+
+    monkeypatch.setattr(
+        strategy_submission_module,
+        "redis_cache_manager",
+        types.SimpleNamespace(redis=DummyRedisManager()),
+    )
+
+    submission = StrategySubmission(
+        id=str(uuid.uuid4()),
+        user_id=str(uuid.uuid4()),
+        name="Momentum Adjustments",
+        description="Needs parameter tweaks",
+        category="momentum",
+        risk_level=RiskLevel.MEDIUM,
+        pricing_model=PricingModel.FREE,
+        support_level=SupportLevel.STANDARD,
+        status=StrategyStatus.SUBMITTED,
+        strategy_config={
+            submission_service.REVIEW_STATE_KEY: StrategyStatus.SUBMITTED.value,
+            submission_service.REVIEW_HISTORY_KEY: [],
+        },
+    )
+
+    async def _fake_get_submission_by_id(self, submission_id: str, db: AsyncMock) -> StrategySubmission:
+        assert submission_id == str(submission.id)
+        return submission
+
+    monkeypatch.setattr(
+        StrategySubmissionService,
+        "_get_submission_by_id",
+        _fake_get_submission_by_id,
+    )
+
+    db = AsyncMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+    reviewer = types.SimpleNamespace(id=uuid.uuid4(), email="reviewer-request-changes@example.com")
+
+    updated = await submission_service.review_submission(
+        submission_id=str(submission.id),
+        reviewer=reviewer,
+        action="request_changes",
+        comment="Please adjust risk metrics",
+        db=db,
+    )
+
+    assert updated.status == StrategyStatus.CHANGES_REQUESTED
+    assert updated.strategy_config[submission_service.REVIEW_STATE_KEY] == "changes_requested"
+    history = updated.strategy_config[submission_service.REVIEW_HISTORY_KEY]
+    assert history[-1]["action"] == "changes_requested"
+    db.commit.assert_awaited()
+    db.refresh.assert_awaited_with(submission)

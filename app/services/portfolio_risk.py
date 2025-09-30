@@ -49,6 +49,12 @@ import structlog
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 
+from app.services.real_market_data import (
+    RealMarketDataService,
+    real_market_data_service,
+)
+from app.services.dynamic_asset_filter import AssetInfo, enterprise_asset_filter
+
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_manager
@@ -868,8 +874,35 @@ class PortfolioOptimizationEngine(LoggerMixin):
     - Adaptive allocation
     """
     
-    def __init__(self):
+    def __init__(self, market_data_service: Optional[RealMarketDataService] = None):
         self.optimization_cache = {}
+        self._market_data_service: RealMarketDataService = (
+            market_data_service or real_market_data_service
+        )
+        self._historical_cache: Dict[str, Dict[str, Any]] = {}
+        self._historical_cache_ttl = timedelta(minutes=15)
+        self._risk_free_rate = 0.02
+        self._latest_price_frame: Optional[pd.DataFrame] = None
+        self._latest_returns_frame: Optional[pd.DataFrame] = None
+        self._latest_expected_returns: Dict[str, float] = {}
+        self._latest_covariance_df: Optional[pd.DataFrame] = None
+        self._latest_sample_size: int = 0
+        self._latest_symbols_with_data: set = set()
+        self._asset_filter = enterprise_asset_filter
+        self._asset_metadata_cache: Dict[str, AssetInfo] = {}
+        self._asset_metadata_expiry: datetime = datetime.min
+        self._asset_metadata_ttl: timedelta = timedelta(minutes=10)
+        self._default_liquidity_multiplier: float = 0.65
+        self._tier_liquidity_bias: Dict[str, float] = {
+            "tier_institutional": 1.1,
+            "tier_enterprise": 1.0,
+            "tier_professional": 0.9,
+            "tier_retail": 0.75,
+            "tier_emerging": 0.5,
+            "tier_micro": 0.35,
+            "tier_any": 0.25,
+        }
+        self._stablecoin_symbols = {"USDT", "USDC", "BUSD", "DAI", "TUSD", "USDP", "GUSD"}
     
     async def optimize_portfolio(
         self,
@@ -888,19 +921,35 @@ class PortfolioOptimizationEngine(LoggerMixin):
         
         # Apply optimization strategy
         if strategy == OptimizationStrategy.RISK_PARITY:
-            result = await self._optimize_risk_parity(positions, covariance_matrix)
+            result = await self._optimize_risk_parity(
+                positions,
+                expected_returns,
+                covariance_matrix,
+            )
         elif strategy == OptimizationStrategy.EQUAL_WEIGHT:
-            result = await self._optimize_equal_weight(positions)
+            result = await self._optimize_equal_weight(
+                positions,
+                expected_returns,
+                covariance_matrix,
+            )
         elif strategy == OptimizationStrategy.MAX_SHARPE:
             result = await self._optimize_max_sharpe(positions, expected_returns, covariance_matrix)
         elif strategy == OptimizationStrategy.MIN_VARIANCE:
-            result = await self._optimize_min_variance(positions, covariance_matrix)
+            result = await self._optimize_min_variance(
+                positions,
+                expected_returns,
+                covariance_matrix,
+            )
         elif strategy == OptimizationStrategy.KELLY_CRITERION:
             result = await self._optimize_kelly_criterion(positions, expected_returns, covariance_matrix)
         elif strategy == OptimizationStrategy.ADAPTIVE:
             result = await self._optimize_adaptive(positions, expected_returns, covariance_matrix)
         else:
-            result = await self._optimize_equal_weight(positions)  # Default fallback
+            result = await self._optimize_equal_weight(
+                positions,
+                expected_returns,
+                covariance_matrix,
+            )  # Default fallback
         
         # Generate rebalancing trades if needed
         result.suggested_trades = await self._generate_rebalancing_trades(
@@ -909,109 +958,504 @@ class PortfolioOptimizationEngine(LoggerMixin):
         
         return result
     
+    def _extract_symbols(self, positions: List[Dict[str, Any]]) -> List[str]:
+        """Return unique symbols while preserving portfolio order."""
+
+        symbols: List[str] = []
+        for position in positions:
+            symbol = position.get("symbol")
+            if symbol and symbol not in symbols:
+                symbols.append(symbol)
+        return symbols
+
+    async def _refresh_asset_metadata(self, symbols: List[str]) -> Dict[str, AssetInfo]:
+        """Refresh cached asset metadata using the enterprise discovery service."""
+
+        if not symbols:
+            self._asset_metadata_cache = {}
+            self._asset_metadata_expiry = datetime.utcnow()
+            return {}
+
+        asset_filter = getattr(self, "_asset_filter", None)
+        if asset_filter is None:
+            self._asset_metadata_cache = {}
+            self._asset_metadata_expiry = datetime.utcnow()
+            return {}
+
+        try:
+            if not getattr(asset_filter, "session", None):
+                await asset_filter.async_init()
+
+            asset_map = await asset_filter.get_assets_for_symbol_list(symbols)
+            normalized = {symbol.upper(): info for symbol, info in asset_map.items()}
+            self._asset_metadata_cache = normalized
+            self._asset_metadata_expiry = datetime.utcnow()
+            return normalized
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.warning(
+                "Dynamic asset metadata unavailable",
+                error=str(exc),
+            )
+            self._asset_metadata_cache = {}
+            self._asset_metadata_expiry = datetime.utcnow()
+            return {}
+
+    async def _ensure_asset_metadata(self, symbols: List[str]) -> Dict[str, AssetInfo]:
+        """Ensure asset metadata is available for the requested symbols."""
+
+        if not symbols:
+            return {}
+
+        now = datetime.utcnow()
+        cache_expired = (now - self._asset_metadata_expiry) > self._asset_metadata_ttl
+        normalized_symbols = [symbol.upper() for symbol in symbols]
+        missing = [symbol for symbol in normalized_symbols if symbol not in self._asset_metadata_cache]
+
+        if cache_expired or missing:
+            return await self._refresh_asset_metadata(normalized_symbols)
+
+        return self._asset_metadata_cache
+
+    def _get_liquidity_multiplier(self, symbol: str, asset_info: Optional[AssetInfo]) -> float:
+        """Derive a liquidity-based weight multiplier for an asset."""
+
+        if asset_info is None:
+            multiplier = self._default_liquidity_multiplier
+        else:
+            tier = (getattr(asset_info, "tier", "") or "").lower()
+            multiplier = self._tier_liquidity_bias.get(tier, self._default_liquidity_multiplier)
+
+        if symbol.upper() in self._stablecoin_symbols:
+            multiplier = max(multiplier, 0.85)
+
+        return float(max(0.1, min(1.25, multiplier)))
+
+    async def _apply_dynamic_weight_constraints(
+        self,
+        symbols: List[str],
+        weights_array: np.ndarray,
+    ) -> np.ndarray:
+        """Adjust weights using dynamically discovered asset liquidity."""
+
+        if not symbols:
+            return weights_array
+
+        weights = np.asarray(weights_array, dtype=float)
+        if weights.size != len(symbols):
+            weights = np.ones(len(symbols)) / len(symbols)
+
+        weights = np.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
+        weights = np.maximum(weights, 0.0)
+
+        asset_metadata = await self._ensure_asset_metadata(symbols)
+        multipliers = np.array(
+            [
+                self._get_liquidity_multiplier(symbol, asset_metadata.get(symbol.upper()))
+                for symbol in symbols
+            ],
+            dtype=float,
+        )
+
+        multipliers = np.nan_to_num(
+            multipliers,
+            nan=self._default_liquidity_multiplier,
+            posinf=self._default_liquidity_multiplier,
+            neginf=self._default_liquidity_multiplier,
+        )
+
+        adjusted = weights * multipliers
+        total = adjusted.sum()
+        if total <= 0:
+            adjusted = multipliers
+            total = adjusted.sum()
+
+        if total <= 0:
+            return np.ones(len(symbols)) / len(symbols)
+
+        adjusted = adjusted / total
+        return adjusted
+
+    def _normalize_market_symbol(self, symbol: str) -> str:
+        """Normalize internal symbols to exchange-compatible trading pairs."""
+
+        if not symbol:
+            return symbol
+
+        if "/" in symbol:
+            return symbol
+
+        if "-" in symbol:
+            return symbol.replace("-", "/")
+
+        base = symbol.upper()
+        stablecoin_pairs = {
+            "USDC": "USDC/USDT",
+            "USDT": "USDT/USDC",
+            "BUSD": "BUSD/USDT",
+            "DAI": "DAI/USDT",
+        }
+
+        if base in stablecoin_pairs:
+            return stablecoin_pairs[base]
+
+        quote = "USDT"
+        return f"{base}/{quote}"
+
+    async def _fetch_symbol_price_series(
+        self,
+        symbol: str,
+        lookback: int = 180,
+        timeframe: str = "1d"
+    ) -> Optional[pd.Series]:
+        """Fetch and cache historical close prices for a symbol."""
+
+        market_symbol = self._normalize_market_symbol(symbol)
+        cache_key = f"{market_symbol}:{timeframe}:{lookback}"
+        now = datetime.utcnow()
+
+        cached_entry = self._historical_cache.get(cache_key)
+        if cached_entry:
+            cached_ts = cached_entry.get("timestamp")
+            if isinstance(cached_ts, datetime) and now - cached_ts < self._historical_cache_ttl:
+                cached_series = cached_entry.get("series")
+                if isinstance(cached_series, pd.Series) and not cached_series.empty:
+                    return cached_series
+
+        if not self._market_data_service:
+            return None
+
+        try:
+            ohlcv = await self._market_data_service.get_historical_ohlcv(
+                symbol=market_symbol,
+                timeframe=timeframe,
+                limit=lookback,
+                exchange="auto",
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.warning(
+                "Failed to fetch historical OHLCV",
+                symbol=market_symbol,
+                error=str(exc),
+            )
+            ohlcv = []
+
+        if not ohlcv:
+            return None
+
+        closes: List[float] = []
+        timestamps: List[pd.Timestamp] = []
+
+        for candle in ohlcv:
+            close_val = candle.get("close")
+            ts_val = candle.get("timestamp")
+            if close_val in (None, 0):
+                continue
+
+            try:
+                timestamps.append(pd.to_datetime(ts_val))
+                closes.append(float(close_val))
+            except Exception:  # pragma: no cover - parsing safety
+                continue
+
+        if not closes:
+            return None
+
+        series = pd.Series(closes, index=pd.DatetimeIndex(timestamps)).sort_index()
+        series = series[~series.index.duplicated(keep="last")]
+
+        if len(series) > lookback:
+            series = series.iloc[-lookback:]
+
+        self._historical_cache[cache_key] = {"timestamp": now, "series": series}
+        return series
+
+    def _fallback_optimization_inputs(
+        self, symbols: List[str]
+    ) -> Tuple[Dict[str, float], np.ndarray]:
+        """Fallback to deterministic defaults when market data is unavailable."""
+
+        expected_returns: Dict[str, float] = {}
+        for symbol in symbols:
+            if symbol == "USDC":
+                expected_returns[symbol] = 0.03
+            else:
+                expected_returns[symbol] = 0.18
+
+        covariance_matrix = np.eye(len(symbols)) * 0.12
+        return expected_returns, covariance_matrix
+
     async def _get_optimization_inputs(
         self,
         positions: List[Dict]
     ) -> Tuple[Dict[str, float], np.ndarray]:
         """Get expected returns and covariance matrix for optimization."""
-        
-        symbols = list(set(pos["symbol"] for pos in positions))
-        n_assets = len(symbols)
-        
-        # ENTERPRISE FIX: Comprehensive expected returns for real portfolio assets
-        expected_returns = {}
+
+        symbols = self._extract_symbols(positions)
+        if not symbols:
+            return {}, np.array([[]])
+
+        lookback = 180
+        timeframe = "1d"
+
+        fetch_tasks = [self._fetch_symbol_price_series(symbol, lookback, timeframe) for symbol in symbols]
+        series_results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+        price_series: Dict[str, pd.Series] = {}
+        for symbol, result in zip(symbols, series_results):
+            if isinstance(result, Exception):  # pragma: no cover - defensive logging
+                self.logger.warning(
+                    "Historical price fetch raised exception",
+                    symbol=symbol,
+                    error=str(result),
+                )
+                continue
+
+            if isinstance(result, pd.Series) and not result.empty:
+                price_series[symbol] = result
+
+        if not price_series:
+            self.logger.warning("No historical prices available, using fallback estimates")
+            self._latest_price_frame = None
+            self._latest_returns_frame = None
+            self._latest_expected_returns = {}
+            self._latest_covariance_df = None
+            self._latest_sample_size = 0
+            self._latest_symbols_with_data = set()
+            return self._fallback_optimization_inputs(symbols)
+
+        price_df = pd.DataFrame(price_series)
+        price_df = price_df.sort_index().ffill().dropna()
+
+        returns_df = np.log(price_df / price_df.shift(1)).dropna()
+
+        if returns_df.empty:
+            self.logger.warning("Insufficient returns data after processing, using fallback estimates")
+            self._latest_price_frame = None
+            self._latest_returns_frame = None
+            self._latest_expected_returns = {}
+            self._latest_covariance_df = None
+            self._latest_sample_size = 0
+            self._latest_symbols_with_data = set()
+            return self._fallback_optimization_inputs(symbols)
+
+        fallback_expected, fallback_covariance = self._fallback_optimization_inputs(symbols)
+
+        mean_returns = returns_df.mean() * 252.0
+        expected_returns: Dict[str, float] = {}
         for symbol in symbols:
-            # Major cryptocurrencies
-            if symbol == "BTC":
-                expected_returns[symbol] = 0.15  # 15% annual expected return
-            elif symbol == "ETH":
-                expected_returns[symbol] = 0.20  # 20% for ETH
-            # Real portfolio assets (based on market research 2024)
-            elif symbol == "XRP":
-                expected_returns[symbol] = 0.12  # 12% for XRP (realistic with regulatory uncertainty)
-            elif symbol == "ADA":
-                expected_returns[symbol] = 0.15  # 15% for ADA (smart contract platform, slower growth)
-            elif symbol == "DOGE":
-                expected_returns[symbol] = 0.10  # 10% for DOGE (meme coin, highly speculative)
-            elif symbol == "USDC":
-                expected_returns[symbol] = 0.04  # 4% for stablecoin (current yield rates)
-            elif symbol == "REEF":
-                expected_returns[symbol] = -0.05  # -5% for REEF (small cap, high risk of loss)
-            # Other altcoins
-            elif symbol in ["SOL", "AVAX", "DOT"]:
-                expected_returns[symbol] = 0.25  # 25% for major altcoins
-            elif symbol in ["MATIC", "LINK", "UNI"]:
-                expected_returns[symbol] = 0.23  # 23% for DeFi tokens
+            symbol_mean = mean_returns.get(symbol)
+            if pd.isna(symbol_mean):
+                expected_returns[symbol] = float(fallback_expected.get(symbol, 0.0))
             else:
-                expected_returns[symbol] = 0.20  # 20% default for unknown assets
-        
-        # Simulate covariance matrix (positive semi-definite)
-        np.random.seed(42)  # For reproducibility
-        A = np.random.randn(n_assets, n_assets) * 0.1
-        covariance_matrix = np.dot(A, A.T)  # Ensure positive semi-definite
-        
-        # Add some realistic correlation structure
-        for i in range(n_assets):
-            covariance_matrix[i][i] = 0.16  # 40% annual volatility
-            for j in range(i + 1, n_assets):
-                # Crypto assets tend to be correlated
-                covariance_matrix[i][j] = covariance_matrix[j][i] = 0.08  # 50% correlation
-        
+                expected_returns[symbol] = float(symbol_mean)
+
+        covariance_df = returns_df.cov().fillna(0.0) * 252.0
+        covariance_df = covariance_df.reindex(index=symbols, columns=symbols)
+        covariance_df = covariance_df.fillna(0.0)
+
+        fallback_cov_df = pd.DataFrame(
+            fallback_covariance,
+            index=symbols,
+            columns=symbols,
+        )
+
+        for symbol in symbols:
+            if symbol not in returns_df.columns or covariance_df.loc[symbol, symbol] <= 0.0:
+                covariance_df.loc[symbol, symbol] = float(fallback_cov_df.loc[symbol, symbol])
+
+        covariance_matrix = covariance_df.to_numpy()
+
+        self._latest_price_frame = price_df
+        self._latest_returns_frame = returns_df
+        self._latest_expected_returns = expected_returns
+        self._latest_covariance_df = covariance_df
+        self._latest_sample_size = len(returns_df)
+        self._latest_symbols_with_data = set(price_series.keys())
+
         return expected_returns, covariance_matrix
+
+    def _get_covariance_for_symbols(
+        self,
+        symbols: List[str],
+        covariance_matrix: np.ndarray,
+    ) -> np.ndarray:
+        """Return covariance matrix aligned with symbol order."""
+
+        if self._latest_covariance_df is not None:
+            try:
+                cov_df = self._latest_covariance_df.reindex(index=symbols, columns=symbols).fillna(0.0)
+                matrix = cov_df.to_numpy()
+                if matrix.shape == (len(symbols), len(symbols)):
+                    return matrix
+            except Exception:  # pragma: no cover - defensive safety
+                pass
+
+        matrix = np.asarray(covariance_matrix, dtype=float)
+        if matrix.shape != (len(symbols), len(symbols)):
+            return np.eye(len(symbols)) * 0.1
+        return matrix
+
+    def _estimate_portfolio_drawdown(self, weights: Dict[str, float]) -> float:
+        """Estimate max drawdown from the latest cached price frame."""
+
+        price_df = self._latest_price_frame
+        if price_df is None or price_df.empty:
+            return 0.0
+
+        available_symbols = [symbol for symbol in weights if symbol in price_df.columns]
+        if not available_symbols:
+            return 0.0
+
+        aligned_prices = price_df[available_symbols].copy()
+        aligned_prices = aligned_prices / aligned_prices.iloc[0]
+
+        weight_vector = np.array([weights[symbol] for symbol in available_symbols], dtype=float)
+        portfolio_series = (aligned_prices * weight_vector).sum(axis=1)
+
+        if portfolio_series.empty:
+            return 0.0
+
+        running_max = portfolio_series.cummax()
+        drawdowns = (portfolio_series - running_max) / running_max
+
+        if drawdowns.empty:
+            return 0.0
+
+        return float(abs(drawdowns.min()))
+
+    def _calculate_confidence_metric(self, weights: Dict[str, float]) -> float:
+        """Derive a confidence score from sample depth and data coverage."""
+
+        sample_size = self._latest_sample_size
+        if sample_size <= 1:
+            return 0.5
+
+        coverage = sum(weights.get(symbol, 0.0) for symbol in self._latest_symbols_with_data)
+        coverage = float(max(0.0, min(1.0, coverage)))
+
+        depth_factor = min(1.0, sample_size / 252.0)
+        confidence = 0.4 + 0.4 * depth_factor + 0.2 * coverage
+        return float(max(0.4, min(0.99, confidence)))
+
+    def _build_optimization_result(
+        self,
+        strategy: OptimizationStrategy,
+        symbols: List[str],
+        weights_array: np.ndarray,
+        expected_returns: Dict[str, float],
+        covariance_matrix: np.ndarray,
+        rebalancing_needed: bool,
+        suggested_trades: Optional[List[Dict[str, Any]]] = None,
+        weights_override: Optional[Dict[str, float]] = None,
+    ) -> OptimizationResult:
+        """Build a consistent OptimizationResult with measured metrics."""
+
+        weights_array = np.asarray(weights_array, dtype=float)
+        weights_array = np.clip(weights_array, 0.0, None)
+
+        if weights_array.size != len(symbols):
+            weights_array = np.ones(len(symbols)) / len(symbols)
+
+        if weights_array.sum() > 0:
+            weights_array = weights_array / weights_array.sum()
+        else:
+            weights_array = np.ones(len(symbols)) / len(symbols)
+
+        if weights_override:
+            positive_weights = {k: max(0.0, float(v)) for k, v in weights_override.items()}
+            total_override = sum(positive_weights.get(symbol, 0.0) for symbol in symbols)
+            if total_override > 0:
+                normalized_weights = {
+                    symbol: positive_weights.get(symbol, 0.0) / total_override
+                    for symbol in symbols
+                }
+            else:
+                normalized_weights = {symbol: float(weights_array[i]) for i, symbol in enumerate(symbols)}
+        else:
+            normalized_weights = {symbol: float(weights_array[i]) for i, symbol in enumerate(symbols)}
+
+        weight_vector = np.array([normalized_weights[symbol] for symbol in symbols], dtype=float)
+
+        returns_vector = np.array([expected_returns.get(symbol, 0.0) for symbol in symbols], dtype=float)
+        portfolio_return = float(np.dot(weight_vector, returns_vector))
+
+        matrix = self._get_covariance_for_symbols(symbols, covariance_matrix)
+        variance = float(np.dot(weight_vector, np.dot(matrix, weight_vector)))
+        variance = max(variance, 0.0)
+        expected_volatility = math.sqrt(variance)
+
+        if expected_volatility > 0:
+            sharpe_ratio = float((portfolio_return - self._risk_free_rate) / expected_volatility)
+        else:
+            sharpe_ratio = 0.0
+
+        max_drawdown = self._estimate_portfolio_drawdown(normalized_weights)
+        confidence = self._calculate_confidence_metric(normalized_weights)
+
+        return OptimizationResult(
+            strategy=strategy,
+            weights=normalized_weights,
+            expected_return=portfolio_return,
+            expected_volatility=expected_volatility,
+            sharpe_ratio=sharpe_ratio,
+            max_drawdown_estimate=max_drawdown,
+            confidence=confidence,
+            rebalancing_needed=rebalancing_needed,
+            suggested_trades=suggested_trades or [],
+        )
     
     async def _optimize_risk_parity(
         self,
         positions: List[Dict],
-        covariance_matrix: np.ndarray
+        expected_returns: Dict[str, float],
+        covariance_matrix: np.ndarray,
     ) -> OptimizationResult:
         """Optimize for equal risk contribution."""
-        
-        symbols = list(set(pos["symbol"] for pos in positions))
-        n_assets = len(symbols)
-        
-        # Risk parity: weights inversely proportional to volatility
-        volatilities = np.sqrt(np.diag(covariance_matrix))
+
+        symbols = self._extract_symbols(positions)
+        if not symbols:
+            return self._get_empty_optimization_result(OptimizationStrategy.RISK_PARITY)
+
+        matrix = self._get_covariance_for_symbols(symbols, covariance_matrix)
+        diagonal = np.diag(matrix)
+        diagonal = np.where(diagonal <= 0, 1e-8, diagonal)
+
+        volatilities = np.sqrt(diagonal)
         inv_vol = 1.0 / volatilities
         weights_array = inv_vol / np.sum(inv_vol)
-        
-        # Convert to dictionary
-        weights = {symbols[i]: float(weights_array[i]) for i in range(n_assets)}
-        
-        # Calculate portfolio metrics
-        expected_return = 0.18  # Average expected return
-        portfolio_variance = np.dot(weights_array, np.dot(covariance_matrix, weights_array))
-        expected_volatility = np.sqrt(portfolio_variance)
-        sharpe_ratio = (expected_return - 0.02) / expected_volatility if expected_volatility > 0 else 0
-        
-        return OptimizationResult(
+
+        return self._build_optimization_result(
             strategy=OptimizationStrategy.RISK_PARITY,
-            weights=weights,
-            expected_return=expected_return,
-            expected_volatility=expected_volatility,
-            sharpe_ratio=sharpe_ratio,
-            max_drawdown_estimate=0.25,
-            confidence=0.85,  # FIXED: 85% confidence, not 8.5
+            symbols=symbols,
+            weights_array=weights_array,
+            expected_returns=expected_returns,
+            covariance_matrix=matrix,
             rebalancing_needed=True,
-            suggested_trades=[]
         )
     
-    async def _optimize_equal_weight(self, positions: List[Dict]) -> OptimizationResult:
+    async def _optimize_equal_weight(
+        self,
+        positions: List[Dict],
+        expected_returns: Dict[str, float],
+        covariance_matrix: np.ndarray,
+    ) -> OptimizationResult:
         """Optimize for equal weight allocation with proper rebalancing detection."""
-        
-        symbols = list(set(pos["symbol"] for pos in positions))
+
+        symbols = self._extract_symbols(positions)
         n_assets = len(symbols)
-        
+
         if n_assets == 0:
             return self._get_empty_optimization_result(OptimizationStrategy.EQUAL_WEIGHT)
-        
+
         # Calculate target equal weights
         equal_weight = 1.0 / n_assets
         target_weights = {symbol: equal_weight for symbol in symbols}
-        
+        weights_array = np.array([equal_weight] * n_assets, dtype=float)
+
         # Calculate current weights
         total_value = sum(pos["value_usd"] for pos in positions)
         current_weights = {}
-        
+
         for pos in positions:
             symbol = pos["symbol"]
             current_weight = pos["value_usd"] / total_value if total_value > 0 else 0
@@ -1041,7 +1485,7 @@ class PortfolioOptimizationEngine(LoggerMixin):
                 current = current_weights.get(symbol, 0.0)
                 target = equal_weight
                 difference = target - current
-                
+
                 if abs(difference) > 0.01:  # Only trade if >1% difference
                     trade_value = difference * total_value
                     suggested_trades.append({
@@ -1053,16 +1497,15 @@ class PortfolioOptimizationEngine(LoggerMixin):
                         "weight_change": difference
                     })
         
-        return OptimizationResult(
+        return self._build_optimization_result(
             strategy=OptimizationStrategy.EQUAL_WEIGHT,
-            weights=target_weights,
-            expected_return=0.19,
-            expected_volatility=0.35,
-            sharpe_ratio=0.49,
-            max_drawdown_estimate=0.30,
-            confidence=0.70,  # FIXED: 70% confidence, not 7.0
-            rebalancing_needed=rebalancing_needed,  # Now properly calculated
-            suggested_trades=suggested_trades
+            symbols=symbols,
+            weights_array=weights_array,
+            expected_returns=expected_returns,
+            covariance_matrix=covariance_matrix,
+            rebalancing_needed=rebalancing_needed,
+            suggested_trades=suggested_trades,
+            weights_override=target_weights,
         )
     
     async def _optimize_max_sharpe(
@@ -1072,105 +1515,74 @@ class PortfolioOptimizationEngine(LoggerMixin):
         covariance_matrix: np.ndarray
     ) -> OptimizationResult:
         """Optimize for maximum Sharpe ratio (Markowitz)."""
-        
-        symbols = list(set(pos["symbol"] for pos in positions))
-        returns_array = np.array([expected_returns[symbol] for symbol in symbols])
-        
+
+        symbols = self._extract_symbols(positions)
+        if not symbols:
+            return self._get_empty_optimization_result(OptimizationStrategy.MAX_SHARPE)
+
+        matrix = self._get_covariance_for_symbols(symbols, covariance_matrix)
+        returns_array = np.array([expected_returns.get(symbol, 0.0) for symbol in symbols])
+
         # Simplified maximum Sharpe ratio calculation
         # In production, would use scipy.optimize
-        inv_cov = np.linalg.pinv(covariance_matrix)
+        inv_cov = np.linalg.pinv(matrix)
         ones = np.ones(len(symbols))
-        
-        # Calculate optimal weights with asset-specific constraints
-        numerator = np.dot(inv_cov, returns_array - 0.02)  # Excess returns
+
+        # Calculate optimal weights with dynamically adjusted constraints
+        numerator = np.dot(inv_cov, returns_array - self._risk_free_rate)  # Excess returns
         denominator = np.dot(ones.T, numerator)
-        
+
         if abs(denominator) > 1e-8:
             weights_array = numerator / denominator
             weights_array = np.abs(weights_array)  # Ensure positive
-            
-            # Apply asset-specific constraints based on market research
-            for i, symbol in enumerate(symbols):
-                if symbol == "XRP":
-                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.25)  # Max 25%
-                elif symbol == "ADA":
-                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.20)  # Max 20%
-                elif symbol == "DOGE":
-                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.10)  # Max 10%
-                elif symbol == "USDC":
-                    weights_array[i] = np.clip(weights_array[i], 0.05, 0.30)  # 5-30%
-                elif symbol == "REEF":
-                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.05)  # Max 5%
-                else:
-                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.25)  # Default constraints
-            
-            weights_array = weights_array / np.sum(weights_array)  # Normalize
         else:
             # Fallback to equal weights
             weights_array = np.ones(len(symbols)) / len(symbols)
-        
-        weights = {symbols[i]: float(weights_array[i]) for i in range(len(symbols))}
-        
-        # Calculate portfolio metrics
-        portfolio_return = np.dot(weights_array, returns_array)
-        portfolio_variance = np.dot(weights_array, np.dot(covariance_matrix, weights_array))
-        portfolio_volatility = np.sqrt(portfolio_variance)
-        sharpe_ratio = (portfolio_return - 0.02) / portfolio_volatility if portfolio_volatility > 0 else 0
-        
-        return OptimizationResult(
+
+        weights_array = await self._apply_dynamic_weight_constraints(symbols, weights_array)
+
+        return self._build_optimization_result(
             strategy=OptimizationStrategy.MAX_SHARPE,
-            weights=weights,
-            expected_return=float(portfolio_return),
-            expected_volatility=float(portfolio_volatility),
-            sharpe_ratio=float(sharpe_ratio),
-            max_drawdown_estimate=0.20,
-            confidence=0.90,  # FIXED: 90% confidence for max Sharpe (sophisticated method)
+            symbols=symbols,
+            weights_array=weights_array,
+            expected_returns=expected_returns,
+            covariance_matrix=matrix,
             rebalancing_needed=True,
-            suggested_trades=[]
         )
     
     async def _optimize_min_variance(
         self,
         positions: List[Dict],
-        covariance_matrix: np.ndarray
+        expected_returns: Dict[str, float],
+        covariance_matrix: np.ndarray,
     ) -> OptimizationResult:
         """Optimize for minimum variance."""
-        
-        symbols = list(set(pos["symbol"] for pos in positions))
-        
-        # Minimum variance portfolio
-        inv_cov = np.linalg.pinv(covariance_matrix)
+
+        symbols = self._extract_symbols(positions)
+        if not symbols:
+            return self._get_empty_optimization_result(OptimizationStrategy.MIN_VARIANCE)
+
+        matrix = self._get_covariance_for_symbols(symbols, covariance_matrix)
+        inv_cov = np.linalg.pinv(matrix)
         ones = np.ones(len(symbols))
-        
-        # Calculate minimum variance weights
+
         numerator = np.dot(inv_cov, ones)
         denominator = np.dot(ones.T, numerator)
-        
+
         if abs(denominator) > 1e-8:
             weights_array = numerator / denominator
-            weights_array = np.abs(weights_array)  # Ensure positive
-            weights_array = weights_array / np.sum(weights_array)  # Normalize
+            weights_array = np.abs(weights_array)
+            weights_array = weights_array / np.sum(weights_array)
         else:
             weights_array = np.ones(len(symbols)) / len(symbols)
-        
-        weights = {symbols[i]: float(weights_array[i]) for i in range(len(symbols))}
-        
-        # Calculate portfolio metrics
-        expected_return = 0.16  # Conservative return estimate
-        portfolio_variance = np.dot(weights_array, np.dot(covariance_matrix, weights_array))
-        expected_volatility = np.sqrt(portfolio_variance)
-        sharpe_ratio = (expected_return - 0.02) / expected_volatility if expected_volatility > 0 else 0
-        
-        return OptimizationResult(
+
+        return self._build_optimization_result(
             strategy=OptimizationStrategy.MIN_VARIANCE,
-            weights=weights,
-            expected_return=expected_return,
-            expected_volatility=float(expected_volatility),
-            sharpe_ratio=float(sharpe_ratio),
-            max_drawdown_estimate=0.15,
-            confidence=0.80,  # FIXED: 80% confidence for min variance
+            symbols=symbols,
+            weights_array=weights_array,
+            expected_returns=expected_returns,
+            covariance_matrix=matrix,
             rebalancing_needed=True,
-            suggested_trades=[]
         )
     
     async def _optimize_kelly_criterion(
@@ -1180,21 +1592,25 @@ class PortfolioOptimizationEngine(LoggerMixin):
         covariance_matrix: np.ndarray
     ) -> OptimizationResult:
         """Optimize using Kelly Criterion."""
-        
-        symbols = list(set(pos["symbol"] for pos in positions))
-        returns_array = np.array([expected_returns[symbol] for symbol in symbols])
-        
+
+        symbols = self._extract_symbols(positions)
+        if not symbols:
+            return self._get_empty_optimization_result(OptimizationStrategy.KELLY_CRITERION)
+
+        matrix = self._get_covariance_for_symbols(symbols, covariance_matrix)
+        returns_array = np.array([expected_returns.get(symbol, 0.0) for symbol in symbols])
+
         # ENTERPRISE FIX: Robust Kelly Criterion with error handling
-        excess_returns = returns_array - 0.02  # Risk-free rate
-        
+        excess_returns = returns_array - self._risk_free_rate  # Risk-free rate
+
         try:
             # Use regularized inverse to handle near-singular matrices
             regularization = 1e-6
-            regularized_cov = covariance_matrix + regularization * np.eye(len(symbols))
+            regularized_cov = matrix + regularization * np.eye(len(symbols))
             inv_cov = np.linalg.inv(regularized_cov)
-            
+
             kelly_weights = np.dot(inv_cov, excess_returns)
-            
+
             # Apply Kelly fraction (25% of full Kelly for risk management)
             kelly_fraction = 0.25
             kelly_weights = kelly_weights * kelly_fraction
@@ -1209,30 +1625,19 @@ class PortfolioOptimizationEngine(LoggerMixin):
                 # Fallback to equal weights if Kelly calculation fails
                 logger.warning("Kelly Criterion calculation failed, using equal weights fallback")
                 kelly_weights = np.ones(len(symbols)) / len(symbols)
-                
+
         except (np.linalg.LinAlgError, ValueError) as e:
             # Robust fallback for matrix inversion failures
             logger.warning(f"Kelly Criterion matrix inversion failed: {e}, using equal weights")
             kelly_weights = np.ones(len(symbols)) / len(symbols)
-        
-        weights = {symbols[i]: float(kelly_weights[i]) for i in range(len(symbols))}
-        
-        # Calculate portfolio metrics
-        portfolio_return = np.dot(kelly_weights, returns_array)
-        portfolio_variance = np.dot(kelly_weights, np.dot(covariance_matrix, kelly_weights))
-        expected_volatility = np.sqrt(portfolio_variance)
-        sharpe_ratio = (portfolio_return - 0.02) / expected_volatility if expected_volatility > 0 else 0
-        
-        return OptimizationResult(
+
+        return self._build_optimization_result(
             strategy=OptimizationStrategy.KELLY_CRITERION,
-            weights=weights,
-            expected_return=float(portfolio_return),
-            expected_volatility=float(expected_volatility),
-            sharpe_ratio=float(sharpe_ratio),
-            max_drawdown_estimate=0.35,
-            confidence=0.75,  # FIXED: 75% confidence for Kelly (more aggressive)
+            symbols=symbols,
+            weights_array=kelly_weights,
+            expected_returns=expected_returns,
+            covariance_matrix=matrix,
             rebalancing_needed=True,
-            suggested_trades=[]
         )
     
     async def _optimize_adaptive(
@@ -1246,56 +1651,60 @@ class PortfolioOptimizationEngine(LoggerMixin):
         # Adaptive strategy: blend of strategies based on market regime
         # For demo, use a combination of risk parity and max Sharpe
         
-        risk_parity_result = await self._optimize_risk_parity(positions, covariance_matrix)
-        max_sharpe_result = await self._optimize_max_sharpe(positions, expected_returns, covariance_matrix)
-        
+        risk_parity_result = await self._optimize_risk_parity(
+            positions,
+            expected_returns,
+            covariance_matrix,
+        )
+        max_sharpe_result = await self._optimize_max_sharpe(
+            positions,
+            expected_returns,
+            covariance_matrix,
+        )
+
         # Blend weights (80% risk parity, 20% max Sharpe) - More conservative
-        symbols = list(set(pos["symbol"] for pos in positions))
-        blended_weights = {}
-        
-        for symbol in symbols:
-            rp_weight = risk_parity_result.weights.get(symbol, 0)
-            ms_weight = max_sharpe_result.weights.get(symbol, 0)
-            blended_weights[symbol] = 0.8 * rp_weight + 0.2 * ms_weight
-            
-        # Apply asset-specific constraints based on market research
-        for symbol in blended_weights:
-            if symbol == "XRP":
-                blended_weights[symbol] = min(blended_weights[symbol], 0.25)  # Max 25%
-            elif symbol == "ADA":
-                blended_weights[symbol] = min(blended_weights[symbol], 0.20)  # Max 20%
-            elif symbol == "DOGE":
-                blended_weights[symbol] = min(blended_weights[symbol], 0.10)  # Max 10%
-            elif symbol == "USDC":
-                blended_weights[symbol] = max(min(blended_weights[symbol], 0.30), 0.05)  # 5-30%
-            elif symbol == "REEF":
-                blended_weights[symbol] = min(blended_weights[symbol], 0.05)  # Max 5%
-            else:
-                blended_weights[symbol] = min(blended_weights[symbol], 0.25)  # Default max 25%
-            
-            # Ensure minimum allocation
-            if blended_weights[symbol] < 0.02:
-                blended_weights[symbol] = 0.02
-        
-        # ENTERPRISE FIX: Robust weight normalization
-        total_weight = sum(blended_weights.values())
-        if total_weight > 1e-10:  # Avoid division by very small numbers
-            blended_weights = {k: v/total_weight for k, v in blended_weights.items()}
+        symbols = self._extract_symbols(positions)
+        if not symbols:
+            return self._get_empty_optimization_result(OptimizationStrategy.ADAPTIVE)
+
+        raw_weights = np.array(
+            [
+                0.8 * risk_parity_result.weights.get(symbol, 0.0)
+                + 0.2 * max_sharpe_result.weights.get(symbol, 0.0)
+                for symbol in symbols
+            ],
+            dtype=float,
+        )
+
+        raw_weights = np.nan_to_num(raw_weights, nan=0.0, posinf=0.0, neginf=0.0)
+
+        total_weight = raw_weights.sum()
+        if total_weight <= 0:
+            logger.warning("Adaptive strategy blend produced zero weights; using equal allocation")
+            raw_weights = np.ones(len(symbols), dtype=float) / len(symbols)
         else:
-            # Fallback to equal weights if blending fails
-            logger.warning("Adaptive strategy weight blending failed, using equal weights")
-            blended_weights = {symbol: 1.0/len(symbols) for symbol in symbols}
-        
-        return OptimizationResult(
+            raw_weights = raw_weights / total_weight
+
+        constrained_weights = await self._apply_dynamic_weight_constraints(symbols, raw_weights)
+
+        if constrained_weights.size != len(symbols) or not np.all(np.isfinite(constrained_weights)):
+            logger.warning("Dynamic constraint application failed; reverting to equal weights")
+            constrained_weights = np.ones(len(symbols), dtype=float) / len(symbols)
+
+        weights_array = np.array(constrained_weights, dtype=float)
+        blended_weights = {
+            symbol: float(weight)
+            for symbol, weight in zip(symbols, weights_array)
+        }
+
+        return self._build_optimization_result(
             strategy=OptimizationStrategy.ADAPTIVE,
-            weights=blended_weights,
-            expected_return=0.175,
-            expected_volatility=0.32,
-            sharpe_ratio=0.48,
-            max_drawdown_estimate=0.22,
-            confidence=0.88,  # FIXED: 88% confidence for adaptive strategy
+            symbols=symbols,
+            weights_array=weights_array,
+            expected_returns=expected_returns,
+            covariance_matrix=covariance_matrix,
             rebalancing_needed=True,
-            suggested_trades=[]
+            weights_override=blended_weights,
         )
     
     async def _generate_rebalancing_trades(

@@ -29,7 +29,7 @@ from app.api.v1.endpoints.auth import get_current_user, require_role
 from app.models.user import User, UserRole
 from app.models.trading import TradingStrategy, Trade, Position, StrategyType
 from app.models.exchange import ExchangeAccount, ExchangeStatus
-from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
+from app.models.credit import CreditAccount, CreditTransactionType
 from app.core.redis import get_redis_client
 from app.models.strategy_submission import (
     StrategySubmission, StrategyStatus, PricingModel,
@@ -40,6 +40,7 @@ from app.services.trade_execution import TradeExecutionService
 from app.services.strategy_marketplace_service import strategy_marketplace_service
 from app.services.strategy_submission_service import strategy_submission_service
 from app.services.rate_limit import rate_limiter
+from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -353,24 +354,26 @@ async def execute_strategy(
                         detail=f"Insufficient credits after execution. Required: {credits_required}, Available: {credit_account.available_credits if credit_account else 0}"
                     )
                 
-                # Perform atomic credit deduction
-                balance_before = credit_account.available_credits
-                credit_account.available_credits -= credits_required
-                credit_account.used_credits += credits_required
-                credits_used = credits_required
-                balance_after = credit_account.available_credits
-                
-                # Record credit transaction with correct model fields
-                credit_tx = CreditTransaction(
-                    account_id=credit_account.id,
-                    amount=-credits_required,
-                    transaction_type=CreditTransactionType.USAGE,
-                    description=f"Strategy execution: {request.function} on {request.symbol}",
-                    balance_before=balance_before,
-                    balance_after=balance_after,
-                    source="api"
-                )
-                db.add(credit_tx)
+                try:
+                    await credit_ledger.consume_credits(
+                        db,
+                        credit_account,
+                        credits=credits_required,
+                        description=f"Strategy execution: {request.function} on {request.symbol}",
+                        source="strategies_api",
+                        transaction_type=CreditTransactionType.USAGE,
+                        metadata={
+                            "function": request.function,
+                            "symbol": request.symbol,
+                            "strategy_id": strategy_id,
+                        },
+                    )
+                    credits_used = credits_required
+                except InsufficientCreditsError:
+                    raise HTTPException(
+                        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                        detail="Insufficient credits after execution",
+                    )
         elif user_owns_strategy:
             logger.info("Strategy executed without credit consumption (owned strategy)", 
                        user_id=str(current_user.id),

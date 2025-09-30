@@ -146,7 +146,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             redis = await get_redis_client()
             if redis is None:
-                raise RuntimeError("Redis client unavailable")
+
+                raise RuntimeError("Redis client unavailable during startup")
+
 
             await redis.ping()
             logger.info("Redis connected")

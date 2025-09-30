@@ -15,6 +15,7 @@ Date: 2025-09-12
 """
 
 import asyncio
+import copy
 import json
 import math
 import re
@@ -36,6 +37,8 @@ from app.services.trading_strategies import trading_strategies_service
 from app.services.dynamic_asset_filter import enterprise_asset_filter
 from app.models.credit import CreditAccount, CreditTransaction
 from app.models.user import User
+from app.services.portfolio_risk_core import portfolio_risk_service
+from sqlalchemy import select
 
 settings = get_settings()
 
@@ -462,7 +465,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             signal_stats["threshold_analysis"]["additional_opportunities_revealed"] = (
                 len(ranked_opportunities) - signal_stats["threshold_analysis"]["opportunities_above_original"]
             )
-            
+
+            metadata_payload: Dict[str, Any] = {}
+            capital_metadata = self._extract_capital_metadata_from_opportunities(ranked_opportunities)
+            if capital_metadata:
+                metadata_payload["capital_assumptions"] = capital_metadata
+
+            projection_summary = self._summarize_profit_projections(ranked_opportunities)
+            if projection_summary:
+                metadata_payload["profit_projection_summary"] = projection_summary
+
             final_response = {
                 "success": True,
                 "scan_id": scan_id,
@@ -500,7 +512,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     "total_errors": len(metrics['errors'])
                 }
             }
-            
+
+            if metadata_payload:
+                final_response["metadata"] = metadata_payload
+
             # ENTERPRISE MONITORING: Log comprehensive metrics
             self.logger.info("📊 OPPORTUNITY DISCOVERY METRICS",
                            scan_id=scan_id,
@@ -1294,20 +1309,29 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             )
             
             if optimization_result.get("success"):
-                # ENTERPRISE FIX: Extract rebalancing recommendations from both possible locations
                 execution_result = optimization_result.get("execution_result", {})
-                
-                # Check both top-level and nested locations
                 rebalancing_recommendations = (
-                    execution_result.get("rebalancing_recommendations", []) or
-                    optimization_result.get("rebalancing_recommendations", [])
+                    execution_result.get("rebalancing_recommendations", [])
+                    or optimization_result.get("rebalancing_recommendations", [])
                 )
-                
-                # Also check for strategy_analysis from new implementation
-                strategy_analysis = optimization_result.get("strategy_analysis", {})
-                
-                # Process recommendations from all strategies
+
+                strategy_analysis_raw = optimization_result.get("strategy_analysis", {}) or {}
+                strategy_analysis = {
+                    str(key).lower(): value
+                    for key, value in strategy_analysis_raw.items()
+                    if isinstance(value, dict)
+                }
+
+                capital_info = await self._estimate_user_deployable_capital(
+                    user_profile.user_id,
+                    portfolio_result,
+                    optimization_result,
+                )
+                deployable_capital = float(capital_info.get("deployable_capital_usd", 0.0) or 0.0)
+                optimization_summary = optimization_result.get("optimization_summary", {}) or {}
+
                 if rebalancing_recommendations:
+
                     def _normalize_improvement(value: Any) -> float:
                         """Convert raw improvement values to a 0-1 range."""
                         if value is None:
@@ -1333,11 +1357,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             return 0.0
 
                     for rebal in rebalancing_recommendations:
-                        # Include all recommendations, not filtered by improvement
                         raw_improvement = rebal.get("improvement_potential")
                         strategy_name = rebal.get("strategy", "UNKNOWN")
+                        strategy_key = str(strategy_name).lower()
 
-                        # Use the helper function for consistent normalization
                         improvement_normalized = _normalize_improvement(raw_improvement)
 
                         target_weight_fraction = self._to_fraction(rebal.get("target_weight"))
@@ -1355,30 +1378,61 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         notional_usd = self._to_float(rebal.get("notional_usd"))
                         trade_value_usd = value_change if value_change is not None else notional_usd
                         if trade_value_usd is None:
-                            # Fallback for legacy payloads: interpret amount as a fraction when appropriate.
                             fallback_frac = self._to_fraction(rebal.get("amount", 0.0))
                             if fallback_frac is not None and -1.0 <= fallback_frac <= 1.0:
-                                trade_value_usd = fallback_frac * 10000.0  # keep legacy $10k baseline
+                                baseline_capital = deployable_capital if deployable_capital > 0 else 10000.0
+                                trade_value_usd = fallback_frac * baseline_capital
                             else:
-                                # If caller provided an absolute notional, use that directly.
                                 fallback_abs = self._to_float(rebal.get("amount"))
                                 trade_value_usd = fallback_abs if fallback_abs is not None else None
 
                         required_capital = abs(float(trade_value_usd)) if trade_value_usd is not None else 0.0
+
+                        strategy_metrics = strategy_analysis.get(strategy_key, {})
+                        improvement_candidate = improvement_normalized if improvement_normalized > 0 else None
+                        expected_return_rate = self._normalize_return_rate(
+                            improvement_candidate,
+                            strategy_metrics.get("expected_return"),
+                            optimization_summary.get("expected_return"),
+                        )
+
+                        profit_projection = self._build_profit_projection(
+                            deployable_capital,
+                            expected_return_rate,
+                            strategy_metrics.get("risk_level"),
+                            source="strategy_analysis",
+                        )
 
                         metadata: Dict[str, Any] = {
                             "rebalance_action": rebal.get("action", ""),
                             "strategy_used": strategy_name,
                             "improvement_potential": improvement_normalized,
                             "risk_reduction": rebal.get("risk_reduction", 0),
-                            "urgency": rebal.get("urgency", "MEDIUM")
+                            "urgency": rebal.get("urgency", "MEDIUM"),
+                            "normalized_improvement": improvement_normalized,
+                            "return_assumptions": {
+                                "improvement_input": raw_improvement,
+                                "expected_return_rate": expected_return_rate,
+                                "source": "improvement_potential"
+                                if improvement_candidate is not None
+                                else "strategy_analysis",
+                            },
+                            "profit_projection": profit_projection,
+                            "capital_assumptions": self._prepare_capital_metadata_snapshot(
+                                capital_info,
+                                deployable_capital,
+                            ),
+                            "risk_metrics": {
+                                "raw_risk_input": strategy_metrics.get("risk_level"),
+                                "normalized_risk_spread_pct": profit_projection["risk_spread_pct"],
+                                "source": profit_projection.get("risk_measure_source"),
+                            },
+                            "optimization_summary_snapshot": optimization_summary,
                         }
 
-                        # Amount should reflect desired weight (or change) as a fraction in [-1,1].
                         if amount_fraction is not None and -1.0 <= amount_fraction <= 1.0:
                             metadata["amount"] = amount_fraction
                         else:
-                            # If caller provided a notional amount, preserve it explicitly.
                             amt_usd = self._to_float(rebal.get("amount"))
                             if amt_usd is not None:
                                 metadata["amount_usd"] = float(amt_usd)
@@ -1399,55 +1453,94 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         if value_change is not None and value_change != trade_value_usd:
                             metadata["value_change"] = value_change
 
-                        metadata["normalized_improvement"] = improvement_normalized
+                        profit_potential_usd = float(profit_projection["expected_profit_usd"] or 0.0)
+                        risk_label = self._risk_spread_to_label(
+                            profit_projection["risk_spread_pct"] / 100.0
+                        )
+                        confidence_score = max(
+                            45.0,
+                            min(95.0, 95.0 - profit_projection["risk_spread_pct"]),
+                        )
+
                         opportunity = OpportunityResult(
                             strategy_id="ai_portfolio_optimization",
                             strategy_name=f"AI Portfolio Optimization - {strategy_name}",
                             opportunity_type="portfolio_rebalance",
                             symbol=rebal.get("symbol", rebal.get("target_asset", "")),
                             exchange="multiple",
-                            profit_potential_usd=float(improvement_normalized * 10000),  # Assume $10k portfolio
-                            confidence_score=80.0,  # High confidence in optimization
-                            risk_level="low",
+                            profit_potential_usd=profit_potential_usd,
+                            confidence_score=confidence_score,
+                            risk_level=risk_label,
                             required_capital_usd=required_capital,
                             estimated_timeframe="1-3 months",
                             entry_price=None,
                             exit_price=None,
                             metadata=metadata,
-                            discovered_at=datetime.utcnow()
+                            discovered_at=datetime.utcnow(),
                         )
                         opportunities.append(opportunity)
-                
-                # If no specific trades but we have strategy analysis, show potential
+
                 elif strategy_analysis:
                     for strategy, results in strategy_analysis.items():
                         if not isinstance(results, dict):
                             continue
-                        expected_return = results.get("expected_return", 0)
-                        if expected_return > 0 or strategy == "equal_weight":  # Show all strategies
-                            opportunity = OpportunityResult(
-                                strategy_id="ai_portfolio_optimization",
-                                strategy_name=f"Portfolio {strategy.replace('_', ' ').title()}",
-                                opportunity_type="optimization_analysis",
-                                symbol="PORTFOLIO",
-                                exchange="all",
-                                profit_potential_usd=float(expected_return * 10000),
-                                confidence_score=75.0,
-                                risk_level="medium",
-                                required_capital_usd=10000.0,
-                                estimated_timeframe="1 year",
-                                entry_price=None,
-                                exit_price=None,
-                                metadata={
-                                    "strategy": strategy,
-                                    "expected_annual_return": expected_return,
-                                    "risk_level": results.get("risk_level", 0),
-                                    "sharpe_ratio": results.get("sharpe_ratio", 0),
-                                    "analysis_type": "strategy_comparison"
-                                },
-                                discovered_at=datetime.utcnow()
-                            )
-                            opportunities.append(opportunity)
+
+                        expected_return_rate = self._normalize_return_rate(
+                            results.get("expected_return"),
+                            optimization_summary.get("expected_return"),
+                        )
+
+                        profit_projection = self._build_profit_projection(
+                            deployable_capital,
+                            expected_return_rate,
+                            results.get("risk_level"),
+                            source="strategy_analysis",
+                        )
+
+                        profit_potential_usd = float(profit_projection["expected_profit_usd"] or 0.0)
+                        risk_label = self._risk_spread_to_label(
+                            profit_projection["risk_spread_pct"] / 100.0
+                        )
+                        confidence_score = max(
+                            45.0,
+                            min(92.0, 92.0 - profit_projection["risk_spread_pct"]),
+                        )
+
+                        metadata = {
+                            "strategy": strategy,
+                            "expected_annual_return": expected_return_rate,
+                            "risk_level": results.get("risk_level", 0),
+                            "sharpe_ratio": results.get("sharpe_ratio", 0),
+                            "analysis_type": "strategy_comparison",
+                            "profit_projection": profit_projection,
+                            "capital_assumptions": self._prepare_capital_metadata_snapshot(
+                                capital_info,
+                                deployable_capital,
+                            ),
+                            "risk_metrics": {
+                                "raw_risk_input": results.get("risk_level"),
+                                "normalized_risk_spread_pct": profit_projection["risk_spread_pct"],
+                                "source": profit_projection.get("risk_measure_source"),
+                            },
+                        }
+
+                        opportunity = OpportunityResult(
+                            strategy_id="ai_portfolio_optimization",
+                            strategy_name=f"Portfolio {strategy.replace('_', ' ').title()}",
+                            opportunity_type="optimization_analysis",
+                            symbol="PORTFOLIO",
+                            exchange="all",
+                            profit_potential_usd=profit_potential_usd,
+                            confidence_score=confidence_score,
+                            risk_level=risk_label,
+                            required_capital_usd=deployable_capital if deployable_capital > 0 else 0.0,
+                            estimated_timeframe="1 year",
+                            entry_price=None,
+                            exit_price=None,
+                            metadata=metadata,
+                            discovered_at=datetime.utcnow(),
+                        )
+                        opportunities.append(opportunity)
                         
         except Exception as e:
             self.logger.error("Portfolio optimization scan failed",
@@ -1909,21 +2002,418 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     
     def _calculate_futures_risk(self, leverage: float, volatility: float) -> str:
         """Calculate risk level based on leverage and volatility."""
-        
+
         # Risk increases with leverage and volatility
         leverage_risk = leverage / 100  # Normalize leverage (10x = 0.1)
         volatility_risk = volatility * 10  # Amplify volatility impact
-        
+
         total_risk = leverage_risk + volatility_risk
-        
+
         if total_risk < 0.3:
             return "low"
         elif total_risk < 0.6:
-            return "medium" 
+            return "medium"
         elif total_risk < 1.0:
             return "high"
         else:
             return "very_high"
+
+    def _prepare_capital_metadata_snapshot(
+        self,
+        capital_info: Optional[Dict[str, Any]],
+        deployable_capital: float,
+    ) -> Dict[str, Any]:
+        """Create an immutable snapshot of capital assumptions for metadata."""
+
+        if not isinstance(capital_info, dict):
+            return {
+                "deployable_capital_usd": float(deployable_capital or 0.0),
+                "capital_basis_used_usd": float(deployable_capital or 0.0),
+                "components": {},
+                "assumptions": ["Capital details unavailable; using fallback basis."],
+                "fallback_used": True,
+            }
+
+        snapshot = copy.deepcopy(capital_info)
+        snapshot.setdefault("assumptions", [])
+        if not isinstance(snapshot["assumptions"], list):
+            snapshot["assumptions"] = [str(snapshot["assumptions"])]
+
+        current_capital = self._to_float(snapshot.get("deployable_capital_usd"))
+        desired_capital = self._to_float(deployable_capital)
+        if desired_capital is None:
+            desired_capital = current_capital or 0.0
+
+        snapshot["deployable_capital_usd"] = float(desired_capital or 0.0)
+        snapshot["capital_basis_used_usd"] = float(desired_capital or 0.0)
+
+        components = snapshot.get("components")
+        if isinstance(components, dict):
+            normalized_components = {}
+            for key, value in components.items():
+                numeric = self._to_float(value)
+                if numeric is not None:
+                    normalized_components[key] = float(numeric)
+            snapshot["components"] = normalized_components
+        else:
+            snapshot["components"] = {}
+
+        if "fallback_used" not in snapshot:
+            snapshot["fallback_used"] = False
+
+        snapshot.setdefault("calculation_timestamp", datetime.utcnow().isoformat())
+
+        return snapshot
+
+    async def _estimate_user_deployable_capital(
+        self,
+        user_id: str,
+        portfolio_result: Dict[str, Any],
+        optimization_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Estimate deployable capital based on portfolio data and credit availability."""
+
+        details: Dict[str, Any] = {
+            "deployable_capital_usd": 0.0,
+            "components": {},
+            "inputs": {},
+            "credit_profile": None,
+            "assumptions": [],
+            "calculation_timestamp": datetime.utcnow().isoformat(),
+            "fallback_used": False,
+        }
+
+        portfolio_value_candidates: Dict[str, float] = {}
+
+        def add_portfolio_candidate(source: str, value: Any) -> None:
+            numeric = self._to_float(value)
+            if numeric is None:
+                return
+            portfolio_value_candidates[source] = float(numeric)
+
+        optimization_summary = (optimization_result or {}).get("optimization_summary", {}) or {}
+        add_portfolio_candidate("optimization_summary", optimization_summary.get("portfolio_value"))
+        add_portfolio_candidate("optimization_summary_usd", optimization_summary.get("portfolio_value_usd"))
+
+        portfolio_context = (optimization_result or {}).get("portfolio_context", {}) or {}
+        add_portfolio_candidate("optimization_portfolio_context", portfolio_context.get("total_value_usd"))
+
+        summary = (portfolio_result or {}).get("summary", {}) or {}
+        add_portfolio_candidate("strategy_marketplace_summary", summary.get("total_portfolio_value"))
+
+        nested_portfolio = (portfolio_result or {}).get("portfolio", {}) or {}
+        add_portfolio_candidate("strategy_marketplace_portfolio", nested_portfolio.get("total_value"))
+        add_portfolio_candidate("strategy_marketplace_portfolio_usd", nested_portfolio.get("total_value_usd"))
+
+        cash_balance = 0.0
+        try:
+            portfolio_snapshot = await portfolio_risk_service.get_portfolio(user_id)
+            if portfolio_snapshot.get("success"):
+                portfolio_payload = portfolio_snapshot.get("portfolio", {}) or {}
+                add_portfolio_candidate("portfolio_risk_service", portfolio_payload.get("total_value_usd"))
+                cash_balance = self._extract_cash_balance(portfolio_payload)
+                details["inputs"]["portfolio_service_source"] = portfolio_snapshot.get("function", "get_portfolio")
+        except Exception as portfolio_error:  # pragma: no cover - defensive logging
+            self.logger.debug(
+                "Capital estimation: portfolio service lookup failed",
+                error=str(portfolio_error),
+            )
+
+        details["inputs"]["portfolio_value_sources"] = portfolio_value_candidates
+
+        portfolio_value = max(portfolio_value_candidates.values(), default=0.0)
+
+        credit_buying_power = 0.0
+        credit_profile: Optional[Dict[str, Any]] = None
+        user_uuid: Optional[uuid.UUID] = None
+        try:
+            user_uuid = uuid.UUID(str(user_id))
+        except (ValueError, TypeError):
+            user_uuid = None
+
+        if user_uuid:
+            try:
+                async for db in get_database():
+                    stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
+                    result = await db.execute(stmt)
+                    credit_account = result.scalar_one_or_none()
+                    if credit_account:
+                        ratio = self._to_float(getattr(credit_account, "credit_to_usd_ratio", 1.0))
+                        if ratio is None or ratio <= 0:
+                            ratio = 1.0
+                        available_credits = float(getattr(credit_account, "available_credits", 0) or 0)
+                        credit_buying_power = available_credits * ratio
+                        profit_potential = credit_account.calculate_profit_potential()
+                        profit_potential_value = self._to_float(profit_potential) or available_credits * ratio
+                        credit_profile = {
+                            "available_credits": available_credits,
+                            "credit_to_usd_ratio": float(ratio),
+                            "credit_buying_power_usd": float(credit_buying_power),
+                            "profit_potential_usd": float(profit_potential_value),
+                        }
+                    break
+            except Exception as credit_error:  # pragma: no cover - defensive logging
+                self.logger.debug(
+                    "Capital estimation: credit lookup failed",
+                    error=str(credit_error),
+                )
+
+        details["inputs"]["credit_buying_power_usd"] = float(credit_buying_power)
+
+        components: Dict[str, float] = {}
+        if portfolio_value > 0:
+            components["portfolio_value_usd"] = float(portfolio_value)
+        if cash_balance > 0:
+            components["cash_balance_usd"] = float(cash_balance)
+        if credit_buying_power > 0:
+            components["credit_buying_power_usd"] = float(credit_buying_power)
+
+        deployable_capital = (
+            max(portfolio_value, 0.0)
+            + max(cash_balance, 0.0)
+            + max(credit_buying_power, 0.0)
+        )
+
+        if deployable_capital <= 0:
+            deployable_capital = 10000.0
+            details["fallback_used"] = True
+            details["assumptions"].append(
+                "Fallback deployable capital of $10,000 applied due to missing live balance data."
+            )
+
+        if not details["assumptions"]:
+            details["assumptions"].append(
+                "Deployable capital derived from live portfolio balances and available credit."
+            )
+
+        if credit_profile:
+            details["assumptions"].append(
+                "Credit-derived buying power assumes 1 credit = ${:.2f} USD spendable capital.".format(
+                    credit_profile.get("credit_to_usd_ratio", 1.0)
+                )
+            )
+
+        details["deployable_capital_usd"] = float(deployable_capital)
+        details["capital_basis_used_usd"] = float(deployable_capital)
+        details["components"] = components
+        details["credit_profile"] = credit_profile
+        details["cash_balance_usd"] = float(cash_balance)
+
+        return details
+
+    def _extract_cash_balance(self, portfolio_payload: Dict[str, Any]) -> float:
+        """Extract cash-like balances (stablecoins) from portfolio payload."""
+
+        if not isinstance(portfolio_payload, dict):
+            return 0.0
+
+        stable_assets = {"USDT", "USDC", "USD", "BUSD", "USDP", "DAI", "TUSD"}
+        total_cash = 0.0
+
+        balances = portfolio_payload.get("balances", []) or []
+        for balance in balances:
+            if not isinstance(balance, dict):
+                continue
+            asset = str(balance.get("asset") or balance.get("symbol") or "").upper()
+            if asset not in stable_assets:
+                continue
+            value = self._to_float(balance.get("value_usd"))
+            if value is None:
+                value = self._to_float(balance.get("total"))
+            if value is not None:
+                total_cash += float(value)
+
+        return float(total_cash)
+
+    def _normalize_return_rate(self, *candidates: Optional[Any]) -> float:
+        """Normalize return values (percentages or fractions) into fraction form."""
+
+        for candidate in candidates:
+            if candidate is None:
+                continue
+            numeric = candidate if isinstance(candidate, (int, float)) else self._to_float(candidate)
+            if numeric is None:
+                continue
+            numeric = float(numeric)
+            if not math.isfinite(numeric):
+                continue
+            if abs(numeric) > 1.0 and abs(numeric) <= 100.0:
+                numeric /= 100.0
+            numeric = max(-5.0, min(5.0, numeric))
+            return numeric
+        return 0.0
+
+    def _normalize_risk_measure(self, risk_value: Any, default_source: str = "analysis") -> Tuple[float, str]:
+        """Normalize various risk descriptors into a volatility-style fraction."""
+
+        if risk_value is None:
+            return 0.2, f"{default_source}:default"
+
+        if isinstance(risk_value, (int, float)):
+            val = abs(float(risk_value))
+            if val > 1.0 and val <= 100.0:
+                val /= 100.0
+            elif val > 100.0:
+                val = min(val / 100.0, 1.0)
+            val = max(0.02, min(val, 0.75))
+            return val, f"{default_source}:numeric"
+
+        if isinstance(risk_value, str):
+            normalized = risk_value.strip().lower()
+            mapping = {
+                "very_low": 0.05,
+                "low": 0.10,
+                "balanced": 0.18,
+                "medium": 0.20,
+                "medium_high": 0.30,
+                "elevated": 0.30,
+                "high": 0.40,
+                "very_high": 0.55,
+                "extreme": 0.65,
+            }
+            if normalized in mapping:
+                return mapping[normalized], f"{default_source}:{normalized}"
+
+            numeric = self._to_float(risk_value)
+            if numeric is not None:
+                if abs(numeric) > 1.0 and abs(numeric) <= 100.0:
+                    numeric /= 100.0
+                numeric = abs(float(numeric))
+                numeric = max(0.02, min(numeric, 0.75))
+                return numeric, f"{default_source}:parsed_numeric"
+
+        return 0.25, f"{default_source}:fallback"
+
+    def _build_profit_projection(
+        self,
+        capital: float,
+        expected_return_rate: Any,
+        risk_value: Any,
+        source: str = "analysis",
+    ) -> Dict[str, float]:
+        """Build expected/best/worst-case profit projections."""
+
+        capital_basis = self._to_float(capital) or 0.0
+        normalized_return = self._normalize_return_rate(expected_return_rate)
+        risk_spread, risk_source = self._normalize_risk_measure(risk_value, default_source=source)
+
+        best_return = normalized_return + risk_spread
+        worst_return = normalized_return - risk_spread
+        worst_return = max(-1.0, worst_return)
+
+        projection = {
+            "expected_return_pct": normalized_return * 100.0,
+            "expected_profit_usd": capital_basis * normalized_return,
+            "best_case_return_pct": best_return * 100.0,
+            "best_case_profit_usd": capital_basis * best_return,
+            "worst_case_return_pct": worst_return * 100.0,
+            "worst_case_profit_usd": capital_basis * worst_return,
+            "risk_spread_pct": risk_spread * 100.0,
+            "risk_measure_value": risk_value,
+            "risk_measure_source": risk_source,
+            "capital_basis_usd": capital_basis,
+        }
+
+        return {key: float(value) if isinstance(value, (int, float)) else value for key, value in projection.items()}
+
+    def _risk_spread_to_label(self, risk_spread: float) -> str:
+        """Convert normalized risk spread into human-readable label."""
+
+        if risk_spread <= 0.1:
+            return "low"
+        if risk_spread <= 0.25:
+            return "medium"
+        if risk_spread <= 0.4:
+            return "medium_high"
+        return "high"
+
+    def _extract_capital_metadata_from_opportunities(
+        self,
+        opportunities: List[OpportunityResult],
+    ) -> Optional[Dict[str, Any]]:
+        """Aggregate capital metadata from opportunity results."""
+
+        capital_snapshots: List[Dict[str, Any]] = []
+        for opportunity in opportunities:
+            if not isinstance(opportunity, OpportunityResult):
+                continue
+            metadata = getattr(opportunity, "metadata", {}) or {}
+            if not isinstance(metadata, dict):
+                continue
+            capital_meta = metadata.get("capital_assumptions")
+            if isinstance(capital_meta, dict):
+                capital_snapshots.append(capital_meta)
+
+        if not capital_snapshots:
+            return None
+
+        reference = max(
+            capital_snapshots,
+            key=lambda item: self._to_float(item.get("deployable_capital_usd")) or 0.0,
+        )
+
+        combined = copy.deepcopy(reference)
+        combined_components = combined.get("components") if isinstance(combined.get("components"), dict) else {}
+
+        for snapshot in capital_snapshots:
+            components = snapshot.get("components") if isinstance(snapshot, dict) else None
+            if isinstance(components, dict):
+                for key, value in components.items():
+                    numeric = self._to_float(value)
+                    if numeric is None:
+                        continue
+                    existing = self._to_float(combined_components.get(key))
+                    if existing is None or numeric > existing:
+                        combined_components[key] = float(numeric)
+
+        combined["components"] = combined_components
+        combined["sources_count"] = len(capital_snapshots)
+
+        return combined
+
+    def _summarize_profit_projections(
+        self,
+        opportunities: List[OpportunityResult],
+    ) -> Optional[Dict[str, Any]]:
+        """Summarize profit projections across opportunities."""
+
+        projections: List[Dict[str, Any]] = []
+        for opportunity in opportunities:
+            metadata = getattr(opportunity, "metadata", {}) or {}
+            if not isinstance(metadata, dict):
+                continue
+            projection = metadata.get("profit_projection")
+            if isinstance(projection, dict):
+                projections.append(projection)
+
+        if not projections:
+            return None
+
+        total_expected = 0.0
+        total_best = 0.0
+        total_worst = 0.0
+        total_return_pct = 0.0
+
+        for projection in projections:
+            expected_profit = self._to_float(projection.get("expected_profit_usd")) or 0.0
+            best_profit = self._to_float(projection.get("best_case_profit_usd")) or 0.0
+            worst_profit = self._to_float(projection.get("worst_case_profit_usd")) or 0.0
+            expected_return_pct = self._to_float(projection.get("expected_return_pct")) or 0.0
+
+            total_expected += expected_profit
+            total_best += best_profit
+            total_worst += worst_profit
+            total_return_pct += expected_return_pct
+
+        summary = {
+            "expected_profit_total_usd": total_expected,
+            "best_case_total_usd": total_best,
+            "worst_case_total_usd": total_worst,
+            "average_expected_return_pct": total_return_pct / max(len(projections), 1),
+            "opportunity_count": len(projections),
+        }
+
+        return summary
     
     async def _scan_hedge_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Hedge position strategy scanner - placeholder for real implementation."""

@@ -20,6 +20,7 @@ import structlog
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
 from app.core.redis import get_redis_client
+from app.services.credit_ledger import credit_ledger
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -511,40 +512,73 @@ class CryptoPaymentService(LoggerMixin):
         """Allocate purchased credits to user account."""
         try:
             from app.core.database import get_database
-            from app.models.credit import CreditAccount, CreditTransaction
+            from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
             from sqlalchemy import select
-            
+            from sqlalchemy.exc import IntegrityError
+
             async for db in get_database():
                 # Get user's credit account
                 stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
                 result = await db.execute(stmt)
                 credit_account = result.scalar_one_or_none()
-                
-                if credit_account:
-                    # Add credits
-                    credit_account.available_credits += credit_amount
-                    credit_account.total_purchased_credits += credit_amount
-                    
-                    # Update transaction status - use stripe_payment_intent_id field instead
-                    tx_stmt = select(CreditTransaction).where(
-                        CreditTransaction.stripe_payment_intent_id == payment_id
+
+                if not credit_account:
+                    credit_account = CreditAccount(user_id=user_id)
+                    db.add(credit_account)
+                    await db.flush()
+
+                # Idempotency: Atomic check and add using row lock to prevent race conditions
+                try:
+                    # Acquire row lock on credit account to serialize concurrent webhooks
+                    await db.execute(
+                        select(CreditAccount).where(CreditAccount.user_id == user_id).with_for_update()
                     )
-                    tx_result = await db.execute(tx_stmt)
-                    transaction = tx_result.scalar_one_or_none()
-                    
-                    if transaction:
-                        # Note: CreditTransaction doesn't have status or processed_at fields
-                        # Just log the completion
-                        self.logger.info("Payment processed successfully", payment_id=payment_id)
-                    
-                    await db.commit()
-                    
-                    self.logger.info(
-                        "Credits allocated successfully",
-                        user_id=user_id,
+
+                    # Re-check for existing payment after acquiring lock
+                    existing = await db.execute(
+                        select(CreditTransaction).where(CreditTransaction.reference_id == payment_id)
+                    )
+                    if existing.scalar_one_or_none():
+                        self.logger.info("Duplicate payment webhook ignored", payment_id=payment_id)
+                        await db.commit()
+                        return
+
+                    await credit_ledger.add_credits(
+                        db,
+                        credit_account,
                         credits=credit_amount,
-                        payment_id=payment_id
+                        transaction_type=CreditTransactionType.PURCHASE,
+                        description=f"Crypto payment allocation ({payment_id})",
+                        source="crypto_payment",
+                        provider="coinbase_commerce",
+                        reference_id=payment_id,
+                        metadata={"payment_id": payment_id},
                     )
+                except IntegrityError as e:
+                    # If duplicate reference_id constraint violation occurs, log and ignore
+                    self.logger.info("Duplicate payment detected via constraint violation",
+                                   payment_id=payment_id, error=str(e))
+                    await db.rollback()
+                    return
+
+                # Update transaction status using shared reference_id for reconciliation
+                tx_stmt = select(CreditTransaction).where(
+                    CreditTransaction.reference_id == payment_id
+                )
+                tx_result = await db.execute(tx_stmt)
+                transaction = tx_result.scalar_one_or_none()
+
+                if transaction:
+                    self.logger.info("Payment processed successfully", payment_id=payment_id)
+
+                await db.commit()
+
+                self.logger.info(
+                    "Credits allocated successfully",
+                    user_id=user_id,
+                    credits=credit_amount,
+                    payment_id=payment_id,
+                )
         
         except Exception as e:
             self.logger.error("Credit allocation failed", error=str(e))
