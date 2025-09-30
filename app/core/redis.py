@@ -84,20 +84,25 @@ class RedisConnectionManager:
             logger.debug("Redis circuit breaker is OPEN, returning None")
             return None
         
-        # Health check
-        if current_time - self.last_health_check > self.health_check_interval:
+        # Health check (force if unhealthy even within interval)
+        if (
+            current_time - self.last_health_check > self.health_check_interval
+            or not self.is_healthy
+        ):
             await self._health_check()
             self.last_health_check = current_time
-        
+
         # Return existing healthy client
         if self.client and self.is_healthy:
             return self.client
-        
+
         # Create new client if needed
         if self.client is None:
             await self._create_client()
-        
-        return self.client if self.is_healthy else None
+            if self.client and self.is_healthy:
+                return self.client
+
+        return self.client if self.client and self.is_healthy else None
     
     async def _create_client(self):
         """Create new Redis client."""
@@ -105,19 +110,25 @@ class RedisConnectionManager:
             pool = await self.get_connection_pool()
             if pool:
                 self.client = Redis(connection_pool=pool)
+                self.is_healthy = True
+                self.connection_failures = 0
                 logger.info("Redis client created successfully")
             else:
                 self.client = None
+                self.is_healthy = False
+                await self._handle_connection_failure()
         except Exception as e:
             logger.error("Failed to create Redis client", error=str(e))
             self.client = None
+            self.is_healthy = False
             await self._handle_connection_failure()
     
     async def _health_check(self):
         """Perform Redis health check."""
         if not self.client:
-            self.is_healthy = False
-            return
+            await self._create_client()
+            if not self.client:
+                return
         
         try:
             # ENTERPRISE: Enhanced ping with parser error handling
