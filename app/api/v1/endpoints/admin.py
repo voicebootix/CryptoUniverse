@@ -16,6 +16,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, field_validator
 from sqlalchemy import and_, or_, func, select, case, desc
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -246,13 +247,21 @@ async def get_credit_analytics(
         )
         total_credits, total_available, total_used, account_count = totals_result.one()
 
-        revenue_result = await db.execute(
-            select(
-                func.coalesce(func.sum(CreditTransaction.usd_value), 0),
-                func.coalesce(func.sum(CreditTransaction.profit_amount_usd), 0),
+        try:
+            revenue_result = await db.execute(
+                select(
+                    func.coalesce(func.sum(CreditTransaction.usd_value), 0),
+                    func.coalesce(func.sum(CreditTransaction.profit_amount_usd), 0),
+                )
             )
-        )
-        total_revenue, total_profit = revenue_result.one()
+            total_revenue, total_profit = revenue_result.one()
+        except SQLAlchemyError as revenue_error:
+            logger.warning(
+                "credit_analytics_revenue_fallback",
+                error=str(revenue_error),
+                note="profit columns missing, defaulting to zero values",
+            )
+            total_revenue, total_profit = (0, 0)
 
         active_users_result = await db.execute(
             select(func.count(User.id)).where(User.status == UserStatus.ACTIVE)
@@ -288,15 +297,51 @@ async def get_credit_analytics(
             .order_by(func.date(CreditTransaction.created_at))
         )
 
-        usage_rows = await db.execute(usage_stmt)
-        daily_usage = [
-            {
-                "date": usage_date.isoformat() if isinstance(usage_date, date) else str(usage_date),
-                "credits_used": int(credits_used or 0),
-                "revenue": round(_decimal_to_float(revenue_value), 2),
-            }
-            for usage_date, credits_used, revenue_value in usage_rows.all()
-        ]
+        try:
+            usage_rows = await db.execute(usage_stmt)
+            usage_data = usage_rows.all()
+            daily_usage = [
+                {
+                    "date": usage_date.isoformat() if isinstance(usage_date, date) else str(usage_date),
+                    "credits_used": int(credits_used or 0),
+                    "revenue": round(_decimal_to_float(revenue_value), 2),
+                }
+                for usage_date, credits_used, revenue_value in usage_data
+            ]
+        except SQLAlchemyError as usage_error:
+            logger.warning(
+                "credit_analytics_usage_fallback",
+                error=str(usage_error),
+                note="Falling back to usage counts without revenue totals",
+            )
+
+            fallback_usage_stmt = (
+                select(
+                    func.date(CreditTransaction.created_at).label("usage_date"),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (CreditTransaction.amount < 0, -CreditTransaction.amount),
+                                else_=0,
+                            )
+                        ),
+                        0,
+                    ).label("credits_used"),
+                )
+                .where(CreditTransaction.created_at >= usage_start)
+                .group_by(func.date(CreditTransaction.created_at))
+                .order_by(func.date(CreditTransaction.created_at))
+            )
+
+            fallback_rows = await db.execute(fallback_usage_stmt)
+            daily_usage = [
+                {
+                    "date": usage_date.isoformat() if isinstance(usage_date, date) else str(usage_date),
+                    "credits_used": int(credits_used or 0),
+                    "revenue": 0.0,
+                }
+                for usage_date, credits_used in fallback_rows.all()
+            ]
 
         return {
             "total_credits_issued": int(total_credits or 0),
@@ -337,9 +382,83 @@ async def get_credit_transactions(
 
     limit = max(1, min(limit, 200))
 
+    def _build_transactions(rows: Iterable[Any], include_financials: bool) -> List[Dict[str, Any]]:
+        transactions: List[Dict[str, Any]] = []
+        for row in rows:
+            user: User = row.User  # type: ignore[assignment]
+            first_name = getattr(row, "first_name", None)
+            last_name = getattr(row, "last_name", None)
+            name_parts = [part for part in [first_name, last_name] if part]
+            user_name = " ".join(name_parts) or user.full_name_display
+
+            transaction_type = getattr(row, "transaction_type", None)
+            if hasattr(transaction_type, "value"):
+                transaction_type = transaction_type.value
+            elif transaction_type is None:
+                transaction_type = "unknown"
+            else:
+                transaction_type = str(transaction_type)
+
+            status_value = getattr(row, "status", None)
+            if hasattr(status_value, "value"):
+                status_value = status_value.value
+            elif status_value is None:
+                status_value = "unknown"
+            else:
+                status_value = str(status_value)
+
+            usd_value = getattr(row, "usd_value", None) if include_financials else None
+            profit_value = (
+                getattr(row, "profit_amount_usd", None) if include_financials else None
+            )
+
+            transactions.append(
+                {
+                    "id": str(row.id),
+                    "user_id": str(user.id),
+                    "user_email": user.email if include_user_info else None,
+                    "user_name": user_name if include_user_info else None,
+                    "amount": int(getattr(row, "amount", 0) or 0),
+                    "transaction_type": transaction_type,
+                    "description": getattr(row, "description", ""),
+                    "balance_before": int(getattr(row, "balance_before", 0) or 0),
+                    "balance_after": int(getattr(row, "balance_after", 0) or 0),
+                    "usd_value": round(_decimal_to_float(usd_value), 2)
+                    if include_financials
+                    else 0.0,
+                    "profit_amount_usd": round(_decimal_to_float(profit_value), 2)
+                    if include_financials
+                    else 0.0,
+                    "status": status_value,
+                    "source": getattr(row, "source", None),
+                    "reference_id": getattr(row, "reference_id", None),
+                    "created_at": row.created_at.isoformat()
+                    if getattr(row, "created_at", None)
+                    else None,
+                }
+            )
+
+        return transactions
+
     try:
-        stmt = (
-            select(CreditTransaction, User, UserProfile)
+        base_query = (
+            select(
+                CreditTransaction.id,
+                CreditTransaction.amount,
+                CreditTransaction.transaction_type,
+                CreditTransaction.description,
+                CreditTransaction.balance_before,
+                CreditTransaction.balance_after,
+                CreditTransaction.usd_value,
+                CreditTransaction.profit_amount_usd,
+                CreditTransaction.status,
+                CreditTransaction.source,
+                CreditTransaction.reference_id,
+                CreditTransaction.created_at,
+                User,
+                UserProfile.first_name,
+                UserProfile.last_name,
+            )
             .join(CreditAccount, CreditTransaction.account_id == CreditAccount.id)
             .join(User, CreditAccount.user_id == User.id)
             .outerjoin(UserProfile, UserProfile.user_id == User.id)
@@ -347,36 +466,41 @@ async def get_credit_transactions(
             .limit(limit)
         )
 
-        rows = await db.execute(stmt)
-        transactions: List[Dict[str, Any]] = []
-
-        for transaction, user, profile in rows.all():
-            transactions.append(
-                {
-                    "id": str(transaction.id),
-                    "user_id": str(user.id),
-                    "user_email": user.email if include_user_info else None,
-                    "user_name": (profile.full_name if profile else user.full_name_display)
-                    if include_user_info
-                    else None,
-                    "amount": int(transaction.amount),
-                    "transaction_type": transaction.transaction_type.value,
-                    "description": transaction.description,
-                    "balance_before": int(transaction.balance_before),
-                    "balance_after": int(transaction.balance_after),
-                    "usd_value": round(_decimal_to_float(transaction.usd_value), 2),
-                    "profit_amount_usd": round(
-                        _decimal_to_float(transaction.profit_amount_usd), 2
-                    ),
-                    "status": transaction.status.value,
-                    "source": transaction.source,
-                    "reference_id": transaction.reference_id,
-                    "created_at": transaction.created_at.isoformat()
-                    if transaction.created_at
-                    else None,
-                }
+        try:
+            rows = await db.execute(base_query)
+            transactions = _build_transactions(rows.all(), include_financials=True)
+        except SQLAlchemyError as query_error:
+            logger.warning(
+                "credit_transactions_fallback",
+                error=str(query_error),
+                note="Falling back to minimal transaction payload",
             )
 
+            fallback_query = (
+                select(
+                    CreditTransaction.id,
+                    CreditTransaction.amount,
+                    CreditTransaction.transaction_type,
+                    CreditTransaction.description,
+                    CreditTransaction.balance_before,
+                    CreditTransaction.balance_after,
+                    CreditTransaction.status,
+                    CreditTransaction.source,
+                    CreditTransaction.reference_id,
+                    CreditTransaction.created_at,
+                    User,
+                    UserProfile.first_name,
+                    UserProfile.last_name,
+                )
+                .join(CreditAccount, CreditTransaction.account_id == CreditAccount.id)
+                .join(User, CreditAccount.user_id == User.id)
+                .outerjoin(UserProfile, UserProfile.user_id == User.id)
+                .order_by(CreditTransaction.created_at.desc())
+                .limit(limit)
+            )
+
+            rows = await db.execute(fallback_query)
+            transactions = _build_transactions(rows.all(), include_financials=False)
         return {
             "transactions": transactions,
             "count": len(transactions),
@@ -423,9 +547,18 @@ async def get_revenue_metrics(
         if current_start:
             revenue_stmt = revenue_stmt.where(CreditTransaction.created_at >= current_start)
 
-        revenue_result = await db.execute(revenue_stmt)
-        current_revenue_value, total_transactions = revenue_result.one()
-        current_revenue = _decimal_to_float(current_revenue_value)
+        try:
+            revenue_result = await db.execute(revenue_stmt)
+            current_revenue_value, total_transactions = revenue_result.one()
+            current_revenue = _decimal_to_float(current_revenue_value)
+        except SQLAlchemyError as revenue_error:
+            logger.warning(
+                "revenue_metrics_revenue_fallback",
+                error=str(revenue_error),
+                note="Defaulting revenue totals to zero",
+            )
+            current_revenue = 0.0
+            total_transactions = 0
 
         previous_revenue = 0.0
         if previous_start and previous_end:
@@ -433,16 +566,32 @@ async def get_revenue_metrics(
                 CreditTransaction.created_at >= previous_start,
                 CreditTransaction.created_at < previous_end,
             )
-            previous_value = (await db.execute(previous_stmt)).scalar_one_or_none()
-            previous_revenue = _decimal_to_float(previous_value)
+            try:
+                previous_value = (await db.execute(previous_stmt)).scalar_one_or_none()
+                previous_revenue = _decimal_to_float(previous_value)
+            except SQLAlchemyError as previous_error:
+                logger.warning(
+                    "revenue_metrics_previous_fallback",
+                    error=str(previous_error),
+                    note="Previous revenue defaulted to zero",
+                )
+                previous_revenue = 0.0
 
         monthly_ago = datetime.utcnow() - timedelta(days=30)
         monthly_revenue_stmt = select(func.coalesce(func.sum(CreditTransaction.usd_value), 0)).where(
             CreditTransaction.created_at >= monthly_ago
         )
-        monthly_revenue = _decimal_to_float(
-            (await db.execute(monthly_revenue_stmt)).scalar_one_or_none()
-        )
+        try:
+            monthly_revenue = _decimal_to_float(
+                (await db.execute(monthly_revenue_stmt)).scalar_one_or_none()
+            )
+        except SQLAlchemyError as monthly_error:
+            logger.warning(
+                "revenue_metrics_monthly_fallback",
+                error=str(monthly_error),
+                note="Monthly revenue defaulted to zero",
+            )
+            monthly_revenue = 0.0
 
         revenue_growth = 0.0
         if previous_revenue:
@@ -520,7 +669,17 @@ async def get_revenue_metrics(
         profit_stmt = select(func.coalesce(func.sum(CreditTransaction.profit_amount_usd), 0))
         if current_start:
             profit_stmt = profit_stmt.where(CreditTransaction.created_at >= current_start)
-        total_profit_shared = _decimal_to_float((await db.execute(profit_stmt)).scalar_one_or_none())
+        try:
+            total_profit_shared = _decimal_to_float(
+                (await db.execute(profit_stmt)).scalar_one_or_none()
+            )
+        except SQLAlchemyError as profit_error:
+            logger.warning(
+                "revenue_metrics_profit_fallback",
+                error=str(profit_error),
+                note="Profit totals defaulted to zero",
+            )
+            total_profit_shared = 0.0
         profit_share_revenue = total_profit_shared * 0.25
         avg_profit_share_per_user = _safe_divide(total_profit_shared, active_users)
 
@@ -624,13 +783,22 @@ async def get_revenue_breakdown(
                 )
                 .group_by(CreditTransaction.transaction_type)
             )
-            previous_rows = await db.execute(previous_stmt)
-            previous_map = {
-                row.transaction_type.value: _decimal_to_float(row.amount)
-                for row in previous_rows.all()
-            }
+            try:
+                previous_rows = await db.execute(previous_stmt)
+                previous_map = {}
+                for row in previous_rows.all():
+                    txn_type_raw = getattr(row, "transaction_type", None)
+                    txn_type = getattr(txn_type_raw, "value", txn_type_raw) or "unknown"
+                    previous_map[str(txn_type)] = _decimal_to_float(row.amount)
+            except SQLAlchemyError as previous_error:
+                logger.warning(
+                    "revenue_breakdown_previous_fallback",
+                    error=str(previous_error),
+                    note="Previous period breakdown unavailable",
+                )
+                previous_map = {}
 
-        total_amount = sum(_decimal_to_float(row.amount) for row in breakdown_rows) or 1.0
+        total_amount = sum(_decimal_to_float(getattr(row, "amount", 0)) for row in breakdown_rows) or 1.0
 
         color_map = {
             CreditTransactionType.PURCHASE.value: "#2563eb",
@@ -644,7 +812,8 @@ async def get_revenue_breakdown(
 
         breakdown = []
         for row in breakdown_rows:
-            stream = row.transaction_type.value
+            txn_type_raw = getattr(row, "transaction_type", None)
+            stream = str(getattr(txn_type_raw, "value", txn_type_raw) or "unknown")
             amount = _decimal_to_float(row.amount)
             percentage = _safe_divide(amount, total_amount) * 100
             previous_amount = previous_map.get(stream, 0.0)
@@ -703,8 +872,16 @@ async def get_revenue_user_segments(
         if period_info.start:
             revenue_stmt = revenue_stmt.where(CreditTransaction.created_at >= period_info.start)
 
-        revenue_rows = await db.execute(revenue_stmt)
-        revenue_by_user = _collect_revenue_by_user(revenue_rows.all())
+        try:
+            revenue_rows = await db.execute(revenue_stmt)
+            revenue_by_user = _collect_revenue_by_user(revenue_rows.all())
+        except SQLAlchemyError as segments_error:
+            logger.warning(
+                "revenue_segments_fallback",
+                error=str(segments_error),
+                note="User segment revenue defaults to zero",
+            )
+            revenue_by_user = {}
 
         active_ids = (
             await db.execute(select(User.id).where(User.status == UserStatus.ACTIVE))
@@ -830,19 +1007,28 @@ async def get_revenue_geographic(
 
         geo_stmt = geo_stmt.where(CreditTransaction.created_at >= start)
 
-        rows = await db.execute(geo_stmt)
-        geographic = []
-        for country, user_count, revenue_value in rows.all():
-            revenue = _decimal_to_float(revenue_value)
-            geographic.append(
-                {
-                    "country": country,
-                    "country_code": country,
-                    "revenue": round(revenue, 2),
-                    "user_count": int(user_count or 0),
-                    "avg_revenue_per_user": round(_safe_divide(revenue, user_count or 1), 2),
-                    "growth_rate": 0.0,
-                }
+        geographic: List[Dict[str, Any]] = []
+        try:
+            rows = await db.execute(geo_stmt)
+            for country, user_count, revenue_value in rows.all():
+                revenue = _decimal_to_float(revenue_value)
+                geographic.append(
+                    {
+                        "country": country,
+                        "country_code": country,
+                        "revenue": round(revenue, 2),
+                        "user_count": int(user_count or 0),
+                        "avg_revenue_per_user": round(
+                            _safe_divide(revenue, user_count or 1), 2
+                        ),
+                        "growth_rate": 0.0,
+                    }
+                )
+        except SQLAlchemyError as geo_error:
+            logger.warning(
+                "revenue_geographic_fallback",
+                error=str(geo_error),
+                note="Returning empty geographic distribution",
             )
 
         geographic.sort(key=lambda item: item["revenue"], reverse=True)
@@ -913,7 +1099,16 @@ async def get_revenue_timeseries(
             .order_by(func.date(CreditTransaction.created_at))
         )
 
-        timeseries_rows = await db.execute(timeseries_stmt)
+        try:
+            timeseries_rows = await db.execute(timeseries_stmt)
+            timeseries_data = timeseries_rows.all()
+        except SQLAlchemyError as timeseries_error:
+            logger.warning(
+                "revenue_timeseries_fallback",
+                error=str(timeseries_error),
+                note="Returning empty timeseries due to missing financial data",
+            )
+            timeseries_data = []
 
         new_users_rows = await db.execute(
             select(func.date(User.created_at), func.count(User.id))
@@ -927,7 +1122,7 @@ async def get_revenue_timeseries(
         ).scalar_one_or_none() or 0
 
         timeseries = []
-        for bucket, total_revenue, profit_share, credit_revenue, tx_count in timeseries_rows.all():
+        for bucket, total_revenue, profit_share, credit_revenue, tx_count in timeseries_data:
             bucket_date = bucket.isoformat() if isinstance(bucket, date) else str(bucket)
             timeseries.append(
                 {
@@ -1046,15 +1241,23 @@ async def get_revenue_top_performers(
                 }
             )
 
-        customer_revenue_rows = await db.execute(
-            select(
-                CreditAccount.user_id,
-                func.coalesce(func.sum(CreditTransaction.usd_value), 0).label("revenue"),
+        try:
+            customer_revenue_rows = await db.execute(
+                select(
+                    CreditAccount.user_id,
+                    func.coalesce(func.sum(CreditTransaction.usd_value), 0).label("revenue"),
+                )
+                .join(CreditAccount, CreditTransaction.account_id == CreditAccount.id)
+                .group_by(CreditAccount.user_id)
             )
-            .join(CreditAccount, CreditTransaction.account_id == CreditAccount.id)
-            .group_by(CreditAccount.user_id)
-        )
-        revenue_by_user = _collect_revenue_by_user(customer_revenue_rows.all())
+            revenue_by_user = _collect_revenue_by_user(customer_revenue_rows.all())
+        except SQLAlchemyError as customer_error:
+            logger.warning(
+                "revenue_top_performers_customer_fallback",
+                error=str(customer_error),
+                note="Customer revenue defaults to zero",
+            )
+            revenue_by_user = {}
         top_user_ids = [user_id for user_id, _ in sorted(
             revenue_by_user.items(), key=lambda item: item[1], reverse=True
         )[:5]]
