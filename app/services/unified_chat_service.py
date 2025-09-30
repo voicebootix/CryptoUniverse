@@ -489,7 +489,26 @@ class UnifiedChatService(LoggerMixin):
         for field in required:
             value = user_config.get(field)
             if field == "risk_tolerance":
-                if value in (None, "", "balanced", "moderate", "medium"):
+                normalized_value: Optional[str] = None
+                is_placeholder = False
+
+                if isinstance(value, str):
+                    candidate = value.strip().lower()
+                    if candidate in {"conservative", "moderate", "aggressive", "balanced", "medium", "beast", "beast_mode"}:
+                        if candidate in {"balanced", "medium"}:
+                            normalized_value = "moderate"
+                            if candidate == "balanced":
+                                is_placeholder = True
+                        elif candidate == "beast":
+                            normalized_value = "beast_mode"
+                        else:
+                            normalized_value = candidate
+                    elif candidate:
+                        normalized_value = self._normalize_risk_tolerance(candidate)
+                elif value is not None:
+                    normalized_value = self._normalize_risk_tolerance(str(value).lower())
+
+                if not normalized_value or is_placeholder:
                     missing.append(field)
             elif field == "investment_amount":
                 amount = self._safe_float(value, None)
@@ -712,6 +731,9 @@ class UnifiedChatService(LoggerMixin):
             "very aggressive": "aggressive",
             "high": "aggressive",
             "speculative": "aggressive",
+            "beast": "beast_mode",
+            "beast mode": "beast_mode",
+            "maximum": "beast_mode",
         }
 
         for keyword, value in risk_map.items():
@@ -721,6 +743,44 @@ class UnifiedChatService(LoggerMixin):
 
     def _normalize_time_horizon(self, message: str) -> Optional[str]:
         """Map text to standardized time horizon labels."""
+
+        if not message:
+            return None
+
+        normalized_message = re.sub(r"\s+", " ", message.lower().replace("–", "-"))
+
+        range_keywords = {
+            "0-12 month": "short_term",
+            "0 - 12 month": "short_term",
+            "0 to 12 month": "short_term",
+            "0-12-month": "short_term",
+            "0-12month": "short_term",
+            "0-12 months": "short_term",
+            "0 - 12 months": "short_term",
+            "0 to 12 months": "short_term",
+            "1-3 year": "medium_term",
+            "1 - 3 year": "medium_term",
+            "1 to 3 year": "medium_term",
+            "1-3 years": "medium_term",
+            "1 - 3 years": "medium_term",
+            "1 to 3 years": "medium_term",
+            "3-5 year": "long_term",
+            "3 - 5 year": "long_term",
+            "3 to 5 year": "long_term",
+            "3-5 years": "long_term",
+            "3 - 5 years": "long_term",
+            "3 to 5 years": "long_term",
+            "5+ year": "long_term",
+            "5 + year": "long_term",
+            "5 or more year": "long_term",
+            "5+ years": "long_term",
+            "5 + years": "long_term",
+            "5 or more years": "long_term",
+        }
+
+        for phrase, value in range_keywords.items():
+            if phrase in normalized_message:
+                return value
 
         horizon_keywords = {
             "short": "short_term",
@@ -735,15 +795,15 @@ class UnifiedChatService(LoggerMixin):
         }
 
         for keyword, value in horizon_keywords.items():
-            if keyword in message:
+            if keyword in normalized_message:
                 return value
 
-        if "year" in message:
-            if any(token in message for token in ["1 year", "12 month", "one-year"]):
+        if "year" in normalized_message or "month" in normalized_message:
+            if any(token in normalized_message for token in ["1 year", "12 month", "one-year", "0-12 month", "0 to 12 month"]):
                 return "short_term"
-            if any(token in message for token in ["3 year", "36 month", "three-year"]):
+            if any(token in normalized_message for token in ["3 year", "36 month", "three-year", "1-3 year", "1 to 3 year"]):
                 return "medium_term"
-            if any(token in message for token in ["5 year", "10 year", "five-year", "decade"]):
+            if any(token in normalized_message for token in ["5 year", "10 year", "five-year", "decade", "3-5 year", "5+ year", "5 or more year"]):
                 return "long_term"
 
         return None
@@ -871,9 +931,16 @@ class UnifiedChatService(LoggerMixin):
             "avoid leverage": "no_leverage",
             "no margin": "no_margin",
             "no derivatives": "no_derivatives",
+            "limited liquidity": "limited_liquidity",
+            "illiquid": "limited_liquidity",
+            "tax sensitive": "tax_sensitive",
+            "tax-sensitive": "tax_sensitive",
+            "tax efficient": "tax_sensitive",
+            "tax-efficient": "tax_sensitive",
             "esg": "esg_focus",
             "ethical": "ethical_focus",
             "sustainable": "esg_focus",
+            "sustainability focus": "esg_focus",
             "no meme": "avoid_meme_assets",
             "no defi": "avoid_defi",
             "stable only": "stable_only",

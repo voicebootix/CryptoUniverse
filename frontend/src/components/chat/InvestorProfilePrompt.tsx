@@ -261,15 +261,17 @@ const InvestorProfilePrompt: React.FC<InvestorProfilePromptProps> = ({
           </div>
 
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={onSkip}
-              disabled={isSubmitting}
-              className="justify-start text-muted-foreground"
-            >
-              I'll provide this later
-            </Button>
+            {onSkip && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={onSkip}
+                disabled={isSubmitting}
+                className="justify-start text-muted-foreground"
+              >
+                I'll provide this later
+              </Button>
+            )}
 
             <Button type="submit" disabled={isSubmitting} className="gap-2">
               {isSubmitting ? 'Submitting...' : 'Save investor profile'}
