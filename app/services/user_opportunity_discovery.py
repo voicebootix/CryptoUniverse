@@ -242,9 +242,32 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         include_strategy_recommendations: bool = True
     ) -> Dict[str, Any]:
         """
-        MAIN ENTRY POINT: Discover all opportunities for user based on their strategy portfolio.
+        Discover and return ranked trading opportunities and related analytics for a user's active strategies.
         
-        This is the method that replaces the fake market_inefficiency_scanner.
+        Performs a portfolio-aware scan across the user's active strategies, discovers tradeable assets, runs strategy-specific scanners, ranks and filters resulting opportunities, optionally generates strategy recommendations, and returns a structured payload containing opportunities, performance metrics, signal analysis, and metadata.
+        
+        Parameters:
+        	user_id (str): The identifier of the user to run discovery for.
+        	force_refresh (bool): If True, bypass cached results and perform a fresh discovery.
+        	include_strategy_recommendations (bool): If True, include generated strategy recommendations in the response.
+        
+        Returns:
+        	result (dict): A dictionary containing the discovery result. Keys include:
+        		- success (bool): `True` when discovery completed successfully, `False` on failure.
+        		- scan_id (str): Unique identifier for this scan execution.
+        		- user_id (str): The input user identifier.
+        		- opportunities (list): Serialized opportunity objects discovered and ranked.
+        		- total_opportunities (int): Number of opportunities returned.
+        		- signal_analysis (dict): Aggregated statistics about signal strengths and thresholds.
+        		- user_profile (dict): Summary of the user's opportunity profile (tiers, active strategies, fingerprint, limits).
+        		- strategy_performance (dict): Per-strategy summary metrics (counts, totals, averages).
+        		- asset_discovery (dict): Information about discovered asset tiers and totals scanned.
+        		- strategy_recommendations (list): Optional recommendations for strategies to consider.
+        		- execution_time_ms (float): Total discovery time in milliseconds.
+        		- last_updated (str): ISO timestamp when the result was finalized.
+        		- performance_metrics (dict): Timing and cache metrics for the run.
+        		- metadata (dict, optional): Enriched payload such as capital assumptions and profit projection summary.
+        	On failure, the dictionary will have `success` set to `False` and include `error`, `opportunities` (fallback list), `execution_time_ms`, and `error_type`.
         """
         
         discovery_start_time = time.time()
@@ -1286,7 +1309,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         scan_id: str,
         portfolio_result: Dict[str, Any]
     ) -> List[OpportunityResult]:
-        """Portfolio optimization identifies rebalancing opportunities."""
+        """
+        Scan the user's portfolio for optimization opportunities and convert recommendations and analysis into OpportunityResult entries.
+        
+        Performs a portfolio-optimization scan for the given user (if the user owns the portfolio optimization strategy) and returns discovered rebalancing recommendations and strategy-level optimization analyses as a list of OpportunityResult objects. Each OpportunityResult contains profit projections, confidence and risk metadata, required capital estimates, and other enrichment derived from optimization output and deployable capital estimates. If the user does not own the portfolio optimization strategy or no opportunities are found, an empty list is returned.
+        
+        Returns:
+            List[OpportunityResult]: A list of opportunities representing rebalancing actions or optimization analyses discovered for the user's portfolio.
+        """
         
         opportunities = []
         
@@ -1333,7 +1363,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 if rebalancing_recommendations:
 
                     def _normalize_improvement(value: Any) -> float:
-                        """Convert raw improvement values to a 0-1 range."""
+                        """
+                        Normalize a raw improvement value into a bounded 0.0–1.0 range.
+                        
+                        Accepts numeric values, numeric strings, and percentage strings (e.g., "5%", "0.05"). Values greater than 1 are treated as percentages (e.g., 5 -> 0.05). Invalid or missing inputs produce 0.0.
+                        
+                        Parameters:
+                            value (Any): Input improvement value (number, numeric string, or percentage string).
+                        
+                        Returns:
+                            float: Normalized improvement between 0.0 and 1.0.
+                        """
                         if value is None:
                             return 0.0
 
@@ -2001,7 +2041,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             return None
     
     def _calculate_futures_risk(self, leverage: float, volatility: float) -> str:
-        """Calculate risk level based on leverage and volatility."""
+        """
+        Map leverage and volatility to a categorical futures risk level.
+        
+        Parameters:
+            leverage (float): Position leverage expressed as a multiplier (e.g., 10.0 for 10x).
+            volatility (float): Expected asset volatility as a decimal (e.g., 0.05 for 5%).
+        
+        Returns:
+            str: One of "low", "medium", "high", or "very_high" indicating the estimated risk level.
+        """
 
         # Risk increases with leverage and volatility
         leverage_risk = leverage / 100  # Normalize leverage (10x = 0.1)
@@ -2023,7 +2072,28 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         capital_info: Optional[Dict[str, Any]],
         deployable_capital: float,
     ) -> Dict[str, Any]:
-        """Create an immutable snapshot of capital assumptions for metadata."""
+        """
+        Builds a stable snapshot of capital assumptions and normalizes numeric components for inclusion in opportunity metadata.
+        
+        If `capital_info` is not a dictionary, returns a fallback snapshot that uses `deployable_capital` as the basis and marks the snapshot as a fallback. When `capital_info` is a dictionary, the function:
+        - Ensures `assumptions` is a list.
+        - Normalizes `deployable_capital_usd` and `capital_basis_used_usd` to the provided `deployable_capital` (or preserves existing numeric value when `deployable_capital` is not parseable).
+        - Converts any numeric entries found in the `components` mapping to floats and discards non-numeric entries.
+        - Ensures `fallback_used` and `calculation_timestamp` are present.
+        
+        Parameters:
+            capital_info (Optional[Dict[str, Any]]): Existing capital metadata to snapshot; expected keys include `deployable_capital_usd`, `components`, and `assumptions`.
+            deployable_capital (float): Preferred deployable capital value to use as the canonical basis for the snapshot.
+        
+        Returns:
+            Dict[str, Any]: An immutable, normalized snapshot containing:
+              - `deployable_capital_usd` (float)
+              - `capital_basis_used_usd` (float)
+              - `components` (dict of float values)
+              - `assumptions` (list of strings)
+              - `fallback_used` (bool)
+              - `calculation_timestamp` (ISO 8601 string)
+        """
 
         if not isinstance(capital_info, dict):
             return {
@@ -2071,7 +2141,28 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         portfolio_result: Dict[str, Any],
         optimization_result: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Estimate deployable capital based on portfolio data and credit availability."""
+        """
+        Estimate the user's deployable capital using portfolio snapshots, optimization results, and available credit.
+        
+        Builds a reconciled view of portfolio value candidates from the provided marketplace/optimization payloads and a live portfolio service, augments that with any available credit buying power retrieved from the credit accounts database, and returns a structured explanation of the computed deployable capital along with inputs, components, assumptions, and metadata.
+        
+        Parameters:
+            user_id (str): The user's identifier; a UUID string will be used to lookup credit accounts if parsable.
+            portfolio_result (Dict[str, Any]): Strategy marketplace portfolio payload; used to extract portfolio/value fields such as `summary.total_portfolio_value` and `portfolio.total_value[_usd]`.
+            optimization_result (Dict[str, Any]): Optional optimization output; used to extract `optimization_summary.portfolio_value` and `portfolio_context.total_value_usd` as additional portfolio value candidates.
+        
+        Returns:
+            Dict[str, Any]: A details dictionary containing:
+                - deployable_capital_usd (float): Final estimated deployable capital in USD.
+                - capital_basis_used_usd (float): The same numeric basis used for downstream capital calculations.
+                - components (Dict[str, float]): Constituent positive components that contributed to the estimate (possible keys: `portfolio_value_usd`, `cash_balance_usd`, `credit_buying_power_usd`).
+                - inputs (Dict[str, Any]): Observed inputs and discovered value sources used during computation (`portfolio_value_sources`, `portfolio_service_source`, `credit_buying_power_usd`).
+                - credit_profile (Optional[Dict[str, Any]]): If a credit account was found, a profile with `available_credits`, `credit_to_usd_ratio`, `credit_buying_power_usd`, and `profit_potential_usd`.
+                - assumptions (List[str]): Human-readable assumptions applied (including fallback notes).
+                - calculation_timestamp (str): ISO-8601 UTC timestamp when the calculation was made.
+                - fallback_used (bool): True if a default fallback capital was applied due to missing live data.
+                - cash_balance_usd (float): Extracted cash balance from the portfolio risk service (0.0 if unavailable).
+        """
 
         details: Dict[str, Any] = {
             "deployable_capital_usd": 0.0,
@@ -2086,6 +2177,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         portfolio_value_candidates: Dict[str, float] = {}
 
         def add_portfolio_candidate(source: str, value: Any) -> None:
+            """
+            Attempt to convert value to a float and, if conversion yields a finite number, store it in the shared portfolio_value_candidates mapping under the given source key.
+            
+            Parameters:
+                source (str): Identifier for the portfolio value source used as the key in portfolio_value_candidates.
+                value (Any): Value to be converted to a float; non-numeric or non-finite inputs are ignored.
+            """
             numeric = self._to_float(value)
             if numeric is None:
                 return
@@ -2198,7 +2296,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         return details
 
     def _extract_cash_balance(self, portfolio_payload: Dict[str, Any]) -> float:
-        """Extract cash-like balances (stablecoins) from portfolio payload."""
+        """
+        Extract the USD cash-equivalent total from a portfolio payload by summing recognized stablecoin balances.
+        
+        Parameters:
+            portfolio_payload (Dict[str, Any]): Portfolio dictionary expected to contain a "balances" list of dicts.
+                Each balance dict may include keys "asset" or "symbol", and a USD value under "value_usd" or "total".
+                The function tolerates missing or malformed payloads and balance entries.
+        
+        Returns:
+            float: Sum of USD values for recognized stable assets (USDT, USDC, USD, BUSD, USDP, DAI, TUSD). Returns 0.0 if input is invalid or no stable balances are found.
+        """
 
         if not isinstance(portfolio_payload, dict):
             return 0.0
@@ -2222,7 +2330,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         return float(total_cash)
 
     def _normalize_return_rate(self, *candidates: Optional[Any]) -> float:
-        """Normalize return values (percentages or fractions) into fraction form."""
+        """
+        Convert one or more return-rate candidates into a normalized fractional return.
+        
+        Tries each provided candidate in order until a valid numeric value is found. Candidates may be numbers or numeric strings (for example "5", "5%", "0.05"); percentages in the range (1, 100] are converted to fractions by dividing by 100. The resulting value is clamped to the range [-5.0, 5.0]. If no valid numeric candidate is found, returns 0.0.
+        
+        Parameters:
+            *candidates (Optional[Any]): One or more potential return-rate values to normalize; evaluated in order.
+        
+        Returns:
+            float: The normalized return as a fraction (e.g., 0.05 for 5%), clamped between -5.0 and 5.0. Returns 0.0 if no valid candidate is found.
+        """
 
         for candidate in candidates:
             if candidate is None:
@@ -2240,7 +2358,18 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         return 0.0
 
     def _normalize_risk_measure(self, risk_value: Any, default_source: str = "analysis") -> Tuple[float, str]:
-        """Normalize various risk descriptors into a volatility-style fraction."""
+        """
+        Convert a variety of risk descriptors into a standardized volatility-style fraction and a provenance tag.
+        
+        Parameters:
+            risk_value: A risk descriptor which may be numeric (int/float or numeric string) or a textual label (e.g., "low", "high").
+            default_source (str): Prefix used in the returned provenance tag to indicate the origin of the normalization.
+        
+        Returns:
+            (volatility_fraction, source_tag): 
+                volatility_fraction (float): A normalized volatility value bounded between 0.02 and 0.75 representing risk as a fractional volatility.
+                source_tag (str): A short tag combining `default_source` and the reason or label used for normalization (e.g., "analysis:low", "analysis:parsed_numeric", "analysis:fallback").
+        """
 
         if risk_value is None:
             return 0.2, f"{default_source}:default"
@@ -2287,7 +2416,28 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         risk_value: Any,
         source: str = "analysis",
     ) -> Dict[str, float]:
-        """Build expected/best/worst-case profit projections."""
+        """
+        Build a profit projection dictionary describing expected, best-, and worst-case returns and profits.
+        
+        Parameters:
+            capital (float): Capital basis in USD used to compute profit projections.
+            expected_return_rate (Any): Expected return expressed as a number or string (percent or fraction); will be normalized to a fractional return (e.g., 0.05).
+            risk_value (Any): Risk input used to derive a risk spread; may be a numeric value or structured risk descriptor.
+            source (str): Label identifying the origin of the risk measure (defaults to "analysis").
+        
+        Returns:
+            Dict[str, float]: A mapping containing:
+                - `expected_return_pct`: expected return as a percentage.
+                - `expected_profit_usd`: expected profit in USD.
+                - `best_case_return_pct`: best-case return as a percentage.
+                - `best_case_profit_usd`: best-case profit in USD.
+                - `worst_case_return_pct`: worst-case return as a percentage (floored at -100%).
+                - `worst_case_profit_usd`: worst-case profit in USD.
+                - `risk_spread_pct`: risk spread used, as a percentage.
+                - `risk_measure_value`: original `risk_value` provided.
+                - `risk_measure_source`: resolved source label for the risk measure.
+                - `capital_basis_usd`: numeric capital basis used for calculations.
+        """
 
         capital_basis = self._to_float(capital) or 0.0
         normalized_return = self._normalize_return_rate(expected_return_rate)
@@ -2313,7 +2463,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         return {key: float(value) if isinstance(value, (int, float)) else value for key, value in projection.items()}
 
     def _risk_spread_to_label(self, risk_spread: float) -> str:
-        """Convert normalized risk spread into human-readable label."""
+        """
+        Map a normalized risk spread to a human-readable risk label.
+        
+        Parameters:
+            risk_spread (float): Normalized risk spread, expected in the range 0.0–1.0.
+        
+        Returns:
+            str: `'low'` if `risk_spread` <= 0.1, `'medium'` if <= 0.25, `'medium_high'` if <= 0.4, `'high'` otherwise.
+        """
 
         if risk_spread <= 0.1:
             return "low"
@@ -2327,7 +2485,24 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self,
         opportunities: List[OpportunityResult],
     ) -> Optional[Dict[str, Any]]:
-        """Aggregate capital metadata from opportunity results."""
+        """
+        Build a consolidated capital assumptions snapshot from a list of opportunity results.
+        
+        Scans each opportunity's `metadata.capital_assumptions` dictionaries and merges them into a single snapshot that:
+        - Preserves the reference snapshot chosen by the largest `deployable_capital_usd`.
+        - For each component key, keeps the largest numeric value observed across snapshots.
+        - Records how many source snapshots contributed.
+        
+        Parameters:
+            opportunities (List[OpportunityResult]): OpportunityResult objects to extract capital assumptions from.
+        
+        Returns:
+            Optional[Dict[str, Any]]: A merged capital assumptions dictionary containing at least:
+                - `components` (dict): mapping of component names to numeric USD values (floats).
+                - `deployable_capital_usd` (numeric): value taken from the chosen reference snapshot.
+                - `sources_count` (int): number of snapshots merged.
+            Returns `None` if no capital assumptions are present on any opportunity.
+        """
 
         capital_snapshots: List[Dict[str, Any]] = []
         for opportunity in opportunities:
@@ -2371,7 +2546,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self,
         opportunities: List[OpportunityResult],
     ) -> Optional[Dict[str, Any]]:
-        """Summarize profit projections across opportunities."""
+        """
+        Compute aggregated profit projections from a list of opportunity results.
+        
+        Parameters:
+            opportunities (List[OpportunityResult]): OpportunityResult objects whose `metadata.profit_projection` dictionaries will be aggregated. Entries without a valid `profit_projection` dict are ignored.
+        
+        Returns:
+            summary (Optional[Dict[str, Any]]): Aggregated profit projection values or `None` if no projections were found. When present, the dictionary contains:
+                - expected_profit_total_usd (float): Sum of all `expected_profit_usd` values.
+                - best_case_total_usd (float): Sum of all `best_case_profit_usd` values.
+                - worst_case_total_usd (float): Sum of all `worst_case_profit_usd` values.
+                - average_expected_return_pct (float): Mean of all `expected_return_pct` values (expressed as a percentage, not a fraction).
+                - opportunity_count (int): Number of profit projections included in the aggregation.
+        """
 
         projections: List[Dict[str, Any]] = []
         for opportunity in opportunities:
@@ -2412,7 +2600,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         return summary
     
     async def _scan_hedge_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
-        """Hedge position strategy scanner - placeholder for real implementation."""
+        """
+        Scan for portfolio hedge and risk-mitigation opportunities based on discovered assets and the user's profile.
+        
+        Analyzes the user's portfolio context and available assets to identify hedging recommendations, suggested hedges or mitigation trades, and related capital/risk metadata suitable for inclusion as OpportunityResult entries.
+        
+        Parameters:
+        	discovered_assets: A collection of asset descriptors discovered for the enterprise (used to select eligible hedging instruments).
+        	user_profile: UserOpportunityProfile containing tier, limits, and strategy fingerprint to guide eligibility and sizing.
+        	scan_id: A unique identifier for this discovery run (used to correlate results and telemetry).
+        	portfolio_result: The fetched user portfolio and strategy ownership information to determine applicable hedging actions.
+        
+        Returns:
+        	list: A list of OpportunityResult-like objects representing hedge or risk-mitigation opportunities; empty if no opportunities are found.
+        """
         # Would call trading_strategies_service.hedge_position()
         return []
     
