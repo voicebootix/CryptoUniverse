@@ -205,6 +205,92 @@ async def test_portfolio_optimization_normalizes_non_percent_improvement(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_portfolio_optimization_uses_cash_balance_when_portfolio_zero(monkeypatch):
+    service = UserOpportunityDiscoveryService()
+
+    fake_recommendation = {
+        "strategy": "Core",
+        "symbol": "ETHUSDT",
+        "action": "buy",
+        "target_weight": "10%",
+        "amount": "10%",
+        "improvement_potential": "8%",
+    }
+
+    fake_response = {
+        "success": True,
+        "execution_result": {
+            "rebalancing_recommendations": [fake_recommendation]
+        },
+        "strategy_analysis": {
+            "core": {"expected_return": 0.08, "risk_level": 0.18, "sharpe_ratio": 1.1}
+        },
+        "optimization_summary": {},
+    }
+
+    monkeypatch.setattr(
+        discovery_module.trading_strategies_service,
+        "execute_strategy",
+        AsyncMock(return_value=fake_response),
+    )
+
+    portfolio_snapshot = {
+        "success": True,
+        "function": "get_portfolio",
+        "portfolio": {
+            "total_value_usd": 0.0,
+            "balances": [{"asset": "USDT", "value_usd": 2500.0}],
+        },
+    }
+
+    monkeypatch.setattr(
+        discovery_module.portfolio_risk_service,
+        "get_portfolio",
+        AsyncMock(return_value=portfolio_snapshot),
+    )
+
+    profile = UserOpportunityProfile(
+        user_id="non-uuid-user",
+        active_strategy_count=1,
+        total_monthly_strategy_cost=0,
+        user_tier="pro",
+        max_asset_tier="tier_professional",
+        opportunity_scan_limit=10,
+        last_scan_time=None,
+        strategy_fingerprint="abc123",
+    )
+
+    portfolio_result = {
+        "active_strategies": [
+            {"strategy_id": "ai_portfolio_optimization"}
+        ]
+    }
+
+    opportunities = await service._scan_portfolio_optimization_opportunities(
+        discovered_assets={},
+        user_profile=profile,
+        scan_id="scan-1",
+        portfolio_result=portfolio_result,
+    )
+
+    assert len(opportunities) == 1
+    opportunity = opportunities[0]
+
+    # Trade sizing should use the actual cash-based deployable capital (10% of $2,500)
+    assert opportunity.required_capital_usd == pytest.approx(250.0)
+
+    metadata = opportunity.metadata
+    capital_assumptions = metadata["capital_assumptions"]
+
+    assert capital_assumptions["deployable_capital_usd"] == pytest.approx(2500.0)
+    assert capital_assumptions["capital_basis_used_usd"] == pytest.approx(2500.0)
+    assert capital_assumptions["components"]["cash_balance_usd"] == pytest.approx(2500.0)
+    assert capital_assumptions["fallback_used"] is False
+
+    assert metadata["trade_value_usd"] == pytest.approx(250.0)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("capital", [1000.0, 25000.0, 100000.0], ids=["low", "medium", "high"])
 async def test_portfolio_optimization_profit_scales_with_capital(monkeypatch, capital):
     service = UserOpportunityDiscoveryService()

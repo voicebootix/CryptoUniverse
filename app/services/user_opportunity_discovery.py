@@ -2168,7 +2168,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         if credit_buying_power > 0:
             components["credit_buying_power_usd"] = float(credit_buying_power)
 
-        deployable_capital = max(portfolio_value, 0.0) + max(credit_buying_power, 0.0)
+        deployable_capital = (
+            max(portfolio_value, 0.0)
+            + max(cash_balance, 0.0)
+            + max(credit_buying_power, 0.0)
+        )
 
         if deployable_capital <= 0:
             deployable_capital = 10000.0
