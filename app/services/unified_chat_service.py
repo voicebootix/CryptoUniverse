@@ -622,33 +622,9 @@ class UnifiedChatService(LoggerMixin):
                 marketplace_strategies=prefetched_marketplace
             )
 
-            # Step 4: Charge credits before generation (consistent with streaming path)
-            charge_context: Optional[Dict[str, Any]] = None
-            if charge_request:
-                try:
-                    charge_context = await self._charge_chat_interaction(
-                        user_id,
-                        charge_request["intent"],
-                        charge_request["conversation_mode"],
-                        charge_request["credits"],
-                    )
-                except InsufficientCreditsError:
-                    return {
-                        "success": False,
-                        "session_id": session.session_id,
-                        "message_id": str(uuid.uuid4()),
-                        "content": "Insufficient credits for this operation. Please purchase additional credits to continue.",
-                        "intent": intent_analysis["intent"].value if hasattr(intent_analysis["intent"], "value") else intent_analysis["intent"],
-                        "requires_action": True,
-                        "action_data": {
-                            "type": "credit_purchase",
-                            "required_credits": charge_request["credits"],
-                        },
-                        "timestamp": datetime.utcnow(),
-                    }
-
-            # Step 5: Generate response
+            # Step 4: Generate response with appropriate charging strategy
             if stream:
+                # Streaming flow handles its own charge/refund lifecycle
                 return self._generate_streaming_response(
                     message,
                     intent_analysis,
@@ -658,9 +634,52 @@ class UnifiedChatService(LoggerMixin):
                     user_id=user_id,
                 )
             else:
+                # Non-streaming flow: charge upfront, generate response, refund on failure
+                charge_context: Optional[Dict[str, Any]] = None
+                if charge_request:
+                    try:
+                        charge_context = await self._charge_chat_interaction(
+                            user_id,
+                            charge_request["intent"],
+                            charge_request["conversation_mode"],
+                            charge_request["credits"],
+                        )
+                    except InsufficientCreditsError:
+                        return {
+                            "success": False,
+                            "session_id": session.session_id,
+                            "message_id": str(uuid.uuid4()),
+                            "content": "Insufficient credits for this operation. Please purchase additional credits to continue.",
+                            "intent": intent_analysis["intent"].value if hasattr(intent_analysis["intent"], "value") else intent_analysis["intent"],
+                            "requires_action": True,
+                            "action_data": {
+                                "type": "credit_purchase",
+                                "required_credits": charge_request["credits"],
+                            },
+                            "timestamp": datetime.utcnow(),
+                        }
+
                 response = await self._generate_complete_response(
                     message, intent_analysis, session, context_data
                 )
+
+                # Refund credits if response generation failed
+                if not response.get("success", True) and charge_context:
+                    try:
+                        await self._refund_chat_charge(
+                            user_id,
+                            charge_context,
+                            "Response generation failed after credit deduction",
+                        )
+                    except Exception as refund_error:
+                        # Don't mask the original response with refund errors
+                        self.logger.warning(
+                            "Failed to refund credits after response failure",
+                            error=str(refund_error),
+                            user_id=user_id,
+                            charge_context=charge_context,
+                        )
+
                 return response
 
         except Exception as e:
