@@ -40,7 +40,7 @@ from app.services.trade_execution import TradeExecutionService
 from app.services.telegram_core import TelegramCommanderService
 from app.services.websocket import manager as websocket_manager
 from app.services.chat_memory import ChatMemoryService
-from app.services.unified_ai_manager import unified_ai_manager
+# Note: unified_ai_manager is imported lazily in methods to avoid initialization at module load
 
 # Import all service engines
 from app.services.market_analysis_core import MarketAnalysisService
@@ -1022,6 +1022,7 @@ class UnifiedChatService(LoggerMixin):
             return await self._get_user_config(user_id)
 
         try:
+            from app.services.unified_ai_manager import unified_ai_manager
             return await unified_ai_manager.update_user_profile_preferences(user_id, updates)
         except Exception as exc:
             self.logger.warning(
@@ -3212,6 +3213,7 @@ Provide a helpful response using the real data available. Never use placeholder 
     async def _get_user_config(self, user_id: str) -> Dict[str, Any]:
         """Get user configuration - REAL data only."""
         try:
+            from app.services.unified_ai_manager import unified_ai_manager
             config = await unified_ai_manager.get_user_profile_preferences(user_id)
             # Ensure core keys exist for downstream logic
             config.setdefault("trading_mode", TradingMode.BALANCED.value)
