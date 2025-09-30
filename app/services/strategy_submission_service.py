@@ -323,6 +323,7 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
                     [
                         StrategyStatus.SUBMITTED,
                         StrategyStatus.UNDER_REVIEW,
+                        StrategyStatus.CHANGES_REQUESTED,
                         StrategyStatus.APPROVED,
                         StrategyStatus.REJECTED,
                         StrategyStatus.PUBLISHED,
