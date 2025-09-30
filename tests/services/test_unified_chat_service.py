@@ -86,14 +86,19 @@ async def test_trade_execution_pipeline_builds_structured_request():
     assert simulation_mode_arg is True
     assert isinstance(trade_request_arg, dict)
     assert trade_request_arg["symbol"] == "BTCUSDT"
-    assert trade_request_arg["action"] == "BUY"
-    assert trade_request_arg["side"] == "buy"
+    assert trade_request_arg["action"].upper() == "BUY"
+    assert trade_request_arg.get("side", trade_request_arg["action"].lower()) == "buy"
     quantity = trade_request_arg.get("quantity")
     if quantity is not None:
         assert quantity == pytest.approx(0.25)
     else:
-        assert trade_request_arg.get("position_size_usd") == pytest.approx(0.25)
-    assert trade_request_arg["order_type"] == "MARKET"
+        position_size = trade_request_arg.get("position_size_usd")
+        amount_field = trade_request_arg.get("amount")
+        if position_size is not None:
+            assert position_size == pytest.approx(0.25)
+        else:
+            assert amount_field == pytest.approx(0.25)
+    assert trade_request_arg["order_type"].upper() == "MARKET"
 
 
 @pytest.mark.asyncio
@@ -116,7 +121,10 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
     service.trade_executor.execute_trade = AsyncMock(
         return_value={
             "success": True,
-            "trade_id": "trade-456",
+            "simulation_result": {
+                "quantity": 1.95,
+                "execution_price": 2050.0,
+            },
         }
     )
 
@@ -125,7 +133,8 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
             {
                 "symbol": "ethusdt",
                 "action": "buy",
-                "amount": "2",
+                "amount": "4000",
+                "reference_price": "2000",
                 "order_type": "limit",
                 "simulation_mode": "false",
             }
@@ -143,6 +152,8 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
     assert validation_user_arg == "user-abc"
     assert validation_request_arg["symbol"] == "ethusdt"
     assert validation_request_arg["action"] == "buy"
+    assert validation_request_arg["position_size_usd"] == 4000.0
+    assert validation_request_arg["quantity"] == 2.0
 
     execution_call = service.trade_executor.execute_trade.await_args
     exec_request_arg, exec_user_arg, exec_simulation_mode = execution_call.args
@@ -154,10 +165,57 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
     assert exec_request_arg["side"] == "buy"
     assert exec_request_arg["quantity"] == 2.0
     assert exec_request_arg["order_type"] == "LIMIT"
+    assert exec_request_arg["position_size_usd"] == 4000.0
+    assert exec_request_arg["reference_price"] == 2000.0
+    assert exec_request_arg["price"] == 2000.0
 
     assert result["success"] is True
     assert result["trades_executed"] == 1
     assert result["trades_failed"] == 0
+
+    execution_metadata = result["results"][0]["rebalance_execution"]
+    assert execution_metadata["requested_notional_usd"] == 4000.0
+    assert execution_metadata["requested_quantity"] == 2.0
+    assert execution_metadata["simulation_mode"] is False
+    assert execution_metadata["filled_quantity"] == pytest.approx(1.95)
+    assert execution_metadata["fill_price"] == pytest.approx(2050.0)
+    assert execution_metadata["filled_value_usd"] == pytest.approx(1.95 * 2050.0)
+
+
+def test_opportunity_prompt_uses_fractional_weights_and_trade_values():
+    service = UnifiedChatService()
+
+    context = {
+        "opportunities": {
+            "opportunities": [
+                {
+                    "strategy_name": "AI Portfolio Optimization - Core",
+                    "symbol": "BTCUSDT",
+                    "confidence_score": 0.82,
+                    "profit_potential_usd": 1250,
+                    "required_capital_usd": 1500,
+                    "metadata": {
+                        "strategy": "core_balanced",
+                        "amount": "15%",
+                        "target_weight": "15%",
+                        "weight_change": "0.5%",
+                        "trade_value_usd": 1500,
+                    },
+                }
+            ],
+            "user_profile": {"risk_profile": "balanced"},
+        }
+    }
+
+    prompt = service._build_response_prompt(
+        "Show me portfolio optimization opportunities",
+        ChatIntent.OPPORTUNITY_DISCOVERY,
+        context,
+    )
+
+    assert "Allocation Target: 15.0% of portfolio" in prompt
+    assert "Weight Change: 0.5%" in prompt
+    assert "Trade Size: ≈ $1,500.00" in prompt
 
 
 @pytest.mark.asyncio
