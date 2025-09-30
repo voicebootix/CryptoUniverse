@@ -411,7 +411,7 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
             submission.strategy_config[self.REVIEW_STATE_KEY] = "rejected"
             self._append_history_entry(submission, "rejected", reviewer.email, comment)
         elif action == "request_changes":
-            submission.status = StrategyStatus.SUBMITTED
+            submission.status = StrategyStatus.CHANGES_REQUESTED
             submission.reviewed_at = now
             submission.reviewer_feedback = comment
             submission.strategy_config[self.REVIEW_STATE_KEY] = "changes_requested"
