@@ -256,12 +256,16 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
     ) -> ReviewStats:
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
+        changes_requested_status = getattr(
+            StrategyStatus, "CHANGES_REQUESTED", None
+        )
+
         pending_statuses = [
             StrategyStatus.SUBMITTED,
             StrategyStatus.UNDER_REVIEW,
         ]
-        if hasattr(StrategyStatus, "CHANGES_REQUESTED"):
-            pending_statuses.append(StrategyStatus.CHANGES_REQUESTED)
+        if changes_requested_status:
+            pending_statuses.append(changes_requested_status)
 
         total_pending_stmt = select(func.count(StrategySubmission.id)).where(
             StrategySubmission.status.in_(pending_statuses)
@@ -297,8 +301,8 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
                 StrategyStatus.SUBMITTED,
                 StrategyStatus.UNDER_REVIEW,
             ]
-            if hasattr(StrategyStatus, "CHANGES_REQUESTED"):
-                assigned_statuses.append(StrategyStatus.CHANGES_REQUESTED)
+            if changes_requested_status:
+                assigned_statuses.append(changes_requested_status)
 
             assigned_stmt = select(func.count(StrategySubmission.id)).where(
                 and_(
@@ -322,6 +326,10 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
         db: AsyncSession,
         status_filter: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        changes_requested_status = getattr(
+            StrategyStatus, "CHANGES_REQUESTED", None
+        )
+
         stmt = (
             select(StrategySubmission)
             .options(
@@ -337,6 +345,11 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
                         StrategyStatus.REJECTED,
                         StrategyStatus.PUBLISHED,
                     ]
+                    + (
+                        [changes_requested_status]
+                        if changes_requested_status
+                        else []
+                    )
                 )
             )
             .order_by(StrategySubmission.submitted_at.desc())
