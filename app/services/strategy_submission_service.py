@@ -69,21 +69,6 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
     def logger(self):  # type: ignore[override]
         return super().logger.bind(service="strategy_submission_service")
 
-    @staticmethod
-    def _with_changes_requested(
-        statuses: List[StrategyStatus],
-    ) -> List[StrategyStatus]:
-        """Append the change-requested status when available."""
-
-        result = list(statuses)
-        changes_requested_status = getattr(StrategyStatus, "CHANGES_REQUESTED", None)
-        if (
-            changes_requested_status
-            and changes_requested_status not in result
-        ):
-            result.append(changes_requested_status)
-        return result
-
     # ------------------------------------------------------------------
     # Publisher operations
     # ------------------------------------------------------------------
@@ -271,9 +256,10 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
     ) -> ReviewStats:
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
-        pending_statuses = self._with_changes_requested(
-            [StrategyStatus.SUBMITTED, StrategyStatus.UNDER_REVIEW]
-        )
+        changes_requested_status = getattr(StrategyStatus, "CHANGES_REQUESTED", None)
+        pending_statuses = [StrategyStatus.SUBMITTED, StrategyStatus.UNDER_REVIEW]
+        if changes_requested_status:
+            pending_statuses.append(changes_requested_status)
 
         total_pending_stmt = select(func.count(StrategySubmission.id)).where(
             StrategySubmission.status.in_(pending_statuses)
@@ -327,6 +313,11 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
         db: AsyncSession,
         status_filter: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        changes_requested_status = getattr(StrategyStatus, "CHANGES_REQUESTED", None)
+        pending_statuses = [StrategyStatus.SUBMITTED, StrategyStatus.UNDER_REVIEW]
+        if changes_requested_status:
+            pending_statuses.append(changes_requested_status)
+
         stmt = (
             select(StrategySubmission)
             .options(
@@ -335,15 +326,12 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
             )
             .where(
                 StrategySubmission.status.in_(
-                    self._with_changes_requested(
-                        [
-                            StrategyStatus.SUBMITTED,
-                            StrategyStatus.UNDER_REVIEW,
-                            StrategyStatus.APPROVED,
-                            StrategyStatus.REJECTED,
-                            StrategyStatus.PUBLISHED,
-                        ]
-                    )
+                    [
+                        *pending_statuses,
+                        StrategyStatus.APPROVED,
+                        StrategyStatus.REJECTED,
+                        StrategyStatus.PUBLISHED,
+                    ]
                 )
             )
             .order_by(StrategySubmission.submitted_at.desc())
