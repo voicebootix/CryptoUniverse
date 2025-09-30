@@ -731,8 +731,20 @@ async def _process_confirmed_payment(
                     
                     return
                 
-                # Update credit account using centralized ledger rules
-                await credit_ledger.add_credits(
+                # Store placeholder transaction metadata before deleting it
+                placeholder_metadata = {**transaction_metadata}
+                placeholder_metadata.update({
+                    "payment_id": payment_id,
+                    "transaction_hash": verification_result.get("transaction_hash"),
+                    "payment_state": "completed",
+                })
+
+                # Delete the placeholder transaction to avoid duplicates
+                await db_session.delete(transaction)
+                await db_session.flush()
+
+                # Create finalized transaction using centralized ledger rules
+                ledger_transaction = await credit_ledger.add_credits(
                     db_session,
                     credit_account,
                     credits=credit_amount,
@@ -740,24 +752,11 @@ async def _process_confirmed_payment(
                     description=f"Crypto payment allocation ({payment_id})",
                     source="crypto_payment",
                     reference_id=payment_id,
-                    metadata={
-                        "payment_id": payment_id,
-                        "transaction_hash": verification_result.get("transaction_hash"),
-                    },
+                    metadata=placeholder_metadata,
                 )
 
-                # Update transaction status
-                transaction.status = CreditStatus.ACTIVE
-                transaction.processed_at = datetime.utcnow()
-                updated_metadata = {**transaction_metadata}
-                updated_metadata.update(
-                    {
-                        "payment_id": payment_id,
-                        "transaction_hash": verification_result.get("transaction_hash"),
-                        "payment_state": "completed",
-                    }
-                )
-                transaction.meta_data = updated_metadata
+                # Use the ledger transaction as the surviving record
+                transaction = ledger_transaction
 
                 # Commit all changes in single transaction
                 await db_session.commit()

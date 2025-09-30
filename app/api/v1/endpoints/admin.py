@@ -8,6 +8,7 @@ system configuration, and monitoring for the AI money manager platform.
 import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
+import uuid
 from uuid import UUID
 
 import structlog
@@ -1178,6 +1179,13 @@ async def manage_user(
                     detail="Credit amount required for reset_credits action"
                 )
 
+            # Validate credit amount is non-negative
+            if request.credit_amount < 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Credit amount must be non-negative"
+                )
+
             # Get or create credit account using async query
             credit_result = await db.execute(
                 select(CreditAccount).where(
@@ -1191,14 +1199,26 @@ async def manage_user(
                 db.add(credit_account)
                 await db.flush()
 
+            # Re-query with row lock to serialize concurrent updates
+            locked_result = await db.execute(
+                select(CreditAccount).where(
+                    CreditAccount.user_id == target_user.id
+                ).with_for_update()
+            )
+            credit_account = locked_result.scalar_one()
+
             current_balance = int(credit_account.available_credits or 0)
             target_balance = int(request.credit_amount)
             delta = target_balance - current_balance
+
+            # Generate reference_id for audit/idempotency
+            reference_id = str(uuid.uuid4())
 
             metadata = {
                 "requested_by": current_user.email,
                 "reason": request.reason,
                 "target_balance": target_balance,
+                "reference_id": reference_id,
             }
 
             if delta > 0:
@@ -1209,6 +1229,8 @@ async def manage_user(
                     transaction_type=CreditTransactionType.ADJUSTMENT,
                     description=f"Admin credit reset increase by {current_user.email}",
                     source="admin_console",
+                    provider="admin_console",
+                    reference_id=reference_id,
                     metadata=metadata,
                     track_lifetime=False,
                 )
@@ -1222,6 +1244,7 @@ async def manage_user(
                         source="admin_console",
                         transaction_type=CreditTransactionType.ADJUSTMENT,
                         metadata=metadata,
+                        track_usage=False,
                     )
                 except InsufficientCreditsError as e:
                     raise HTTPException(
