@@ -179,7 +179,7 @@ class MarketAnalysisService(LoggerMixin):
             "average_response_time": 0
         }
         self._cache_store: Dict[str, Dict[str, Any]] = {}
-        self._cache_lock: Optional[asyncio.Lock] = None
+        self._cache_locks: Dict[int, asyncio.Lock] = {}
         self._default_cache_ttl = 60
         self._cache_ttl_overrides = {
             "realtime_price_tracking": 60,
@@ -189,10 +189,15 @@ class MarketAnalysisService(LoggerMixin):
         }
 
     async def _get_cache_lock(self) -> asyncio.Lock:
-        """Ensure we have an asyncio lock tied to the active event loop."""
-        if self._cache_lock is None:
-            self._cache_lock = asyncio.Lock()
-        return self._cache_lock
+        """Provide an asyncio lock scoped to the current event loop."""
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+
+        lock = self._cache_locks.get(loop_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._cache_locks[loop_id] = lock
+        return lock
 
     def _build_cache_key(self, namespace: str, **params: Any) -> str:
         """Create a deterministic cache key for the provided parameters."""
@@ -279,7 +284,7 @@ class MarketAnalysisService(LoggerMixin):
                         "exchanges_checked": 0,
                         "response_time_ms": 0.0,
                         "timestamp": datetime.utcnow().isoformat(),
-                        "cache_status": "hit",
+                        "cache_status": "skip",
                     },
                 }
 
@@ -336,13 +341,17 @@ class MarketAnalysisService(LoggerMixin):
                 if symbol_data:
                     prices = [d["price"] for d in symbol_data]
                     volumes = [d.get("volume", 0) for d in symbol_data]
+                    min_price = min(prices) if prices else 0
+                    max_price = max(prices) if prices else 0
+                    price_spread = max_price - min_price
+                    spread_percentage = ((max_price - min_price) / min_price) * 100 if min_price > 0 else None
 
                     price_data[symbol] = {
                         "exchanges": symbol_data,
                         "aggregated": {
                             "average_price": sum(prices) / len(prices),
-                            "price_spread": max(prices) - min(prices),
-                            "spread_percentage": ((max(prices) - min(prices)) / min(prices)) * 100,
+                            "price_spread": price_spread,
+                            "spread_percentage": spread_percentage,
                             "total_volume": sum(volumes),
                             "exchange_count": len(symbol_data),
                         },

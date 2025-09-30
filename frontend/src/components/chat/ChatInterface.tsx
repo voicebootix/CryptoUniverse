@@ -83,6 +83,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
   const pendingMessageRef = useRef<string | null>(null);
+  const pendingRequestIdRef = useRef<string | null>(null);
   const { toast } = useToast();
 
   // Auto-scroll to bottom when new messages arrive
@@ -115,6 +116,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   const finalizePendingRequest = useCallback(() => {
     pendingMessageRef.current = null;
+    pendingRequestIdRef.current = null;
     clearFallbackTimer();
     setIsLoading(false);
   }, [clearFallbackTimer]);
@@ -276,7 +278,10 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
+
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     pendingMessageRef.current = messageToSend;
+    pendingRequestIdRef.current = requestId;
 
     try {
       console.log('💬 Sending message:', { isConnected, hasWsMessage: !!sendWsMessage, messageToSend });
@@ -291,17 +296,27 @@ Just chat with me naturally! How can I help you manage your crypto investments t
 
         // Set timeout to fall back to REST API if no WebSocket response
         clearFallbackTimer();
+        const fallbackRequestId = requestId;
         fallbackTimerRef.current = setTimeout(async () => {
-          if (!pendingMessageRef.current) {
+          if (!pendingMessageRef.current || pendingRequestIdRef.current !== fallbackRequestId) {
             return;
           }
 
           console.log('⏰ WebSocket timeout, falling back to REST API');
+          let shouldFinalize = false;
+          const pendingMessage = pendingMessageRef.current;
+
           try {
             const response = await apiClient.post('/chat/message', {
-              message: pendingMessageRef.current,
+              message: pendingMessage,
               session_id: sessionId
             });
+
+            if (pendingRequestIdRef.current !== fallbackRequestId) {
+              return;
+            }
+
+            shouldFinalize = true;
 
             if (response.data.success) {
               const assistantMessage: ChatMessage = {
@@ -314,8 +329,15 @@ Just chat with me naturally! How can I help you manage your crypto investments t
                 metadata: response.data.metadata
               };
               setMessages(prev => [...prev, assistantMessage]);
+            } else {
+              throw new Error('Failed to send message');
             }
           } catch (fallbackError) {
+            if (pendingRequestIdRef.current !== fallbackRequestId) {
+              return;
+            }
+
+            shouldFinalize = true;
             const friendlyMessage = buildErrorMessage(fallbackError);
             pushSystemMessage(friendlyMessage);
             toast({
@@ -324,7 +346,9 @@ Just chat with me naturally! How can I help you manage your crypto investments t
               variant: 'destructive',
             });
           } finally {
-            finalizePendingRequest();
+            if (shouldFinalize && pendingRequestIdRef.current === fallbackRequestId) {
+              finalizePendingRequest();
+            }
           }
         }, 10000); // 10 second timeout
       } else {
@@ -351,7 +375,9 @@ Just chat with me naturally! How can I help you manage your crypto investments t
           throw new Error('Failed to send message');
         }
 
-        finalizePendingRequest();
+        if (pendingRequestIdRef.current === requestId) {
+          finalizePendingRequest();
+        }
       }
     } catch (error) {
       const friendlyMessage = buildErrorMessage(error);
