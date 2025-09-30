@@ -256,10 +256,15 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
     ) -> ReviewStats:
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
+        pending_statuses = [
+            StrategyStatus.SUBMITTED,
+            StrategyStatus.UNDER_REVIEW,
+        ]
+        if hasattr(StrategyStatus, "CHANGES_REQUESTED"):
+            pending_statuses.append(StrategyStatus.CHANGES_REQUESTED)
+
         total_pending_stmt = select(func.count(StrategySubmission.id)).where(
-            StrategySubmission.status.in_(
-                [StrategyStatus.SUBMITTED, StrategyStatus.UNDER_REVIEW]
-            )
+            StrategySubmission.status.in_(pending_statuses)
         )
         under_review_stmt = select(func.count(StrategySubmission.id)).where(
             StrategySubmission.status == StrategyStatus.UNDER_REVIEW
@@ -288,12 +293,17 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
 
         my_assigned = 0
         if reviewer:
+            assigned_statuses = [
+                StrategyStatus.SUBMITTED,
+                StrategyStatus.UNDER_REVIEW,
+            ]
+            if hasattr(StrategyStatus, "CHANGES_REQUESTED"):
+                assigned_statuses.append(StrategyStatus.CHANGES_REQUESTED)
+
             assigned_stmt = select(func.count(StrategySubmission.id)).where(
                 and_(
                     StrategySubmission.reviewer_id == str(reviewer.id),
-                    StrategySubmission.status.in_(
-                        [StrategyStatus.SUBMITTED, StrategyStatus.UNDER_REVIEW]
-                    ),
+                    StrategySubmission.status.in_(assigned_statuses),
                 )
             )
             my_assigned = (await db.execute(assigned_stmt)).scalar_one()
