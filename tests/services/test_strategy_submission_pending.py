@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, UTC
-import uuid
-import sys
-from pathlib import Path
+from datetime import UTC, datetime
 import os
+import sys
+import uuid
+from pathlib import Path
 
 import pytest
 
