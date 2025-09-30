@@ -256,10 +256,13 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
     ) -> ReviewStats:
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
+        changes_requested_status = getattr(StrategyStatus, "CHANGES_REQUESTED", None)
+        pending_statuses = [StrategyStatus.SUBMITTED, StrategyStatus.UNDER_REVIEW]
+        if changes_requested_status:
+            pending_statuses.append(changes_requested_status)
+
         total_pending_stmt = select(func.count(StrategySubmission.id)).where(
-            StrategySubmission.status.in_(
-                [StrategyStatus.SUBMITTED, StrategyStatus.UNDER_REVIEW]
-            )
+            StrategySubmission.status.in_(pending_statuses)
         )
         under_review_stmt = select(func.count(StrategySubmission.id)).where(
             StrategySubmission.status == StrategyStatus.UNDER_REVIEW
@@ -291,9 +294,7 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
             assigned_stmt = select(func.count(StrategySubmission.id)).where(
                 and_(
                     StrategySubmission.reviewer_id == str(reviewer.id),
-                    StrategySubmission.status.in_(
-                        [StrategyStatus.SUBMITTED, StrategyStatus.UNDER_REVIEW]
-                    ),
+                    StrategySubmission.status.in_(pending_statuses),
                 )
             )
             my_assigned = (await db.execute(assigned_stmt)).scalar_one()
@@ -312,6 +313,11 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
         db: AsyncSession,
         status_filter: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        changes_requested_status = getattr(StrategyStatus, "CHANGES_REQUESTED", None)
+        pending_statuses = [StrategyStatus.SUBMITTED, StrategyStatus.UNDER_REVIEW]
+        if changes_requested_status:
+            pending_statuses.append(changes_requested_status)
+
         stmt = (
             select(StrategySubmission)
             .options(
@@ -321,8 +327,7 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
             .where(
                 StrategySubmission.status.in_(
                     [
-                        StrategyStatus.SUBMITTED,
-                        StrategyStatus.UNDER_REVIEW,
+                        *pending_statuses,
                         StrategyStatus.APPROVED,
                         StrategyStatus.REJECTED,
                         StrategyStatus.PUBLISHED,
