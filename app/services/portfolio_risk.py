@@ -1650,42 +1650,38 @@ class PortfolioOptimizationEngine(LoggerMixin):
 
         # Blend weights (80% risk parity, 20% max Sharpe) - More conservative
         symbols = self._extract_symbols(positions)
-        blended_weights = {}
+        if not symbols:
+            return self._get_empty_optimization_result(OptimizationStrategy.ADAPTIVE)
 
-        for symbol in symbols:
-            rp_weight = risk_parity_result.weights.get(symbol, 0)
-            ms_weight = max_sharpe_result.weights.get(symbol, 0)
-            blended_weights[symbol] = 0.8 * rp_weight + 0.2 * ms_weight
-            
-        # Apply asset-specific constraints based on market research
-        for symbol in blended_weights:
-            if symbol == "XRP":
-                blended_weights[symbol] = min(blended_weights[symbol], 0.25)  # Max 25%
-            elif symbol == "ADA":
-                blended_weights[symbol] = min(blended_weights[symbol], 0.20)  # Max 20%
-            elif symbol == "DOGE":
-                blended_weights[symbol] = min(blended_weights[symbol], 0.10)  # Max 10%
-            elif symbol == "USDC":
-                blended_weights[symbol] = max(min(blended_weights[symbol], 0.30), 0.05)  # 5-30%
-            elif symbol == "REEF":
-                blended_weights[symbol] = min(blended_weights[symbol], 0.05)  # Max 5%
-            else:
-                blended_weights[symbol] = min(blended_weights[symbol], 0.25)  # Default max 25%
-            
-            # Ensure minimum allocation
-            if blended_weights[symbol] < 0.02:
-                blended_weights[symbol] = 0.02
-        
-        # ENTERPRISE FIX: Robust weight normalization
-        total_weight = sum(blended_weights.values())
-        if total_weight > 1e-10:  # Avoid division by very small numbers
-            blended_weights = {k: v/total_weight for k, v in blended_weights.items()}
+        raw_weights = np.array(
+            [
+                0.8 * risk_parity_result.weights.get(symbol, 0.0)
+                + 0.2 * max_sharpe_result.weights.get(symbol, 0.0)
+                for symbol in symbols
+            ],
+            dtype=float,
+        )
+
+        raw_weights = np.nan_to_num(raw_weights, nan=0.0, posinf=0.0, neginf=0.0)
+
+        total_weight = raw_weights.sum()
+        if total_weight <= 0:
+            logger.warning("Adaptive strategy blend produced zero weights; using equal allocation")
+            raw_weights = np.ones(len(symbols), dtype=float) / len(symbols)
         else:
-            # Fallback to equal weights if blending fails
-            logger.warning("Adaptive strategy weight blending failed, using equal weights")
-            blended_weights = {symbol: 1.0/len(symbols) for symbol in symbols}
+            raw_weights = raw_weights / total_weight
 
-        weights_array = np.array([blended_weights[symbol] for symbol in symbols], dtype=float)
+        constrained_weights = await self._apply_dynamic_weight_constraints(symbols, raw_weights)
+
+        if constrained_weights.size != len(symbols) or not np.all(np.isfinite(constrained_weights)):
+            logger.warning("Dynamic constraint application failed; reverting to equal weights")
+            constrained_weights = np.ones(len(symbols), dtype=float) / len(symbols)
+
+        weights_array = np.array(constrained_weights, dtype=float)
+        blended_weights = {
+            symbol: float(weight)
+            for symbol, weight in zip(symbols, weights_array)
+        }
 
         return self._build_optimization_result(
             strategy=OptimizationStrategy.ADAPTIVE,

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 import os
 import sys
 
@@ -248,3 +248,88 @@ async def test_max_sharpe_uses_dynamic_asset_liquidity(monkeypatch):
     assert {"BTC", "DOGE"} == set(stub_filter.calls[0])
     assert result.weights["BTC"] > result.weights["DOGE"]
     assert result.weights["BTC"] > 0.55
+
+
+@pytest.mark.asyncio
+async def test_adaptive_blend_uses_dynamic_constraints(monkeypatch):
+    now = datetime.utcnow()
+    asset_map = {
+        "BTC": AssetInfo(
+            symbol="BTC",
+            exchange="binance",
+            volume_24h_usd=750_000_000.0,
+            price_usd=30000.0,
+            market_cap_usd=None,
+            tier="tier_institutional",
+            last_updated=now,
+            metadata={"source": "test"},
+        ),
+        "ADA": AssetInfo(
+            symbol="ADA",
+            exchange="binance",
+            volume_24h_usd=15_000_000.0,
+            price_usd=0.6,
+            market_cap_usd=None,
+            tier="tier_micro",
+            last_updated=now,
+            metadata={"source": "test"},
+        ),
+    }
+
+    stub_filter = StubAssetFilter(asset_map)
+    monkeypatch.setattr(
+        portfolio_risk_module,
+        "enterprise_asset_filter",
+        stub_filter,
+        raising=False,
+    )
+
+    price_map = {
+        "BTC/USDT": _build_ohlcv_series([30000, 30900, 31500, 32200, 33000]),
+        "ADA/USDT": _build_ohlcv_series([0.6, 0.62, 0.58, 0.6, 0.605]),
+    }
+
+    engine = PortfolioOptimizationEngine(market_data_service=StubMarketDataService(price_map))
+    engine._asset_filter = stub_filter
+
+    captured: Dict[str, Any] = {}
+    original_apply = PortfolioOptimizationEngine._apply_dynamic_weight_constraints
+
+    async def spy(self, symbols, weights_array):
+        captured["symbols"] = list(symbols)
+        captured["input"] = np.array(weights_array, dtype=float)
+        constrained = await original_apply(self, symbols, weights_array)
+        captured["output"] = np.array(constrained, dtype=float)
+        return constrained
+
+    monkeypatch.setattr(PortfolioOptimizationEngine, "_apply_dynamic_weight_constraints", spy)
+
+    positions = [
+        {"symbol": "BTC", "value_usd": 20000},
+        {"symbol": "ADA", "value_usd": 5000},
+    ]
+
+    result = await engine.optimize_portfolio(
+        {"positions": positions},
+        OptimizationStrategy.ADAPTIVE,
+    )
+
+    assert stub_filter.calls, "Expected asset filter to be used for adaptive blend"
+    assert captured["symbols"] == ["BTC", "ADA"]
+    assert "input" in captured and "output" in captured
+
+    multipliers = np.array(
+        [
+            engine._get_liquidity_multiplier(symbol, stub_filter._asset_map[symbol])
+            for symbol in captured["symbols"]
+        ],
+        dtype=float,
+    )
+
+    expected = captured["input"] * multipliers
+    expected /= expected.sum()
+
+    for symbol, expected_weight in zip(captured["symbols"], expected):
+        assert result.weights[symbol] == pytest.approx(expected_weight, rel=1e-6, abs=1e-6)
+
+    np.testing.assert_allclose(captured["output"], expected, rtol=1e-6, atol=1e-6)
