@@ -21,6 +21,7 @@ from enum import Enum
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import DatabaseError
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
@@ -621,7 +622,32 @@ class UnifiedChatService(LoggerMixin):
                 marketplace_strategies=prefetched_marketplace
             )
 
-            # Step 4: Generate response
+            # Step 4: Charge credits before generation (consistent with streaming path)
+            charge_context: Optional[Dict[str, Any]] = None
+            if charge_request:
+                try:
+                    charge_context = await self._charge_chat_interaction(
+                        user_id,
+                        charge_request["intent"],
+                        charge_request["conversation_mode"],
+                        charge_request["credits"],
+                    )
+                except InsufficientCreditsError:
+                    return {
+                        "success": False,
+                        "session_id": session.session_id,
+                        "message_id": str(uuid.uuid4()),
+                        "content": "Insufficient credits for this operation. Please purchase additional credits to continue.",
+                        "intent": intent_analysis["intent"].value if hasattr(intent_analysis["intent"], "value") else intent_analysis["intent"],
+                        "requires_action": True,
+                        "action_data": {
+                            "type": "credit_purchase",
+                            "required_credits": charge_request["credits"],
+                        },
+                        "timestamp": datetime.utcnow(),
+                    }
+
+            # Step 5: Generate response
             if stream:
                 return self._generate_streaming_response(
                     message,
@@ -635,30 +661,6 @@ class UnifiedChatService(LoggerMixin):
                 response = await self._generate_complete_response(
                     message, intent_analysis, session, context_data
                 )
-
-                if response.get("success") and charge_request:
-                    try:
-                        charge_context = await self._charge_chat_interaction(
-                            user_id,
-                            charge_request["intent"],
-                            charge_request["conversation_mode"],
-                            charge_request["credits"],
-                        )
-                    except InsufficientCreditsError:
-                        return {
-                            "success": False,
-                            "session_id": session.session_id,
-                            "message_id": str(uuid.uuid4()),
-                            "content": "Insufficient credits for this operation. Please purchase additional credits to continue.",
-                            "intent": intent_analysis["intent"].value if hasattr(intent_analysis["intent"], "value") else intent_analysis["intent"],
-                            "requires_action": True,
-                            "action_data": {
-                                "type": "credit_purchase",
-                                "required_credits": charge_request["credits"],
-                            },
-                            "timestamp": datetime.utcnow(),
-                        }
-
                 return response
 
         except Exception as e:
@@ -972,8 +974,9 @@ class UnifiedChatService(LoggerMixin):
                     "account_status": "active",
                 }
 
-        except Exception as e:
-            self.logger.error("Credit check failed", error=str(e), user_id=str(user_id))
+        except (ValueError, RuntimeError, DatabaseError) as e:
+            # Expected errors that should return error status
+            self.logger.exception("Credit check failed with expected error", user_id=str(user_id))
             return {
                 "has_credits": False,
                 "available_credits": 0,
@@ -981,6 +984,10 @@ class UnifiedChatService(LoggerMixin):
                 "error": str(e),
                 "account_status": "error",
             }
+        except Exception as e:
+            # Unexpected errors should be logged with full traceback and re-raised
+            self.logger.exception("Unexpected error during credit check", user_id=str(user_id))
+            raise
 
     async def _charge_chat_interaction(
         self,

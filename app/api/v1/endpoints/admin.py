@@ -2369,26 +2369,14 @@ async def manage_user(
                     detail="Credit amount must be non-negative"
                 )
 
-            # Get or create credit account using async query
-            credit_result = await db.execute(
-                select(CreditAccount).where(
-                    CreditAccount.user_id == target_user.id
-                )
+            # Get or create credit account using ledger helper that handles dialect-specific locking
+            credit_account = await credit_ledger.get_account(
+                db,
+                target_user.id,
+                for_update=True,
+                create_if_missing=True,
+                initial_credits=0,
             )
-            credit_account = credit_result.scalar_one_or_none()
-
-            if not credit_account:
-                credit_account = CreditAccount(user_id=target_user.id)
-                db.add(credit_account)
-                await db.flush()
-
-            # Re-query with row lock to serialize concurrent updates
-            locked_result = await db.execute(
-                select(CreditAccount).where(
-                    CreditAccount.user_id == target_user.id
-                ).with_for_update()
-            )
-            credit_account = locked_result.scalar_one()
 
             current_balance = int(credit_account.available_credits or 0)
             target_balance = int(request.credit_amount)
