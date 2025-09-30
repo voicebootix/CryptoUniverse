@@ -12,11 +12,12 @@ NO MOCKS, NO PLACEHOLDERS - Only real data and services.
 
 import asyncio
 import json
+import re
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Dict, List, Optional, Any, AsyncGenerator, Union
-from dataclasses import dataclass
+from typing import Dict, List, Optional, Any, AsyncGenerator, Union, Tuple, Iterable
+from dataclasses import dataclass, asdict
 from enum import Enum
 
 import structlog
@@ -38,9 +39,11 @@ from app.services.trade_execution import TradeExecutionService
 from app.services.telegram_core import TelegramCommanderService
 from app.services.websocket import manager as websocket_manager
 from app.services.chat_memory import ChatMemoryService
+from app.services.unified_ai_manager import unified_ai_manager
 
 # Import all service engines
 from app.services.market_analysis_core import MarketAnalysisService
+from app.services.portfolio_risk import OptimizationStrategy
 from app.services.portfolio_risk_core import PortfolioRiskService
 from app.services.trading_strategies import TradingStrategiesService
 from app.services.strategy_marketplace_service import strategy_marketplace_service
@@ -328,15 +331,726 @@ class UnifiedChatService(LoggerMixin):
         """Resolve the user's configured trading mode with a safe fallback."""
         trading_mode_value = user_config.get("trading_mode", TradingMode.BALANCED.value)
 
+        if isinstance(trading_mode_value, TradingMode):
+            return trading_mode_value
+
         if isinstance(trading_mode_value, str):
             normalized_value = trading_mode_value.lower()
+            try:
+                return TradingMode(normalized_value)
+            except ValueError:
+                pass
+
+        return self._map_risk_to_trading_mode(user_config.get("risk_tolerance"))
+
+    def _map_risk_to_trading_mode(self, risk_tolerance: Optional[str]) -> TradingMode:
+        """Translate a textual risk tolerance into a trading mode."""
+
+        if not risk_tolerance:
+            return TradingMode.BALANCED
+
+        normalized = str(risk_tolerance).strip().lower()
+
+        if normalized in {"very conservative", "conservative", "cautious", "low"}:
+            return TradingMode.CONSERVATIVE
+
+        if normalized in {"aggressive", "very aggressive", "high", "speculative"}:
+            return TradingMode.AGGRESSIVE
+
+        if normalized in {"beast", "beast_mode", "maximum"}:
+            return TradingMode.BEAST_MODE
+
+        return TradingMode.BALANCED
+
+    def _select_optimization_strategies(
+        self,
+        user_config: Dict[str, Any]
+    ) -> Tuple[TradingMode, List[OptimizationStrategy]]:
+        """Pick the trading mode and strategy sequence that matches the profile."""
+
+        trading_mode = self._map_risk_to_trading_mode(user_config.get("risk_tolerance"))
+
+        strategy_map = {
+            TradingMode.CONSERVATIVE: [
+                OptimizationStrategy.MIN_VARIANCE,
+                OptimizationStrategy.RISK_PARITY,
+            ],
+            TradingMode.BALANCED: [
+                OptimizationStrategy.RISK_PARITY,
+                OptimizationStrategy.EQUAL_WEIGHT,
+            ],
+            TradingMode.AGGRESSIVE: [
+                OptimizationStrategy.KELLY_CRITERION,
+                OptimizationStrategy.ADAPTIVE,
+            ],
+            TradingMode.BEAST_MODE: [
+                OptimizationStrategy.ADAPTIVE,
+                OptimizationStrategy.KELLY_CRITERION,
+            ],
+        }
+
+        strategies = strategy_map.get(trading_mode)
+        if not strategies:
+            strategies = [OptimizationStrategy.RISK_PARITY]
+
+        return trading_mode, strategies
+
+    async def _run_portfolio_optimization(
+        self,
+        user_id: str,
+        user_config: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Execute portfolio optimizations aligned to the user's risk selection."""
+
+        trading_mode, strategies = self._select_optimization_strategies(user_config)
+        optimization_summaries: List[Dict[str, Any]] = []
+        allowed_symbols: List[str] = []
+
+        for strategy in strategies:
+            try:
+                response = await self.portfolio_risk.optimize_allocation(
+                    user_id=user_id,
+                    strategy=strategy.value,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self.logger.warning(
+                    "Portfolio optimization call failed",
+                    user_id=user_id,
+                    strategy=strategy.value,
+                    error=str(exc),
+                )
+                continue
+
+            if not response.get("success"):
+                continue
+
+            raw_result = response.get("optimization_result") or {}
+
+            if hasattr(raw_result, "__dataclass_fields__"):
+                raw_result = asdict(raw_result)
+            elif not isinstance(raw_result, dict):
+                raw_result = dict(raw_result)
+
+            # Normalize enum serialization for downstream consumers
+            strategy_value = raw_result.get("strategy")
+            if isinstance(strategy_value, OptimizationStrategy):
+                raw_result["strategy"] = strategy_value.value
+
+            weights = raw_result.get("weights") or {}
+            allowed_symbols.extend(str(weights_key).upper() for weights_key in weights.keys())
+
+            suggested_trades = raw_result.get("suggested_trades") or []
+
+            expected_return = raw_result.get("expected_return")
+            expected_volatility = raw_result.get("expected_volatility")
+
+            optimization_summaries.append(
+                {
+                    "strategy": strategy.value,
+                    "result": raw_result,
+                    "expected_return": expected_return,
+                    "expected_volatility": expected_volatility,
+                    "expected_return_range": (
+                        expected_return - expected_volatility
+                        if expected_return is not None and expected_volatility is not None
+                        else None,
+                        expected_return + expected_volatility
+                        if expected_return is not None and expected_volatility is not None
+                        else None,
+                    ),
+                    "sharpe_ratio": raw_result.get("sharpe_ratio"),
+                    "confidence": raw_result.get("confidence"),
+                    "suggested_trades": suggested_trades,
+                }
+            )
+
+        if not optimization_summaries:
+            return None
+
+        unique_allowed = sorted({symbol for symbol in allowed_symbols if symbol})
+
+        return {
+            "trading_mode": trading_mode.value,
+            "strategies": optimization_summaries,
+            "primary_strategy": optimization_summaries[0]["strategy"],
+            "allowed_symbols": unique_allowed,
+        }
+
+    def _profile_fields_missing(
+        self,
+        user_config: Dict[str, Any],
+        required_fields: Optional[List[str]] = None,
+    ) -> List[str]:
+        """Determine which investor profile fields are missing or incomplete."""
+
+        required = required_fields or list(self.INVESTOR_PROFILE_FIELDS)
+        missing: List[str] = []
+
+        for field in required:
+            value = user_config.get(field)
+            if field == "risk_tolerance":
+                if value in (None, "", "balanced", "moderate", "medium"):
+                    missing.append(field)
+            elif field == "investment_amount":
+                amount = self._safe_float(value, None)
+                if amount is None or amount <= 0:
+                    missing.append(field)
+            elif field == "investment_objectives":
+                if not value:
+                    missing.append(field)
+            elif field == "constraints":
+                if value is None:
+                    missing.append(field)
+            elif value in (None, ""):
+                missing.append(field)
+
+        return missing
+
+    async def _prepare_profile_questionnaire(
+        self,
+        session: ChatSession,
+        missing_fields: List[str],
+        original_message: str,
+        intent: ChatIntent,
+    ) -> None:
+        """Persist questionnaire state so we can collect investor preferences."""
+
+        session.context["awaiting_profile_fields"] = list(missing_fields)
+        session.context["pending_profile_original_message"] = original_message
+        session.context["pending_profile_intent"] = intent.value
+
+        await self._persist_session_context(
+            session.session_id,
+            {
+                "awaiting_profile_fields": list(missing_fields),
+                "pending_profile_original_message": original_message,
+                "pending_profile_intent": intent.value,
+            },
+        )
+
+    def _build_profile_prompt(self, missing_fields: List[str]) -> str:
+        """Create a human-friendly prompt asking for missing profile fields."""
+
+        field_descriptions = {
+            "risk_tolerance": "your risk tolerance (e.g., conservative, balanced, aggressive)",
+            "investment_amount": "the capital you want the plan to manage (e.g., $10,000 or 5 BTC)",
+            "time_horizon": "your time horizon (short-term, medium-term, or long-term)",
+            "investment_objectives": "your investment objectives (growth, income, capital preservation, etc.)",
+            "constraints": "any constraints or guardrails (no leverage, ESG focus, avoid certain assets, etc.)",
+        }
+
+        prompts = [field_descriptions[field] for field in missing_fields if field in field_descriptions]
+        prompt_tail = "; and ".join(prompts)
+
+        return (
+            "To tailor strategy guidance, I need a quick profile update. Please share "
+            f"{prompt_tail}. A single sentence like \"I'm conservative, long-term, focused on income\" works great."
+        )
+
+    def _build_profile_acknowledgement(
+        self,
+        updated_config: Dict[str, Any],
+        pending_message: Optional[str],
+    ) -> str:
+        """Summarize the stored preferences and invite the user to continue."""
+
+        summary = self._describe_user_profile(updated_config)
+        acknowledgement = [
+            f"Thanks! I've updated your investor profile: {summary}.",
+            "Ask for opportunities or strategy recommendations anytime and I'll align them with these preferences.",
+        ]
+
+        if pending_message:
+            acknowledgement.append(f"Ready whenever you want to revisit: \"{pending_message}\".")
+
+        return " ".join(acknowledgement)
+
+    async def _handle_pending_profile_collection(
+        self,
+        session: ChatSession,
+        message: str,
+        user_id: str,
+        interface: InterfaceType,
+        conversation_mode: ConversationMode,
+        stream: bool,
+    ) -> Optional[Union[Dict[str, Any], AsyncGenerator[Dict[str, Any], None]]]:
+        """Handle follow-up messages when we're collecting investor preferences."""
+
+        pending_fields = session.context.get("awaiting_profile_fields")
+        if not pending_fields:
+            return None
+
+        parsed_updates = self._parse_investor_profile_response(message, pending_fields)
+        if parsed_updates:
+            updated_config = await self._update_user_config_preferences(user_id, parsed_updates)
         else:
-            normalized_value = TradingMode.BALANCED.value
+            updated_config = await self._get_user_config(user_id)
+
+        missing_fields = self._profile_fields_missing(updated_config, list(pending_fields))
+
+        if missing_fields:
+            session.context["awaiting_profile_fields"] = missing_fields
+            await self._persist_session_context(
+                session.session_id,
+                {"awaiting_profile_fields": missing_fields},
+            )
+
+            response_payload = {
+                "success": False,
+                "session_id": session.session_id,
+                "message_id": str(uuid.uuid4()),
+                "content": self._build_profile_prompt(missing_fields),
+                "intent": ChatIntent.HELP.value,
+                "requires_action": True,
+                "action_data": {
+                    "type": "collect_investor_profile",
+                    "missing_fields": missing_fields,
+                },
+                "timestamp": datetime.utcnow(),
+            }
+
+            if stream:
+                async def prompt_stream():
+                    yield response_payload
+
+                return prompt_stream()
+
+            return response_payload
+
+        # All required fields collected
+        session.context.pop("awaiting_profile_fields", None)
+        pending_message = session.context.pop("pending_profile_original_message", None)
+        pending_intent = session.context.pop("pending_profile_intent", None)
+        session.context["user_profile_preferences"] = {
+            key: updated_config.get(key)
+            for key in self.INVESTOR_PROFILE_FIELDS
+        }
+
+        await self._persist_session_context(
+            session.session_id,
+            {
+                "awaiting_profile_fields": None,
+                "pending_profile_original_message": None,
+                "pending_profile_intent": None,
+                "user_profile_preferences": session.context["user_profile_preferences"],
+            },
+        )
+
+        acknowledgement = {
+            "success": True,
+            "session_id": session.session_id,
+            "message_id": str(uuid.uuid4()),
+            "content": self._build_profile_acknowledgement(updated_config, pending_message),
+            "intent": ChatIntent.HELP.value,
+            "metadata": {
+                "preference_update": True,
+                "pending_intent": pending_intent,
+                "interface": interface.value,
+                "conversation_mode": conversation_mode.value,
+            },
+            "timestamp": datetime.utcnow(),
+        }
+
+        if stream:
+            async def acknowledgement_stream():
+                yield acknowledgement
+
+            return acknowledgement_stream()
+
+        return acknowledgement
+
+    def _parse_investor_profile_response(
+        self,
+        message: str,
+        pending_fields: List[str],
+    ) -> Dict[str, Any]:
+        """Extract investor profile values from a free-form message."""
+
+        normalized = message.lower()
+        updates: Dict[str, Any] = {}
+
+        if "risk_tolerance" in pending_fields or "risk_tolerance" in self.INVESTOR_PROFILE_FIELDS:
+            risk_value = self._normalize_risk_tolerance(normalized)
+            if risk_value:
+                updates["risk_tolerance"] = risk_value
+
+        if "investment_amount" in pending_fields or "investment_amount" in self.INVESTOR_PROFILE_FIELDS:
+            amount_value = self._extract_investment_amount(message)
+            if amount_value is not None:
+                updates["investment_amount"] = amount_value
+
+        if "time_horizon" in pending_fields or "time_horizon" in self.INVESTOR_PROFILE_FIELDS:
+            horizon_value = self._normalize_time_horizon(normalized)
+            if horizon_value:
+                updates["time_horizon"] = horizon_value
+
+        if "investment_objectives" in pending_fields or "investment_objectives" in self.INVESTOR_PROFILE_FIELDS:
+            objectives = self._extract_investment_objectives(normalized)
+            if objectives:
+                updates["investment_objectives"] = objectives
+
+        if "constraints" in pending_fields or "constraints" in self.INVESTOR_PROFILE_FIELDS:
+            constraints = self._extract_constraints(message)
+            if constraints is not None:
+                updates["constraints"] = constraints
+
+        return updates
+
+    def _normalize_risk_tolerance(self, message: str) -> Optional[str]:
+        """Map message text to a canonical risk tolerance value."""
+
+        risk_map = {
+            "very conservative": "conservative",
+            "conservative": "conservative",
+            "cautious": "conservative",
+            "low": "conservative",
+            "moderate": "moderate",
+            "balanced": "moderate",
+            "medium": "moderate",
+            "growth": "moderate",
+            "aggressive": "aggressive",
+            "very aggressive": "aggressive",
+            "high": "aggressive",
+            "speculative": "aggressive",
+        }
+
+        for keyword, value in risk_map.items():
+            if keyword in message:
+                return value
+        return None
+
+    def _normalize_time_horizon(self, message: str) -> Optional[str]:
+        """Map text to standardized time horizon labels."""
+
+        horizon_keywords = {
+            "short": "short_term",
+            "near-term": "short_term",
+            "immediate": "short_term",
+            "medium": "medium_term",
+            "mid": "medium_term",
+            "intermediate": "medium_term",
+            "long": "long_term",
+            "long-term": "long_term",
+            "multi-year": "long_term",
+        }
+
+        for keyword, value in horizon_keywords.items():
+            if keyword in message:
+                return value
+
+        if "year" in message:
+            if any(token in message for token in ["1 year", "12 month", "one-year"]):
+                return "short_term"
+            if any(token in message for token in ["3 year", "36 month", "three-year"]):
+                return "medium_term"
+            if any(token in message for token in ["5 year", "10 year", "five-year", "decade"]):
+                return "long_term"
+
+        return None
+
+    def _extract_investment_objectives(self, message: str) -> List[str]:
+        """Identify investment objectives from the message."""
+
+        objective_keywords = {
+            "income": "income",
+            "yield": "income",
+            "dividend": "income",
+            "growth": "growth",
+            "appreciation": "growth",
+            "balanced": "balanced",
+            "blend": "balanced",
+            "capital preservation": "capital_preservation",
+            "preserve": "capital_preservation",
+            "protect": "capital_preservation",
+            "speculative": "speculation",
+            "maximize": "speculation",
+            "aggressive": "speculation",
+        }
+
+        detected: List[str] = []
+        for keyword, value in objective_keywords.items():
+            if keyword in message and value not in detected:
+                detected.append(value)
+
+        return detected
+
+    def _extract_investment_amount(self, message: str) -> Optional[float]:
+        """Pull an investment amount from the message if present."""
+
+        if not message:
+            return None
+
+        keyword_pattern = re.compile(
+            r"(?:invest|allocate|deploy|amount|capital|budget|plan|manage)[^\d$]{0,20}(\$?\d[\d,]*(?:\.\d+)?)\s*(k|m|b|bn|million|billion|thousand|hundred|usd|usdt|usdc)?",
+            re.IGNORECASE,
+        )
+
+        general_pattern = re.compile(
+            r"\$?\d[\d,]*(?:\.\d+)?\s*(?:k|m|b|bn|million|billion|thousand|usd|usdt|usdc)?",
+            re.IGNORECASE,
+        )
+
+        def _to_amount(token: str, unit_hint: Optional[str] = None) -> Optional[float]:
+            token = token.strip()
+            if not token:
+                return None
+
+            multiplier = 1.0
+            unit_match = re.search(
+                r"(k|m|b|bn|million|billion|thousand|hundred)",
+                token,
+                re.IGNORECASE,
+            )
+
+            effective_unit = unit_hint.lower() if unit_hint else None
+
+            if unit_match:
+                unit = unit_match.group(1).lower()
+                if unit in {"k", "thousand"}:
+                    multiplier = 1_000.0
+                elif unit in {"hundred"}:
+                    multiplier = 100.0
+                elif unit in {"m", "million"}:
+                    multiplier = 1_000_000.0
+                elif unit in {"b", "bn", "billion"}:
+                    multiplier = 1_000_000_000.0
+                token = token[: unit_match.start()].strip()
+            elif effective_unit:
+                if effective_unit in {"k", "thousand"}:
+                    multiplier = 1_000.0
+                elif effective_unit in {"hundred"}:
+                    multiplier = 100.0
+                elif effective_unit in {"m", "million"}:
+                    multiplier = 1_000_000.0
+                elif effective_unit in {"b", "bn", "billion"}:
+                    multiplier = 1_000_000_000.0
+
+            numeric_part = token.replace("$", "").replace(",", "").strip()
+            if not numeric_part:
+                return None
+
+            try:
+                value = float(numeric_part)
+            except ValueError:
+                return None
+
+            return value * multiplier
+
+        for pattern in (keyword_pattern, general_pattern):
+            for match in pattern.finditer(message):
+                if isinstance(match, re.Match):
+                    if match.lastindex:
+                        token = match.group(1)
+                        unit_hint = match.group(2) if match.lastindex >= 2 else None
+                    else:
+                        token = match.group(0)
+                        unit_hint = None
+                else:
+                    token = match
+
+                    unit_hint = None
+
+                amount = _to_amount(token or "", unit_hint)
+                if amount is not None and amount > 0:
+                    return amount
+
+        return None
+
+    def _extract_constraints(self, message: str) -> Optional[List[str]]:
+        """Derive constraint tags from free-form text."""
+
+        if not message:
+            return None
+
+        normalized = message.lower()
+        if any(phrase in normalized for phrase in ["no constraints", "no restriction", "none", "no limits"]):
+            return []
+
+        constraint_map = {
+            "no leverage": "no_leverage",
+            "avoid leverage": "no_leverage",
+            "no margin": "no_margin",
+            "no derivatives": "no_derivatives",
+            "esg": "esg_focus",
+            "ethical": "ethical_focus",
+            "sustainable": "esg_focus",
+            "no meme": "avoid_meme_assets",
+            "no defi": "avoid_defi",
+            "stable only": "stable_only",
+        }
+
+        constraints: List[str] = []
+        for phrase, tag in constraint_map.items():
+            if phrase in normalized and tag not in constraints:
+                constraints.append(tag)
+
+        ticker_constraints = []
+        for pattern in [r"avoid\s+([A-Z]{2,10})", r"no\s+([A-Z]{2,10})"]:
+            for match in re.finditer(pattern, message):
+                ticker = match.group(1)
+                ticker_constraints.append(f"avoid_{ticker.upper()}")
+
+        constraints.extend(ticker_constraints)
+
+        return constraints if constraints else None
+
+    async def _update_user_config_preferences(
+        self,
+        user_id: str,
+        updates: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Persist user preference updates via the unified AI manager."""
+
+        if not updates:
+            return await self._get_user_config(user_id)
 
         try:
-            return TradingMode(normalized_value)
-        except ValueError:
-            return TradingMode.BALANCED
+            return await unified_ai_manager.update_user_profile_preferences(user_id, updates)
+        except Exception as exc:
+            self.logger.warning(
+                "Falling back to local user config update",
+                user_id=user_id,
+                updates=list(updates.keys()),
+                error=str(exc),
+            )
+            current = await self._get_user_config(user_id)
+            current.update(updates)
+            return current
+
+    async def _persist_session_context(
+        self,
+        session_id: str,
+        context_updates: Dict[str, Any],
+    ) -> None:
+        """Best-effort persistence of session context updates."""
+
+        try:
+            await self.memory_service.update_session_context(session_id, context_updates)
+        except Exception as exc:
+            self.logger.debug(
+                "Failed to persist session context update",
+                session_id=session_id,
+                updates=list(context_updates.keys()),
+                error=str(exc),
+            )
+
+    def _describe_user_profile(self, user_config: Dict[str, Any]) -> str:
+        """Return a concise textual description of user preferences."""
+
+        risk = user_config.get("risk_tolerance") or "balanced"
+        horizon = user_config.get("time_horizon") or "medium_term"
+        objectives = user_config.get("investment_objectives") or []
+        if isinstance(objectives, str):
+            objectives = [objectives]
+        objective_text = ", ".join(objectives) if objectives else "general growth"
+        amount_value = self._safe_float(user_config.get("investment_amount"), None)
+        if amount_value and amount_value > 0:
+            amount_text = f"investment amount ${amount_value:,.0f}"
+        else:
+            amount_text = "investment amount pending"
+
+        constraints = user_config.get("constraints")
+        if isinstance(constraints, str):
+            constraints = [constraints]
+        if not constraints:
+            constraints_text = "constraints none"
+        else:
+            constraints_text = f"constraints {', '.join(constraints)}"
+
+        return (
+            f"risk tolerance {risk}, time horizon {horizon}, objectives {objective_text}, "
+            f"{amount_text}, {constraints_text}"
+        )
+
+    def _filter_opportunities_by_profile(
+        self,
+        opportunities: List[Dict[str, Any]],
+        user_config: Dict[str, Any],
+        allowed_symbols: Optional[Iterable[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Apply simple heuristics to keep opportunities aligned with the investor profile."""
+
+        if not opportunities:
+            return opportunities
+
+        allowed_set = (
+            {symbol.upper() for symbol in allowed_symbols}
+            if allowed_symbols
+            else None
+        )
+        if allowed_set is not None:
+            opportunities = [
+                opp
+                for opp in opportunities
+                if (opp.get("symbol") or "").upper() in allowed_set
+            ]
+            if not opportunities:
+                return opportunities
+
+        risk_preference = (user_config.get("risk_tolerance") or "moderate").lower()
+        time_horizon = user_config.get("time_horizon")
+        objectives = user_config.get("investment_objectives") or []
+        if isinstance(objectives, str):
+            objectives = [objectives]
+
+        allowed_risk_level = {
+            "conservative": 0,
+            "low": 0,
+            "moderate": 1,
+            "balanced": 1,
+            "medium": 1,
+            "aggressive": 2,
+            "high": 2,
+            "maximum": 3,
+        }.get(risk_preference, 1)
+
+        def risk_score(opportunity: Dict[str, Any]) -> int:
+            metadata = opportunity.get("metadata", {}) or {}
+            raw_level = (metadata.get("risk_level") or opportunity.get("risk_level") or "medium").lower()
+            return {
+                "very low": 0,
+                "low": 0,
+                "conservative": 0,
+                "medium": 1,
+                "moderate": 1,
+                "balanced": 1,
+                "elevated": 2,
+                "high": 2,
+                "aggressive": 2,
+                "maximum": 3,
+            }.get(raw_level, 1)
+
+        def matches_time_horizon(opportunity: Dict[str, Any]) -> bool:
+            if not time_horizon:
+                return True
+            metadata = opportunity.get("metadata", {}) or {}
+            candidate = (
+                (metadata.get("time_horizon") or metadata.get("holding_period") or metadata.get("timeframe") or "")
+                .lower()
+            )
+            if not candidate:
+                return True
+            return time_horizon.replace("_", "-") in candidate or time_horizon in candidate
+
+        def matches_objectives(opportunity: Dict[str, Any]) -> bool:
+            if not objectives:
+                return True
+            metadata = opportunity.get("metadata", {}) or {}
+            objective_text = (metadata.get("objective") or metadata.get("category") or "").lower()
+            if not objective_text:
+                return True
+            return any(obj.replace("_", " ") in objective_text for obj in objectives)
+
+        filtered = [
+            opp
+            for opp in opportunities
+            if risk_score(opp) <= allowed_risk_level
+            and matches_time_horizon(opp)
+            and matches_objectives(opp)
+        ]
+
+        # If filtering removed everything, keep the original list to avoid empty guidance
+        return filtered or opportunities
 
     def _json_default(self, obj):
         """Default JSON serializer for complex types."""
@@ -503,6 +1217,18 @@ class UnifiedChatService(LoggerMixin):
             session_id, user_id, interface, conversation_mode
         )
         
+        # Check if we are mid-profile collection before doing anything else
+        pending_response = await self._handle_pending_profile_collection(
+            session,
+            message,
+            user_id,
+            interface,
+            conversation_mode,
+            stream,
+        )
+        if pending_response is not None:
+            return pending_response
+
         # Log the request
         self.logger.info(
             "Processing unified chat message",
@@ -513,14 +1239,18 @@ class UnifiedChatService(LoggerMixin):
             stream=stream,
             message_length=len(message)
         )
-        
+
         try:
             # Step 1: Analyze intent using ChatAI (fast)
             intent_analysis = await self._analyze_intent_unified(message, session.context)
-            
+
             # Step 2: Check requirements (credits, strategies, etc.)
             requirements_check = await self._check_requirements(
-                intent_analysis, user_id, conversation_mode
+                intent_analysis,
+                user_id,
+                conversation_mode,
+                session,
+                message,
             )
             
             if not requirements_check["allowed"]:
@@ -546,13 +1276,15 @@ class UnifiedChatService(LoggerMixin):
             # Step 3: Gather required data
             prefetched_user_strategies = requirements_check.get("user_strategies")
             prefetched_marketplace = requirements_check.get("marketplace_strategies")
+            prefetched_user_config = requirements_check.get("user_config")
 
             context_data = await self._gather_context_data(
                 intent_analysis,
                 user_id,
                 session,
                 user_strategies=prefetched_user_strategies,
-                marketplace_strategies=prefetched_marketplace
+                marketplace_strategies=prefetched_marketplace,
+                user_config=prefetched_user_config,
             )
             
             # Step 4: Generate response
@@ -742,23 +1474,64 @@ class UnifiedChatService(LoggerMixin):
             "entities": self._extract_entities(message)
         }
     
+    PROFILE_REQUIRED_INTENTS = {
+        ChatIntent.STRATEGY_RECOMMENDATION,
+        ChatIntent.OPPORTUNITY_DISCOVERY,
+    }
+    INVESTOR_PROFILE_FIELDS = (
+        "risk_tolerance",
+        "investment_amount",
+        "time_horizon",
+        "investment_objectives",
+        "constraints",
+    )
+
     async def _check_requirements(
         self,
         intent_analysis: Dict[str, Any],
         user_id: str,
-        conversation_mode: ConversationMode
+        conversation_mode: ConversationMode,
+        session: ChatSession,
+        original_message: str,
     ) -> Dict[str, Any]:
         """
         Check ALL requirements - credits, strategies, limits, etc.
         PRESERVES all validation from original system.
         """
         intent = intent_analysis["intent"]
-        
-        # Paper trading mode - NO CREDIT CHECKS
+
+        user_config = await self._get_user_config(user_id)
+        requirements_result: Dict[str, Any] = {
+            "allowed": True,
+            "message": "All checks passed",
+            "user_config": user_config,
+        }
+
+        if intent in self.PROFILE_REQUIRED_INTENTS:
+            missing_fields = self._profile_fields_missing(user_config)
+            if missing_fields:
+                await self._prepare_profile_questionnaire(
+                    session,
+                    missing_fields,
+                    original_message,
+                    intent,
+                )
+                requirements_result.update(
+                    {
+                        "allowed": False,
+                        "message": self._build_profile_prompt(missing_fields),
+                        "requires_action": True,
+                        "action_data": {
+                            "type": "collect_investor_profile",
+                            "missing_fields": missing_fields,
+                        },
+                    }
+                )
+                return requirements_result
+
         if conversation_mode == ConversationMode.PAPER_TRADING:
-            return {"allowed": True, "message": "Paper trading mode active"}
-        
-        requirements_result: Dict[str, Any] = {"allowed": True, "message": "All checks passed"}
+            requirements_result["message"] = "Paper trading mode active"
+            return requirements_result
 
         # Check credit requirements for paid operations
         if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
@@ -1041,7 +1814,8 @@ class UnifiedChatService(LoggerMixin):
         user_id: str,
         session: ChatSession,
         user_strategies: Optional[Dict[str, Any]] = None,
-        marketplace_strategies: Optional[Dict[str, Any]] = None
+        marketplace_strategies: Optional[Dict[str, Any]] = None,
+        user_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Gather ALL required data based on intent.
@@ -1049,7 +1823,8 @@ class UnifiedChatService(LoggerMixin):
         """
         intent = intent_analysis["intent"]
         context_data = {}
-        user_config = await self._get_user_config(user_id)
+        if user_config is None:
+            user_config = await self._get_user_config(user_id)
 
         # Always get basic portfolio data with error handling
         try:
@@ -1089,7 +1864,15 @@ class UnifiedChatService(LoggerMixin):
                 }
 
             context_data["performance"] = await self._get_performance_metrics(user_id)
-            
+
+            optimization_summary = await self._run_portfolio_optimization(
+                user_id,
+                user_config,
+            )
+            if optimization_summary:
+                context_data["portfolio_optimization"] = optimization_summary
+                context_data["allowed_symbols"] = optimization_summary.get("allowed_symbols", [])
+
         elif intent == ChatIntent.TRADE_EXECUTION:
             # Get market data for trade analysis
             entities = intent_analysis.get("entities", {})
@@ -1118,7 +1901,15 @@ class UnifiedChatService(LoggerMixin):
                     "error": "Opportunity discovery temporarily unavailable",
                     "opportunities": []
                 }
-            
+
+            optimization_summary = await self._run_portfolio_optimization(
+                user_id,
+                user_config,
+            )
+            if optimization_summary:
+                context_data["portfolio_optimization"] = optimization_summary
+                context_data["allowed_symbols"] = optimization_summary.get("allowed_symbols", [])
+
         elif intent == ChatIntent.RISK_ASSESSMENT:
             # Get comprehensive risk metrics
             context_data["risk_metrics"] = await self.portfolio_risk.risk_analysis(user_id)
@@ -1469,6 +2260,47 @@ Respond naturally using ONLY the real data provided."""
         if intent == ChatIntent.PORTFOLIO_ANALYSIS:
             portfolio = context_data.get("portfolio", {})
             risk = context_data.get("risk_analysis", {})
+            optimization = context_data.get("portfolio_optimization", {})
+            strategies_summary = optimization.get("strategies", [])
+
+            optimization_lines: List[str] = []
+            if strategies_summary:
+                primary = strategies_summary[0]
+                expected_return = primary.get("expected_return")
+                expected_volatility = primary.get("expected_volatility")
+                sharpe_ratio = primary.get("sharpe_ratio")
+                confidence = primary.get("confidence")
+                weights = (primary.get("result") or {}).get("weights", {})
+
+                optimization_lines.append("\nPortfolio optimisation snapshot:")
+                optimization_lines.append(
+                    f"- Strategy: {primary.get('strategy', optimization.get('primary_strategy', 'unknown')).replace('_', ' ').title()}"
+                )
+                if expected_return is not None:
+                    optimization_lines.append(
+                        f"- Expected annual return: {_format_percentage(expected_return)} (estimate)"
+                    )
+                if expected_volatility is not None:
+                    optimization_lines.append(
+                        f"- Expected volatility: {_format_percentage(expected_volatility)}"
+                    )
+                if sharpe_ratio is not None:
+                    optimization_lines.append(
+                        f"- Sharpe ratio: {_safe_float(sharpe_ratio, 0.0):.2f}"
+                    )
+                if confidence is not None:
+                    confidence_pct = confidence * 100 if confidence <= 1 else confidence
+                    optimization_lines.append(
+                        f"- Model confidence: {_safe_float(confidence_pct, 0.0):.1f}%"
+                    )
+
+                if weights:
+                    top_weights = sorted(weights.items(), key=lambda item: item[1], reverse=True)[:5]
+                    allocation_lines = ", ".join(
+                        f"{symbol} {(_format_percentage(weight) or '0.0%')}"
+                        for symbol, weight in top_weights
+                    )
+                    optimization_lines.append(f"- Top target weights: {allocation_lines}")
 
             # Check for error condition
             if portfolio.get('total_value', 0) == -999:
@@ -1490,8 +2322,9 @@ Portfolio Data (REAL):
 - Positions: {len(portfolio.get('positions', []))}
 - Risk Level: {risk.get('overall_risk', 'Unknown')}
 - Top Holdings: {', '.join([f"{p['symbol']} (${p['value_usd']:,.2f})" for p in portfolio.get('positions', [])[:3]])}
+{chr(10).join(optimization_lines)}
 
-Provide a comprehensive portfolio analysis using this real data."""
+Provide a comprehensive portfolio analysis using this real data. Explain how the optimisation guidance aligns with the user's risk profile and make clear that expected returns are model estimates, not guarantees."""
         
         elif intent == ChatIntent.TRADE_EXECUTION:
             market = context_data.get("market_data", {})
@@ -1668,13 +2501,26 @@ REBALANCING ANALYSIS ERROR:
             return "\n".join(instructions)
 
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-            # Use uz53pl's enhanced data flow structure for better chat logic
             opportunities_data = context_data.get("opportunities", {})
             opportunities = opportunities_data.get("opportunities", [])
             strategy_performance = opportunities_data.get("strategy_performance", {})
             user_profile = opportunities_data.get("user_profile", {})
+            user_preferences = context_data.get("user_config", {})
+            allowed_symbols = context_data.get("allowed_symbols")
 
-            # Group opportunities by strategy with deterministic naming
+            filtered_opportunities = self._filter_opportunities_by_profile(
+                opportunities,
+                user_preferences,
+                allowed_symbols=allowed_symbols,
+            )
+            filtered_out = max(0, len(opportunities) - len(filtered_opportunities))
+            opportunities = filtered_opportunities
+
+            optimization_summary = context_data.get("portfolio_optimization", {})
+            strategy_summaries = optimization_summary.get("strategies", [])
+            primary_strategy = strategy_summaries[0] if strategy_summaries else {}
+            primary_weights = (primary_strategy.get("result") or {}).get("weights", {})
+
             opportunities_by_strategy: Dict[str, List[Dict[str, Any]]] = {}
             for opportunity in opportunities:
                 strategy_name = (
@@ -1685,92 +2531,170 @@ REBALANCING ANALYSIS ERROR:
                 normalized_strategy = strategy_name.replace("_", " ").title()
                 opportunities_by_strategy.setdefault(normalized_strategy, []).append(opportunity)
 
-            # uz53pl approach: cleaner data extraction without duplication
-            # Build comprehensive prompt
             prompt_parts = [f'User asked: "{message}"']
-            prompt_parts.append(f"\nTotal opportunities found: {len(opportunities)}")
-            prompt_parts.append(f"User risk profile: {user_profile.get('risk_profile', 'balanced')}")
-            # Use robust data coercion for better chat logic (enhanced from uz53pl intent)
-            active_strategies_raw = user_profile.get("active_strategies")
-            if isinstance(active_strategies_raw, (list, tuple, set)):
-                active_strategies_total = len(active_strategies_raw)
-            elif isinstance(active_strategies_raw, int):
-                active_strategies_total = active_strategies_raw
-            elif isinstance(active_strategies_raw, str) and active_strategies_raw.isdigit():
-                active_strategies_total = int(active_strategies_raw)
-            else:
-                active_strategies_total = user_profile.get("active_strategy_count", 0)
+            prompt_parts.append(f"\nUser profile: {self._describe_user_profile(user_preferences)}")
             prompt_parts.append(
-                f"Active strategies: {active_strategies_total}"
+                f"Total personalised opportunities: {len(opportunities)} (filtered out {filtered_out} misaligned ideas)"
             )
+
+            if primary_strategy:
+                expected_return = primary_strategy.get("expected_return")
+                expected_volatility = primary_strategy.get("expected_volatility")
+                sharpe_ratio = primary_strategy.get("sharpe_ratio")
+                confidence = primary_strategy.get("confidence")
+                expected_range = primary_strategy.get("expected_return_range") or (None, None)
+
+                def _format_range(value_pair: Tuple[Optional[float], Optional[float]]) -> Optional[str]:
+                    low, high = value_pair
+                    if low is None or high is None:
+                        return None
+                    return f"{low * 100:.1f}% to {high * 100:.1f}%"
+
+                prompt_parts.append("\nPORTFOLIO OPTIMISATION SUMMARY:")
+                prompt_parts.append(
+                    f"- Primary strategy: {primary_strategy.get('strategy', optimization_summary.get('primary_strategy', 'unknown')).replace('_', ' ').title()}"
+                )
+                if expected_return is not None:
+                    prompt_parts.append(
+                        f"- Expected annual return: {_format_percentage(expected_return)}"
+                    )
+                range_text = _format_range(expected_range)
+                if range_text:
+                    prompt_parts.append(
+                        f"- Estimated return range (1σ): {range_text}"
+                    )
+                if expected_volatility is not None:
+                    prompt_parts.append(
+                        f"- Expected volatility: {_format_percentage(expected_volatility)}"
+                    )
+                if sharpe_ratio is not None:
+                    prompt_parts.append(
+                        f"- Sharpe ratio: {_safe_float(sharpe_ratio, 0.0):.2f}"
+                    )
+                if confidence is not None:
+                    confidence_pct = confidence * 100 if confidence <= 1 else confidence
+                    prompt_parts.append(
+                        f"- Model confidence: {_safe_float(confidence_pct, 0.0):.1f}%"
+                    )
+
+                if primary_weights:
+                    prompt_parts.append("\nTARGET ALLOCATIONS:")
+                    for symbol, weight in sorted(
+                        primary_weights.items(), key=lambda item: item[1], reverse=True
+                    ):
+                        weight_fmt = _format_percentage(weight) or "0.0%"
+                        prompt_parts.append(f"  • {symbol}: target {weight_fmt} of portfolio")
+
+                trades = primary_strategy.get("suggested_trades") or []
+                prompt_parts.append("\nREBALANCING PLAN:")
+                if trades:
+                    for index, trade in enumerate(trades[:6], start=1):
+                        symbol = trade.get("symbol", "N/A")
+                        action = (trade.get("action") or "hold").upper()
+                        quantity = self._safe_float(trade.get("quantity"), None)
+                        notional = self._safe_float(
+                            trade.get("notional_value")
+                            or trade.get("notional_usd")
+                            or trade.get("amount")
+                            or trade.get("value_usd"),
+                            None,
+                        )
+                        target_weight = _format_percentage(
+                            trade.get("target_weight") or primary_weights.get(symbol)
+                        )
+                        price_value = self._safe_float(
+                            trade.get("reference_price") or trade.get("price"),
+                            None,
+                        )
+                        details = [f"target {target_weight}" if target_weight else None]
+                        weight_change = _format_percentage(trade.get("weight_change"))
+                        if weight_change:
+                            details.append(f"Δ {weight_change}")
+                        details = ", ".join(filter(None, details))
+                        price_text = f" @ ${price_value:,.2f}" if price_value else ""
+                        notional_text = f" ≈ ${abs(notional):,.2f}" if notional else ""
+                        quantity_text = (
+                            f" ({quantity:.6f} units)" if quantity is not None else ""
+                        )
+                        detail_text = f" ({details})" if details else ""
+                        prompt_parts.append(
+                            f"  {index}. {action} {symbol}{notional_text}{price_text}{quantity_text}{detail_text}"
+                        )
+                    if len(trades) > 6:
+                        prompt_parts.append(
+                            f"  • Additional {len(trades) - 6} trades available in the execution plan"
+                        )
+                else:
+                    prompt_parts.append("  • No immediate trades generated — explain why the allocation already aligns with the target profile.")
+
+                if len(strategy_summaries) > 1:
+                    prompt_parts.append("\nALTERNATIVE STRATEGY SNAPSHOTS:")
+                    for alt in strategy_summaries[1:4]:
+                        prompt_parts.append(
+                            "  - {} | exp. return {} | volatility {} | Sharpe {}".format(
+                                alt.get("strategy", "unknown").replace("_", " ").title(),
+                                _format_percentage(alt.get("expected_return")) or "N/A",
+                                _format_percentage(alt.get("expected_volatility")) or "N/A",
+                                f"{_safe_float(alt.get('sharpe_ratio'), 0.0):.2f}" if alt.get("sharpe_ratio") is not None else "N/A",
+                            )
+                        )
+
+            prompt_parts.append(f"\nActive strategies connected: {user_profile.get('active_strategy_count', 0)}")
             if user_profile.get("strategy_fingerprint"):
                 prompt_parts.append(
-                    f"Strategy portfolio fingerprint: {user_profile['strategy_fingerprint']}"
+                    f"Strategy fingerprint: {user_profile['strategy_fingerprint']}"
                 )
 
-            # Strategy performance summary with uz53pl's enhanced chat data flow
-
             if strategy_performance:
-                prompt_parts.append("\n📊 STRATEGY PERFORMANCE:")
+                prompt_parts.append("\n📊 STRATEGY PERFORMANCE (live data):")
                 for strat, performance in strategy_performance.items():
                     if isinstance(performance, dict):
                         opportunity_count = _safe_int(performance.get("count", 0))
-                        total_potential = _safe_float(performance.get("total_potential", 0.0))
                         average_confidence = _safe_percentage(performance.get("avg_confidence"))
                     else:
                         opportunity_count = _safe_int(performance)
-                        total_potential = 0.0
                         average_confidence = None
 
                     summary_line = f"- {strat}: {opportunity_count} opportunities"
-                    if total_potential:
-                        summary_line += f" • ${total_potential:,.0f} potential"
                     if average_confidence is not None:
                         summary_line += f" • {_safe_float(average_confidence, 0.0):.1f}% avg confidence"
                     prompt_parts.append(summary_line)
 
-            # Detailed opportunities by strategy
-            prompt_parts.append("\n🎯 OPPORTUNITIES BY STRATEGY:")
-            for strategy_name, strategy_opps in opportunities_by_strategy.items():
-                prompt_parts.append(f"\n{strategy_name} ({len(strategy_opps)} opportunities):")
+            if opportunities_by_strategy:
+                prompt_parts.append("\n🎯 OPPORTUNITIES BY STRATEGY (top 3 each):")
+                for strategy_name, strategy_opps in opportunities_by_strategy.items():
+                    prompt_parts.append(f"\n{strategy_name} ({len(strategy_opps)} opportunities):")
+                    for index, opportunity in enumerate(strategy_opps[:3], start=1):
+                        symbol = opportunity.get("symbol", "N/A")
+                        metadata = opportunity.get("metadata", {}) or {}
+                        confidence_raw = opportunity.get("confidence_score", 0.0)
+                        confidence_value = _safe_float(confidence_raw, 0.0)
+                        if confidence_value <= 1.0:
+                            confidence_value *= 100
+                        confidence_value = max(0.0, min(100.0, confidence_value))
 
-                for index, opportunity in enumerate(strategy_opps[:3], start=1):
-                    symbol = opportunity.get("symbol", "N/A")
-                    # uz53pl's enhanced opportunity data processing
-                    confidence_raw = opportunity.get("confidence_score", 0.0)
-                    profit_usd_raw = opportunity.get("profit_potential_usd", 0.0)
-                    metadata = opportunity.get("metadata", {}) or {}
+                        prompt_parts.append(f"  {index}. {symbol}")
+                        prompt_parts.append(
+                            f"     Confidence: {_safe_float(confidence_value, 0.0):.1f}%"
+                        )
 
-                    confidence_value = _safe_float(confidence_raw, 0.0)
-                    if confidence_value <= 1.0:
-                        confidence_value *= 100
-                    confidence_value = max(0.0, min(100.0, confidence_value))
-
-                    profit_usd_value = _safe_float(profit_usd_raw, 0.0)
-
-                    prompt_parts.append(f"  {index}. {symbol}")
-                    prompt_parts.append(f"     Confidence: {_safe_float(confidence_value, 0.0):.1f}%")
-                    prompt_parts.append(f"     Profit Potential: ${profit_usd_value:,.0f}")
-
-                    action = metadata.get("signal_action") or opportunity.get("action")
-                    if action:
-                        prompt_parts.append(f"     Action: {action}")
-
-                    strategy_name_lower = strategy_name.lower()
-                    if "portfolio" in strategy_name_lower:
-                        strategy_variant = metadata.get("strategy")
-                        if strategy_variant:
-                            # uz53pl's clean approach with safe string handling
-                            prompt_parts.append(
-                                f"     Strategy: {strategy_variant.replace('_', ' ').title()}"
-                            )
-
-                        expected_return = metadata.get("expected_annual_return")
+                        expected_return = (
+                            metadata.get("expected_annual_return")
+                            or metadata.get("expected_return")
+                        )
                         if expected_return is not None:
                             formatted_expected = _format_percentage(expected_return)
                             if formatted_expected:
                                 prompt_parts.append(
                                     f"     Expected Return: {formatted_expected}"
+                                )
+
+                        expected_vol = metadata.get("expected_volatility")
+                        if expected_vol is not None:
+                            formatted_vol = _format_percentage(expected_vol)
+                            if formatted_vol:
+                                prompt_parts.append(
+                                    f"     Expected Volatility: {formatted_vol}"
                                 )
 
                         sharpe_ratio_raw = metadata.get("sharpe_ratio")
@@ -1779,6 +2703,18 @@ REBALANCING ANALYSIS ERROR:
                             prompt_parts.append(
                                 f"     Sharpe Ratio: {_safe_float(sharpe_ratio_value, 0.0):.2f}"
                             )
+
+                        target_fraction = (
+                            _fraction_from(metadata.get("target_weight"))
+                            or _fraction_from(metadata.get("target_percentage"))
+                            or _fraction_from(primary_weights.get(symbol))
+                        )
+                        if target_fraction is not None:
+                            formatted_allocation = _format_percentage(target_fraction)
+                            if formatted_allocation:
+                                prompt_parts.append(
+                                    f"     Target Allocation: {formatted_allocation}"
+                                )
 
                         risk_level = metadata.get("risk_level")
                         if risk_level is not None:
@@ -1793,65 +2729,33 @@ REBALANCING ANALYSIS ERROR:
                                         f"     Risk Level: {risk_fraction * 100:.1f}%"
                                     )
 
-                        target_fraction = (
-                            _fraction_from(metadata.get("target_weight"))
-                            or _fraction_from(metadata.get("target_percentage"))
-                        )
-                        allocation_fraction = _fraction_from(
-                            metadata.get("amount"),
-                            allow_percent_conversion=False,
-                        )
-                        weight_change_fraction = _fraction_from(metadata.get("weight_change"))
+                        action = metadata.get("signal_action") or opportunity.get("action")
+                        if action:
+                            prompt_parts.append(f"     Action: {action}")
 
-                        display_fraction = target_fraction or allocation_fraction
-                        if display_fraction is not None:
-                            formatted_allocation = _format_percentage(display_fraction)
-                            if formatted_allocation:
-                                prompt_parts.append(
-                                    f"     Allocation Target: {formatted_allocation} of portfolio"
-                                )
-
-                        if weight_change_fraction is not None:
-                            weight_change_text = _format_percentage(weight_change_fraction)
-                            if weight_change_text:
-                                prompt_parts.append(
-                                    f"     Weight Change: {weight_change_text}"
-                                )
-
-                        trade_value = (
+                        trade_size = self._safe_float(
                             metadata.get("trade_value_usd")
                             or metadata.get("value_change")
-                            or opportunity.get("required_capital_usd")
+                            or opportunity.get("required_capital_usd"),
+                            None,
                         )
-                        trade_value_numeric = _safe_float(trade_value, None)
-                        if trade_value_numeric is not None and trade_value_numeric != 0:
+                        if trade_size:
                             prompt_parts.append(
-                                f"     Trade Size: ≈ ${abs(trade_value_numeric):,.2f}"
+                                f"     Suggested Trade Size: ≈ ${abs(trade_size):,.2f}"
                             )
 
-                    elif "risk" in strategy_name_lower:
-                        prompt_parts.append(
-                            f"     Risk Type: {metadata.get('risk_type', 'Risk Alert')}"
-                        )
-                        prompt_parts.append(
-                            f"     Recommendation: {metadata.get('strategy', 'Mitigation required')}"
-                        )
-                        urgency = metadata.get("urgency")
-                        if urgency is not None:
-                            prompt_parts.append(f"     Urgency: {urgency}")
+            prompt_parts.append(
+                "\nINSTRUCTIONS FOR AI MONEY MANAGER:\n"
+                "1. Explain how the optimisation metrics translate into portfolio guidance, emphasising that returns are estimates.\n"
+                "2. Summarise the rebalancing plan step-by-step, referencing the trades above.\n"
+                "3. Align each highlighted opportunity with the user's risk tolerance, horizon, investment amount, and constraints.\n"
+                "4. Compare alternative strategies when helpful, noting differences in return and volatility expectations.\n"
+                "5. Close with clear next steps (execute now vs. monitor) and remind the user that projections are not guarantees."
+            )
 
-            prompt_parts.append(f"""
-
-INSTRUCTIONS FOR AI MONEY MANAGER:
-1. Present opportunities grouped by strategy type
-2. For portfolio optimization, explain each of the 6 strategies and their expected returns
-3. Highlight the best opportunities based on the user's risk profile ({user_profile.get('risk_profile', 'balanced')})
-4. Provide specific, actionable recommendations
-5. Use actual symbols and values from the data, not generic examples
-6. If portfolio optimization shows multiple strategies, compare them clearly
-7. End with a clear recommendation based on user's profile
-
-Remember: You are the AI Money Manager providing personalized advice based on real analysis.""")
+            prompt_parts.append(
+                "\nAll performance figures are model-based forecasts and should be communicated as estimates, not promises."
+            )
 
             return "\n".join(prompt_parts)
 
@@ -1892,6 +2796,7 @@ Explain that strategy access requires subscription/purchase and guide the user o
         elif intent == ChatIntent.STRATEGY_RECOMMENDATION:
             active_strategy = context_data.get("active_strategy", {})
             available_strategies = context_data.get("available_strategies", {})
+            user_preferences = context_data.get("user_config", {})
 
             return f"""User asked: "{message}"
 
@@ -1899,6 +2804,7 @@ CURRENT STRATEGY STATUS:
 - Active Strategy: {active_strategy.get('name', 'None') if active_strategy else 'None'}
 - Risk Level: {active_strategy.get('risk_level', 'Unknown') if active_strategy else 'Not Set'}
 - Strategy Active: {'Yes' if active_strategy and active_strategy.get('active') else 'No'}
+- Investor Profile Alignment: {self._describe_user_profile(user_preferences)}
 
 AVAILABLE STRATEGIES:
 - Total Strategies in Marketplace: {len(available_strategies.get('strategies', []))}
@@ -1907,7 +2813,7 @@ AVAILABLE STRATEGIES:
 Top Recommended Strategies:
 {chr(10).join([f"• {s.get('name', 'Unknown')} - {s.get('category', 'Unknown')} - Expected Return: {(_fraction_from(s.get('expected_return', 0), allow_percent_conversion=True) or 0.0) * 100:.1f}%" for s in available_strategies.get('strategies', [])[:5]])}
 
-Provide personalized strategy recommendations based on the user's current setup and available strategies."""
+Provide personalized strategy recommendations based on the user's current setup, their risk tolerance ({user_preferences.get('risk_tolerance', 'balanced')}), time horizon ({user_preferences.get('time_horizon', 'medium_term')}), and objectives ({', '.join(user_preferences.get('investment_objectives', ['general growth']))})."""
 
         elif intent == ChatIntent.CREDIT_INQUIRY:
             credit_account = context_data.get("credit_account", {})
@@ -1956,17 +2862,23 @@ Provide a helpful response using the real data available. Never use placeholder 
     async def _get_user_config(self, user_id: str) -> Dict[str, Any]:
         """Get user configuration - REAL data only."""
         try:
-            # This would connect to your actual user service
-            # For now, returning structure that matches your system
-            return {
-            "trading_mode": "balanced",
-            "operation_mode": "assisted",
-            "risk_tolerance": "medium",
-            "notification_preferences": {}
-            }
+            config = await unified_ai_manager.get_user_profile_preferences(user_id)
+            # Ensure core keys exist for downstream logic
+            config.setdefault("trading_mode", TradingMode.BALANCED.value)
+            config.setdefault("operation_mode", OperationMode.ASSISTED.value)
+            config.setdefault("risk_tolerance", "balanced")
+            config.setdefault("time_horizon", None)
+            config.setdefault("investment_objectives", [])
+            return config
         except Exception as e:
             self.logger.error("Failed to get user config", error=str(e))
-            return {"trading_mode": "balanced", "operation_mode": "assisted"}
+            return {
+                "trading_mode": TradingMode.BALANCED.value,
+                "operation_mode": OperationMode.ASSISTED.value,
+                "risk_tolerance": "balanced",
+                "time_horizon": None,
+                "investment_objectives": [],
+            }
     
     async def _get_performance_metrics(self, user_id: str) -> Dict[str, Any]:
         """Get performance metrics - REAL data."""
