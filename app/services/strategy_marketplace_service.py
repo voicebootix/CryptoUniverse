@@ -1435,9 +1435,16 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 # Deduct credits (only for paid strategies)
                 if cost > 0:
                     try:
+                        # Re-fetch credit account with row lock to prevent race conditions
+                        locked_stmt = select(CreditAccount).where(
+                            CreditAccount.user_id == user_id
+                        ).with_for_update()
+                        locked_result = await db.execute(locked_stmt)
+                        locked_credit_account = locked_result.scalar_one()
+
                         await credit_ledger.consume_credits(
                             db,
-                            credit_account,
+                            locked_credit_account,
                             credits=cost,
                             description=f"Strategy access: {strategy_id} ({subscription_type})",
                             source="strategy_marketplace",

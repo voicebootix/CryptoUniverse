@@ -246,9 +246,16 @@ async def execute_manual_trade(
         # Deduct credits for real trades after successful execution
         if credit_cost is not None:
             try:
+                # Re-fetch credit account with row lock to prevent race conditions
+                locked_stmt = select(CreditAccount).where(
+                    CreditAccount.user_id == current_user.id
+                ).with_for_update()
+                locked_result = await db.execute(locked_stmt)
+                locked_credit_account = locked_result.scalar_one()
+
                 await credit_ledger.consume_credits(
                     db,
-                    credit_account,
+                    locked_credit_account,
                     credits=credit_cost,
                     description=f"Trade execution: {request.action} {request.symbol}",
                     source="trading_api",
