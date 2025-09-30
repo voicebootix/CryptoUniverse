@@ -694,22 +694,33 @@ class UnifiedAIManager(LoggerMixin):
                 cached_config = {}
         else:
             cached_config = {}
-        
+
+        if not cached_config:
+            in_memory = self.user_preferences.get(user_id)
+            if in_memory:
+                return in_memory
+
         # Use single default configuration source
         default_config = self._get_default_user_config()
-        
+
         # Cache for future use as JSON blob
         redis_client = await self._ensure_redis()
         if redis_client:
             await redis_client.set(f"user_ai_config:{user_id}", json.dumps(default_config))
-        
+
+        self.user_preferences[user_id] = default_config.copy()
+
         return default_config
-    
+
     def _get_default_user_config(self) -> Dict[str, Any]:
         """Get single default user configuration to avoid duplication."""
         return {
             "operation_mode": "assisted",
-            "risk_tolerance": "balanced", 
+            "risk_tolerance": "balanced",
+            "investment_amount": None,
+            "time_horizon": None,
+            "investment_objectives": [],
+            "constraints": None,
             "trading_mode": "balanced",
             "ai_confidence_threshold": 80.0,
             "max_position_size_pct": 10.0,
@@ -723,6 +734,144 @@ class UnifiedAIManager(LoggerMixin):
                 "email": False
             }
         }
+
+    @staticmethod
+    def _safe_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+        """Best-effort conversion of incoming values to floats."""
+
+        if value is None:
+            return default
+
+        if isinstance(value, (int, float)):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        if isinstance(value, str):
+            sanitized = value.replace("$", "").replace(",", "").strip()
+            if not sanitized:
+                return default
+            try:
+                return float(sanitized)
+            except ValueError:
+                return default
+
+        return default
+
+    def _resolve_trading_mode_from_risk(self, risk_tolerance: Optional[str]) -> str:
+        """Align stored trading mode with the latest risk tolerance."""
+
+        if not risk_tolerance:
+            return TradingMode.BALANCED.value
+
+        normalized = str(risk_tolerance).strip().lower()
+
+        if normalized in {"very conservative", "conservative", "cautious", "low"}:
+            return TradingMode.CONSERVATIVE.value
+
+        if normalized in {"aggressive", "very aggressive", "high", "speculative"}:
+            return TradingMode.AGGRESSIVE.value
+
+        if normalized in {"beast", "beast_mode", "maximum"}:
+            return TradingMode.BEAST_MODE.value
+
+        return TradingMode.BALANCED.value
+
+    async def get_user_profile_preferences(self, user_id: str) -> Dict[str, Any]:
+        """Public accessor for user configuration with investment profile defaults."""
+
+        config = await self._get_user_config(user_id)
+
+        # Ensure new preference fields are always present for downstream consumers
+        if "time_horizon" not in config:
+            config["time_horizon"] = None
+        if "investment_objectives" not in config:
+            config["investment_objectives"] = []
+        if "investment_amount" not in config:
+            config["investment_amount"] = None
+        if "constraints" not in config:
+            config["constraints"] = None
+
+        # Normalize investment objectives to list form
+        objectives = config.get("investment_objectives")
+        if isinstance(objectives, str):
+            config["investment_objectives"] = [objectives]
+        elif objectives is None:
+            config["investment_objectives"] = []
+
+        config["investment_amount"] = self._safe_float(
+            config.get("investment_amount"),
+            None,
+        )
+
+        constraints = config.get("constraints")
+        if constraints is None:
+            config["constraints"] = None
+        elif isinstance(constraints, str):
+            config["constraints"] = [constraints]
+        else:
+            config["constraints"] = list(constraints)
+
+        config["trading_mode"] = self._resolve_trading_mode_from_risk(
+            config.get("risk_tolerance")
+        )
+
+        return config
+
+    async def update_user_profile_preferences(
+        self,
+        user_id: str,
+        updates: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Persist user preference updates while keeping Redis/in-memory caches aligned."""
+
+        current_config = await self.get_user_profile_preferences(user_id)
+        merged_config = {**current_config, **updates}
+
+        # Normalize investment objectives after merge
+        objectives = merged_config.get("investment_objectives")
+        if isinstance(objectives, str):
+            merged_config["investment_objectives"] = [objectives]
+        elif objectives is None:
+            merged_config["investment_objectives"] = []
+
+        merged_config["investment_amount"] = self._safe_float(
+            merged_config.get("investment_amount"),
+            None,
+        )
+
+        constraints = merged_config.get("constraints")
+        if constraints is None:
+            merged_config["constraints"] = None
+        elif isinstance(constraints, str):
+            merged_config["constraints"] = [constraints]
+        else:
+            merged_config["constraints"] = list(constraints)
+
+        merged_config["trading_mode"] = self._resolve_trading_mode_from_risk(
+            merged_config.get("risk_tolerance")
+        )
+
+        # Store in in-memory preferences for quick access
+        self.user_preferences[user_id] = merged_config
+
+        redis_client = await self._ensure_redis()
+        if redis_client:
+            try:
+                await redis_client.set(
+                    f"user_ai_config:{user_id}",
+                    json.dumps(merged_config)
+                )
+            except Exception:
+                # Non-fatal: keep running with in-memory configuration
+                self.logger.warning(
+                    "Failed to persist user profile preferences to Redis",
+                    user_id=user_id,
+                    fields=list(updates.keys())
+                )
+
+        return merged_config
 
     async def _set_user_operation_mode(self, user_id: str, mode: OperationMode):
         """Set user operation mode with in-memory fallback when Redis unavailable."""

@@ -38,6 +38,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { useChatStore, ChatMode, ChatMessage as BaseChatMessage } from '@/store/chatStore';
+import InvestorProfilePrompt, { InvestorProfileFormValues } from '@/components/chat/InvestorProfilePrompt';
 
 import {
   ExecutionPhase,
@@ -126,7 +127,9 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     setCurrentMode,
     pendingDecision,
     approveDecision,
-    clearPendingDecision
+    clearPendingDecision,
+    pendingAction,
+    clearPendingAction
   } = useChatStore();
   
   // Overlay state for local-only messages (phase, trade, ai messages)
@@ -161,6 +164,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
   const [decisionError, setDecisionError] = useState<string | null>(null);
   const [decisionLoading, setDecisionLoading] = useState(false);
   const [decisionAction, setDecisionAction] = useState<'approve' | 'decline' | null>(null);
+  const [profileSubmitting, setProfileSubmitting] = useState(false);
   // Remove WebSocket connection state since we're using REST API
   const [isConnected] = useState(true); // Always connected via REST API
   
@@ -213,6 +217,79 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
     };
     setOverlays(prev => [...prev, message]);
   };
+
+  const handleProfileSubmit = useCallback(async (values: InvestorProfileFormValues) => {
+    const details: string[] = [];
+
+    if (values.riskTolerance) {
+      const readableRisk = values.riskTolerance.replace(/_/g, ' ');
+      details.push(`Risk tolerance: ${readableRisk}`);
+    }
+
+    if (values.investmentAmount) {
+      const normalizedAmount = values.investmentAmount.replace(/[^0-9.]/g, '');
+      const amountNumber = normalizedAmount ? Number(normalizedAmount) : NaN;
+      if (!Number.isNaN(amountNumber) && amountNumber > 0) {
+        details.push(`Investment amount: ${formatCurrency(amountNumber)}`);
+      } else {
+        details.push(`Investment amount: ${values.investmentAmount.trim()}`);
+      }
+    }
+
+    if (values.timeHorizon) {
+      details.push(`Time horizon: ${values.timeHorizon}`);
+    }
+
+    const objectives = [...(values.objectives || [])];
+    if (values.additionalObjective) {
+      objectives.push(values.additionalObjective);
+    }
+    if (objectives.length) {
+      details.push(`Investment objectives: ${objectives.join(', ')}`);
+    }
+
+    const constraints = [...(values.constraints || [])].filter(Boolean);
+    if (values.additionalConstraint) {
+      constraints.push(values.additionalConstraint);
+    }
+    if (constraints.length) {
+      if (constraints.length === 1 && constraints[0].toLowerCase() === 'none') {
+        details.push('Constraints: none');
+      } else {
+        details.push(`Constraints: ${constraints.join(', ')}`);
+      }
+    }
+
+    if (values.notes) {
+      details.push(`Additional notes: ${values.notes}`);
+    }
+
+    if (!details.length) {
+      toast({
+        variant: 'destructive',
+        title: 'Missing details',
+        description: 'Please complete at least one field so we can tailor recommendations.'
+      });
+      return;
+    }
+
+    const summary = `Here are my investor preferences:\n${details.map((line) => `- ${line}`).join('\n')}`;
+
+    try {
+      setProfileSubmitting(true);
+      await sendChatMessage(summary);
+      clearPendingAction();
+    } catch (error) {
+      console.error('Failed to submit investor profile', error);
+      toast({
+        variant: 'destructive',
+        title: 'Unable to update profile',
+        description: 'Please try again in a moment.'
+      });
+    } finally {
+      setProfileSubmitting(false);
+    }
+  }, [sendChatMessage, toast, clearPendingAction]);
 
   const pendingTradeDetails = useMemo<PendingTradeDetails | null>(() => {
     if (!pendingDecision?.message) {
@@ -722,6 +799,17 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
                 </div>
               </CardContent>
             </Card>
+          </div>
+        )}
+
+        {pendingAction?.type === 'collect_investor_profile' && (
+          <div className="px-6 pb-4">
+            <InvestorProfilePrompt
+              missingFields={pendingAction.data?.missing_fields ?? []}
+              onSubmit={handleProfileSubmit}
+              onSkip={clearPendingAction}
+              isSubmitting={profileSubmitting || isLoading}
+            />
           </div>
         )}
 

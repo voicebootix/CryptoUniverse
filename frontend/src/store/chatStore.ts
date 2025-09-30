@@ -11,6 +11,12 @@ export interface ChatMessage {
   confidence?: number;
 }
 
+export interface PendingChatAction {
+  type: string;
+  data: any;
+  messageId: string;
+}
+
 export enum ChatMode {
   TRADING = 'trading',     // Full trading workflow (main tab)
   QUICK = 'quick',         // Quick questions (widget)
@@ -44,6 +50,7 @@ interface ChatState {
     message: ChatMessage;
     timestamp: string;
   } | null;
+  pendingAction: PendingChatAction | null;
   
   // Actions
   setSessionId: (sessionId: string) => void;
@@ -65,6 +72,7 @@ interface ChatState {
   // Decision Actions
   approveDecision: (decisionId: string, approved: boolean) => Promise<DecisionApprovalResult>;
   clearPendingDecision: () => void;
+  clearPendingAction: () => void;
 }
 
 export const useChatStore = create<ChatState>()(
@@ -79,6 +87,7 @@ export const useChatStore = create<ChatState>()(
       isWidgetMinimized: false,
       unreadCount: 0,
       pendingDecision: null,
+      pendingAction: null,
       
       // Session Management
       setSessionId: (sessionId) => set({ sessionId }),
@@ -159,7 +168,12 @@ export const useChatStore = create<ChatState>()(
               conversation_continuity: true
             }
           });
-          
+
+          const intent = response.data.intent;
+          const requiresAction = response.data.requires_action;
+          const actionData = response.data.action_data;
+          const metadata = response.data.metadata || {};
+
           if (response.data.success) {
             // Clamp AI timestamp to ensure it's at least userTimestamp + 100ms (handles server clock skew)
             const serverTimestamp = new Date(response.data.timestamp || 0).getTime();
@@ -174,8 +188,8 @@ export const useChatStore = create<ChatState>()(
               mode: currentMode,
               confidence: response.data.confidence, // Move confidence to top level for UI access
               metadata: {
-                ...response.data.metadata,
-                intent: response.data.intent,
+                ...metadata,
+                intent,
                 requires_approval: response.data.requires_approval,
                 decision_id: response.data.decision_id,
                 ai_analysis: response.data.ai_analysis
@@ -184,8 +198,8 @@ export const useChatStore = create<ChatState>()(
 
             // Use addMessage to handle unread count and timestamp ordering
             get().addMessage(assistantMessage);
-            set({ isLoading: false });
-            
+            set({ isLoading: false, pendingAction: null });
+
             // Handle approval requests
             if (response.data.requires_approval && response.data.decision_id) {
               // Store decision ID for potential approval
@@ -198,6 +212,35 @@ export const useChatStore = create<ChatState>()(
                 }
               }));
             }
+          } else if (requiresAction && actionData) {
+            const serverTimestamp = new Date(response.data.timestamp || 0).getTime();
+            const minAiTimestamp = userTimestamp.getTime() + 100;
+            const aiTimestamp = new Date(Math.max(serverTimestamp, minAiTimestamp));
+
+            const assistantMessage: ChatMessage = {
+              id: response.data.message_id || `ai-${Date.now() + 1}`,
+              content: response.data.content,
+              type: 'assistant',
+              timestamp: aiTimestamp.toISOString(),
+              mode: currentMode,
+              confidence: response.data.confidence,
+              metadata: {
+                ...metadata,
+                intent,
+                requires_action: true,
+                action_data: actionData
+              }
+            };
+
+            get().addMessage(assistantMessage);
+            set({
+              isLoading: false,
+              pendingAction: {
+                type: actionData.type,
+                data: actionData,
+                messageId: assistantMessage.id
+              }
+            });
           } else {
             throw new Error('Failed to get AI response');
           }
@@ -270,7 +313,8 @@ export const useChatStore = create<ChatState>()(
         messages: [],
         sessionId: null,
         unreadCount: 0,
-        pendingDecision: null
+        pendingDecision: null,
+        pendingAction: null
       }),
       
       // Decision Actions
@@ -324,7 +368,9 @@ export const useChatStore = create<ChatState>()(
         }
       },
       
-      clearPendingDecision: () => set({ pendingDecision: null })
+      clearPendingDecision: () => set({ pendingDecision: null }),
+
+      clearPendingAction: () => set({ pendingAction: null })
     }),
     {
       name: 'chat-store',
@@ -332,7 +378,8 @@ export const useChatStore = create<ChatState>()(
         sessionId: state.sessionId,
         messages: state.messages,
         currentMode: state.currentMode,
-        pendingDecision: state.pendingDecision
+        pendingDecision: state.pendingDecision,
+        pendingAction: state.pendingAction
       })
     }
   )
