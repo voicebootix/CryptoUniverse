@@ -82,11 +82,11 @@ const InvestorProfilePrompt: React.FC<InvestorProfilePromptProps> = ({
   }, [objectives, additionalObjective]);
 
   const constraintSelections = useMemo(() => {
-    const base = constraints.includes('None') ? ['None'] : constraints;
+    const base = constraints.includes('none') ? ['none'] : constraints;
     if (!additionalConstraint.trim()) {
       return base;
     }
-    return [...base.filter(option => option !== 'None'), additionalConstraint.trim()];
+    return [...base.filter(option => option !== 'none'), additionalConstraint.trim()];
   }, [constraints, additionalConstraint]);
 
   const toggleObjective = (value: string) => {

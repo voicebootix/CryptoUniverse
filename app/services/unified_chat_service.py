@@ -514,27 +514,9 @@ class UnifiedChatService(LoggerMixin):
         for field in required:
             value = user_config.get(field)
             if field == "risk_tolerance":
-                normalized_value: Optional[str] = None
-                is_placeholder = False
-
-                if isinstance(value, str):
-                    candidate = value.strip().lower()
-                    # First check if already a valid normalized value
-                    if candidate in {"conservative", "moderate", "aggressive", "beast_mode"}:
-                        normalized_value = candidate
-                    # Then check for synonyms that need normalization
-                    elif candidate in {"balanced", "medium"}:
-                        normalized_value = "moderate"
-                        if candidate == "balanced":
-                            is_placeholder = True
-                    elif candidate == "beast":
-                        normalized_value = "beast_mode"
-                    elif candidate:
-                        normalized_value = self._normalize_risk_tolerance(candidate)
-                elif value is not None:
-                    normalized_value = self._normalize_risk_tolerance(str(value).lower())
-
-                if not normalized_value or is_placeholder:
+                normalized_value = self._normalize_risk_tolerance(str(value).strip().lower()) if value else None
+                # Only flag as missing if we have no value or the default "balanced" placeholder
+                if not normalized_value or (isinstance(value, str) and value.strip().lower() == "balanced"):
                     missing.append(field)
             elif field == "investment_amount":
                 amount = self._safe_float(value, None)
