@@ -4,7 +4,8 @@
       "Bash(git show-branch:*)",
       "Bash(python test_chat_endpoints.py)",
       "Bash(python:./scripts/*)",
-      "Bash(python:./app/tests/*)"
+      "Bash(python:./app/tests/*)",
+      "Bash(git pull:*)"
     ],
     "deny": [],
     "ask": [

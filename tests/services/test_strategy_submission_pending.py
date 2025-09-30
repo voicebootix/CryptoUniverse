@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 os.environ.setdefault("SECRET_KEY", "test-secret")
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_strategy_pending.db")
+os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
