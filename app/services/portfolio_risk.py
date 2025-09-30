@@ -53,6 +53,7 @@ from app.services.real_market_data import (
     RealMarketDataService,
     real_market_data_service,
 )
+from app.services.dynamic_asset_filter import AssetInfo, enterprise_asset_filter
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
@@ -887,6 +888,21 @@ class PortfolioOptimizationEngine(LoggerMixin):
         self._latest_covariance_df: Optional[pd.DataFrame] = None
         self._latest_sample_size: int = 0
         self._latest_symbols_with_data: set = set()
+        self._asset_filter = enterprise_asset_filter
+        self._asset_metadata_cache: Dict[str, AssetInfo] = {}
+        self._asset_metadata_expiry: datetime = datetime.min
+        self._asset_metadata_ttl: timedelta = timedelta(minutes=10)
+        self._default_liquidity_multiplier: float = 0.65
+        self._tier_liquidity_bias: Dict[str, float] = {
+            "tier_institutional": 1.1,
+            "tier_enterprise": 1.0,
+            "tier_professional": 0.9,
+            "tier_retail": 0.75,
+            "tier_emerging": 0.5,
+            "tier_micro": 0.35,
+            "tier_any": 0.25,
+        }
+        self._stablecoin_symbols = {"USDT", "USDC", "BUSD", "DAI", "TUSD", "USDP", "GUSD"}
     
     async def optimize_portfolio(
         self,
@@ -951,6 +967,113 @@ class PortfolioOptimizationEngine(LoggerMixin):
             if symbol and symbol not in symbols:
                 symbols.append(symbol)
         return symbols
+
+    async def _refresh_asset_metadata(self, symbols: List[str]) -> Dict[str, AssetInfo]:
+        """Refresh cached asset metadata using the enterprise discovery service."""
+
+        if not symbols:
+            self._asset_metadata_cache = {}
+            self._asset_metadata_expiry = datetime.utcnow()
+            return {}
+
+        asset_filter = getattr(self, "_asset_filter", None)
+        if asset_filter is None:
+            self._asset_metadata_cache = {}
+            self._asset_metadata_expiry = datetime.utcnow()
+            return {}
+
+        try:
+            if not getattr(asset_filter, "session", None):
+                await asset_filter.async_init()
+
+            asset_map = await asset_filter.get_assets_for_symbol_list(symbols)
+            normalized = {symbol.upper(): info for symbol, info in asset_map.items()}
+            self._asset_metadata_cache = normalized
+            self._asset_metadata_expiry = datetime.utcnow()
+            return normalized
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.warning(
+                "Dynamic asset metadata unavailable",
+                error=str(exc),
+            )
+            self._asset_metadata_cache = {}
+            self._asset_metadata_expiry = datetime.utcnow()
+            return {}
+
+    async def _ensure_asset_metadata(self, symbols: List[str]) -> Dict[str, AssetInfo]:
+        """Ensure asset metadata is available for the requested symbols."""
+
+        if not symbols:
+            return {}
+
+        now = datetime.utcnow()
+        cache_expired = (now - self._asset_metadata_expiry) > self._asset_metadata_ttl
+        normalized_symbols = [symbol.upper() for symbol in symbols]
+        missing = [symbol for symbol in normalized_symbols if symbol not in self._asset_metadata_cache]
+
+        if cache_expired or missing:
+            return await self._refresh_asset_metadata(normalized_symbols)
+
+        return self._asset_metadata_cache
+
+    def _get_liquidity_multiplier(self, symbol: str, asset_info: Optional[AssetInfo]) -> float:
+        """Derive a liquidity-based weight multiplier for an asset."""
+
+        if asset_info is None:
+            multiplier = self._default_liquidity_multiplier
+        else:
+            tier = (getattr(asset_info, "tier", "") or "").lower()
+            multiplier = self._tier_liquidity_bias.get(tier, self._default_liquidity_multiplier)
+
+        if symbol.upper() in self._stablecoin_symbols:
+            multiplier = max(multiplier, 0.85)
+
+        return float(max(0.1, min(1.25, multiplier)))
+
+    async def _apply_dynamic_weight_constraints(
+        self,
+        symbols: List[str],
+        weights_array: np.ndarray,
+    ) -> np.ndarray:
+        """Adjust weights using dynamically discovered asset liquidity."""
+
+        if not symbols:
+            return weights_array
+
+        weights = np.asarray(weights_array, dtype=float)
+        if weights.size != len(symbols):
+            weights = np.ones(len(symbols)) / len(symbols)
+
+        weights = np.nan_to_num(weights, nan=0.0, posinf=0.0, neginf=0.0)
+        weights = np.maximum(weights, 0.0)
+
+        asset_metadata = await self._ensure_asset_metadata(symbols)
+        multipliers = np.array(
+            [
+                self._get_liquidity_multiplier(symbol, asset_metadata.get(symbol.upper()))
+                for symbol in symbols
+            ],
+            dtype=float,
+        )
+
+        multipliers = np.nan_to_num(
+            multipliers,
+            nan=self._default_liquidity_multiplier,
+            posinf=self._default_liquidity_multiplier,
+            neginf=self._default_liquidity_multiplier,
+        )
+
+        adjusted = weights * multipliers
+        total = adjusted.sum()
+        if total <= 0:
+            adjusted = multipliers
+            total = adjusted.sum()
+
+        if total <= 0:
+            return np.ones(len(symbols)) / len(symbols)
+
+        adjusted = adjusted / total
+        return adjusted
 
     def _normalize_market_symbol(self, symbol: str) -> str:
         """Normalize internal symbols to exchange-compatible trading pairs."""
@@ -1391,33 +1514,18 @@ class PortfolioOptimizationEngine(LoggerMixin):
         inv_cov = np.linalg.pinv(matrix)
         ones = np.ones(len(symbols))
 
-        # Calculate optimal weights with asset-specific constraints
+        # Calculate optimal weights with dynamically adjusted constraints
         numerator = np.dot(inv_cov, returns_array - self._risk_free_rate)  # Excess returns
         denominator = np.dot(ones.T, numerator)
 
         if abs(denominator) > 1e-8:
             weights_array = numerator / denominator
             weights_array = np.abs(weights_array)  # Ensure positive
-            
-            # Apply asset-specific constraints based on market research
-            for i, symbol in enumerate(symbols):
-                if symbol == "XRP":
-                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.25)  # Max 25%
-                elif symbol == "ADA":
-                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.20)  # Max 20%
-                elif symbol == "DOGE":
-                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.10)  # Max 10%
-                elif symbol == "USDC":
-                    weights_array[i] = np.clip(weights_array[i], 0.05, 0.30)  # 5-30%
-                elif symbol == "REEF":
-                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.05)  # Max 5%
-                else:
-                    weights_array[i] = np.clip(weights_array[i], 0.02, 0.25)  # Default constraints
-
-            weights_array = weights_array / np.sum(weights_array)  # Normalize
         else:
             # Fallback to equal weights
             weights_array = np.ones(len(symbols)) / len(symbols)
+
+        weights_array = await self._apply_dynamic_weight_constraints(symbols, weights_array)
 
         return self._build_optimization_result(
             strategy=OptimizationStrategy.MAX_SHARPE,

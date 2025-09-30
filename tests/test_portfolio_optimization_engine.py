@@ -14,6 +14,10 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
+import app.services.portfolio_risk as portfolio_risk_module  # noqa: E402  pylint: disable=wrong-import-position
+from app.services.dynamic_asset_filter import (  # noqa: E402  pylint: disable=wrong-import-position
+    AssetInfo,
+)
 from app.services.portfolio_risk import (  # noqa: E402  pylint: disable=wrong-import-position
     OptimizationStrategy,
     PortfolioOptimizationEngine,
@@ -56,6 +60,27 @@ class StubMarketDataService:
     ) -> List[Dict[str, float]]:
         self.calls[symbol] = self.calls.get(symbol, 0) + 1
         return self._price_map.get(symbol, [])
+
+
+class StubAssetFilter:
+    """Stub enterprise asset filter returning predetermined asset metadata."""
+
+    def __init__(self, asset_map: Dict[str, AssetInfo]):
+        self._asset_map = {symbol.upper(): info for symbol, info in asset_map.items()}
+        self.session = object()
+        self.calls: List[List[str]] = []
+
+    async def async_init(self):
+        self.session = object()
+
+    async def get_assets_for_symbol_list(self, symbols: List[str]) -> Dict[str, AssetInfo]:
+        requested = [symbol.upper() for symbol in symbols]
+        self.calls.append(requested)
+        return {
+            symbol: self._asset_map[symbol]
+            for symbol in requested
+            if symbol in self._asset_map
+        }
 
 
 def _annualized_log_return(prices: List[float]) -> float:
@@ -165,3 +190,61 @@ async def test_equal_weight_expected_return_reflects_market_data():
     assert result_b.expected_return == pytest.approx(equal_expected_b, rel=1e-3)
     assert result_b.expected_return > result_a.expected_return
     assert result_b.sharpe_ratio > result_a.sharpe_ratio
+
+
+@pytest.mark.asyncio
+async def test_max_sharpe_uses_dynamic_asset_liquidity(monkeypatch):
+    now = datetime.utcnow()
+    asset_map = {
+        "BTC": AssetInfo(
+            symbol="BTC",
+            exchange="binance",
+            volume_24h_usd=500_000_000.0,
+            price_usd=30000.0,
+            market_cap_usd=None,
+            tier="tier_institutional",
+            last_updated=now,
+            metadata={"source": "test"},
+        ),
+        "DOGE": AssetInfo(
+            symbol="DOGE",
+            exchange="binance",
+            volume_24h_usd=5_000_000.0,
+            price_usd=0.1,
+            market_cap_usd=None,
+            tier="tier_retail",
+            last_updated=now,
+            metadata={"source": "test"},
+        ),
+    }
+
+    stub_filter = StubAssetFilter(asset_map)
+    monkeypatch.setattr(
+        portfolio_risk_module,
+        "enterprise_asset_filter",
+        stub_filter,
+        raising=False,
+    )
+
+    price_map = {
+        "BTC/USDT": _build_ohlcv_series([30000, 31000, 32000, 33000, 34000]),
+        "DOGE/USDT": _build_ohlcv_series([0.1, 0.11, 0.105, 0.11, 0.1125]),
+    }
+
+    engine = PortfolioOptimizationEngine(market_data_service=StubMarketDataService(price_map))
+    engine._asset_filter = stub_filter
+
+    positions = [
+        {"symbol": "BTC", "value_usd": 15000},
+        {"symbol": "DOGE", "value_usd": 5000},
+    ]
+
+    result = await engine.optimize_portfolio(
+        {"positions": positions},
+        OptimizationStrategy.MAX_SHARPE,
+    )
+
+    assert stub_filter.calls, "Expected dynamic asset filter to be invoked"
+    assert {"BTC", "DOGE"} == set(stub_filter.calls[0])
+    assert result.weights["BTC"] > result.weights["DOGE"]
+    assert result.weights["BTC"] > 0.55
