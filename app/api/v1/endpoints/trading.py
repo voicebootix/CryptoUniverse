@@ -24,13 +24,14 @@ from app.api.v1.endpoints.auth import get_current_user, require_role
 from app.models.user import User, UserRole
 from app.models.trading import Trade, Position, Order, TradingStrategy
 from app.models.exchange import ExchangeAccount
-from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
+from app.models.credit import CreditAccount, CreditTransactionType
 from app.services.trade_execution import TradeExecutionService
 from app.services.master_controller import MasterSystemController
 from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
 from app.services.market_analysis_core import market_analysis_service
 from app.services.rate_limit import rate_limiter
 from app.services.websocket import manager
+from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -219,38 +220,60 @@ async def execute_manual_trade(
             "user_id": str(current_user.id)
         }
         
+        # Pre-calculate credit requirement for live trades
+        credit_cost: Optional[int] = None
+        if not simulation_mode:
+            credit_cost = calculate_credit_cost(request.amount, request.symbol)
+            if credit_account.available_credits < credit_cost:
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Insufficient credits for trading",
+                )
+
         # Execute trade
         result = await trade_executor.execute_trade(
             trade_data,
             str(current_user.id),
             simulation_mode=simulation_mode
         )
-        
+
         if not result.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=result.get("error", "Trade execution failed")
             )
-        
-        # Deduct credits for real trades
-        if not simulation_mode:
-            credit_cost = calculate_credit_cost(request.amount, request.symbol)
-            if credit_account.available_credits >= credit_cost:
-                credit_account.available_credits -= credit_cost
-                credit_account.total_used_credits += credit_cost
-                
-                # Record transaction
-                credit_tx = CreditTransaction(
-                    account_id=credit_account.id,
-                    amount=-credit_cost,
+
+        # Deduct credits for real trades after successful execution
+        if credit_cost is not None:
+            try:
+                # Re-fetch credit account with row lock to prevent race conditions
+                locked_stmt = select(CreditAccount).where(
+                    CreditAccount.user_id == current_user.id
+                ).with_for_update()
+                locked_result = await db.execute(locked_stmt)
+                locked_credit_account = locked_result.scalar_one()
+
+                await credit_ledger.consume_credits(
+                    db,
+                    locked_credit_account,
+                    credits=credit_cost,
+                    description=f"Trade execution: {request.action} {request.symbol}",
+                    source="trading_api",
                     transaction_type=CreditTransactionType.USAGE,
-                    description=f"Trade: {request.action} {request.symbol}",
-                    balance_before=credit_account.available_credits + credit_cost,
-                    balance_after=credit_account.available_credits,
-                    source="api"
+                    metadata={
+                        "symbol": request.symbol,
+                        "amount": float(request.amount),
+                        "order_type": request.order_type,
+                        "exchange": request.exchange,
+                    },
                 )
-                db.add(credit_tx)
                 await db.commit()
+            except InsufficientCreditsError:
+                await db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Insufficient credits for trading",
+                )
         
         trade_result = result.get("trade_result", {}) or result.get("simulation_result", {})
         

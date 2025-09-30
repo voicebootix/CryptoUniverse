@@ -7,7 +7,7 @@ deployment environments (development, staging, production).
 
 import os
 from functools import lru_cache
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import Field, field_validator, model_validator, computed_field
 from pydantic_settings import BaseSettings
@@ -179,6 +179,19 @@ class Settings(BaseSettings):
     )
     API_V1_PREFIX: str = Field(default="https://cryptouniverse.onrender.com/api/v1", description="API v1 prefix URL")
 
+    # Chat credit consumption settings
+    CHAT_CREDIT_COST_DEFAULT: int = Field(
+        default=1,
+        env="CHAT_CREDIT_COST_DEFAULT",
+        ge=0,
+        description="Default number of credits consumed per chargeable chat interaction",
+    )
+    CHAT_CREDIT_COST_OVERRIDES: str = Field(
+        default="{}",
+        env="CHAT_CREDIT_COST_OVERRIDES",
+        description="JSON object mapping chat intents or conversation modes to specific credit costs",
+    )
+
     # Validator to prevent insecure SSL in production
     @model_validator(mode="after")
     def _validate_ssl_policy(self):
@@ -193,6 +206,31 @@ class Settings(BaseSettings):
                 "If you absolutely must override this (emergency only), set SSL_INSECURE_OVERRIDE_ACKNOWLEDGED=true"
             )
         return self
+
+    @computed_field
+    @property
+    def chat_credit_cost_overrides(self) -> Dict[str, int]:
+        """Parse chat credit cost overrides from JSON payload."""
+        raw_value = getattr(self, "CHAT_CREDIT_COST_OVERRIDES", "{}")
+        if not raw_value:
+            return {}
+
+        try:
+            parsed = json.loads(raw_value) if isinstance(raw_value, str) else raw_value
+        except (TypeError, json.JSONDecodeError):
+            return {}
+
+        if not isinstance(parsed, dict):
+            return {}
+
+        normalized: Dict[str, int] = {}
+        for key, value in parsed.items():
+            try:
+                normalized[str(key)] = max(0, int(value))
+            except (TypeError, ValueError):
+                continue
+
+        return normalized
 
     class Config:
         case_sensitive = True

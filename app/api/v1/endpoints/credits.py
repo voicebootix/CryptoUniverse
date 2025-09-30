@@ -32,9 +32,15 @@ from app.core.config import get_settings
 from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User, UserRole
-from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
+from app.models.credit import (
+    CreditAccount,
+    CreditStatus,
+    CreditTransaction,
+    CreditTransactionType,
+)
 from app.models.trading import Trade, TradeStatus
 from app.models.exchange import ExchangeAccount
+from app.services.credit_ledger import credit_ledger
 from app.services.profit_sharing_service import profit_sharing_service
 from app.services.rate_limit import rate_limiter
 
@@ -70,15 +76,23 @@ async def get_or_create_credit_account(user_id: str, db: AsyncSession, user: Opt
             initial_credits = getattr(settings, 'admin_initial_credits', 0)
 
     # Create new account with role-based initial credits
-    credit_account = CreditAccount(
-        user_id=user_id,
-        total_credits=initial_credits,
-        available_credits=initial_credits,
-        used_credits=0,
-        expired_credits=0
-    )
+    credit_account = CreditAccount(user_id=user_id)
+    credit_account.synchronize_profit_tracking()
 
     db.add(credit_account)
+    await db.flush()  # Ensure account is persisted/attached to session
+
+    # Use credit ledger API for initial credits to ensure proper transaction recording
+    if initial_credits > 0:
+        await credit_ledger.add_credits(
+            db,
+            credit_account,
+            credits=initial_credits,
+            description=f"Initial role-based credits for {user.role.value if user else 'user'}",
+            source="system",
+            transaction_type=CreditTransactionType.BONUS,
+            track_lifetime=False,
+        )
 
     try:
         await db.commit()
@@ -129,8 +143,10 @@ class CreditPurchaseRequest(BaseModel):
 
 class CreditBalanceResponse(BaseModel):
     available_credits: int
-    total_credits: int  # Updated field name
-    used_credits: int   # Updated field name
+    total_credits: int
+    used_credits: int
+    total_purchased_credits: int
+    total_used_credits: int
     profit_potential: Decimal
     profit_earned_to_date: Decimal
     remaining_potential: Decimal
@@ -186,10 +202,16 @@ async def get_credit_balance(
                    available_credits=credit_account.available_credits,
                    total_credits=credit_account.total_credits)
         
+        # Ensure derived values are up to date before responding
+        credit_account.synchronize_profit_tracking()
+
         # Calculate profit potential using domain model method
         await profit_sharing_service.ensure_pricing_loaded()  # Ensure pricing loaded if needed by model
-        
+
         profit_potential = credit_account.calculate_profit_potential()
+
+        total_purchased = int(credit_account.total_purchased_credits or credit_account.total_credits or 0)
+        total_used = int(credit_account.total_used_credits or credit_account.used_credits or 0)
         
         # Get total profit earned to date with safe query
         try:
@@ -215,8 +237,10 @@ async def get_credit_balance(
         
         return CreditBalanceResponse(
             available_credits=int(credit_account.available_credits or 0),
-            total_credits=int(credit_account.total_credits or 0),
+            total_credits=total_purchased,
             used_credits=int(credit_account.used_credits or 0),
+            total_purchased_credits=total_purchased,
+            total_used_credits=total_used,
             profit_potential=max(Decimal("0"), profit_potential),
             profit_earned_to_date=max(Decimal("0"), profit_earned),
             remaining_potential=max(Decimal("0"), remaining_potential),
@@ -551,7 +575,14 @@ async def _store_pending_payment(
             description=f"Credit purchase: {credit_amount} credits for ${payment_data['amount_usd']}",
             balance_before=credit_account.available_credits,
             balance_after=credit_account.available_credits + credit_amount,
-            source="api"
+            source="api",
+            reference_id=payment_data["payment_id"],
+            stripe_payment_intent_id=payment_data["payment_id"],
+            meta_data={
+                "payment_state": "pending",
+                "payment_id": payment_data["payment_id"],
+                "payment_method": payment_data.get("crypto_currency"),
+            },
         )
         db.add(transaction)
         await db.commit()
@@ -636,7 +667,7 @@ async def _process_confirmed_payment(
         import json
         payment_info = json.loads(pending_data)
         user_id = payment_info["user_id"]
-        credit_amount = payment_info["credit_amount"]
+        credit_amount = int(payment_info["credit_amount"])
         
         # Acquire Redis lock for idempotent processing
         lock_key = f"payment_processing:{payment_id}"
@@ -651,10 +682,20 @@ async def _process_confirmed_payment(
             
             # Process payment with database row locks for idempotency
             async for db_session in get_database():
+                bind = db_session.get_bind()
+                dialect = getattr(bind, "dialect", None)
+                if dialect is None and hasattr(bind, "sync_engine"):
+                    dialect = getattr(bind.sync_engine, "dialect", None)
+                dialect_name = (getattr(dialect, "name", "") or "").lower()
+
+                for_update_supported = dialect_name != "sqlite"
+
                 # Acquire row locks to prevent concurrent processing
                 credit_stmt = select(CreditAccount).where(
                     CreditAccount.user_id == user_id
-                ).with_for_update()
+                )
+                if for_update_supported:
+                    credit_stmt = credit_stmt.with_for_update()
                 
                 credit_result = await db_session.execute(credit_stmt)
                 credit_account = credit_result.scalar_one_or_none()
@@ -665,8 +706,10 @@ async def _process_confirmed_payment(
                 
                 # Check transaction with row lock
                 tx_stmt = select(CreditTransaction).where(
-                    CreditTransaction.stripe_payment_intent_id == payment_id
-                ).with_for_update()
+                    CreditTransaction.reference_id == payment_id
+                )
+                if for_update_supported:
+                    tx_stmt = tx_stmt.with_for_update()
                 
                 tx_result = await db_session.execute(tx_stmt)
                 transaction = tx_result.scalar_one_or_none()
@@ -674,11 +717,12 @@ async def _process_confirmed_payment(
                 if not transaction:
                     logger.error(f"Transaction not found for payment {payment_id}")
                     return
-                
+
                 # Check if already completed (idempotency check)
-                if transaction.status == "completed":
+                transaction_metadata = transaction.meta_data or {}
+                if transaction_metadata.get("payment_state") == "completed":
                     logger.info(f"Payment {payment_id} already completed - skipping")
-                    
+
                     # Clean up pending payment key
                     try:
                         await redis.delete(f"pending_payment:{payment_id}")
@@ -687,15 +731,33 @@ async def _process_confirmed_payment(
                     
                     return
                 
-                # Update credit account with correct field names
-                credit_account.available_credits += credit_amount
-                credit_account.total_credits += credit_amount  # Use correct field name
-                credit_account.last_purchase_at = datetime.utcnow()
-                
-                # Update transaction status
-                transaction.status = "completed"
-                transaction.processed_at = datetime.utcnow()
-                
+                # Store placeholder transaction metadata before deleting it
+                placeholder_metadata = {**transaction_metadata}
+                placeholder_metadata.update({
+                    "payment_id": payment_id,
+                    "transaction_hash": verification_result.get("transaction_hash"),
+                    "payment_state": "completed",
+                })
+
+                # Delete the placeholder transaction to avoid duplicates
+                await db_session.delete(transaction)
+                await db_session.flush()
+
+                # Create finalized transaction using centralized ledger rules
+                ledger_transaction = await credit_ledger.add_credits(
+                    db_session,
+                    credit_account,
+                    credits=credit_amount,
+                    transaction_type=CreditTransactionType.PURCHASE,
+                    description=f"Crypto payment allocation ({payment_id})",
+                    source="crypto_payment",
+                    reference_id=payment_id,
+                    metadata=placeholder_metadata,
+                )
+
+                # Use the ledger transaction as the surviving record
+                transaction = ledger_transaction
+
                 # Commit all changes in single transaction
                 await db_session.commit()
                 
