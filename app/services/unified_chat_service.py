@@ -14,12 +14,14 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Dict, List, Optional, Any, AsyncGenerator, Union
 from dataclasses import dataclass
 from enum import Enum
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import DatabaseError
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
@@ -46,11 +48,13 @@ from app.services.strategy_marketplace_service import strategy_marketplace_servi
 from app.services.paper_trading_engine import paper_trading_engine
 from app.services.user_opportunity_discovery import user_opportunity_discovery
 from app.services.user_onboarding_service import user_onboarding_service
+from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
 
 # Models
 from app.models.user import User
 from app.models.trading import TradingStrategy, Trade, Position
-from app.models.credit import CreditAccount
+from app.models.credit import CreditAccount, CreditTransactionType
+from app.models.analytics import PerformanceMetric, MetricType
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -82,6 +86,27 @@ class ChatIntent(str, Enum):
     OPPORTUNITY_DISCOVERY = "opportunity_discovery"
     HELP = "help"
     UNKNOWN = "unknown"
+
+
+CHARGEABLE_CHAT_INTENTS = {
+    ChatIntent.PORTFOLIO_ANALYSIS,
+    ChatIntent.TRADE_EXECUTION,
+    ChatIntent.MARKET_ANALYSIS,
+    ChatIntent.RISK_ASSESSMENT,
+    ChatIntent.STRATEGY_RECOMMENDATION,
+    ChatIntent.STRATEGY_MANAGEMENT,
+    ChatIntent.REBALANCING,
+    ChatIntent.PERFORMANCE_REVIEW,
+    ChatIntent.POSITION_MANAGEMENT,
+    ChatIntent.OPPORTUNITY_DISCOVERY,
+}
+
+NON_BILLABLE_CHAT_INTENTS = {
+    ChatIntent.GREETING,
+    ChatIntent.HELP,
+    ChatIntent.CREDIT_INQUIRY,
+    ChatIntent.CREDIT_MANAGEMENT,
+}
 
 
 class ConversationMode(str, Enum):
@@ -162,7 +187,9 @@ class UnifiedChatService(LoggerMixin):
         self.live_trading_credit_requirement = 10  # Credits required for live trading operations
         self.opportunity_discovery = user_opportunity_discovery
         self.onboarding_service = user_onboarding_service
-        
+        self.default_chat_credit_cost = max(0, getattr(settings, "CHAT_CREDIT_COST_DEFAULT", 1))
+        self.chat_credit_cost_overrides = settings.chat_credit_cost_overrides
+
         # Redis for state management
         self.redis = None
         self._redis_initialized = False
@@ -190,6 +217,138 @@ class UnifiedChatService(LoggerMixin):
 
         return bool(value)
 
+    @staticmethod
+    def _safe_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+        """Safely convert common numeric representations into floats."""
+        if value is None:
+            return default
+
+        if isinstance(value, bool):
+            return float(value)
+
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        if isinstance(value, Decimal):
+            return float(value)
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return default
+
+            if stripped.endswith("%"):
+                stripped = stripped[:-1].strip()
+
+            try:
+                return float(stripped.replace(",", ""))
+            except ValueError:
+                return default
+
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _coerce_to_float(value: Any, default: float = 0.0) -> float:
+        """Safely convert values to floats, handling Decimal and string inputs."""
+        if value is None:
+            return default
+        if isinstance(value, float):
+            return value
+        if isinstance(value, Decimal):
+            return float(value)
+        if isinstance(value, int):
+            return float(value)
+        try:
+            return float(str(value))
+        except (TypeError, ValueError):
+            return default
+
+    def _infer_overall_risk_level(self, risk_metrics: Dict[str, Any]) -> str:
+        """Derive a qualitative risk level from quantitative metrics."""
+
+        if not risk_metrics:
+            return "Unknown"
+
+        var_95 = abs(self._coerce_to_float(risk_metrics.get("var_95")))
+        max_drawdown = abs(self._coerce_to_float(risk_metrics.get("maximum_drawdown")))
+        sharpe_ratio = self._coerce_to_float(risk_metrics.get("sharpe_ratio"))
+        volatility = abs(self._coerce_to_float(risk_metrics.get("volatility_annual")))
+
+        if var_95 >= 0.20 or max_drawdown >= 0.45 or volatility >= 0.85:
+            return "High"
+        if var_95 <= 0.07 and max_drawdown <= 0.25 and sharpe_ratio >= 1.0:
+            return "Low"
+        return "Medium"
+
+    @staticmethod
+    def _extract_trade_notional(trade: Dict[str, Any]) -> Optional[float]:
+        """Derive the USD notional requested for a rebalancing trade."""
+        for key in (
+            "position_size_usd",
+            "notional_usd",
+            "trade_value",
+            "value_change",
+            "amount",
+            "value_usd",
+        ):
+            raw_value = trade.get(key)
+            value = UnifiedChatService._safe_float(raw_value)
+            if value is None:
+                continue
+            if key == "value_change":
+                value = abs(value)
+            if value != 0:
+                return abs(value)
+
+        return None
+
+    @staticmethod
+    def _extract_trade_quantity(trade: Dict[str, Any]) -> Optional[float]:
+        """Derive the requested quantity (if any) for a rebalancing trade."""
+        for key in ("quantity", "quantity_change"):
+            value = UnifiedChatService._safe_float(trade.get(key))
+            if value is not None and value != 0:
+                return abs(value)
+
+        return None
+
+    @staticmethod
+    def _extract_price_hint(trade: Dict[str, Any]) -> Optional[float]:
+        """Extract an indicative price from the trade payload if provided."""
+        for key in ("reference_price", "price", "current_price", "average_price"):
+            value = UnifiedChatService._safe_float(trade.get(key))
+            if value is not None and value > 0:
+                return value
+
+        return None
+
+    async def _resolve_rebalance_price(
+        self,
+        symbol: Optional[str],
+        exchange: Optional[str]
+    ) -> Optional[float]:
+        """Resolve a live price for rebalancing conversions when none supplied."""
+        if not symbol:
+            return None
+
+        try:
+            price = await self.trade_executor._get_current_price(
+                symbol.upper(),
+                (exchange or "auto")
+            )
+            return price or None
+        except Exception as price_error:
+            self.logger.warning(
+                "Failed to resolve price for rebalancing trade",
+                symbol=symbol,
+                exchange=exchange,
+                error=str(price_error)
+            )
+            return None
+
     def _determine_trading_mode(self, user_config: Dict[str, Any]) -> TradingMode:
         """Resolve the user's configured trading mode with a safe fallback."""
         trading_mode_value = user_config.get("trading_mode", TradingMode.BALANCED.value)
@@ -203,6 +362,44 @@ class UnifiedChatService(LoggerMixin):
             return TradingMode(normalized_value)
         except ValueError:
             return TradingMode.BALANCED
+
+    @staticmethod
+    def _normalize_user_identifier(user_id: Union[str, uuid.UUID]) -> Union[str, uuid.UUID]:
+        """Return a UUID instance when possible to guarantee consistent lookups."""
+
+        if isinstance(user_id, uuid.UUID):
+            return user_id
+
+        try:
+            return uuid.UUID(str(user_id))
+        except (TypeError, ValueError):
+            return str(user_id)
+
+    def _should_charge_intent(self, intent: ChatIntent) -> bool:
+        """Determine if a chat intent should consume credits."""
+
+        return intent in CHARGEABLE_CHAT_INTENTS
+
+    def _resolve_chat_credit_cost(
+        self,
+        intent: ChatIntent,
+        conversation_mode: ConversationMode,
+    ) -> int:
+        """Resolve the credit cost for a chat interaction."""
+
+        if conversation_mode == ConversationMode.PAPER_TRADING:
+            return 0
+
+        if conversation_mode.value in self.chat_credit_cost_overrides:
+            return max(0, int(self.chat_credit_cost_overrides[conversation_mode.value]))
+
+        if intent.value in self.chat_credit_cost_overrides:
+            return max(0, int(self.chat_credit_cost_overrides[intent.value]))
+
+        if intent == ChatIntent.TRADE_EXECUTION:
+            return max(self.default_chat_credit_cost, self.live_trading_credit_requirement)
+
+        return self.default_chat_credit_cost
 
     def _json_default(self, obj):
         """Default JSON serializer for complex types."""
@@ -380,15 +577,19 @@ class UnifiedChatService(LoggerMixin):
             message_length=len(message)
         )
         
+        charge_context: Optional[Dict[str, Any]] = None
+
         try:
             # Step 1: Analyze intent using ChatAI (fast)
             intent_analysis = await self._analyze_intent_unified(message, session.context)
-            
+
             # Step 2: Check requirements (credits, strategies, etc.)
             requirements_check = await self._check_requirements(
                 intent_analysis, user_id, conversation_mode
             )
-            
+
+            charge_request = requirements_check.get("credit_charge")
+
             if not requirements_check["allowed"]:
                 # Return requirement failure message
                 response = {
@@ -420,17 +621,67 @@ class UnifiedChatService(LoggerMixin):
                 user_strategies=prefetched_user_strategies,
                 marketplace_strategies=prefetched_marketplace
             )
-            
-            # Step 4: Generate response
+
+            # Step 4: Generate response with appropriate charging strategy
             if stream:
+                # Streaming flow handles its own charge/refund lifecycle
                 return self._generate_streaming_response(
-                    message, intent_analysis, session, context_data
+                    message,
+                    intent_analysis,
+                    session,
+                    context_data,
+                    charge_request=charge_request,
+                    user_id=user_id,
                 )
             else:
-                return await self._generate_complete_response(
+                # Non-streaming flow: charge upfront, generate response, refund on failure
+                charge_context: Optional[Dict[str, Any]] = None
+                if charge_request:
+                    try:
+                        charge_context = await self._charge_chat_interaction(
+                            user_id,
+                            charge_request["intent"],
+                            charge_request["conversation_mode"],
+                            charge_request["credits"],
+                        )
+                    except InsufficientCreditsError:
+                        return {
+                            "success": False,
+                            "session_id": session.session_id,
+                            "message_id": str(uuid.uuid4()),
+                            "content": "Insufficient credits for this operation. Please purchase additional credits to continue.",
+                            "intent": intent_analysis["intent"].value if hasattr(intent_analysis["intent"], "value") else intent_analysis["intent"],
+                            "requires_action": True,
+                            "action_data": {
+                                "type": "credit_purchase",
+                                "required_credits": charge_request["credits"],
+                            },
+                            "timestamp": datetime.utcnow(),
+                        }
+
+                response = await self._generate_complete_response(
                     message, intent_analysis, session, context_data
                 )
-                
+
+                # Refund credits if response generation failed
+                if not response.get("success", True) and charge_context:
+                    try:
+                        await self._refund_chat_charge(
+                            user_id,
+                            charge_context,
+                            "Response generation failed after credit deduction",
+                        )
+                    except Exception as refund_error:
+                        # Don't mask the original response with refund errors
+                        self.logger.warning(
+                            "Failed to refund credits after response failure",
+                            error=str(refund_error),
+                            user_id=user_id,
+                            charge_context=charge_context,
+                        )
+
+                return response
+
         except Exception as e:
             self.logger.exception("Error processing message", error=str(e))
             error_response = {
@@ -439,7 +690,14 @@ class UnifiedChatService(LoggerMixin):
                 "session_id": session_id,
                 "timestamp": datetime.utcnow()
             }
-            
+
+            if charge_context:
+                await self._refund_chat_charge(
+                    user_id,
+                    charge_context,
+                    "Chat processing failed after credit deduction",
+                )
+
             if stream:
                 async def error_stream():
                     yield error_response
@@ -627,33 +885,42 @@ class UnifiedChatService(LoggerMixin):
         requirements_result: Dict[str, Any] = {"allowed": True, "message": "All checks passed"}
 
         # Check credit requirements for paid operations
-        if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
-            if conversation_mode == ConversationMode.LIVE_TRADING:
-                # Real credit check - NO MOCKS
+        if conversation_mode != ConversationMode.PAPER_TRADING and self._should_charge_intent(intent):
+            required_credits = self._resolve_chat_credit_cost(intent, conversation_mode)
+            if required_credits > 0:
                 credit_check = await self._check_user_credits(user_id)
+                self.logger.info(
+                    "Credit check result for chat",
+                    user_id=user_id,
+                    intent=intent.value,
+                    available_credits=credit_check.get("available_credits", 0),
+                    required_credits=required_credits,
+                )
+                requirements_result["credit_check"] = credit_check
+                requirements_result["required_credits"] = required_credits
 
-                # Debug logging to understand the credit check results
-                self.logger.info("Credit check result for chat",
-                               user_id=user_id,
-                               intent=intent,
-                               available_credits=credit_check.get('available_credits', 0),
-                               required_credits=credit_check.get('required_credits', 0),
-                               has_credits=credit_check.get('has_credits', False),
-                               account_status=credit_check.get('account_status', 'unknown'))
-
-                if not credit_check["has_credits"]:
+                available = int(credit_check.get("available_credits", 0))
+                if available < required_credits:
                     return {
                         "allowed": False,
-                        "message": f"Insufficient credits. You have {credit_check['available_credits']} credits. "
-                                  f"This operation requires {credit_check['required_credits']} credits. "
-                                  f"Switch to paper trading mode or purchase more credits.",
+                        "message": (
+                            f"Insufficient credits. You have {available} credits. "
+                            f"This operation requires {required_credits} credits. "
+                            "Purchase more credits to continue."
+                        ),
                         "requires_action": True,
                         "action_data": {
                             "type": "credit_purchase",
-                            "current_credits": credit_check['available_credits'],
-                            "required_credits": credit_check['required_credits']
-                        }
+                            "current_credits": available,
+                            "required_credits": required_credits,
+                        },
                     }
+
+                requirements_result["credit_charge"] = {
+                    "credits": required_credits,
+                    "intent": intent,
+                    "conversation_mode": conversation_mode,
+                }
 
         # Check strategy access for strategy-related operations
         if intent in [ChatIntent.STRATEGY_RECOMMENDATION, ChatIntent.STRATEGY_MANAGEMENT]:
@@ -694,28 +961,14 @@ class UnifiedChatService(LoggerMixin):
         Uses the same credit lookup logic as the API endpoint.
         """
         try:
-            from app.models.credit import CreditAccount
-            from sqlalchemy import select
-            import uuid
+            normalized_user_id = self._normalize_user_identifier(user_id)
 
             async with get_database_session() as db:
-                # Try multiple lookup methods to find existing account
-                credit_account = None
-
-                # First try: search by string user_id
-                stmt = select(CreditAccount).where(CreditAccount.user_id == user_id)
-                result = await db.execute(stmt)
-                credit_account = result.scalar_one_or_none()
-
-                # Second try: convert to UUID if string didn't work
-                if not credit_account and isinstance(user_id, str) and len(user_id) == 36:
-                    try:
-                        user_uuid = uuid.UUID(user_id)
-                        stmt = select(CreditAccount).where(CreditAccount.user_id == user_uuid)
-                        result = await db.execute(stmt)
-                        credit_account = result.scalar_one_or_none()
-                    except ValueError:
-                        pass
+                credit_account = await credit_ledger.get_account(
+                    db,
+                    normalized_user_id,
+                    for_update=False,
+                )
 
                 if not credit_account:
                     return {
@@ -723,10 +976,9 @@ class UnifiedChatService(LoggerMixin):
                         "available_credits": 0,
                         "required_credits": self.live_trading_credit_requirement,
                         "credit_tier": "none",
-                        "account_status": "no_account"
+                        "account_status": "no_account",
                     }
 
-                # Found existing account - use it
                 available_credits = max(0, credit_account.available_credits or 0)
                 required_credits = self.live_trading_credit_requirement
 
@@ -735,19 +987,127 @@ class UnifiedChatService(LoggerMixin):
                     "available_credits": available_credits,
                     "required_credits": required_credits,
                     "total_credits": credit_account.total_credits,
+                    "total_purchased_credits": credit_account.total_purchased_credits,
+                    "total_used_credits": credit_account.total_used_credits,
                     "credit_tier": "premium" if available_credits > 100 else "standard",
-                    "account_status": "active"
+                    "account_status": "active",
                 }
 
-        except Exception as e:
-            self.logger.error("Credit check failed", error=str(e), user_id=user_id)
+        except (ValueError, RuntimeError, DatabaseError) as e:
+            # Expected errors that should return error status
+            self.logger.exception("Credit check failed with expected error", user_id=str(user_id))
             return {
                 "has_credits": False,
                 "available_credits": 0,
                 "required_credits": self.live_trading_credit_requirement,
                 "error": str(e),
-                "account_status": "error"
+                "account_status": "error",
             }
+        except Exception as e:
+            # Unexpected errors should be logged with full traceback and re-raised
+            self.logger.exception("Unexpected error during credit check", user_id=str(user_id))
+            raise
+
+    async def _charge_chat_interaction(
+        self,
+        user_id: str,
+        intent: ChatIntent,
+        conversation_mode: ConversationMode,
+        credits: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Deduct credits for a chat interaction and return transaction context."""
+
+        if credits <= 0:
+            return None
+
+        normalized_user_id = self._normalize_user_identifier(user_id)
+
+        async with get_database_session() as db:
+            try:
+                credit_account = await credit_ledger.get_account(
+                    db,
+                    normalized_user_id,
+                    for_update=True,
+                )
+
+                if not credit_account:
+                    raise InsufficientCreditsError("Credit account not found")
+
+                transaction = await credit_ledger.consume_credits(
+                    db,
+                    credit_account,
+                    credits=credits,
+                    description=f"Chat interaction: {intent.value}",
+                    source="chat",
+                    transaction_type=CreditTransactionType.USAGE,
+                    metadata={
+                        "intent": intent.value,
+                        "conversation_mode": conversation_mode.value,
+                        **(metadata or {}),
+                    },
+                )
+
+                await db.commit()
+
+            except Exception:
+                await db.rollback()
+                raise
+
+        return {
+            "transaction_id": str(transaction.id),
+            "credits": credits,
+            "intent": intent.value,
+            "conversation_mode": conversation_mode.value,
+        }
+
+    async def _refund_chat_charge(
+        self,
+        user_id: str,
+        charge_context: Optional[Dict[str, Any]],
+        reason: str,
+    ) -> None:
+        """Refund credits if chat processing fails after charging."""
+
+        if not charge_context:
+            return
+
+        credits = int(charge_context.get("credits", 0))
+        if credits <= 0:
+            return
+
+        normalized_user_id = self._normalize_user_identifier(user_id)
+
+        async with get_database_session() as db:
+            try:
+                credit_account = await credit_ledger.get_account(
+                    db,
+                    normalized_user_id,
+                    for_update=True,
+                )
+
+                if not credit_account:
+                    self.logger.warning("Unable to refund chat credits: account missing", user_id=str(user_id))
+                    await db.rollback()
+                    return
+
+                await credit_ledger.refund_credits(
+                    db,
+                    credit_account,
+                    credits=credits,
+                    description=reason,
+                    source="chat_refund",
+                    metadata={
+                        "intent": charge_context.get("intent"),
+                        "conversation_mode": charge_context.get("conversation_mode"),
+                    },
+                    reference_transaction_id=charge_context.get("transaction_id"),
+                )
+
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
     
     async def _check_strategy_access(self, user_id: str) -> Dict[str, Any]:
         """Check user's strategy access - REAL check with admin support."""
@@ -930,8 +1290,30 @@ class UnifiedChatService(LoggerMixin):
             # Get REAL portfolio data from exchanges
             context_data["portfolio"] = await self._transform_portfolio_for_chat(user_id)
 
-            # Risk analysis integration pending
-            context_data["risk_analysis"] = {"overall_risk": "Medium", "error": "Risk analysis integration pending"}
+            try:
+                risk_result = await self.portfolio_risk.risk_analysis(user_id)
+                if risk_result.get("success"):
+                    risk_metrics = risk_result.get("risk_metrics", {}) or {}
+                    overall_risk = self._infer_overall_risk_level(risk_metrics)
+                    context_data["risk_analysis"] = {
+                        "overall_risk": overall_risk,
+                        "risk_metrics": risk_metrics,
+                        "risk_alerts": risk_result.get("risk_alerts", []),
+                        "portfolio_value": risk_result.get("portfolio_value"),
+                        "analysis_parameters": risk_result.get("analysis_parameters", {}),
+                    }
+                else:
+                    context_data["risk_analysis"] = {
+                        "overall_risk": "Unknown",
+                        "error": risk_result.get("error", "Risk analysis unavailable"),
+                    }
+            except Exception as e:
+                self.logger.error("Failed to gather risk analysis", error=str(e), user_id=user_id)
+                context_data["risk_analysis"] = {
+                    "overall_risk": "Unknown",
+                    "error": "Risk analysis temporarily unavailable",
+                }
+
             context_data["performance"] = await self._get_performance_metrics(user_id)
             
         elif intent == ChatIntent.TRADE_EXECUTION:
@@ -1029,9 +1411,13 @@ class UnifiedChatService(LoggerMixin):
                 # Use the credit check results regardless of status (as long as we got credits)
                 available_credits = float(credit_check_result.get("available_credits", 0))
                 total_credits = float(credit_check_result.get("total_credits", available_credits))
+                total_purchased = float(credit_check_result.get("total_purchased_credits", total_credits))
+                total_used = float(credit_check_result.get("total_used_credits", 0))
                 context_data["credit_account"] = {
                     "available_credits": available_credits,
                     "total_credits": total_credits,  # Use actual total from credit check
+                    "total_purchased_credits": total_purchased,
+                    "total_used_credits": total_used,
                     "profit_potential": total_credits * 4,  # 1 credit = $4 profit potential
                     "account_tier": credit_check_result.get("credit_tier", "standard"),
                     "account_status": credit_check_result.get("account_status", "unknown")
@@ -1173,21 +1559,40 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
         message: str,
         intent_analysis: Dict[str, Any],
         session: ChatSession,
-        context_data: Dict[str, Any]
+        context_data: Dict[str, Any],
+        charge_request: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Generate streaming response for real-time conversation feel.
         """
+        charge_context: Optional[Dict[str, Any]] = None
+        if charge_request and user_id:
+            try:
+                charge_context = await self._charge_chat_interaction(
+                    user_id,
+                    charge_request["intent"],
+                    charge_request["conversation_mode"],
+                    charge_request["credits"],
+                )
+            except InsufficientCreditsError:
+                yield {
+                    "type": "error",
+                    "content": "Insufficient credits for this operation. Please purchase additional credits to continue.",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+                return
+
         # Yield initial processing messages
         yield {
             "type": "processing",
             "content": "Analyzing your request...",
             "timestamp": datetime.utcnow().isoformat()
         }
-        
+
         intent = intent_analysis["intent"]
         personality = self.personalities[session.trading_mode]
-        
+
         # Build system message
         system_message = f"""You are {personality['name']}, a {personality['style']} cryptocurrency trading AI assistant.
 
@@ -1198,47 +1603,56 @@ Respond naturally using ONLY the real data provided."""
 
         # Build prompt
         prompt = self._build_response_prompt(message, intent, context_data)
-        
+
         # Stream the response
         full_response = ""
-        async for chunk in self.chat_ai.stream_response(prompt, system_message):
-            full_response += chunk
-            yield {
-            "type": "response",
-            "content": chunk,
-            "timestamp": datetime.utcnow().isoformat(),
-            "personality": personality["name"]
-            }
-        
-        # Handle action requirements
-        if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
-            decision_id = str(uuid.uuid4())
-            await self._store_pending_decision(
-            decision_id,
-            intent_analysis,
-            context_data,
-            session.user_id,
-            session.conversation_mode
+        try:
+            async for chunk in self.chat_ai.stream_response(prompt, system_message):
+                full_response += chunk
+                yield {
+                    "type": "response",
+                    "content": chunk,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "personality": personality["name"]
+                }
+
+            # Handle action requirements
+            if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
+                decision_id = str(uuid.uuid4())
+                await self._store_pending_decision(
+                    decision_id,
+                    intent_analysis,
+                    context_data,
+                    session.user_id,
+                    session.conversation_mode
+                )
+
+                yield {
+                    "type": "action_required",
+                    "content": "This action requires your confirmation. Would you like to proceed?",
+                    "action": "confirm_action",
+                    "decision_id": decision_id,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+
+            # Save conversation
+            await self._save_conversation(
+                session.session_id,
+                session.user_id,
+                message,
+                full_response,
+                intent,
+                intent_analysis["confidence"]
             )
-            
-            yield {
-            "type": "action_required",
-            "content": "This action requires your confirmation. Would you like to proceed?",
-            "action": "confirm_action",
-            "decision_id": decision_id,
-            "timestamp": datetime.utcnow().isoformat()
-            }
-        
-        # Save conversation
-        await self._save_conversation(
-            session.session_id,
-            session.user_id,
-            message,
-            full_response,
-            intent,
-            intent_analysis["confidence"]
-        )
-        
+        except Exception:
+            if charge_context:
+                await self._refund_chat_charge(
+                    session.user_id,
+                    charge_context,
+                    "Streaming response failed",
+                )
+            raise
+
         yield {
             "type": "complete",
             "timestamp": datetime.utcnow().isoformat()
@@ -1418,20 +1832,29 @@ REBALANCING ANALYSIS ERROR:
                     notional = float(raw_notional)
                 except (TypeError, ValueError):
                     notional = 0.0
-                weight_change = trade.get("weight_change")
                 exchange = trade.get("exchange") or "multi-exchange"
                 price = trade.get("reference_price") or trade.get("price")
-                if not isinstance(weight_change, (int, float)):
-                    try:
-                        weight_change = float(weight_change)
-                    except (TypeError, ValueError):
-                        weight_change = None
-                weight_text = f", weight Δ {weight_change:+.2%}" if isinstance(weight_change, (int, float)) else ""
+
+                weight_details: List[str] = []
+                weight_delta = _safe_float(trade.get("weight_change"), None)
+                if weight_delta is not None:
+                    weight_details.append(f"Δ {weight_delta:+.2%}")
+
+                target_weight = _format_percentage(trade.get("target_weight"))
+                if target_weight:
+                    weight_details.append(f"target {target_weight}")
+
+                current_weight = _format_percentage(trade.get("current_weight"))
+                if current_weight:
+                    weight_details.append(f"current {current_weight}")
+
+                weight_text = f" ({'; '.join(weight_details)})" if weight_details else ""
+
                 try:
                     price_value = float(price)
                 except (TypeError, ValueError):
                     price_value = None
-                price_text = f" @ ${price_value:,.2f}" if price_value else ""
+                price_text = f" @ ${price_value:,.2f}" if price_value is not None else ""
                 trade_lines.append(
                     f"  {idx}. {action} {symbol} ≈ ${notional:,.2f}{price_text} on {exchange}{weight_text}"
                 )
@@ -1806,13 +2229,57 @@ Provide a helpful response using the real data available. Never use placeholder 
     async def _get_performance_metrics(self, user_id: str) -> Dict[str, Any]:
         """Get performance metrics - REAL data."""
         try:
-            # Connect to your performance tracking service
-            return {
-            "total_return": 0.0,
-            "win_rate": 0.0,
-            "sharpe_ratio": 0.0,
-            "max_drawdown": 0.0
+            try:
+                user_uuid = uuid.UUID(str(user_id))
+            except (ValueError, TypeError):
+                user_uuid = user_id
+
+            metrics_map = {
+                MetricType.RETURN: "total_return",
+                MetricType.WIN_RATE: "win_rate",
+                MetricType.SHARPE_RATIO: "sharpe_ratio",
+                MetricType.MAX_DRAWDOWN: "max_drawdown",
             }
+
+            metric_values: Dict[str, float] = {}
+            latest_period: Optional[datetime] = None
+
+            async with get_database_session() as db:
+                for metric_type, key in metrics_map.items():
+                    stmt = (
+                        select(PerformanceMetric.value, PerformanceMetric.period_end)
+                        .where(
+                            PerformanceMetric.user_id == user_uuid,
+                            PerformanceMetric.metric_type == metric_type,
+                        )
+                        .order_by(PerformanceMetric.period_end.desc())
+                        .limit(1)
+                    )
+                    result = await db.execute(stmt)
+                    row = result.first()
+                    if not row:
+                        continue
+
+                    value, period_end = row
+                    metric_values[key] = self._coerce_to_float(value)
+                    if period_end and (
+                        latest_period is None or period_end > latest_period
+                    ):
+                        latest_period = period_end
+
+            performance = {
+                "total_return": metric_values.get("total_return", 0.0),
+                "win_rate": metric_values.get("win_rate", 0.0),
+                "sharpe_ratio": metric_values.get("sharpe_ratio", 0.0),
+                "max_drawdown": metric_values.get("max_drawdown", 0.0),
+            }
+
+            performance["data_available"] = bool(metric_values)
+
+            if latest_period:
+                performance["last_updated"] = latest_period.isoformat()
+
+            return performance
         except Exception as e:
             self.logger.error("Failed to get performance metrics", error=str(e))
             return {}
@@ -2227,28 +2694,84 @@ Provide a helpful response using the real data available. Never use placeholder 
                 pass
 
             results: List[Dict[str, Any]] = []
+            default_simulation_mode: Optional[bool] = None
+
             for trade in trades:
-                base_request = {
-                    "symbol": trade.get("symbol"),
-                    "action": trade.get("action") or trade.get("side"),
-                    "amount": trade.get("amount"),
-                    "position_size_usd": trade.get("position_size_usd")
-                    or trade.get("amount"),
-                    "quantity": trade.get("quantity", trade.get("amount")),
-                    "order_type": trade.get("order_type", "market"),
-                    "price": trade.get("price"),
+                action_value = trade.get("action") or trade.get("side")
+                symbol_value = trade.get("symbol")
+                order_type_raw = trade.get("order_type", "market")
+                order_type_value = (
+                    order_type_raw.upper()
+                    if isinstance(order_type_raw, str)
+                    else "MARKET"
+                )
+
+                usd_notional = self._extract_trade_notional(trade)
+                quantity_value = self._extract_trade_quantity(trade)
+                price_hint = self._extract_price_hint(trade)
+
+                base_request: Dict[str, Any] = {
+                    "symbol": symbol_value,
+                    "action": action_value,
+                    "order_type": order_type_value,
                     "exchange": trade.get("exchange"),
-                    "stop_loss": trade.get("stop_loss"),
+                    "time_in_force": trade.get("time_in_force"),
                     "take_profit": trade.get("take_profit"),
+                    "stop_loss": trade.get("stop_loss"),
+                    "opportunity_data": trade.get("opportunity_data"),
+                    "strategy": trade.get("strategy"),
                 }
+
+                if usd_notional is not None:
+                    base_request["position_size_usd"] = usd_notional
+                    base_request["amount"] = usd_notional
+
+                if quantity_value is not None:
+                    base_request["quantity"] = quantity_value
+
+                if price_hint is None and symbol_value:
+                    price_hint = await self._resolve_rebalance_price(
+                        symbol_value,
+                        trade.get("exchange")
+                    )
+
+                if (
+                    quantity_value is None
+                    and usd_notional is not None
+                    and price_hint
+                    and price_hint > 0
+                ):
+                    try:
+                        quantity_value = round(usd_notional / price_hint, 8)
+                        if quantity_value > 0:
+                            base_request["quantity"] = quantity_value
+                    except ZeroDivisionError:
+                        pass
+
+                if price_hint is not None and price_hint > 0:
+                    base_request["reference_price"] = price_hint
+                    if order_type_value == "LIMIT":
+                        base_request.setdefault("price", price_hint)
 
                 base_request = {k: v for k, v in base_request.items() if v is not None}
 
                 if "action" not in base_request and "side" in base_request:
                     base_request["action"] = base_request["side"]
 
+                rebalance_metadata = {
+                    "symbol": symbol_value,
+                    "action": action_value.upper() if isinstance(action_value, str) else action_value,
+                    "requested_notional_usd": usd_notional,
+                    "requested_quantity": base_request.get("quantity"),
+                    "reference_price": price_hint,
+                    "exchange": base_request.get("exchange"),
+                }
+
                 try:
-                    validation = await self.trade_executor.validate_trade(dict(base_request), user_id)
+                    validation = await self.trade_executor.validate_trade(
+                        dict(base_request),
+                        user_id
+                    )
                 except Exception as validation_error:
                     self.logger.exception(
                         "Rebalancing trade validation crashed",
@@ -2258,7 +2781,8 @@ Provide a helpful response using the real data available. Never use placeholder 
                     results.append({
                         "success": False,
                         "error": str(validation_error),
-                        "trade_request": base_request
+                        "trade_request": base_request,
+                        "rebalance_execution": rebalance_metadata,
                     })
                     continue
 
@@ -2266,7 +2790,8 @@ Provide a helpful response using the real data available. Never use placeholder 
                     results.append({
                         "success": False,
                         "error": validation.get("reason", "Invalid parameters"),
-                        "trade_request": validation.get("trade_request", base_request)
+                        "trade_request": validation.get("trade_request", base_request),
+                        "rebalance_execution": rebalance_metadata,
                     })
                     continue
 
@@ -2276,14 +2801,77 @@ Provide a helpful response using the real data available. Never use placeholder 
                     normalized_request.get("action", "BUY").lower(),
                 )
 
-                simulation_mode = self._coerce_to_bool(trade.get("simulation_mode"), True)
+                if usd_notional is not None:
+                    normalized_request.setdefault("position_size_usd", usd_notional)
 
-                result = await self.trade_executor.execute_trade(
+                if price_hint is not None and price_hint > 0:
+                    normalized_request.setdefault("reference_price", price_hint)
+                    if (
+                        normalized_request.get("order_type") == "LIMIT"
+                        and "price" not in normalized_request
+                    ):
+                        normalized_request["price"] = price_hint
+
+                if quantity_value is not None:
+                    normalized_request.setdefault("quantity", quantity_value)
+
+                simulation_flag = trade.get("simulation_mode")
+                if simulation_flag is None:
+                    if default_simulation_mode is None:
+                        default_simulation_mode = await self._get_user_simulation_mode(user_id)
+                        if default_simulation_mode is None:
+                            default_simulation_mode = True
+                    simulation_mode = default_simulation_mode
+                else:
+                    simulation_mode = self._coerce_to_bool(simulation_flag, True)
+
+                rebalance_metadata.update({
+                    "requested_quantity": normalized_request.get("quantity"),
+                    "requested_notional_usd": normalized_request.get("position_size_usd", usd_notional),
+                    "simulation_mode": simulation_mode,
+                })
+
+                execution_result = await self.trade_executor.execute_trade(
                     normalized_request,
                     user_id,
                     simulation_mode,
                 )
-                results.append(result)
+
+                filled_quantity = None
+                fill_price = None
+                filled_value = None
+
+                simulation_payload = execution_result.get("simulation_result")
+                execution_payload = execution_result.get("execution_result")
+
+                if isinstance(simulation_payload, dict):
+                    filled_quantity = self._safe_float(simulation_payload.get("quantity"))
+                    fill_price = self._safe_float(simulation_payload.get("execution_price"))
+                    if filled_quantity is not None and fill_price is not None:
+                        filled_value = filled_quantity * fill_price
+                elif isinstance(execution_payload, dict):
+                    filled_quantity = self._safe_float(execution_payload.get("executed_quantity"))
+                    fill_price = self._safe_float(execution_payload.get("execution_price"))
+                    if filled_quantity is not None and fill_price is not None:
+                        filled_value = filled_quantity * fill_price
+                    else:
+                        filled_value = self._safe_float(
+                            execution_result.get("position_value_usd")
+                        )
+                else:
+                    filled_value = self._safe_float(execution_result.get("position_value_usd"))
+
+                if filled_quantity is not None:
+                    rebalance_metadata["filled_quantity"] = filled_quantity
+                if fill_price is not None:
+                    rebalance_metadata["fill_price"] = fill_price
+                if filled_value is not None:
+                    rebalance_metadata["filled_value_usd"] = filled_value
+
+                execution_snapshot = dict(execution_result)
+                execution_snapshot["rebalance_execution"] = rebalance_metadata
+
+                results.append(execution_snapshot)
 
             return {
                 "success": True,

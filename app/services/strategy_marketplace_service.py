@@ -28,10 +28,11 @@ from app.core.logging import LoggerMixin
 from app.core.async_session_manager import DatabaseSessionMixin
 from app.models.trading import TradingStrategy, Trade
 from app.models.user import User
-from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
+from app.models.credit import CreditAccount, CreditTransactionType
 from app.models.copy_trading import StrategyPublisher, StrategyPerformance
 from app.services.trading_strategies import trading_strategies_service
 from app.models.strategy_access import UserStrategyAccess
+from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -1427,28 +1428,35 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 # Check if user has enough credits (skip check for free strategies)
                 if cost > 0 and credit_account.available_credits < cost:
                     return {
-                        "success": False, 
+                        "success": False,
                         "error": f"Insufficient credits. Required: {cost}, Available: {credit_account.available_credits}"
                     }
-                
+
                 # Deduct credits (only for paid strategies)
                 if cost > 0:
-                    balance_before = credit_account.available_credits
-                    credit_account.available_credits -= cost
-                    credit_account.used_credits += cost
-                    balance_after = credit_account.available_credits
-                    
-                    # Record transaction (only for paid strategies)
-                    transaction = CreditTransaction(
-                        account_id=credit_account.id,
-                        transaction_type=CreditTransactionType.USAGE,
-                        amount=-cost,
-                        description=f"Strategy access: {strategy_id} ({subscription_type})",
-                        balance_before=balance_before,
-                        balance_after=balance_after,
-                        source="system"
-                    )
-                    db.add(transaction)
+                    try:
+                        # Re-fetch credit account with row lock to prevent race conditions
+                        locked_stmt = select(CreditAccount).where(
+                            CreditAccount.user_id == user_id
+                        ).with_for_update()
+                        locked_result = await db.execute(locked_stmt)
+                        locked_credit_account = locked_result.scalar_one()
+
+                        await credit_ledger.consume_credits(
+                            db,
+                            locked_credit_account,
+                            credits=cost,
+                            description=f"Strategy access: {strategy_id} ({subscription_type})",
+                            source="strategy_marketplace",
+                            transaction_type=CreditTransactionType.USAGE,
+                            metadata={
+                                "strategy_id": strategy_id,
+                                "subscription_type": subscription_type,
+                                "pricing_mode": subscription_type,
+                            },
+                        )
+                    except InsufficientCreditsError:
+                        return {"success": False, "error": "Insufficient credits"}
                 
                 # Add to user's active strategies
                 await self._add_to_user_strategy_portfolio(user_id, strategy_id, db)

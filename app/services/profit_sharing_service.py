@@ -21,8 +21,9 @@ from app.core.database import get_database
 from app.core.logging import LoggerMixin
 from app.models.user import User
 from app.models.trading import Trade, TradingStrategy, TradeStatus
-from app.models.credit import CreditAccount, CreditTransaction, CreditTransactionType
+from app.models.credit import CreditAccount, CreditTransactionType
 from app.models.subscription import Subscription
+from app.services.credit_ledger import credit_ledger
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -341,22 +342,22 @@ class ProfitSharingService(LoggerMixin):
                         "error": f"Payment processing failed: {payment_result.get('error')}"
                     }
                 
-                # Add credits to user account
-                credit_account.available_credits += credits_earned
-                credit_account.total_purchased_credits += credits_earned
-                
-                # Record transaction
-                transaction = CreditTransaction(
-                    account_id=credit_account.id,
-                    amount=credits_earned,
+                await credit_ledger.add_credits(
+                    db,
+                    credit_account,
+                    credits=credits_earned,
                     transaction_type=CreditTransactionType.PURCHASE,
                     description=f"Profit sharing purchase: Paid ${platform_fee:.2f}, earned {credits_earned} credits",
-                    balance_before=credit_account.available_credits - credits_earned,
-                    balance_after=credit_account.available_credits,
-                    source="system"
+                    source="profit_sharing",
+                    provider=payment_method,
+                    reference_id=payment_result.get("payment_id"),
+                    usd_value=platform_fee,
+                    metadata={
+                        "payment_method": payment_method,
+                        "payment_id": payment_result.get("payment_id"),
+                    },
                 )
-                db.add(transaction)
-                
+
                 await db.commit()
                 
                 self.logger.info(
@@ -545,7 +546,7 @@ class ProfitSharingService(LoggerMixin):
                         CreditAccount, CreditTransaction.account_id == CreditAccount.id
                     ).where(
                         CreditAccount.user_id == user_id,
-                        CreditTransaction.transaction_type == "welcome_bonus"
+                        CreditTransaction.transaction_type == CreditTransactionType.BONUS
                     )
                 )
                 
@@ -576,24 +577,19 @@ class ProfitSharingService(LoggerMixin):
                 welcome_profit_potential = welcome_config.get("welcome_profit_potential", 100)
                 welcome_credits = int(welcome_profit_potential * self.platform_fee_percentage)  # 25% of profit potential
                 
-                # Update credit account balances
-                balance_before = credit_account.available_credits
-                credit_account.available_credits += welcome_credits
-                credit_account.total_credits += welcome_credits
-                balance_after = credit_account.available_credits
-                
-                # Create welcome credit transaction
-                welcome_transaction = CreditTransaction(
-                    account_id=credit_account.id,
-                    amount=welcome_credits,  # Dynamic credit amount
+                await credit_ledger.add_credits(
+                    db,
+                    credit_account,
+                    credits=welcome_credits,
                     transaction_type=CreditTransactionType.BONUS,
                     description=f"Welcome Package: ${welcome_profit_potential:.0f} Free Profit Potential ({welcome_credits} credits)",
-                    balance_before=balance_before,
-                    balance_after=balance_after,
-                    source="system"
+                    source="profit_sharing_welcome",
+                    metadata={
+                        "welcome_profit_potential": welcome_profit_potential,
+                    },
+                    track_lifetime=False,
                 )
-                
-                db.add(welcome_transaction)
+
                 await db.commit()
                 
                 # Add strategies based on admin configuration

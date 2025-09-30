@@ -7,7 +7,7 @@ and the tokenomics foundation for the enterprise platform.
 
 import uuid
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from sqlalchemy import (
@@ -29,6 +29,9 @@ from sqlalchemy.sql import func
 import enum
 
 from app.core.database import Base
+
+
+COMMISSION_RATE = Decimal("0.25")  # 25% platform commission (1 credit unlocks $4 profit potential)
 
 
 class CreditTransactionType(str, enum.Enum):
@@ -78,6 +81,8 @@ class CreditAccount(Base):
     available_credits = Column(Integer, default=0, nullable=False)
     used_credits = Column(Integer, default=0, nullable=False)
     expired_credits = Column(Integer, default=0, nullable=False)
+    total_purchased_credits = Column(Integer, default=0, nullable=False)
+    total_used_credits = Column(Integer, default=0, nullable=False)
     
     # Profit tracking
     total_profit_realized_usd = Column(Numeric(15, 2), default=0, nullable=False)
@@ -111,6 +116,7 @@ class CreditAccount(Base):
     created_at = Column(DateTime, default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     last_purchase_at = Column(DateTime, nullable=True)
+    last_usage_at = Column(DateTime, nullable=True)
     
     # Relationships
     user = relationship("User", back_populates="credit_account")
@@ -156,8 +162,9 @@ class CreditAccount(Base):
         So 1 credit allows $4 profit potential ($1 = 25% of $4)
         """
         # 1 credit = 25% commission, so credit allows 4x profit potential
-        commission_rate = 0.25
-        return Decimal(self.available_credits) / Decimal(commission_rate)
+        if not self.available_credits:
+            return Decimal("0")
+        return Decimal(self.available_credits) / COMMISSION_RATE
     
     def can_realize_profit(self, profit_amount_usd: Decimal) -> tuple[bool, str]:
         """
@@ -174,21 +181,116 @@ class CreditAccount(Base):
             return False, f"Profit amount exceeds remaining limit (${remaining_limit})"
         
         # Calculate required credits based on 25% commission
-        commission_rate = 0.25
-        required_credits = int(profit_amount_usd * commission_rate)
+        commission_rate = COMMISSION_RATE
+        required_credits = int((profit_amount_usd * commission_rate).to_integral_value(rounding=ROUND_HALF_UP))
         if required_credits > self.available_credits:
             return False, f"Insufficient credits (need {required_credits}, have {self.available_credits})"
-        
+
         return True, "OK"
-    
+
     def deduct_credits_for_profit(self, profit_amount_usd: Decimal) -> int:
         """
         Calculate credits to deduct for realized profit.
         
         Business Logic: Deduct 25% of profit as commission in credits.
         """
-        commission_rate = 0.25
-        return int(profit_amount_usd * commission_rate)
+        commission_rate = COMMISSION_RATE
+        return int((profit_amount_usd * commission_rate).to_integral_value(rounding=ROUND_HALF_UP))
+
+    def register_credit_increase(
+        self,
+        credits: int,
+        *,
+        track_lifetime: bool = True,
+        timestamp: Optional[datetime] = None,
+    ) -> tuple[int, int]:
+        """Increase available credits and update lifetime counters."""
+
+        if credits <= 0:
+            raise ValueError("Credits to add must be positive")
+
+        snapshot_before = int(self.available_credits or 0)
+        self.available_credits = snapshot_before + credits
+        self.total_credits = (self.total_credits or 0) + credits
+
+        if track_lifetime:
+            self.total_purchased_credits = (self.total_purchased_credits or 0) + credits
+
+        current_time = timestamp or datetime.utcnow()
+        self.last_purchase_at = current_time
+        self.updated_at = current_time
+
+        self.synchronize_profit_tracking()
+        return snapshot_before, int(self.available_credits)
+
+    def register_credit_usage(
+        self,
+        credits: int,
+        *,
+        track_usage: bool = True,
+        timestamp: Optional[datetime] = None,
+    ) -> tuple[int, int]:
+        """Decrease available credits and update usage counters."""
+
+        if credits <= 0:
+            raise ValueError("Credits to deduct must be positive")
+
+        available = int(self.available_credits or 0)
+        if credits > available:
+            raise ValueError("Insufficient credits for deduction")
+
+        snapshot_before = available
+        self.available_credits = available - credits
+
+        if track_usage:
+            self.used_credits = max(0, (self.used_credits or 0) + credits)
+            self.total_used_credits = max(0, (self.total_used_credits or 0) + credits)
+            self.monthly_credits_used = max(0, (self.monthly_credits_used or 0) + credits)
+
+        current_time = timestamp or datetime.utcnow()
+        self.last_usage_at = current_time
+        self.updated_at = current_time
+
+        self.synchronize_profit_tracking()
+        return snapshot_before, int(self.available_credits)
+
+    def reverse_credit_usage(
+        self,
+        credits: int,
+        *,
+        adjust_usage_totals: bool = True,
+        timestamp: Optional[datetime] = None,
+    ) -> tuple[int, int]:
+        """Reverse previously recorded credit usage (e.g., refunds)."""
+
+        if credits <= 0:
+            raise ValueError("Credits to restore must be positive")
+
+        snapshot_before = int(self.available_credits or 0)
+        self.available_credits = snapshot_before + credits
+
+        if adjust_usage_totals:
+            self.used_credits = max(0, (self.used_credits or 0) - credits)
+            self.total_used_credits = max(0, (self.total_used_credits or 0) - credits)
+            self.monthly_credits_used = max(0, (self.monthly_credits_used or 0) - credits)
+
+        current_time = timestamp or datetime.utcnow()
+        self.updated_at = current_time
+
+        self.synchronize_profit_tracking()
+        return snapshot_before, int(self.available_credits)
+
+    def synchronize_profit_tracking(self) -> None:
+        """Keep derived profit potential figures in sync with balances."""
+
+        total_purchased = int(self.total_purchased_credits or 0)
+        available = int(self.available_credits or 0)
+
+        total_potential = Decimal(total_purchased) / COMMISSION_RATE if total_purchased else Decimal("0")
+        available_potential = Decimal(available) / COMMISSION_RATE if available else Decimal("0")
+
+        self.total_profit_potential_usd = total_potential
+        self.current_profit_limit_usd = max(total_potential, available_potential)
 
 
 class CreditTransaction(Base):

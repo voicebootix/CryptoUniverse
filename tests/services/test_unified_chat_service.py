@@ -25,6 +25,7 @@ from app.services.unified_chat_service import (
     TradingMode,
     UnifiedChatService,
 )
+from app.services.credit_ledger import InsufficientCreditsError
 
 
 def test_unified_chat_service_initializes_key_attributes():
@@ -120,7 +121,10 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
     service.trade_executor.execute_trade = AsyncMock(
         return_value={
             "success": True,
-            "trade_id": "trade-456",
+            "simulation_result": {
+                "quantity": 1.95,
+                "execution_price": 2050.0,
+            },
         }
     )
 
@@ -129,7 +133,8 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
             {
                 "symbol": "ethusdt",
                 "action": "buy",
-                "amount": "2",
+                "amount": "4000",
+                "reference_price": "2000",
                 "order_type": "limit",
                 "simulation_mode": "false",
             }
@@ -147,6 +152,8 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
     assert validation_user_arg == "user-abc"
     assert validation_request_arg["symbol"] == "ethusdt"
     assert validation_request_arg["action"] == "buy"
+    assert validation_request_arg["position_size_usd"] == 4000.0
+    assert validation_request_arg["quantity"] == 2.0
 
     execution_call = service.trade_executor.execute_trade.await_args
     exec_request_arg, exec_user_arg, exec_simulation_mode = execution_call.args
@@ -158,10 +165,21 @@ async def test_rebalancing_normalizes_and_executes_structured_trades():
     assert exec_request_arg["side"] == "buy"
     assert exec_request_arg["quantity"] == 2.0
     assert exec_request_arg["order_type"] == "LIMIT"
+    assert exec_request_arg["position_size_usd"] == 4000.0
+    assert exec_request_arg["reference_price"] == 2000.0
+    assert exec_request_arg["price"] == 2000.0
 
     assert result["success"] is True
     assert result["trades_executed"] == 1
     assert result["trades_failed"] == 0
+
+    execution_metadata = result["results"][0]["rebalance_execution"]
+    assert execution_metadata["requested_notional_usd"] == 4000.0
+    assert execution_metadata["requested_quantity"] == 2.0
+    assert execution_metadata["simulation_mode"] is False
+    assert execution_metadata["filled_quantity"] == pytest.approx(1.95)
+    assert execution_metadata["fill_price"] == pytest.approx(2050.0)
+    assert execution_metadata["filled_value_usd"] == pytest.approx(1.95 * 2050.0)
 
 
 def test_opportunity_prompt_uses_fractional_weights_and_trade_values():
@@ -270,3 +288,166 @@ async def test_strategy_management_prefetches_portfolio_once():
     _, _, _, context_arg = service._generate_complete_response.await_args.args
     assert context_arg["user_strategies"] is portfolio_payload
     assert context_arg["marketplace_strategies"] is marketplace_payload
+
+
+def test_resolve_chat_credit_cost_prefers_overrides():
+    service = UnifiedChatService()
+    service.chat_credit_cost_overrides = {
+        ConversationMode.ANALYSIS.value: 3,
+        ChatIntent.MARKET_ANALYSIS.value: 5,
+    }
+
+    mode_override = service._resolve_chat_credit_cost(
+        ChatIntent.PORTFOLIO_ANALYSIS,
+        ConversationMode.ANALYSIS,
+    )
+    intent_override = service._resolve_chat_credit_cost(
+        ChatIntent.MARKET_ANALYSIS,
+        ConversationMode.LIVE_TRADING,
+    )
+
+    assert mode_override == 3
+    assert intent_override == 5
+
+
+@pytest.mark.asyncio
+async def test_process_message_charges_credits_when_required():
+    service = UnifiedChatService()
+    session_id = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
+
+    service.sessions[session_id] = ChatSession(
+        session_id=session_id,
+        user_id=user_id,
+        interface=InterfaceType.WEB_CHAT,
+        conversation_mode=ConversationMode.LIVE_TRADING,
+        trading_mode=TradingMode.BALANCED,
+        created_at=datetime.utcnow(),
+        last_activity=datetime.utcnow(),
+        context={},
+        messages=[],
+    )
+
+    intent_payload = {
+        "intent": ChatIntent.MARKET_ANALYSIS,
+        "confidence": 0.96,
+        "requires_action": False,
+        "entities": {},
+    }
+
+    service._analyze_intent_unified = AsyncMock(return_value=intent_payload)
+    service._check_requirements = AsyncMock(
+        return_value={
+            "allowed": True,
+            "message": "All checks passed",
+            "credit_charge": {
+                "credits": 4,
+                "intent": ChatIntent.MARKET_ANALYSIS,
+                "conversation_mode": ConversationMode.LIVE_TRADING,
+            },
+        }
+    )
+    service._gather_context_data = AsyncMock(return_value={})
+    service._generate_complete_response = AsyncMock(
+        return_value={
+            "success": True,
+            "session_id": session_id,
+            "message_id": str(uuid.uuid4()),
+            "content": "analysis",
+            "intent": ChatIntent.MARKET_ANALYSIS.value,
+            "confidence": 0.96,
+            "timestamp": datetime.utcnow(),
+        }
+    )
+    service._charge_chat_interaction = AsyncMock(
+        return_value={
+            "transaction_id": str(uuid.uuid4()),
+            "credits": 4,
+            "intent": ChatIntent.MARKET_ANALYSIS.value,
+            "conversation_mode": ConversationMode.LIVE_TRADING.value,
+        }
+    )
+
+    result = await service.process_message(
+        "Give me a market update",
+        user_id,
+        session_id=session_id,
+        conversation_mode=ConversationMode.LIVE_TRADING,
+        stream=False,
+    )
+
+    service._charge_chat_interaction.assert_awaited_once_with(
+        user_id,
+        ChatIntent.MARKET_ANALYSIS,
+        ConversationMode.LIVE_TRADING,
+        4,
+    )
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_process_message_returns_action_when_credits_insufficient():
+    service = UnifiedChatService()
+    session_id = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
+
+    service.sessions[session_id] = ChatSession(
+        session_id=session_id,
+        user_id=user_id,
+        interface=InterfaceType.WEB_CHAT,
+        conversation_mode=ConversationMode.LIVE_TRADING,
+        trading_mode=TradingMode.BALANCED,
+        created_at=datetime.utcnow(),
+        last_activity=datetime.utcnow(),
+        context={},
+        messages=[],
+    )
+
+    intent_payload = {
+        "intent": ChatIntent.MARKET_ANALYSIS,
+        "confidence": 0.91,
+        "requires_action": False,
+        "entities": {},
+    }
+
+    service._analyze_intent_unified = AsyncMock(return_value=intent_payload)
+    service._check_requirements = AsyncMock(
+        return_value={
+            "allowed": True,
+            "message": "All checks passed",
+            "credit_charge": {
+                "credits": 6,
+                "intent": ChatIntent.MARKET_ANALYSIS,
+                "conversation_mode": ConversationMode.LIVE_TRADING,
+            },
+        }
+    )
+    service._gather_context_data = AsyncMock(return_value={})
+    service._generate_complete_response = AsyncMock(
+        return_value={
+            "success": True,
+            "session_id": session_id,
+            "message_id": str(uuid.uuid4()),
+            "content": "analysis",
+            "intent": ChatIntent.MARKET_ANALYSIS.value,
+            "confidence": 0.91,
+            "timestamp": datetime.utcnow(),
+        }
+    )
+    service._charge_chat_interaction = AsyncMock(
+        side_effect=InsufficientCreditsError("insufficient")
+    )
+
+    result = await service.process_message(
+        "Give me a market update",
+        user_id,
+        session_id=session_id,
+        conversation_mode=ConversationMode.LIVE_TRADING,
+        stream=False,
+    )
+
+    service._charge_chat_interaction.assert_awaited_once()
+    assert result["success"] is False
+    assert result["requires_action"] is True
+    assert result["action_data"]["type"] == "credit_purchase"
+    assert result["action_data"]["required_credits"] == 6
