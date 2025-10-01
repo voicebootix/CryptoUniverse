@@ -215,10 +215,16 @@ async def get_credit_balance(
         
         # Get total profit earned to date with safe query
         try:
+            completed_status = TradeStatus.COMPLETED.value
+            normalized_statuses = {
+                completed_status,
+                str(completed_status).upper(),
+            }
+
             profit_stmt = select(func.sum(Trade.profit_realized_usd)).where(
                 and_(
                     Trade.user_id == current_user.id,
-                    Trade.status == TradeStatus.COMPLETED,  # Use enum for proper type casting
+                    Trade.status.in_(list(normalized_statuses)),  # Use plain strings to avoid enum binding
                     Trade.is_simulation.is_(False),  # Use .is_() for proper boolean comparison
                     Trade.profit_realized_usd > 0
                 )
