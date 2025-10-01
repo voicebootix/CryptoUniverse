@@ -11,7 +11,7 @@ import pytest
 os.environ.setdefault("SECRET_KEY", "test-secret")
 os.environ.setdefault("DATABASE_URL", "sqlite:///test.db")
 
-from app.services.trading_strategies import TradingStrategiesService
+from app.services.trading_strategies import StrategyParameters, TradingStrategiesService
 
 
 def _create_service() -> TradingStrategiesService:
@@ -158,5 +158,40 @@ async def test_strategy_performance_handles_percent_and_decimal_sources():
     assert percent_comparison["tracking_error"] == pytest.approx(1.5)
     assert decimal_comparison["tracking_error"] == pytest.approx(1.5)
 
-    assert percent_result["strategy_performance_analysis"]["optimization_recommendations"] == \
-        decimal_result["strategy_performance_analysis"]["optimization_recommendations"]
+    assert (
+        percent_result["strategy_performance_analysis"]["optimization_recommendations"]
+        == decimal_result["strategy_performance_analysis"]["optimization_recommendations"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_derivatives_strategy_handles_perpetual_trade():
+    service = _create_service()
+
+    strategy_params = StrategyParameters(symbol="BTCUSDT", quantity=0.1, leverage=3.0)
+
+    service.get_platform_strategy_id = AsyncMock(return_value="perp-uuid")
+
+    expected = {"success": True, "perpetual_analysis": {"symbol": "BTCUSDT"}}
+    service.perpetual_trade = AsyncMock(return_value=expected)
+
+    result = await service._execute_derivatives_strategy(
+        "perpetual_trade",
+        "long_perpetual",
+        "BTCUSDT",
+        strategy_params,
+        "binance",
+        "user-1",
+    )
+
+    service.perpetual_trade.assert_awaited_once()
+
+    awaited_call = service.perpetual_trade.await_args
+
+    assert awaited_call.kwargs["symbol"] == "BTCUSDT"
+    assert awaited_call.kwargs["strategy_type"] == "long_perpetual"
+    assert awaited_call.kwargs["exchange"] == "binance"
+    assert awaited_call.kwargs["user_id"] == "user-1"
+    assert awaited_call.kwargs["parameters"]["quantity"] == pytest.approx(0.1)
+
+    assert result is expected
