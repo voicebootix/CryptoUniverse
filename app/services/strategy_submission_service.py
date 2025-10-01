@@ -685,10 +685,7 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
         for status in statuses:
             if not status:
                 continue
-            variants.append(status)
-            uppercase = status.upper()
-            if uppercase != status:
-                variants.append(uppercase)
+            variants.extend([status, status.lower(), status.upper()])
 
         unique_variants: List[str] = []
         seen: set[str] = set()

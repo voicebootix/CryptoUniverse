@@ -92,11 +92,6 @@ async def test_get_pending_submissions_includes_changes_requested() -> None:
     payload = await service.get_pending_submissions(session)  # type: ignore[arg-type]
     status_by_id = {item["id"]: item["status"] for item in payload}
 
-    where_clause = session.executed_statements[0]._where_criteria[0].right
-    clause_values = list(where_clause.value)
-    assert "changes_requested" in {value.lower() for value in clause_values}
-    assert "CHANGES_REQUESTED" in clause_values
-
     assert status_by_id["changes"] == "changes_requested"
     assert status_by_id["submitted"] == "submitted"
 

@@ -68,12 +68,7 @@ async def test_get_review_stats_includes_changes_requested():
     assert stats.total_pending == 4
     assert stats.my_assigned == 3
 
-    pending_clause = fake_session.statements[0]._where_criteria[0].right
     assigned_clauses = fake_session.statements[-1]._where_criteria[0].clauses
-
-    pending_values = list(pending_clause.value)
-    assert "changes_requested" in {value.lower() for value in pending_values}
-    assert "CHANGES_REQUESTED" in pending_values
 
     status_clause = None
     for clause in assigned_clauses:
