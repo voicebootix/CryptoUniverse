@@ -237,7 +237,7 @@ class MarketAnalysisService(LoggerMixin):
             if not cached:
                 return None
 
-            if cached["expires_at"] < time.time():
+            if cached["expires_at"] < time.monotonic():
                 # Remove expired entry lazily
                 self._cache_store.pop(cache_key, None)
                 return None
@@ -259,7 +259,7 @@ class MarketAnalysisService(LoggerMixin):
         async with lock:
             self._cache_store[cache_key] = {
                 "value": copy.deepcopy(response) if pre_processed else self._prepare_for_cache(response),
-                "expires_at": time.time() + ttl_seconds,
+                "expires_at": time.monotonic() + ttl_seconds,
             }
 
     async def realtime_price_tracking(
