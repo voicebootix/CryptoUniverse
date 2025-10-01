@@ -67,7 +67,11 @@ const RiskDashboardTab: React.FC = () => {
     if (emergencyPolicies) {
       setOptIn(Boolean(emergencyPolicies.opt_in));
 
-      const policyThresholds = emergencyPolicies.policies.reduce((acc, policy) => {
+      const policies = Array.isArray(emergencyPolicies.policies)
+        ? emergencyPolicies.policies
+        : [];
+
+      const policyThresholds = policies.reduce((acc, policy) => {
         const key = policy.level as keyof typeof DEFAULT_THRESHOLDS;
         if (key in DEFAULT_THRESHOLDS) {
           acc[key] = Number(policy.loss_threshold_pct ?? DEFAULT_THRESHOLDS[key]);
