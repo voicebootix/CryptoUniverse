@@ -732,7 +732,38 @@ class MarketDataFeeds:
                         return {"success": False, "error": f"API error: {response.status}"}
 
                     payload = await response.json()
-                    tvl = float(payload.get("tvl", 0) or 0)
+
+                    def _safe_float(value: Any) -> float:
+                        try:
+                            if isinstance(value, str):
+                                value = value.replace(",", "").strip()
+                            return float(value)
+                        except (TypeError, ValueError):
+                            return 0.0
+
+                    raw_tvl = payload.get("tvl", 0)
+                    tvl = 0.0
+
+                    if isinstance(raw_tvl, list):
+                        last_entry: Optional[Dict[str, Any]] = None
+                        for item in reversed(raw_tvl):
+                            if isinstance(item, dict):
+                                last_entry = item
+                                break
+
+                        if last_entry:
+                            for key in (
+                                "totalLiquidityUSD",
+                                "tvl",
+                                "liquidityUSD",
+                                "totalLiquidity",
+                            ):
+                                if key in last_entry and last_entry[key] not in (None, ""):
+                                    tvl = _safe_float(last_entry[key])
+                                    break
+                    else:
+                        tvl = _safe_float(raw_tvl)
+
                     change_1d = float(payload.get("change_1d", 0) or 0)
                     change_7d = float(payload.get("change_7d", 0) or 0)
                     change_1m = float(payload.get("change_1m", 0) or 0)
