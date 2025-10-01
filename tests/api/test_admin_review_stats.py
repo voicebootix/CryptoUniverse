@@ -15,7 +15,6 @@ os.environ.setdefault("ENVIRONMENT", "development")
 
 pytest.importorskip("aiosqlite")
 
-from app.models.strategy_submission import StrategyStatus
 from app.models.user import User, UserRole, UserStatus
 from app.api.v1.endpoints import admin as admin_endpoints
 from app.services.strategy_submission_service import ReviewStats, StrategySubmissionService
@@ -72,7 +71,9 @@ async def test_get_review_stats_includes_changes_requested():
     pending_clause = fake_session.statements[0]._where_criteria[0].right
     assigned_clauses = fake_session.statements[-1]._where_criteria[0].clauses
 
-    assert StrategyStatus.CHANGES_REQUESTED in pending_clause.value
+    pending_values = list(pending_clause.value)
+    assert "changes_requested" in {value.lower() for value in pending_values}
+    assert "CHANGES_REQUESTED" in pending_values
 
     status_clause = None
     for clause in assigned_clauses:
@@ -82,7 +83,9 @@ async def test_get_review_stats_includes_changes_requested():
             break
 
     assert status_clause is not None
-    assert StrategyStatus.CHANGES_REQUESTED in status_clause.value
+    status_values = list(status_clause.value)
+    assert "changes_requested" in {value.lower() for value in status_values}
+    assert "CHANGES_REQUESTED" in status_values
 
 
 @pytest.mark.asyncio
@@ -123,3 +126,44 @@ async def test_admin_review_stats_endpoint_includes_changes_requested(monkeypatc
 
     assert result.total_pending == 4
     assert result.my_assigned == 3
+
+
+@pytest.mark.asyncio
+async def test_admin_pending_endpoint_returns_changes_requested(monkeypatch):
+    admin_user = User(
+        email="admin@example.com",
+        hashed_password="hashed",
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+        is_active=True,
+        is_verified=True,
+    )
+
+    pending_payload = [
+        {"id": "1", "status": "submitted"},
+        {"id": "2", "status": "changes_requested"},
+    ]
+
+    monkeypatch.setattr(
+        admin_endpoints.rate_limiter,
+        "check_rate_limit",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        admin_endpoints.strategy_submission_service,
+        "get_pending_submissions",
+        AsyncMock(return_value=pending_payload),
+    )
+
+    result = await admin_endpoints.get_pending_strategies(
+        status_filter=None,
+        current_user=admin_user,
+        db=None,
+    )
+
+    assert result["status"] == "success"
+    assert result["total_count"] == 2
+    assert {item["status"] for item in result["strategies"]} == {
+        "submitted",
+        "changes_requested",
+    }
