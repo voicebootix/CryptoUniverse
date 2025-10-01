@@ -25,7 +25,8 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Header
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_, desc, func
+from sqlalchemy import select, and_, or_, desc, func, cast
+from sqlalchemy.types import String
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
@@ -215,12 +216,17 @@ async def get_credit_balance(
         
         # Get total profit earned to date with safe query
         try:
+            completed_literal = TradeStatus.COMPLETED.value.upper()
+            status_text = func.upper(cast(Trade.status, String))
             profit_stmt = select(func.sum(Trade.profit_realized_usd)).where(
                 and_(
                     Trade.user_id == current_user.id,
-                    Trade.status == TradeStatus.COMPLETED,  # Use enum for proper type casting
                     Trade.is_simulation.is_(False),  # Use .is_() for proper boolean comparison
-                    Trade.profit_realized_usd > 0
+                    Trade.profit_realized_usd > 0,
+                    or_(
+                        Trade.status == TradeStatus.COMPLETED,
+                        status_text == completed_literal,
+                    ),
                 )
             )
             profit_result = await db.execute(profit_stmt)

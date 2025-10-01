@@ -330,12 +330,13 @@ class EmergencyManager(LoggerMixin):
                 "description": self.policy_descriptions.get(level, "")
             })
 
-        last_updated = self.user_policy_updates.get(user_id, datetime.utcnow()) if user_id else datetime.utcnow()
+        last_updated_raw = self.user_policy_updates.get(user_id) if user_id else None
+        last_updated = last_updated_raw.isoformat() if isinstance(last_updated_raw, datetime) else None
 
         return {
             "opt_in": opt_in,
             "policies": policies,
-            "last_updated": last_updated.isoformat()
+            "last_updated": last_updated
         }
 
     async def _execute_position_reduction(

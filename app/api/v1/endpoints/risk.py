@@ -260,7 +260,28 @@ async def update_emergency_policies(
     try:
         if payload.thresholds:
             normalized = _normalize_threshold_keys(payload.thresholds)
-            _validate_threshold_sequence(normalized)
+
+            overview = emergency_manager.get_policy_overview(user_id)
+            effective_thresholds = {
+                EmergencyLevel.WARNING: emergency_manager.circuit_breakers[EmergencyLevel.WARNING]["loss_threshold_pct"],
+                EmergencyLevel.CRITICAL: emergency_manager.circuit_breakers[EmergencyLevel.CRITICAL]["loss_threshold_pct"],
+                EmergencyLevel.EMERGENCY: emergency_manager.circuit_breakers[EmergencyLevel.EMERGENCY]["loss_threshold_pct"],
+            }
+
+            for policy in overview.get("policies", []):
+                try:
+                    level = EmergencyLevel(policy.get("level", ""))
+                except ValueError:
+                    continue
+
+                try:
+                    effective_thresholds[level] = float(policy.get("loss_threshold_pct", effective_thresholds[level]))
+                except (TypeError, ValueError):
+                    continue
+
+            effective_thresholds.update(normalized)
+
+            _validate_threshold_sequence(effective_thresholds)
             emergency_manager.update_user_thresholds(user_id, normalized)
 
         if payload.opt_in is not None:
