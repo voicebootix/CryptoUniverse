@@ -330,6 +330,11 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
         else:
             dashboard_statuses.append("changes_requested")
 
+        # Create status variants to handle case sensitivity
+        status_variants = []
+        for status in dashboard_statuses:
+            status_variants.extend([status, status.lower(), status.upper()])
+
         stmt = (
             select(StrategySubmission)
             .options(
@@ -337,9 +342,7 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
                 joinedload(StrategySubmission.reviewer),
             )
             .where(
-                StrategySubmission.status.in_(
-                    self._status_variants(*dashboard_statuses)
-                )
+                StrategySubmission.status.in_(status_variants)
             )
             .order_by(StrategySubmission.submitted_at.desc())
         )
