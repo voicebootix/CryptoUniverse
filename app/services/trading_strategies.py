@@ -37,7 +37,7 @@ from typing import Dict, List, Optional, Any, Tuple
 import uuid
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from enum import Enum
 
 import structlog
@@ -1880,10 +1880,14 @@ class TradingStrategiesService(LoggerMixin):
                 )
 
             elif function == "leverage_position":
+                leverage_params = dict(parameters)
+                leverage_params.setdefault("position_size", strategy_params.quantity)
+                action = leverage_params.pop("action", "increase_leverage")
                 strategy_result = await self.leverage_position(
                     symbol=symbol,
-                    leverage=strategy_params.leverage,
-                    position_size=strategy_params.quantity,
+                    action=action,
+                    target_leverage=strategy_params.leverage,
+                    parameters=leverage_params,
                     user_id=user_id
                 )
 
@@ -1911,14 +1915,24 @@ class TradingStrategiesService(LoggerMixin):
                     symbol=symbol,
                     entry_price=strategy_params.price or 0,
                     leverage=strategy_params.leverage,
-                    position_type=parameters.get("position_type", "long"),
+                    position_side=parameters.get("position_side")
+                    or parameters.get("position_type", "long"),
+                    position_size=parameters.get("position_size", strategy_params.quantity),
                     user_id=user_id
                 )
 
             elif function == "hedge_position":
+                hedge_params = dict(parameters)
+                hedge_params.setdefault("hedge_ratio", parameters.get("hedge_ratio", 0.5))
+                primary_position_size = hedge_params.get("primary_position_size", strategy_params.quantity)
+                primary_side = hedge_params.get("primary_side", "long")
+                hedge_type = hedge_params.get("hedge_type", "direct_hedge")
                 strategy_result = await self.hedge_position(
-                    portfolio_symbols=symbol,
-                    hedge_ratio=parameters.get("hedge_ratio", 0.5),
+                    symbol,
+                    primary_position_size,
+                    primary_side=primary_side,
+                    hedge_type=hedge_type,
+                    parameters=hedge_params,
                     user_id=user_id
                 )
 
@@ -2307,7 +2321,7 @@ class TradingStrategiesService(LoggerMixin):
                 strategy_enum = StrategyType(default_strategy_type)
             except ValueError:
                 strategy_enum = StrategyType.CALL_OPTION  # Fallback to default
-            
+
             # Get real current price for dynamic strike
             try:
                 price_data = await self._get_symbol_price("auto", symbol)
@@ -2336,7 +2350,26 @@ class TradingStrategiesService(LoggerMixin):
             return await self.derivatives_engine.options_trade(
                 strategy_enum, symbol, parameters, expiry_date, strike_price, user_id
             )
-        
+
+        elif function == "perpetual_trade":
+            default_strategy_type = strategy_type or "long_perpetual"
+            perpetual_parameters = {
+                key: value
+                for key, value in asdict(parameters).items()
+                if value is not None and key != "symbol"
+            }
+
+            if strategy_uuid:
+                perpetual_parameters.setdefault("strategy_id", strategy_uuid)
+
+            return await self.perpetual_trade(
+                symbol=symbol,
+                strategy_type=default_strategy_type,
+                parameters=perpetual_parameters,
+                exchange=exchange,
+                user_id=user_id,
+            )
+
         elif function == "complex_strategy":
             # Get REAL current price for dynamic strike selection
             try:
@@ -6312,6 +6345,48 @@ class TradingStrategiesService(LoggerMixin):
         except Exception:
             return []
 
+    async def _calculate_real_volatility(
+        self,
+        underlying_price: float,
+        time_to_expiry: float,
+        symbol: Optional[str] = None,
+    ) -> float:
+        """Estimate annualized volatility for option pricing."""
+
+        try:
+            base_symbol = symbol or "BTCUSDT"
+            if "-" in base_symbol:
+                base_symbol = base_symbol.split("-")[0]
+
+            base_symbol = base_symbol.replace("/", "")
+
+            if not base_symbol.upper().endswith(("USDT", "USD", "USDC")):
+                base_symbol = f"{base_symbol}USDT"
+
+            daily_volatility = await self._estimate_daily_volatility(base_symbol)
+
+            import math
+
+            annualized_volatility = daily_volatility * math.sqrt(365)
+
+            # Ensure volatility remains within reasonable bounds and is a float
+            annualized_volatility = float(max(0.01, min(annualized_volatility, 3.0)))
+
+            if time_to_expiry and time_to_expiry > 0:
+                # Adjust for shorter expiries to avoid overstating risk
+                annualized_volatility *= math.sqrt(min(time_to_expiry, 1.0))
+                annualized_volatility = float(max(0.01, min(annualized_volatility, 3.0)))
+
+            return annualized_volatility
+
+        except Exception as exc:
+            self.logger.warning(
+                "Falling back to default volatility", error=str(exc), symbol=symbol
+            )
+
+            # Provide a conservative fallback if estimation fails
+            return 0.5 if underlying_price > 0 else 0.3
+
     async def _estimate_daily_volatility(self, symbol: str) -> float:
         """Calculate real daily volatility using historical price data."""
         try:
@@ -6865,8 +6940,11 @@ class TradingStrategiesService(LoggerMixin):
             
             # Get real volatility if not provided
             if volatility <= 0:
-                vol_data = await self._calculate_real_volatility(option_symbol)
-                volatility = vol_data.get("volatility", 0.5)  # Default to 50% if unavailable
+                volatility = await self._calculate_real_volatility(
+                    underlying_price=underlying_price,
+                    time_to_expiry=time_to_expiry,
+                    symbol=option_symbol,
+                )
             
             # Black-Scholes calculations with real data
             S = underlying_price  # Current stock price
