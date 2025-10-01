@@ -33,6 +33,7 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { apiClient } from '@/lib/api/client';
+import type { AxiosError } from 'axios';
 
 interface ChatMessage {
   id: string;
@@ -58,7 +59,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
+  
   // Memoized sorted messages to prevent state mutation during render
   const sortedMessages = useMemo(() => {
     return [...messages].sort((a, b) => {
@@ -80,16 +81,88 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingMessageRef = useRef<string | null>(null);
+  const pendingRequestIdRef = useRef<string | null>(null);
   const { toast } = useToast();
 
   // Auto-scroll to bottom when new messages arrive
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, []);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    if (isLoading) {
+      scrollToBottom();
+    }
+  }, [isLoading, scrollToBottom]);
+
+  const clearFallbackTimer = useCallback(() => {
+    if (fallbackTimerRef.current) {
+      clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearFallbackTimer();
+    };
+  }, [clearFallbackTimer]);
+
+  const finalizePendingRequest = useCallback(() => {
+    pendingMessageRef.current = null;
+    pendingRequestIdRef.current = null;
+    clearFallbackTimer();
+    setIsLoading(false);
+  }, [clearFallbackTimer]);
+
+  const buildErrorMessage = useCallback((error: unknown): string => {
+    if (typeof error === 'string') {
+      return error;
+    }
+
+    if (error && typeof error === 'object') {
+      const axiosError = error as AxiosError<any>;
+      const detail = axiosError.response?.data?.detail;
+
+      if (typeof detail === 'string' && detail.trim().length > 0) {
+        return detail;
+      }
+
+      if (detail && typeof detail === 'object' && 'message' in detail) {
+        const message = (detail as { message?: string }).message;
+        if (message) {
+          return message;
+        }
+      }
+
+      if (axiosError.response?.data?.message) {
+        return axiosError.response.data.message;
+      }
+
+      if ('message' in error && typeof (error as { message?: string }).message === 'string') {
+        return (error as { message: string }).message;
+      }
+    }
+
+    return 'The AI assistant could not complete that request. Please try again in a moment or contact support if the issue persists.';
+  }, []);
+
+  const pushSystemMessage = useCallback((content: string) => {
+    const systemMessage: ChatMessage = {
+      id: `system-${Date.now()}`,
+      content,
+      type: 'system',
+      timestamp: new Date().toISOString(),
+    };
+
+    setMessages(prev => [...prev, systemMessage]);
+  }, []);
 
   // Initialize chat session
   useEffect(() => {
@@ -163,9 +236,9 @@ Just chat with me naturally! How can I help you manage your crypto investments t
             confidence: data.confidence,
             metadata: data.metadata
           };
-          
+
           setMessages(prev => [...prev, newMessage]);
-          setIsLoading(false);
+          finalizePendingRequest();
         } else if (data.type === 'connection_established') {
           // Chat connection established
         }
@@ -183,20 +256,21 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     setIsConnected(connectionStatus === 'Open');
   }, [connectionStatus]);
 
-  const sendMessage = async () => {
-    console.log('🚀 SEND MESSAGE CALLED!', { inputValue, isLoading, sessionId });
-    if (!inputValue.trim() || isLoading || !sessionId) {
-      console.log('❌ SEND MESSAGE BLOCKED:', { 
-        noInput: !inputValue.trim(), 
-        isLoading, 
-        noSession: !sessionId 
+  const sendMessage = useCallback(async () => {
+    const messageToSend = inputValue.trim();
+    console.log('🚀 SEND MESSAGE CALLED!', { messageToSend, isLoading, sessionId });
+    if (!messageToSend || isLoading || !sessionId) {
+      console.log('❌ SEND MESSAGE BLOCKED:', {
+        noInput: !messageToSend,
+        isLoading,
+        noSession: !sessionId
       });
       return;
     }
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
-      content: inputValue,
+      content: messageToSend,
       type: 'user',
       timestamp: new Date().toISOString()
     };
@@ -205,49 +279,83 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     setInputValue('');
     setIsLoading(true);
 
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    pendingMessageRef.current = messageToSend;
+    pendingRequestIdRef.current = requestId;
+
     try {
-      console.log('💬 Sending message:', { isConnected, hasWsMessage: !!sendWsMessage, inputValue });
+      console.log('💬 Sending message:', { isConnected, hasWsMessage: !!sendWsMessage, messageToSend });
       if (isConnected && sendWsMessage) {
         console.log('📤 Sending via WebSocket');
         // Send via WebSocket for real-time response
         sendWsMessage({
           type: 'chat_message',
-          message: inputValue,
+          message: messageToSend,
           session_id: sessionId
         });
-        
+
         // Set timeout to fall back to REST API if no WebSocket response
-        setTimeout(() => {
-          if (isLoading) {
-            console.log('⏰ WebSocket timeout, falling back to REST API');
-            // Fallback to REST API
-            apiClient.post('/chat/message', {
-              message: inputValue,
+        clearFallbackTimer();
+        const fallbackRequestId = requestId;
+        fallbackTimerRef.current = setTimeout(async () => {
+          if (!pendingMessageRef.current || pendingRequestIdRef.current !== fallbackRequestId) {
+            return;
+          }
+
+          console.log('⏰ WebSocket timeout, falling back to REST API');
+          let shouldFinalize = false;
+          const pendingMessage = pendingMessageRef.current;
+
+          try {
+            const response = await apiClient.post('/chat/message', {
+              message: pendingMessage,
               session_id: sessionId
-            }).then(response => {
-              if (response.data.success) {
-                const assistantMessage: ChatMessage = {
-                  id: response.data.message_id,
-                  content: response.data.content,
-                  type: 'assistant',
-                  timestamp: response.data.timestamp,
-                  intent: response.data.intent,
-                  confidence: response.data.confidence,
-                  metadata: response.data.metadata
-                };
-                setMessages(prev => [...prev, assistantMessage]);
-              }
-              setIsLoading(false);
-            }).catch(() => {
-              setIsLoading(false);
             });
+
+            if (pendingRequestIdRef.current !== fallbackRequestId) {
+              return;
+            }
+
+            shouldFinalize = true;
+
+            if (response.data.success) {
+              const assistantMessage: ChatMessage = {
+                id: response.data.message_id,
+                content: response.data.content,
+                type: 'assistant',
+                timestamp: response.data.timestamp,
+                intent: response.data.intent,
+                confidence: response.data.confidence,
+                metadata: response.data.metadata
+              };
+              setMessages(prev => [...prev, assistantMessage]);
+            } else {
+              throw new Error('Failed to send message');
+            }
+          } catch (fallbackError) {
+            if (pendingRequestIdRef.current !== fallbackRequestId) {
+              return;
+            }
+
+            shouldFinalize = true;
+            const friendlyMessage = buildErrorMessage(fallbackError);
+            pushSystemMessage(friendlyMessage);
+            toast({
+              title: 'Message Failed',
+              description: friendlyMessage,
+              variant: 'destructive',
+            });
+          } finally {
+            if (shouldFinalize && pendingRequestIdRef.current === fallbackRequestId) {
+              finalizePendingRequest();
+            }
           }
         }, 10000); // 10 second timeout
       } else {
         console.log('📡 Using REST API (WebSocket not connected)');
         // Fallback to REST API
         const response = await apiClient.post('/chat/message', {
-          message: inputValue,
+          message: messageToSend,
           session_id: sessionId
         });
 
@@ -261,26 +369,40 @@ Just chat with me naturally! How can I help you manage your crypto investments t
             confidence: response.data.confidence,
             metadata: response.data.metadata
           };
-          
+
           setMessages(prev => [...prev, assistantMessage]);
         } else {
           throw new Error('Failed to send message');
         }
-        
-        setIsLoading(false);
+
+        if (pendingRequestIdRef.current === requestId) {
+          finalizePendingRequest();
+        }
       }
     } catch (error) {
-      // Failed to send message - show error to user
+      const friendlyMessage = buildErrorMessage(error);
+      pushSystemMessage(friendlyMessage);
       toast({
         title: 'Message Failed',
-        description: 'Unable to send message. Please check your connection.',
+        description: friendlyMessage,
         variant: 'destructive',
       });
-      setIsLoading(false);
+      finalizePendingRequest();
     }
-  };
+  }, [
+    buildErrorMessage,
+    finalizePendingRequest,
+    inputValue,
+    isConnected,
+    isLoading,
+    pushSystemMessage,
+    sendWsMessage,
+    sessionId,
+    toast,
+    clearFallbackTimer,
+  ]);
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -547,7 +669,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
                 ref={inputRef}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={handleKeyPress}
+                onKeyDown={handleKeyDown}
                 placeholder="Ask me about your portfolio, trading, or market opportunities..."
                 disabled={isLoading}
                 className="pr-12"
@@ -570,9 +692,15 @@ Just chat with me naturally! How can I help you manage your crypto investments t
               className="gap-2"
             >
               {isLoading ? (
-                <Loader className="h-4 w-4 animate-spin" />
+                <>
+                  <Loader className="h-4 w-4 animate-spin" />
+                  <span className="text-sm">Sending…</span>
+                </>
               ) : (
-                <Send className="h-4 w-4" />
+                <>
+                  <Send className="h-4 w-4" />
+                  <span className="text-sm">Send</span>
+                </>
               )}
             </Button>
           </div>

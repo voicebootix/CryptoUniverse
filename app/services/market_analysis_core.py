@@ -29,6 +29,7 @@ Functions migrated:
 """
 
 import asyncio
+import copy
 import os
 import time
 from datetime import datetime, timedelta
@@ -177,55 +178,189 @@ class MarketAnalysisService(LoggerMixin):
             "successful_requests": 0,
             "average_response_time": 0
         }
-    
+        self._cache_store: Dict[str, Dict[str, Any]] = {}
+        self._cache_locks: Dict[int, asyncio.Lock] = {}
+        self._default_cache_ttl = 60
+        self._cache_ttl_overrides = {
+            "realtime_price_tracking": 60,
+            "technical_analysis": 60,
+            "volatility_analysis": 60,
+            "market_overview": 60,
+        }
+
+    async def _get_cache_lock(self) -> asyncio.Lock:
+        """Provide an asyncio lock scoped to the current event loop."""
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+
+        lock = self._cache_locks.get(loop_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._cache_locks[loop_id] = lock
+        return lock
+
+    def _build_cache_key(self, namespace: str, **params: Any) -> str:
+        """Create a deterministic cache key for the provided parameters."""
+        components = [namespace]
+        for key in sorted(params):
+            value = params[key]
+            if isinstance(value, (list, tuple, set)):
+                value = ",".join(str(v) for v in value)
+            components.append(f"{key}={value}")
+        return "|".join(components)
+
+    def _prepare_for_cache(self, response: Dict[str, Any]) -> Dict[str, Any]:
+        """Attach cache metadata before persisting a response."""
+        response_copy = copy.deepcopy(response)
+        metadata = response_copy.setdefault("metadata", {})
+        metadata.update({
+            "cache_status": "miss",
+            "cache_updated_at": datetime.utcnow().isoformat(),
+        })
+        return response_copy
+
+    def _mark_cache_hit(self, cached_value: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a safe copy of a cached response annotated as a cache hit."""
+        response_copy = copy.deepcopy(cached_value)
+        metadata = response_copy.setdefault("metadata", {})
+        metadata.update({
+            "cache_status": "hit",
+            "cache_retrieved_at": datetime.utcnow().isoformat(),
+        })
+        return response_copy
+
+    async def _get_cached_result(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a cached response if it is still fresh."""
+        lock = await self._get_cache_lock()
+        async with lock:
+            cached = self._cache_store.get(cache_key)
+            if not cached:
+                return None
+
+            if cached["expires_at"] < time.monotonic():
+                # Remove expired entry lazily
+                self._cache_store.pop(cache_key, None)
+                return None
+
+            return self._mark_cache_hit(cached["value"])
+
+    async def _set_cached_result(
+        self,
+        cache_key: str,
+        response: Dict[str, Any],
+        ttl: Optional[int] = None,
+        *,
+        pre_processed: bool = False,
+    ) -> None:
+        """Persist a response in the in-memory cache with the configured TTL."""
+        lock = await self._get_cache_lock()
+        namespace = cache_key.split("|", 1)[0]
+        ttl_seconds = ttl or self._cache_ttl_overrides.get(namespace, self._default_cache_ttl)
+        async with lock:
+            self._cache_store[cache_key] = {
+                "value": copy.deepcopy(response) if pre_processed else self._prepare_for_cache(response),
+                "expires_at": time.monotonic() + ttl_seconds,
+            }
+
     async def realtime_price_tracking(
-        self, 
-        symbols: str, 
+        self,
+        symbols: str,
         exchanges: str = "all",
         user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Real-time price tracking across multiple exchanges."""
         start_time = time.time()
-        
+
         try:
-            symbol_list = [s.strip() for s in symbols.split(",")]
-            exchange_list = self.exchange_manager.exchange_configs.keys() if exchanges == "all" else [exchanges]
-            
-            price_data = {}
-            
+            symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
+            if not symbol_list:
+                return {
+                    "success": True,
+                    "function": "realtime_price_tracking",
+                    "data": {},
+                    "metadata": {
+                        "symbols_requested": 0,
+                        "symbols_found": 0,
+                        "exchanges_checked": 0,
+                        "response_time_ms": 0.0,
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "cache_status": "skip",
+                    },
+                }
+
+            exchange_source = (
+                self.exchange_manager.exchange_configs.keys()
+                if exchanges == "all"
+                else [exchanges]
+            )
+            exchange_list = [str(exchange).lower() for exchange in exchange_source]
+
+            cache_key = self._build_cache_key(
+                "realtime_price_tracking",
+                symbols=",".join(sorted(symbol_list)),
+                exchanges=",".join(sorted(exchange_list)),
+            )
+            cached_response = await self._get_cached_result(cache_key)
+            if cached_response:
+                await self._update_performance_metrics(time.time() - start_time, True, user_id)
+                return cached_response
+
+            price_data: Dict[str, Any] = {}
+
+            async def fetch_exchange_price(exchange: str, symbol: str):
+                try:
+                    price_info = await self._get_symbol_price(exchange, symbol)
+                    return exchange, price_info
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    self.logger.warning(
+                        "Failed to get symbol price",
+                        symbol=symbol,
+                        exchange=exchange,
+                        error=str(exc),
+                    )
+                    return exchange, None
+
             for symbol in symbol_list:
+                tasks = [fetch_exchange_price(exchange, symbol) for exchange in exchange_list]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
                 symbol_data = []
-                
-                for exchange in exchange_list:
-                    try:
-                        price_info = await self._get_symbol_price(exchange, symbol)
-                        if price_info:
-                            symbol_data.append({
-                                "exchange": exchange,
-                                **price_info
-                            })
-                    except Exception as e:
-                        self.logger.warning(f"Failed to get {symbol} price from {exchange}: {e}")
-                
+                for result in results:
+                    if isinstance(result, Exception):  # pragma: no cover - defensive
+                        self.logger.warning(
+                            "Exchange price task failed",
+                            symbol=symbol,
+                            error=str(result),
+                        )
+                        continue
+
+                    exchange, price_info = result
+                    if price_info:
+                        symbol_data.append({"exchange": exchange, **price_info})
+
                 if symbol_data:
                     prices = [d["price"] for d in symbol_data]
                     volumes = [d.get("volume", 0) for d in symbol_data]
-                    
+                    min_price = min(prices) if prices else 0
+                    max_price = max(prices) if prices else 0
+                    price_spread = max_price - min_price
+                    spread_percentage = ((max_price - min_price) / min_price) * 100 if min_price > 0 else None
+
                     price_data[symbol] = {
                         "exchanges": symbol_data,
                         "aggregated": {
                             "average_price": sum(prices) / len(prices),
-                            "price_spread": max(prices) - min(prices),
-                            "spread_percentage": ((max(prices) - min(prices)) / min(prices)) * 100,
+                            "price_spread": price_spread,
+                            "spread_percentage": spread_percentage,
                             "total_volume": sum(volumes),
-                            "exchange_count": len(symbol_data)
-                        }
+                            "exchange_count": len(symbol_data),
+                        },
                     }
-            
+
             response_time = time.time() - start_time
             await self._update_performance_metrics(response_time, True, user_id)
-            
-            return {
+
+            response = {
                 "success": True,
                 "function": "realtime_price_tracking",
                 "data": price_data,
@@ -234,10 +369,14 @@ class MarketAnalysisService(LoggerMixin):
                     "symbols_found": len(price_data),
                     "exchanges_checked": len(exchange_list),
                     "response_time_ms": round(response_time * 1000, 2),
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
             }
-            
+
+            response_with_metadata = self._prepare_for_cache(response)
+            await self._set_cached_result(cache_key, response_with_metadata, pre_processed=True)
+            return response_with_metadata
+
         except Exception as e:
             await self._update_performance_metrics(time.time() - start_time, False, user_id)
             raise e
@@ -251,18 +390,45 @@ class MarketAnalysisService(LoggerMixin):
     ) -> Dict[str, Any]:
         """Comprehensive technical analysis for symbols."""
         start_time = time.time()
-        
+
         try:
-            symbol_list = [s.strip() for s in symbols.split(",")]
+            symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
             indicator_list = indicators.split(",") if indicators else [
                 "sma", "ema", "rsi", "macd", "bollinger", "support_resistance"
             ]
-            
-            analysis_results = {}
 
-            for symbol in symbol_list:
-                analysis = await self._analyze_symbol_technical(symbol, timeframe, indicator_list)
-                analysis_results[symbol] = analysis
+            cache_key = self._build_cache_key(
+                "technical_analysis",
+                symbols=",".join(sorted(symbol_list)),
+                timeframe=timeframe,
+                indicators=",".join(sorted(indicator_list)),
+            )
+            cached_response = await self._get_cached_result(cache_key)
+            if cached_response:
+                await self._update_performance_metrics(time.time() - start_time, True, user_id)
+                return cached_response
+
+            analysis_results: Dict[str, Any] = {}
+
+            analysis_tasks = [
+                self._analyze_symbol_technical(symbol, timeframe, indicator_list)
+                for symbol in symbol_list
+            ]
+            task_results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+
+            for symbol, result in zip(symbol_list, task_results):
+                if isinstance(result, Exception):
+                    self.logger.error(
+                        "Technical analysis task failed",
+                        symbol=symbol,
+                        error=str(result),
+                    )
+                    analysis_results[symbol] = {
+                        "data_quality": "error",
+                        "error": str(result),
+                    }
+                else:
+                    analysis_results[symbol] = result
 
             symbols_with_real_data = [
                 symbol for symbol, analysis in analysis_results.items()
@@ -295,13 +461,17 @@ class MarketAnalysisService(LoggerMixin):
             if symbols_without_data:
                 metadata["unavailable_symbols"] = symbols_without_data
 
-            return {
+            response = {
                 "success": overall_success,
                 "function": "technical_analysis",
                 "technical_analysis": analysis_results,
                 "data": analysis_results,
                 "metadata": metadata,
             }
+
+            response_with_metadata = self._prepare_for_cache(response)
+            await self._set_cached_result(cache_key, response_with_metadata, pre_processed=True)
+            return response_with_metadata
 
         except Exception as e:
             await self._update_performance_metrics(time.time() - start_time, False, user_id)
@@ -1482,31 +1652,63 @@ class MarketAnalysisService(LoggerMixin):
         """DEDICATED VOLATILITY ANALYSIS - Comprehensive volatility metrics."""
         
         start_time = time.time()
-        
+
         try:
-            symbol_list = [s.strip().upper() for s in symbols.split(",")]
-            timeframe_list = [tf.strip() for tf in timeframes.split(",")]
-            
-            volatility_results = {}
-            
+            symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+            timeframe_list = [tf.strip() for tf in timeframes.split(",") if tf.strip()]
+
+            cache_key = self._build_cache_key(
+                "volatility_analysis",
+                symbols=",".join(sorted(symbol_list)),
+                timeframes=",".join(sorted(timeframe_list)),
+            )
+            cached_response = await self._get_cached_result(cache_key)
+            if cached_response:
+                await self._update_performance_metrics(time.time() - start_time, True, user_id)
+                return cached_response
+
+            volatility_results: Dict[str, Any] = {}
+
+            async def fetch_symbol_price(symbol: str):
+                try:
+                    data = await self._get_symbol_price("binance", symbol)
+                    return symbol, data
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    self.logger.warning(
+                        "Volatility price fetch failed",
+                        symbol=symbol,
+                        error=str(exc),
+                    )
+                    return symbol, None
+
+            price_results = await asyncio.gather(
+                *(fetch_symbol_price(symbol) for symbol in symbol_list),
+                return_exceptions=True,
+            )
+
+            price_lookup: Dict[str, Optional[Dict[str, Any]]] = {}
+            for result in price_results:
+                if isinstance(result, Exception):  # pragma: no cover - defensive
+                    self.logger.warning("Volatility price task raised", error=str(result))
+                    continue
+                symbol, data = result
+                price_lookup[symbol] = data
+
             for symbol in symbol_list:
                 symbol_volatility = {
                     "symbol": symbol,
                     "timeframes": {},
                     "volatility_ranking": "medium",
                     "volatility_forecast": {},
-                    "risk_metrics": {}
+                    "risk_metrics": {},
                 }
-                
-                for timeframe in timeframe_list:
-                    # Get current price data
-                    price_data = await self._get_symbol_price("binance", symbol)
-                    
-                    if price_data:
-                        # Simulate volatility calculations
-                        current_price = float(price_data.get("price", 0))
-                        price_change_pct = float(price_data.get("change_24h", 0))
-                        
+
+                price_data = price_lookup.get(symbol)
+                current_price = float(price_data.get("price", 0)) if price_data else 0.0
+                price_change_pct = float(price_data.get("change_24h", 0)) if price_data else 0.0
+
+                if price_data:
+                    for timeframe in timeframe_list:
                         timeframe_volatility = {
                             "current_volatility": abs(price_change_pct) / 100,
                             "volatility_percentile": min(95, abs(price_change_pct) * 4),
@@ -1514,41 +1716,54 @@ class MarketAnalysisService(LoggerMixin):
                             "volatility_trend": "INCREASING" if price_change_pct > 5 else "STABLE",
                             "volatility_clustering": abs(price_change_pct) > 10,
                             "parkinson_volatility": abs(price_change_pct) * 0.8 / 100,
-                            "garman_klass_volatility": abs(price_change_pct) * 0.9 / 100
+                            "garman_klass_volatility": abs(price_change_pct) * 0.9 / 100,
                         }
-                        
+
                         symbol_volatility["timeframes"][timeframe] = timeframe_volatility
-                
-                # Overall volatility metrics
+
                 if symbol_volatility["timeframes"]:
-                    avg_vol = sum(tf["current_volatility"] for tf in symbol_volatility["timeframes"].values()) / len(symbol_volatility["timeframes"])
+                    avg_vol = (
+                        sum(tf["current_volatility"] for tf in symbol_volatility["timeframes"].values())
+                        / len(symbol_volatility["timeframes"])
+                    )
                     symbol_volatility["overall_volatility"] = avg_vol
-                    symbol_volatility["volatility_ranking"] = "HIGH" if avg_vol > 0.05 else "MEDIUM" if avg_vol > 0.02 else "LOW"
+                    symbol_volatility["volatility_ranking"] = (
+                        "HIGH" if avg_vol > 0.05 else "MEDIUM" if avg_vol > 0.02 else "LOW"
+                    )
                     symbol_volatility["volatility_forecast"] = {
                         "next_24h": avg_vol * 1.1,
-                        "confidence": 0.75
+                        "confidence": 0.75,
                     }
                     symbol_volatility["risk_metrics"] = {
-                        "var_1d": avg_vol * current_price * -2.33,  # 99% VaR
-                        "expected_shortfall": avg_vol * current_price * -2.67
+                        "var_1d": avg_vol * current_price * -2.33,
+                        "expected_shortfall": avg_vol * current_price * -2.67,
                     }
-                
+
                 volatility_results[symbol] = symbol_volatility
-            
-            execution_time = (time.time() - start_time) * 1000
-            await self._update_performance_metrics(execution_time, True, user_id)
-            
-            return {
+
+            response_time = time.time() - start_time
+            await self._update_performance_metrics(response_time, True, user_id)
+
+            response = {
                 "success": True,
                 "timestamp": datetime.utcnow().isoformat(),
                 "volatility_analysis": {
                     "symbols_analyzed": symbol_list,
                     "timeframes": timeframe_list,
                     "individual_analysis": volatility_results,
-                    "execution_time_ms": execution_time
-                }
+                    "execution_time_ms": round(response_time * 1000, 2),
+                },
+                "metadata": {
+                    "symbols_analyzed": len(symbol_list),
+                    "timeframes": timeframe_list,
+                    "response_time_ms": round(response_time * 1000, 2),
+                },
             }
-            
+
+            response_with_metadata = self._prepare_for_cache(response)
+            await self._set_cached_result(cache_key, response_with_metadata, pre_processed=True)
+            return response_with_metadata
+
         except Exception as e:
             self.logger.error("Volatility analysis failed", error=str(e), exc_info=True)
             return {"success": False, "error": str(e), "function": "volatility_analysis"}
@@ -4146,12 +4361,19 @@ class MarketAnalysisService(LoggerMixin):
     
     async def get_market_overview(self) -> Dict[str, Any]:
         """Get comprehensive market overview for adaptive timing and decision making."""
+        start_time = time.time()
+
         try:
+            cache_key = self._build_cache_key("market_overview")
+            cached_response = await self._get_cached_result(cache_key)
+            if cached_response:
+                return cached_response
+
             from app.services.market_data_feeds import get_market_overview
-            
+
             # Get market data overview
             market_data = await get_market_overview()
-            
+
             if not market_data.get("success", False):
                 # Fallback to basic analysis
                 return {
@@ -4178,8 +4400,8 @@ class MarketAnalysisService(LoggerMixin):
             
             # Detect arbitrage opportunities
             arbitrage_count = await self._detect_arbitrage_opportunities()
-            
-            return {
+
+            response = {
                 "success": True,
                 "market_overview": {
                     "volatility_level": volatility_level,
@@ -4192,9 +4414,16 @@ class MarketAnalysisService(LoggerMixin):
                     "top_gainers": overview_data.get("top_gainers", [])[:5],
                     "top_losers": overview_data.get("top_losers", [])[:5]
                 },
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
+                "metadata": {
+                    "response_time_ms": round((time.time() - start_time) * 1000, 2),
+                },
             }
-            
+
+            response_with_metadata = self._prepare_for_cache(response)
+            await self._set_cached_result(cache_key, response_with_metadata, pre_processed=True)
+            return response_with_metadata
+
         except Exception as e:
             self.logger.error("Market overview failed", error=str(e), exc_info=True)
             return {
