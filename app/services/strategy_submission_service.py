@@ -256,28 +256,32 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
     ) -> ReviewStats:
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
+        pending_statuses = self._pending_status_values()
+        under_review_statuses = self._status_variants(
+            StrategyStatus.UNDER_REVIEW.value
+        )
+        approved_statuses = self._status_variants(
+            StrategyStatus.APPROVED.value,
+            StrategyStatus.PUBLISHED.value,
+        )
+        rejected_statuses = self._status_variants(StrategyStatus.REJECTED.value)
+
         total_pending_stmt = select(func.count(StrategySubmission.id)).where(
-            StrategySubmission.status.in_([
-                StrategyStatus.SUBMITTED,
-                StrategyStatus.UNDER_REVIEW,
-                StrategyStatus.CHANGES_REQUESTED
-            ])
+            StrategySubmission.status.in_(pending_statuses)
         )
         under_review_stmt = select(func.count(StrategySubmission.id)).where(
-            StrategySubmission.status == StrategyStatus.UNDER_REVIEW
+            StrategySubmission.status.in_(under_review_statuses)
         )
         approved_stmt = select(func.count(StrategySubmission.id)).where(
             and_(
                 StrategySubmission.reviewed_at >= today_start,
-                StrategySubmission.status.in_(
-                    [StrategyStatus.APPROVED, StrategyStatus.PUBLISHED]
-                ),
+                StrategySubmission.status.in_(approved_statuses),
             )
         )
         rejected_stmt = select(func.count(StrategySubmission.id)).where(
             and_(
                 StrategySubmission.reviewed_at >= today_start,
-                StrategySubmission.status == StrategyStatus.REJECTED,
+                StrategySubmission.status.in_(rejected_statuses),
             )
         )
 
@@ -312,10 +316,19 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
         db: AsyncSession,
         status_filter: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        pending_statuses = self._pending_status_values()
+        dashboard_statuses = [
+            StrategyStatus.SUBMITTED.value,
+            StrategyStatus.UNDER_REVIEW.value,
+            StrategyStatus.APPROVED.value,
+            StrategyStatus.REJECTED.value,
+            StrategyStatus.PUBLISHED.value,
+        ]
         changes_requested_status = getattr(StrategyStatus, "CHANGES_REQUESTED", None)
-        pending_statuses = [StrategyStatus.SUBMITTED, StrategyStatus.UNDER_REVIEW]
-        if changes_requested_status:
-            pending_statuses.append(changes_requested_status)
+        if isinstance(changes_requested_status, StrategyStatus):
+            dashboard_statuses.append(changes_requested_status.value)
+        else:
+            dashboard_statuses.append("changes_requested")
 
         stmt = (
             select(StrategySubmission)
@@ -325,14 +338,7 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
             )
             .where(
                 StrategySubmission.status.in_(
-                    [
-                        StrategyStatus.SUBMITTED,
-                        StrategyStatus.UNDER_REVIEW,
-                        StrategyStatus.CHANGES_REQUESTED,
-                        StrategyStatus.APPROVED,
-                        StrategyStatus.REJECTED,
-                        StrategyStatus.PUBLISHED,
-                    ]
+                    self._status_variants(*dashboard_statuses)
                 )
             )
             .order_by(StrategySubmission.submitted_at.desc())
@@ -343,12 +349,23 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
 
         payload = [self._build_admin_payload(submission) for submission in submissions]
 
-        if status_filter and status_filter != "all":
-            payload = [
-                item for item in payload if item["status"] == status_filter
+        normalized_filter = status_filter.lower() if status_filter else None
+
+        if normalized_filter == "all":
+            return payload
+
+        pending_status_lookup = {status.lower() for status in pending_statuses}
+
+        if normalized_filter in (None, "", "pending"):
+            return [
+                item
+                for item in payload
+                if item["status"].lower() in pending_status_lookup
             ]
 
-        return payload
+        return [
+            item for item in payload if item["status"].lower() == normalized_filter
+        ]
 
     async def assign_submission(
         self,
@@ -664,6 +681,36 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
 
         avg_seconds = sum(durations) / len(durations)
         return int(avg_seconds // 3600) or 0
+
+    @staticmethod
+    def _status_variants(*statuses: Optional[str]) -> List[str]:
+        variants: List[str] = []
+        for status in statuses:
+            if not status:
+                continue
+            variants.extend([status, status.lower(), status.upper()])
+
+        unique_variants: List[str] = []
+        seen: set[str] = set()
+        for status in variants:
+            if status not in seen:
+                seen.add(status)
+                unique_variants.append(status)
+
+        return unique_variants
+
+    def _pending_status_values(self) -> List[str]:
+        statuses = [
+            StrategyStatus.SUBMITTED.value,
+            StrategyStatus.UNDER_REVIEW.value,
+        ]
+        changes_requested_status = getattr(StrategyStatus, "CHANGES_REQUESTED", None)
+        if isinstance(changes_requested_status, StrategyStatus):
+            statuses.append(changes_requested_status.value)
+        else:
+            statuses.append("changes_requested")
+
+        return self._status_variants(*statuses)
 
     def _build_admin_payload(self, submission: StrategySubmission) -> Dict[str, Any]:
         user = submission.user
