@@ -195,7 +195,7 @@ class MarketAnalysisService(LoggerMixin):
             
             for symbol in symbol_list:
                 symbol_data = []
-                
+
                 for exchange in exchange_list:
                     try:
                         price_info = await self._get_symbol_price(exchange, symbol)
@@ -206,25 +206,43 @@ class MarketAnalysisService(LoggerMixin):
                             })
                     except Exception as e:
                         self.logger.warning(f"Failed to get {symbol} price from {exchange}: {e}")
-                
+
+                snapshot = await market_data_feeds.get_market_snapshot(symbol, include_onchain=True)
+
                 if symbol_data:
                     prices = [d["price"] for d in symbol_data]
                     volumes = [d.get("volume", 0) for d in symbol_data]
-                    
+
                     price_data[symbol] = {
                         "exchanges": symbol_data,
                         "aggregated": {
                             "average_price": sum(prices) / len(prices),
                             "price_spread": max(prices) - min(prices),
-                            "spread_percentage": ((max(prices) - min(prices)) / min(prices)) * 100,
+                            "spread_percentage": ((max(prices) - min(prices)) / min(prices)) * 100 if min(prices) > 0 else 0,
                             "total_volume": sum(volumes),
                             "exchange_count": len(symbol_data)
                         }
                     }
-            
+                elif snapshot.get("success"):
+                    # Use external market data when exchange aggregation fails
+                    price_data[symbol] = {
+                        "exchanges": [],
+                        "aggregated": {
+                            "average_price": snapshot["data"].get("price"),
+                            "price_spread": 0,
+                            "spread_percentage": 0,
+                            "total_volume": snapshot["data"].get("volume_24h", 0),
+                            "exchange_count": 0,
+                        }
+                    }
+
+                if snapshot.get("success"):
+                    price_data.setdefault(symbol, {"exchanges": [], "aggregated": {}})
+                    price_data[symbol]["market_snapshots"] = snapshot["data"]
+
             response_time = time.time() - start_time
             await self._update_performance_metrics(response_time, True, user_id)
-            
+
             return {
                 "success": True,
                 "function": "realtime_price_tracking",
@@ -503,7 +521,7 @@ class MarketAnalysisService(LoggerMixin):
             ]
             
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             # Compile comprehensive report
             assessment = {
                 "price_tracking": results[0] if len(results) > 0 and not isinstance(results[0], Exception) else None,
@@ -512,7 +530,14 @@ class MarketAnalysisService(LoggerMixin):
                 "arbitrage_opportunities": results[3] if len(results) > 3 and not isinstance(results[3], Exception) else None,
                 "alpha_signals": results[4] if len(results) > 4 and not isinstance(results[4], Exception) else None
             }
-            
+
+            try:
+                yield_data = await market_data_feeds.get_yield_opportunities(symbol_list)
+                assessment["yield_opportunities"] = yield_data
+            except Exception as yield_error:
+                self.logger.warning("Yield opportunity aggregation failed", error=str(yield_error))
+                assessment["yield_opportunities"] = {"success": False, "error": str(yield_error)}
+
             # Generate overall market score
             market_score = await self._calculate_overall_market_score(assessment)
             
