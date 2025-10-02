@@ -468,7 +468,7 @@ const RiskDashboardTab: React.FC = () => {
                       </Badge>
                       <span className="text-sm font-semibold">{policy.loss_threshold_pct}% loss</span>
                     </div>
-                    <span className="text-xs uppercase tracking-wide text-muted-foreground">{policy.action.replace('_', ' ')}</span>
+                    <span className="text-xs uppercase tracking-wide text-muted-foreground">{policy.action.replace(/_/g, ' ')}</span>
                   </div>
                   <p className="mt-2 text-xs text-muted-foreground">{policy.description}</p>
                 </div>
