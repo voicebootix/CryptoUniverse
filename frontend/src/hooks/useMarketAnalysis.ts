@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { tradingAPI, apiClient } from '@/lib/api/client';
+import { getMarketOverviewSymbols } from '@/lib/marketSymbols';
 import { ArbitrageOpportunity } from '@/types/arbitrage';
 
 export interface TechnicalAnalysis {
@@ -172,8 +173,10 @@ export const useMarketAnalysis = (): MarketAnalysisHookState => {
     setLoading(true);
     setError(null);
     try {
-      const response = await tradingAPI.get('/market-overview');
-      
+      const symbols = await getMarketOverviewSymbols();
+      const params = symbols.length ? { symbols: symbols.join(',') } : undefined;
+      const response = await tradingAPI.get('/market-overview', { params });
+
       if (response.data && response.data.success !== false) {
         // Handle different response structures
         if (response.data.data) {

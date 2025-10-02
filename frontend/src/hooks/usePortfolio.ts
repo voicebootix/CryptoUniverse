@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { apiClient } from '@/lib/api/client';
+import { getMarketOverviewSymbols } from '@/lib/marketSymbols';
 import { produce, Draft } from 'immer';
 
 interface Position {
@@ -124,7 +125,9 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
   fetchMarketData: async () => {
     set({ isLoading: true, error: null });
     try {
-      const response = await apiClient.get('/trading/market-overview');
+      const symbols = await getMarketOverviewSymbols();
+      const params = symbols.length ? { symbols: symbols.join(',') } : undefined;
+      const response = await apiClient.get('/trading/market-overview', { params });
       const data = response.data;
       set(produce((draft: Draft<PortfolioState>) => {
         draft.marketData = data.market_data.map((item: any) => ({
