@@ -17,6 +17,61 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
+async def _collect_market_cache_metrics(redis) -> dict:
+    """Gather cache freshness metrics for market overview and price snapshots."""
+    metrics: dict = {}
+    now = datetime.utcnow()
+
+    async def _record_timestamp(redis_key: str, label: str) -> None:
+        value = await redis.get(redis_key)
+        if not value:
+            return
+
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+
+        metrics[label] = value
+
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return
+
+        age_seconds = max(0.0, (now - parsed).total_seconds())
+        metrics[f"{label}_age_seconds"] = round(age_seconds, 2)
+
+    await _record_timestamp("market_analysis:last_overview_refresh", "market_overview_last_refresh")
+    await _record_timestamp("market_analysis:last_price_refresh", "price_snapshot_last_refresh")
+    await _record_timestamp("market_analysis:last_onchain_refresh", "onchain_metrics_last_refresh")
+    await _record_timestamp("market_analysis:last_cache_warmer_run", "cache_warmer_last_run")
+
+    overview_cache_key = await redis.get("market_analysis:last_overview_cache_key")
+    if overview_cache_key:
+        if isinstance(overview_cache_key, bytes):
+            overview_cache_key = overview_cache_key.decode("utf-8")
+        metrics["market_overview_cache_key"] = overview_cache_key
+        try:
+            ttl = await redis.ttl(overview_cache_key)
+        except Exception:
+            ttl = None
+        if isinstance(ttl, int) and ttl >= 0:
+            metrics["market_overview_ttl_seconds"] = ttl
+
+    price_cache_key = await redis.get("market_analysis:last_price_cache_key")
+    if price_cache_key:
+        if isinstance(price_cache_key, bytes):
+            price_cache_key = price_cache_key.decode("utf-8")
+        metrics["price_snapshot_cache_key"] = price_cache_key
+        try:
+            ttl = await redis.ttl(price_cache_key)
+        except Exception:
+            ttl = None
+        if isinstance(ttl, int) and ttl >= 0:
+            metrics["price_snapshot_ttl_seconds"] = ttl
+
+    return metrics
+
+
 @router.get("/ping")
 async def ping():
     """Simple ping endpoint with no dependencies."""
@@ -63,14 +118,17 @@ async def redis_health():
         redis = await get_redis_client()
         if not redis:
             raise Exception("Redis client not available")
-        
+
         # Simple Redis operation
         await redis.ping()
-        
+
+        cache_metrics = await _collect_market_cache_metrics(redis)
+
         return {
-            "status": "healthy", 
+            "status": "healthy",
             "redis": "connected",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "cache_metrics": cache_metrics,
         }
     except Exception as e:
         logger.error("Redis health check failed", error=str(e))
@@ -100,7 +158,12 @@ async def full_health_check(db: AsyncSession = Depends(get_database)):
         redis = await get_redis_client()
         if redis:
             await redis.ping()
-            health_status["checks"]["redis"] = {"status": "healthy", "connected": True}
+            cache_metrics = await _collect_market_cache_metrics(redis)
+            health_status["checks"]["redis"] = {
+                "status": "healthy",
+                "connected": True,
+                "cache_metrics": cache_metrics,
+            }
         else:
             health_status["checks"]["redis"] = {"status": "unhealthy", "error": "Redis client not available"}
             health_status["status"] = "degraded"
