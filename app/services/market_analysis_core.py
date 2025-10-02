@@ -682,15 +682,16 @@ class MarketAnalysisService(LoggerMixin):
             
             symbol_list = [s.strip() for s in symbols.split(",")]
             
-            # Execute all analyses in parallel
+            # Execute all analyses in parallel (including yield opportunities)
             tasks = [
                 self.realtime_price_tracking(",".join(symbol_list), user_id=user_id),
                 self.technical_analysis(",".join(symbol_list), user_id=user_id),
                 self.market_sentiment(",".join(symbol_list), user_id=user_id),
                 self.cross_exchange_arbitrage_scanner(",".join(symbol_list), user_id=user_id),
-                self.alpha_generation_coordinator(",".join(symbol_list), user_id=user_id)
+                self.alpha_generation_coordinator(",".join(symbol_list), user_id=user_id),
+                market_data_feeds.get_yield_opportunities(symbol_list)
             ]
-            
+
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             # Compile comprehensive report
@@ -702,12 +703,29 @@ class MarketAnalysisService(LoggerMixin):
                 "alpha_signals": results[4] if len(results) > 4 and not isinstance(results[4], Exception) else None
             }
 
-            try:
-                yield_data = await market_data_feeds.get_yield_opportunities(symbol_list)
-                assessment["yield_opportunities"] = yield_data
-            except Exception as yield_error:
-                self.logger.warning("Yield opportunity aggregation failed", error=str(yield_error))
-                assessment["yield_opportunities"] = {"success": False, "error": str(yield_error)}
+            # Handle yield opportunities result
+            if len(results) > 5:
+                yield_result = results[5]
+                if isinstance(yield_result, Exception):
+                    # Specific exception handling based on error type
+                    if isinstance(yield_result, (asyncio.TimeoutError, asyncio.CancelledError)):
+                        self.logger.warning("Yield opportunity fetch timed out")
+                        assessment["yield_opportunities"] = {"success": False, "error": "Service temporarily unavailable"}
+                    elif hasattr(yield_result, '__module__') and 'aiohttp' in yield_result.__module__:
+                        # aiohttp related errors (ClientError, etc.)
+                        self.logger.warning("Network error fetching yield opportunities", error=type(yield_result).__name__)
+                        assessment["yield_opportunities"] = {"success": False, "error": "Network connectivity issue"}
+                    elif isinstance(yield_result, ValueError):
+                        self.logger.warning("Invalid data in yield opportunities", error=str(yield_result))
+                        assessment["yield_opportunities"] = {"success": False, "error": "Invalid data format"}
+                    else:
+                        # Log unexpected errors with full traceback but return sanitized message
+                        self.logger.exception("Unexpected yield fetch error", exc_info=yield_result)
+                        assessment["yield_opportunities"] = {"success": False, "error": "Service error"}
+                else:
+                    assessment["yield_opportunities"] = yield_result
+            else:
+                assessment["yield_opportunities"] = {"success": False, "error": "Service unavailable"}
 
             # Generate overall market score
             market_score = await self._calculate_overall_market_score(assessment)
