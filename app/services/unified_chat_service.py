@@ -43,7 +43,7 @@ from app.services.chat_memory import ChatMemoryService
 # Note: unified_ai_manager is imported lazily in methods to avoid initialization at module load
 
 # Import all service engines
-from app.services.market_analysis_core import MarketAnalysisService
+from app.services.market_analysis import MarketAnalysisService, market_analysis_service
 from app.services.portfolio_risk import OptimizationStrategy
 from app.services.portfolio_risk_core import PortfolioRiskService
 from app.services.trading_strategies import TradingStrategiesService
@@ -180,7 +180,7 @@ class UnifiedChatService(LoggerMixin):
         self.trade_executor = TradeExecutionService()
 # Direct service integrations - no adapters needed
         self.telegram_core = TelegramCommanderService()
-        self.market_analysis = MarketAnalysisService()
+        self.market_analysis = market_analysis_service
         self.portfolio_risk = PortfolioRiskService()
         self.trading_strategies = TradingStrategiesService()
         self.strategy_marketplace = strategy_marketplace_service
