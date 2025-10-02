@@ -54,6 +54,11 @@ from app.services.real_market_data import (
     real_market_data_service,
 )
 from app.services.dynamic_asset_filter import AssetInfo, enterprise_asset_filter
+from app.services.market_data_profiles import (
+    DEFAULT_EXPECTED_RETURN,
+    DEFAULT_VOLATILITY,
+    get_asset_profile,
+)
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
@@ -617,6 +622,8 @@ class RiskCalculationEngine(LoggerMixin):
     def __init__(self):
         self.market_data_cache = {}
         self.correlation_cache = {}
+        self._market_data_service: RealMarketDataService = real_market_data_service
+        self._rng = np.random.default_rng()
     
     async def calculate_portfolio_risk(
         self,
@@ -670,35 +677,55 @@ class RiskCalculationEngine(LoggerMixin):
         )
     
     async def _get_historical_returns(
-        self, 
-        positions: List[Dict], 
+        self,
+        positions: List[Dict],
         lookback_days: int
     ) -> Dict[str, List[float]]:
         """Get historical returns for portfolio assets."""
-        
-        # In production, this would fetch real historical data
-        # For now, simulate realistic return series
-        
+
         symbols = list(set(pos["symbol"] for pos in positions))
         returns_data = {}
-        
+
         for symbol in symbols:
-            # Simulate realistic crypto returns
-            if symbol == "BTC":
-                daily_returns = np.random.normal(0.001, 0.04, lookback_days)  # ~0.1% daily, 4% volatility
-            elif symbol == "ETH":
-                daily_returns = np.random.normal(0.0015, 0.05, lookback_days)  # Higher vol than BTC
-            elif symbol == "ADA":
-                daily_returns = np.random.normal(0.002, 0.08, lookback_days)   # Altcoin volatility
-            elif symbol == "SOL":
-                daily_returns = np.random.normal(0.0025, 0.09, lookback_days)  # High vol altcoin
-            else:
-                daily_returns = np.random.normal(0.001, 0.06, lookback_days)   # Default crypto
-            
-            returns_data[symbol] = daily_returns.tolist()
-        
+            market_symbol = self._normalize_market_symbol(symbol)
+            ohlcv: List[Dict[str, Any]] = []
+
+            if self._market_data_service:
+                try:
+                    ohlcv = await self._market_data_service.get_historical_ohlcv(
+                        symbol=market_symbol,
+                        timeframe="1d",
+                        limit=min(lookback_days + 1, 365),
+                        exchange="auto",
+                    )
+                except Exception as exc:
+                    self.logger.debug(
+                        "Historical OHLCV fetch failed", symbol=symbol, market_symbol=market_symbol, error=str(exc)
+                    )
+
+            closes: List[float] = []
+            for candle in ohlcv or []:
+                close_val = candle.get("close")
+                if not close_val:
+                    continue
+                try:
+                    closes.append(float(close_val))
+                except (TypeError, ValueError):
+                    continue
+
+            if len(closes) > 1:
+                closes_array = np.asarray(closes, dtype=float)
+                log_returns = np.diff(np.log(closes_array))
+                if log_returns.size > 0:
+                    trimmed = log_returns[-lookback_days:]
+                    returns_data[symbol] = trimmed.tolist()
+                    continue
+
+            # Fallback to profile-based simulation when real data is not available
+            returns_data[symbol] = self._simulate_returns(symbol, lookback_days)
+
         return returns_data
-    
+
     async def _calculate_portfolio_returns(
         self,
         positions: List[Dict],
@@ -731,6 +758,44 @@ class RiskCalculationEngine(LoggerMixin):
             portfolio_returns.append(daily_return)
         
         return portfolio_returns
+
+    def _simulate_returns(self, symbol: str, lookback_days: int) -> List[float]:
+        """Generate fallback return series using asset profile statistics."""
+
+        profile = get_asset_profile(symbol)
+        annual_return = profile.total_expected_return or DEFAULT_EXPECTED_RETURN
+        # Convert to daily expected return and volatility
+        daily_mean = (1 + annual_return) ** (1 / 252) - 1 if annual_return else 0.0
+        annual_volatility = profile.volatility or DEFAULT_VOLATILITY
+        daily_vol = max(annual_volatility / np.sqrt(252), 1e-4)
+
+        simulated = self._rng.normal(daily_mean, daily_vol, lookback_days)
+        return simulated.tolist()
+
+    def _normalize_market_symbol(self, symbol: str) -> str:
+        """Normalize symbols to exchange trading pairs for historical fetches."""
+
+        if not symbol:
+            return symbol
+
+        if "/" in symbol:
+            return symbol
+
+        if "-" in symbol:
+            return symbol.replace("-", "/")
+
+        base = symbol.upper()
+        stablecoin_pairs = {
+            "USDC": "USDC/USDT",
+            "USDT": "USDT/USDC",
+            "BUSD": "BUSD/USDT",
+            "DAI": "DAI/USDT",
+        }
+
+        if base in stablecoin_pairs:
+            return stablecoin_pairs[base]
+
+        return f"{base}/USDT"
     
     def _calculate_var(self, returns: List[float], confidence: float) -> float:
         """Calculate Value at Risk at given confidence level."""
@@ -1178,13 +1243,25 @@ class PortfolioOptimizationEngine(LoggerMixin):
         """Fallback to deterministic defaults when market data is unavailable."""
 
         expected_returns: Dict[str, float] = {}
-        for symbol in symbols:
-            if symbol == "USDC":
-                expected_returns[symbol] = 0.03
-            else:
-                expected_returns[symbol] = 0.18
+        variances: List[float] = []
 
-        covariance_matrix = np.eye(len(symbols)) * 0.12
+        for symbol in symbols:
+            profile = get_asset_profile(symbol)
+            asset_info = self._asset_metadata_cache.get(symbol.upper()) if hasattr(self, "_asset_metadata_cache") else None
+            tier = (getattr(asset_info, "tier", "") or "").lower() if asset_info else ""
+            liquidity_multiplier = self._tier_liquidity_bias.get(tier, self._default_liquidity_multiplier)
+            liquidity_multiplier = max(liquidity_multiplier, 0.3)
+
+            expected_returns[symbol] = profile.total_expected_return * liquidity_multiplier
+
+            profile_vol = profile.volatility or DEFAULT_VOLATILITY
+            adjusted_vol = profile_vol / max(liquidity_multiplier, 1e-3)
+            variances.append(adjusted_vol ** 2)
+
+        if not variances:
+            variances = [DEFAULT_VOLATILITY ** 2 for _ in symbols]
+
+        covariance_matrix = np.diag(variances)
         return expected_returns, covariance_matrix
 
     async def _get_optimization_inputs(
@@ -1196,6 +1273,8 @@ class PortfolioOptimizationEngine(LoggerMixin):
         symbols = self._extract_symbols(positions)
         if not symbols:
             return {}, np.array([[]])
+
+        await self._ensure_asset_metadata(symbols)
 
         lookback = 180
         timeframe = "1d"
@@ -1251,6 +1330,14 @@ class PortfolioOptimizationEngine(LoggerMixin):
                 expected_returns[symbol] = float(fallback_expected.get(symbol, 0.0))
             else:
                 expected_returns[symbol] = float(symbol_mean)
+
+            profile = get_asset_profile(symbol)
+            expected_returns[symbol] += profile.staking_yield
+
+            asset_info = self._asset_metadata_cache.get(symbol.upper()) if hasattr(self, "_asset_metadata_cache") else None
+            if asset_info and getattr(asset_info, "tier", None):
+                tier_multiplier = self._tier_liquidity_bias.get((asset_info.tier or "").lower(), 1.0)
+                expected_returns[symbol] *= tier_multiplier
 
         covariance_df = returns_df.cov().fillna(0.0) * 252.0
         covariance_df = covariance_df.reindex(index=symbols, columns=symbols)
