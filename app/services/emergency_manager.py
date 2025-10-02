@@ -101,6 +101,21 @@ class EmergencyManager(LoggerMixin):
                 "halt_new_trades": True
             }
         }
+
+        self.policy_descriptions = {
+            EmergencyLevel.WARNING: (
+                "Losses beyond the warning threshold trigger automatic position reduction "
+                "to cut exposure while keeping trading active."
+            ),
+            EmergencyLevel.CRITICAL: (
+                "Crossing the critical threshold halts all new trades and forces an in-depth "
+                "risk review before resuming activity."
+            ),
+            EmergencyLevel.EMERGENCY: (
+                "If portfolio losses reach the emergency threshold the system liquidates to "
+                "stablecoins to preserve remaining capital."
+            )
+        }
         
         # Liquidation priority order (risk-based)
         self.liquidation_priority = [
@@ -112,7 +127,12 @@ class EmergencyManager(LoggerMixin):
         
         # Active emergency states per user
         self.active_emergencies: Dict[str, EmergencyAction] = {}
-        
+
+        # User-specific overrides and preferences
+        self.user_threshold_overrides: Dict[str, Dict[EmergencyLevel, float]] = {}
+        self.user_opt_in: Dict[str, bool] = {}
+        self.user_policy_updates: Dict[str, datetime] = {}
+
         self.logger.info("🚨 Emergency Manager initialized with institutional protocols")
     
     async def assess_emergency_level(self, user_id: str, portfolio_data: Dict[str, Any]) -> Tuple[EmergencyLevel, float]:
@@ -131,13 +151,17 @@ class EmergencyManager(LoggerMixin):
                 return EmergencyLevel.NORMAL, 0.0
             
             current_loss_pct = ((initial_value - total_value) / initial_value) * 100
-            
+
+            warning_threshold = self._get_threshold(user_id, EmergencyLevel.WARNING)
+            critical_threshold = self._get_threshold(user_id, EmergencyLevel.CRITICAL)
+            emergency_threshold = self._get_threshold(user_id, EmergencyLevel.EMERGENCY)
+
             # Determine emergency level based on loss thresholds
-            if current_loss_pct >= self.circuit_breakers[EmergencyLevel.EMERGENCY]["loss_threshold_pct"]:
+            if current_loss_pct >= emergency_threshold:
                 return EmergencyLevel.EMERGENCY, current_loss_pct
-            elif current_loss_pct >= self.circuit_breakers[EmergencyLevel.CRITICAL]["loss_threshold_pct"]:
+            elif current_loss_pct >= critical_threshold:
                 return EmergencyLevel.CRITICAL, current_loss_pct
-            elif current_loss_pct >= self.circuit_breakers[EmergencyLevel.WARNING]["loss_threshold_pct"]:
+            elif current_loss_pct >= warning_threshold:
                 return EmergencyLevel.WARNING, current_loss_pct
             else:
                 return EmergencyLevel.NORMAL, current_loss_pct
@@ -238,14 +262,83 @@ class EmergencyManager(LoggerMixin):
                 error=str(e),
                 exc_info=True
             )
-            
+
             return {
                 "success": False,
                 "action_id": action_id,
                 "error": str(e),
                 "emergency_level": emergency_level.value
             }
-    
+
+    def _get_threshold(self, user_id: Optional[str], level: EmergencyLevel) -> float:
+        """Get the appropriate threshold for a user and emergency level."""
+
+        base_threshold = self.circuit_breakers[level]["loss_threshold_pct"]
+
+        if not user_id:
+            return base_threshold
+
+        if not self.user_opt_in.get(user_id):
+            return base_threshold
+
+        overrides = self.user_threshold_overrides.get(user_id, {})
+        return overrides.get(level, base_threshold)
+
+    def set_user_opt_in(self, user_id: str, opt_in: bool) -> None:
+        """Enable or disable user-specific emergency automation."""
+
+        if not opt_in:
+            # Clearing opt-in removes custom thresholds to avoid stale settings
+            self.user_threshold_overrides.pop(user_id, None)
+
+        self.user_opt_in[user_id] = opt_in
+        self.user_policy_updates[user_id] = datetime.utcnow()
+
+    def update_user_thresholds(
+        self,
+        user_id: str,
+        thresholds: Dict[EmergencyLevel, float]
+    ) -> Dict[EmergencyLevel, float]:
+        """Persist user-specific emergency thresholds."""
+
+        overrides = self.user_threshold_overrides.setdefault(user_id, {})
+
+        for level, value in thresholds.items():
+            if value <= 0:
+                raise ValueError("Threshold percentages must be positive values")
+            overrides[level] = float(value)
+
+        self.user_policy_updates[user_id] = datetime.utcnow()
+        return overrides
+
+    def get_policy_overview(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """Return policy overview with optional user customization."""
+
+        opt_in = bool(user_id and self.user_opt_in.get(user_id))
+        overrides = self.user_threshold_overrides.get(user_id or "", {}) if opt_in else {}
+
+        policies = []
+        for level in [EmergencyLevel.WARNING, EmergencyLevel.CRITICAL, EmergencyLevel.EMERGENCY]:
+            base_config = self.circuit_breakers[level]
+            policies.append({
+                "level": level.value,
+                "loss_threshold_pct": overrides.get(level, base_config["loss_threshold_pct"]),
+                "default_loss_threshold_pct": base_config["loss_threshold_pct"],
+                "action": base_config["action"],
+                "reduction_pct": base_config["reduction_pct"],
+                "halt_new_trades": base_config["halt_new_trades"],
+                "description": self.policy_descriptions.get(level, "")
+            })
+
+        last_updated_raw = self.user_policy_updates.get(user_id) if user_id else None
+        last_updated = last_updated_raw.isoformat() if isinstance(last_updated_raw, datetime) else None
+
+        return {
+            "opt_in": opt_in,
+            "policies": policies,
+            "last_updated": last_updated
+        }
+
     async def _execute_position_reduction(
         self,
         user_id: str,

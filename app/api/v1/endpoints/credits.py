@@ -217,7 +217,6 @@ async def get_credit_balance(
         try:
             completed_status = TradeStatus.COMPLETED.value
             normalized_status = str(completed_status).upper()
-            status_text = func.upper(cast(Trade.status, String))  # Cast to text for legacy rows
 
             profit_stmt = select(func.sum(Trade.profit_realized_usd)).where(
                 and_(
