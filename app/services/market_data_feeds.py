@@ -11,11 +11,17 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 
 import aiohttp
+import numpy as np
 import structlog
 from app.core.config import get_settings
 from app.core.redis import get_redis_client
 from app.core.supabase import supabase_client
 from app.core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitBreakerError
+from app.services.market_data_profiles import (
+    DEFI_PROTOCOL_MAPPINGS,
+    get_asset_profile,
+    get_yield_products,
+)
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -31,7 +37,8 @@ class MarketDataFeeds:
         self.api_keys = {
             "alpha_vantage": settings.ALPHA_VANTAGE_API_KEY if hasattr(settings, 'ALPHA_VANTAGE_API_KEY') else None,
             "coingecko": settings.COINGECKO_API_KEY if hasattr(settings, 'COINGECKO_API_KEY') else None,
-            "finnhub": settings.FINNHUB_API_KEY if hasattr(settings, 'FINNHUB_API_KEY') else None
+            "finnhub": settings.FINNHUB_API_KEY if hasattr(settings, 'FINNHUB_API_KEY') else None,
+            "cryptocompare": getattr(settings, "CRYPTOCOMPARE_API_KEY", None),
         }
         
         # Enhanced API endpoints with API key support
@@ -70,6 +77,17 @@ class MarketDataFeeds:
                 },
                 "requires_key": True,
                 "api_key_param": "token"
+            },
+            "cryptocompare": {
+                "base_url": "https://min-api.cryptocompare.com/data",
+                "rate_limit": 100,  # generous community limit
+                "endpoints": {
+                    "price": "/pricemultifull",
+                    "histoday": "/v2/histoday",
+                    "histohour": "/v2/histohour"
+                },
+                "requires_key": False,
+                "api_key_param": "api_key"
             },
             "coincap": {
                 "base_url": "https://api.coincap.io/v2",
@@ -113,7 +131,7 @@ class MarketDataFeeds:
         
         # ENTERPRISE API fallback hierarchy with circuit breaker status
         self.api_fallbacks = {
-            "price": ["coingecko", "coincap", "coinpaprika"],
+            "price": ["coingecko", "cryptocompare", "coincap", "coinpaprika"],
             "market": ["coingecko", "alpha_vantage", "finnhub"],
             "trending": ["coingecko", "coinpaprika"],
             "global": ["coingecko", "coinpaprika"]
@@ -150,7 +168,7 @@ class MarketDataFeeds:
         self.symbol_mappings = {
             "coingecko": {
                 "BTC": "bitcoin",
-                "ETH": "ethereum", 
+                "ETH": "ethereum",
                 "SOL": "solana",
                 "ADA": "cardano",
                 "DOT": "polkadot",
@@ -160,10 +178,29 @@ class MarketDataFeeds:
                 "AVAX": "avalanche-2",
                 "ATOM": "cosmos"
             },
+            "cryptocompare": {
+                "BTC": "BTC",
+                "ETH": "ETH",
+                "SOL": "SOL",
+                "ADA": "ADA",
+                "DOT": "DOT",
+                "MATIC": "MATIC",
+                "LINK": "LINK",
+                "UNI": "UNI",
+                "AVAX": "AVAX",
+                "ATOM": "ATOM",
+                "AAVE": "AAVE",
+                "MKR": "MKR",
+                "SNX": "SNX",
+                "CRV": "CRV",
+                "USDC": "USDC",
+                "USDT": "USDT",
+                "DAI": "DAI",
+            },
             "coincap": {
                 "BTC": "bitcoin",
                 "ETH": "ethereum",
-                "SOL": "solana", 
+                "SOL": "solana",
                 "ADA": "cardano",
                 "DOT": "polkadot",
                 "MATIC": "polygon",
@@ -192,6 +229,9 @@ class MarketDataFeeds:
             "detailed": 300,  # 5 minutes for detailed data
             "markets": 600    # 10 minutes for market data
         }
+
+        # Map DeFi governance tokens to protocol level analytics endpoints
+        self.defi_protocol_mappings = DEFI_PROTOCOL_MAPPINGS
     
     async def async_init(self):
         try:
@@ -286,6 +326,7 @@ class MarketDataFeeds:
             # Try APIs in order of preference with rate limiting
             apis_to_try = [
                 ("coingecko", self._fetch_coingecko_price),
+                ("cryptocompare", self._fetch_cryptocompare_price),
                 ("alpha_vantage", self._fetch_alpha_vantage_price),
                 ("finnhub", self._fetch_finnhub_price),
                 ("coincap", self._fetch_coincap_price)
@@ -302,17 +343,17 @@ class MarketDataFeeds:
                     price_data = await fetch_method(symbol)
                     if price_data.get("success"):
                         # ENTERPRISE: Record successful API call
-                        self._handle_api_success(api_name)
+                        await self._handle_api_success(api_name)
                         break
                     else:
                         # ENTERPRISE: Handle API failure
-                        self._handle_api_failure(api_name, price_data.get("error", "Unknown error"))
+                        await self._handle_api_failure(api_name, price_data.get("error", "Unknown error"))
                 except Exception as e:
                     logger.warning(f"Failed to fetch from {api_name}", error=str(e))
                     # ENTERPRISE: Handle API exception
-                    self._handle_api_failure(api_name, str(e))
+                    await self._handle_api_failure(api_name, str(e))
                     continue
-            
+
             if price_data.get("success"):
                 # ENTERPRISE REDIS RESILIENCE - Cache the result if Redis is available
                 if self.redis:
@@ -496,7 +537,7 @@ class MarketDataFeeds:
         except Exception as e:
             logger.error("Failed to get multiple prices", error=str(e))
             return {"success": False, "error": str(e)}
-    
+
     async def get_trending_coins(self, limit: int = 10) -> Dict[str, Any]:
         """Get trending coins from CoinGecko."""
         try:
@@ -591,10 +632,352 @@ class MarketDataFeeds:
                         return {"success": False, "error": error_msg}
                     
                     return {"success": False, "error": f"API error: {response.status}"}
-                    
+
         except Exception as e:
             return {"success": False, "error": str(e)}
-    
+
+    async def get_market_snapshot(self, symbol: str, include_onchain: bool = False) -> Dict[str, Any]:
+        """Aggregate price, volume, volatility and on-chain analytics for a symbol."""
+
+        symbol = (symbol or "").upper()
+        if not symbol:
+            return {"success": False, "error": "symbol_required"}
+
+        price_task = asyncio.create_task(self.get_real_time_price(symbol))
+        cc_task = asyncio.create_task(self._fetch_cryptocompare_price(symbol))
+        vol_task = asyncio.create_task(self._calculate_realized_volatility(symbol))
+
+        price_result, cc_result, volatility_result = await asyncio.gather(
+            price_task, cc_task, vol_task, return_exceptions=True
+        )
+
+        snapshot: Dict[str, Any] = {
+            "symbol": symbol,
+            "timestamp": datetime.utcnow().isoformat(),
+            "sources": {},
+        }
+
+        # Primary price feed (CoinGecko / fallback hierarchy)
+        if isinstance(price_result, dict) and price_result.get("success"):
+            data = price_result.get("data", {})
+            snapshot.update({k: v for k, v in data.items() if k not in {"symbol", "source"}})
+            snapshot["sources"]["primary"] = data.get("source")
+
+        # CryptoCompare enrichment for volume/volatility context
+        if isinstance(cc_result, dict) and cc_result.get("success"):
+            cc_data = cc_result.get("data", {})
+            snapshot.setdefault("price", cc_data.get("price"))
+            snapshot.setdefault("change_24h", cc_data.get("change_24h"))
+            snapshot["volume_24h"] = max(
+                float(snapshot.get("volume_24h", 0) or 0),
+                float(cc_data.get("volume_24h", 0) or 0),
+            )
+            snapshot["high_24h"] = max(snapshot.get("high_24h", 0) or 0, cc_data.get("high_24h", 0) or 0)
+            snapshot["low_24h"] = min(
+                snapshot.get("low_24h", float("inf")) or float("inf"),
+                cc_data.get("low_24h", float("inf")) or float("inf"),
+            )
+            snapshot["range_volatility"] = cc_data.get("range_volatility")
+            snapshot["sources"]["cryptocompare"] = cc_data.get("source", "cryptocompare")
+
+        if snapshot.get("low_24h") == float("inf"):
+            snapshot["low_24h"] = None
+
+        if isinstance(volatility_result, Exception):
+            volatility_value = None
+        else:
+            volatility_value = volatility_result
+
+        if volatility_value is not None:
+            snapshot["realized_volatility_30d"] = volatility_value
+
+        # Attach static expectations
+        profile = get_asset_profile(symbol)
+        snapshot["asset_profile"] = {
+            "category": profile.category,
+            "tier": profile.tier,
+            "baseline_expected_return": profile.baseline_return,
+            "staking_yield": profile.staking_yield,
+            "total_expected_return": profile.total_expected_return,
+            "notes": profile.notes,
+        }
+
+        # Optional on-chain analytics for DeFi tokens
+        if include_onchain and symbol in self.defi_protocol_mappings:
+            defi_result = await self.get_defi_token_insights(symbol)
+            if defi_result.get("success"):
+                snapshot["onchain_metrics"] = defi_result.get("data", {})
+
+        success = "price" in snapshot and snapshot.get("price") not in (None, 0)
+
+        return {
+            "success": success,
+            "data": snapshot,
+            "timestamp": snapshot["timestamp"],
+        }
+
+    async def get_defi_token_insights(self, symbol: str) -> Dict[str, Any]:
+        """Fetch on-chain analytics for DeFi protocols using DefiLlama."""
+
+        protocol_slug = self.defi_protocol_mappings.get((symbol or "").upper())
+        if not protocol_slug:
+            return {"success": False, "error": "protocol_not_supported"}
+
+        url = f"https://api.llama.fi/protocol/{protocol_slug}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=10) as response:
+                    if response.status != 200:
+                        return {"success": False, "error": f"API error: {response.status}"}
+
+                    payload = await response.json()
+
+                    def _safe_float(value: Any) -> float:
+                        try:
+                            if isinstance(value, str):
+                                value = value.replace(",", "").strip()
+                            return float(value)
+                        except (TypeError, ValueError):
+                            return 0.0
+
+                    raw_tvl = payload.get("tvl", 0)
+                    tvl = 0.0
+
+                    if isinstance(raw_tvl, list):
+                        last_entry: Optional[Dict[str, Any]] = None
+                        for item in reversed(raw_tvl):
+                            if isinstance(item, dict):
+                                last_entry = item
+                                break
+
+                        if last_entry:
+                            for key in (
+                                "totalLiquidityUSD",
+                                "tvl",
+                                "liquidityUSD",
+                                "totalLiquidity",
+                            ):
+                                if key in last_entry and last_entry[key] not in (None, ""):
+                                    tvl = _safe_float(last_entry[key])
+                                    break
+                    else:
+                        tvl = _safe_float(raw_tvl)
+
+                    change_1d = float(payload.get("change_1d", 0) or 0)
+                    change_7d = float(payload.get("change_7d", 0) or 0)
+                    change_1m = float(payload.get("change_1m", 0) or 0)
+
+                    return {
+                        "success": True,
+                        "data": {
+                            "protocol": protocol_slug,
+                            "category": payload.get("category"),
+                            "chains": payload.get("chains", []),
+                            "tvl_usd": tvl,
+                            "change_1d_pct": change_1d,
+                            "change_7d_pct": change_7d,
+                            "change_1m_pct": change_1m,
+                            "audits": payload.get("audit").split(",") if payload.get("audit") else [],
+                            "url": payload.get("url"),
+                            "risk_commentary": payload.get("riskFactors", {}).get("overall", "")
+                            if isinstance(payload.get("riskFactors"), dict)
+                            else "",
+                            "source": "defillama",
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    }
+        except Exception as exc:
+            logger.debug("DefiLlama insight fetch failed", symbol=symbol, error=str(exc))
+            return {"success": False, "error": str(exc)}
+
+    async def get_yield_opportunities(self, symbols: List[str]) -> Dict[str, Any]:
+        """Return staking, lending and yield farming opportunities for the provided symbols."""
+
+        results: Dict[str, Any] = {}
+        defi_tasks: Dict[str, asyncio.Task] = {}
+
+        for raw_symbol in symbols:
+            symbol = (raw_symbol or "").upper()
+            if not symbol:
+                continue
+
+            profile = get_asset_profile(symbol)
+            products = get_yield_products(symbol)
+
+            if profile.staking_yield > 0 or products:
+                results[symbol] = {
+                    "symbol": symbol,
+                    "category": profile.category,
+                    "tier": profile.tier,
+                    "baseline_expected_return": profile.baseline_return,
+                    "staking_yield": profile.staking_yield,
+                    "total_expected_return": profile.total_expected_return,
+                    "products": products,
+                    "risk_notes": profile.notes,
+                }
+
+            if symbol in self.defi_protocol_mappings and symbol not in defi_tasks:
+                defi_tasks[symbol] = asyncio.create_task(self.get_defi_token_insights(symbol))
+
+        for symbol, task in defi_tasks.items():
+            try:
+                defi_result = await task
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.debug("Defi insight task failed", symbol=symbol, error=str(exc))
+                continue
+
+            if defi_result.get("success"):
+                profile = get_asset_profile(symbol)
+                entry = results.setdefault(
+                    symbol,
+                    {
+                        "symbol": symbol,
+                        "category": profile.category,
+                        "tier": profile.tier,
+                        "baseline_expected_return": profile.baseline_return,
+                        "staking_yield": profile.staking_yield,
+                        "total_expected_return": profile.total_expected_return,
+                        "products": [],
+                        "risk_notes": profile.notes,
+                    },
+                )
+                entry["protocol_metrics"] = defi_result.get("data", {})
+
+        timestamp = datetime.utcnow().isoformat()
+
+        return {
+            "success": bool(results),
+            "data": results,
+            "timestamp": timestamp,
+        }
+
+    async def _fetch_cryptocompare_price(self, symbol: str) -> Dict[str, Any]:
+        """Fetch market snapshot from CryptoCompare including 24h ranges."""
+        try:
+            if symbol not in self.symbol_mappings.get("cryptocompare", {}):
+                return {"success": False, "error": f"Symbol {symbol} not supported"}
+
+            if not await self._check_rate_limit("cryptocompare"):
+                return {"success": False, "error": "Rate limit exceeded for CryptoCompare"}
+
+            mapped_symbol = self.symbol_mappings["cryptocompare"][symbol]
+            url = f"{self.apis['cryptocompare']['base_url']}{self.apis['cryptocompare']['endpoints']['price']}"
+            params = self._get_api_params("cryptocompare", {
+                "fsyms": mapped_symbol,
+                "tsyms": "USD"
+            })
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=10) as response:
+                    if response.status != 200:
+                        return {"success": False, "error": f"API error: {response.status}"}
+
+                    payload = await response.json()
+                    raw_section = payload.get("RAW", {})
+                    usd_data = raw_section.get(mapped_symbol, {}).get("USD", {})
+
+                    if not usd_data:
+                        return {"success": False, "error": "No data returned"}
+
+                    price = float(usd_data.get("PRICE", 0) or 0)
+                    high = float(usd_data.get("HIGH24HOUR", 0) or 0)
+                    low = float(usd_data.get("LOW24HOUR", 0) or 0)
+                    volume = float(usd_data.get("TOTALVOLUME24H", 0) or usd_data.get("TOTALVOLUME24HTO", 0) or 0)
+                    change_pct = float(usd_data.get("CHANGEPCT24H", 0) or 0)
+
+                    # Simple intraday volatility proxy using 24h high/low range
+                    if price > 0 and high > 0 and low > 0:
+                        range_vol = abs(high - low) / price
+                    else:
+                        range_vol = 0.0
+
+                    return {
+                        "success": True,
+                        "data": {
+                            "symbol": symbol,
+                            "price": price,
+                            "change_24h": change_pct,
+                            "volume_24h": volume,
+                            "high_24h": high,
+                            "low_24h": low,
+                            "range_volatility": range_vol,
+                            "market": usd_data.get("MARKET", "crypto"),
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "source": "cryptocompare",
+                        },
+                    }
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def _fetch_cryptocompare_history(
+        self,
+        symbol: str,
+        *,
+        limit: int = 60,
+        interval: str = "histoday",
+    ) -> List[Dict[str, Any]]:
+        """Fetch historical candles from CryptoCompare for volatility analysis."""
+
+        if symbol not in self.symbol_mappings.get("cryptocompare", {}):
+            return []
+
+        endpoint_key = "histoday" if interval == "histoday" else "histohour"
+        endpoint = self.apis["cryptocompare"]["endpoints"].get(endpoint_key)
+        if not endpoint:
+            return []
+
+        if not await self._check_rate_limit("cryptocompare"):
+            return []
+
+        mapped_symbol = self.symbol_mappings["cryptocompare"][symbol]
+        params = self._get_api_params(
+            "cryptocompare",
+            {
+                "fsym": mapped_symbol,
+                "tsym": "USD",
+                "limit": limit,
+            },
+        )
+
+        url = f"{self.apis['cryptocompare']['base_url']}{endpoint}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, params=params, timeout=10) as response:
+                    if response.status != 200:
+                        return []
+
+                    payload = await response.json()
+                    data = payload.get("Data", {})
+                    candles = data.get("Data", []) if isinstance(data, dict) else payload.get("Data", [])
+                    return candles or []
+        except Exception:
+            return []
+
+    async def _calculate_realized_volatility(self, symbol: str, window: int = 30) -> Optional[float]:
+        """Calculate annualised realized volatility using CryptoCompare history."""
+
+        candles = await self._fetch_cryptocompare_history(symbol, limit=window)
+        if not candles:
+            return None
+
+        closes = [float(entry.get("close", 0) or 0) for entry in candles if entry.get("close")]
+        if len(closes) < 2:
+            return None
+
+        closes_array = np.asarray(closes, dtype=float)
+        log_returns = np.diff(np.log(closes_array))
+        if log_returns.size == 0:
+            return None
+
+        volatility = float(np.std(log_returns) * np.sqrt(365))
+        if np.isnan(volatility) or np.isinf(volatility):
+            return None
+
+        return volatility
+
     async def _fetch_coincap_price(self, symbol: str) -> Dict[str, Any]:
         """Fetch price from CoinCap API as fallback."""
         try:
@@ -906,3 +1289,13 @@ async def get_market_overview() -> Dict[str, Any]:
     """Get market overview with top coins."""
     top_symbols = ["BTC", "ETH", "SOL", "ADA", "DOT", "MATIC", "LINK", "UNI"]
     return await market_data_feeds.get_multiple_prices(top_symbols)
+
+
+async def get_market_snapshot(symbol: str, include_onchain: bool = False) -> Dict[str, Any]:
+    """Convenience wrapper for aggregated market snapshots."""
+    return await market_data_feeds.get_market_snapshot(symbol, include_onchain=include_onchain)
+
+
+async def get_yield_opportunities(symbols: List[str]) -> Dict[str, Any]:
+    """Convenience wrapper to fetch yield-bearing product information."""
+    return await market_data_feeds.get_yield_opportunities(symbols)
