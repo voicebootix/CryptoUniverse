@@ -37,7 +37,7 @@ from typing import Dict, List, Optional, Any, Tuple
 import uuid
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from enum import Enum
 
 import structlog
@@ -158,6 +158,13 @@ ALGORITHMIC_FUNCTIONS = {
     "market_making",
     "scalping_strategy",
     "swing_trading",
+}
+
+MANAGEMENT_FUNCTIONS = {
+    "position_management",
+    "portfolio_optimization",
+    "risk_management",
+    "strategy_performance",
 }
 
 PORTFOLIO_FUNCTIONS = {
@@ -1178,6 +1185,370 @@ class TradingStrategiesService(LoggerMixin):
                 mapping = await self._load_or_seed_platform_strategies(session)
                 self._platform_strategy_ids = mapping
 
+    # ------------------------------------------------------------------
+    # Transparency, regulatory and educational context helpers
+    # ------------------------------------------------------------------
+
+    def _get_strategy_category(self, function_name: str) -> str:
+        """Map a strategy function to a high level compliance category."""
+
+        if function_name in DERIVATIVES_FUNCTIONS or function_name in {
+            "perpetual_trade",
+            "leverage_position",
+            "margin_status",
+            "options_chain",
+            "basis_trade",
+            "liquidation_price",
+            "calculate_greeks",
+            "hedge_position",
+        }:
+            return "derivatives"
+
+        if function_name in SPOT_FUNCTIONS:
+            return "spot"
+
+        if function_name in ALGORITHMIC_FUNCTIONS:
+            return "algorithmic"
+
+        if function_name in MANAGEMENT_FUNCTIONS or function_name == "portfolio_optimization":
+            return "portfolio"
+
+        return "general"
+
+    def _generate_methodology_summary(
+        self,
+        function_name: str,
+        base_response: Dict[str, Any],
+        symbol: str,
+        strategy_type: Optional[str],
+        parameters: StrategyParameters,
+        risk_mode: str,
+        simulation_mode: bool,
+    ) -> Dict[str, Any]:
+        """Create a human readable explanation of how a strategy result was derived."""
+
+        category = self._get_strategy_category(function_name)
+        friendly_name = self._format_platform_strategy_name(function_name)
+        timeframe = getattr(parameters, "timeframe", None)
+        leverage = getattr(parameters, "leverage", None)
+        quantity = getattr(parameters, "quantity", None)
+
+        category_templates: Dict[str, Dict[str, Any]] = {
+            "derivatives": {
+                "summary": (
+                    f"Evaluated derivatives order books, funding data and volatility to structure {friendly_name} "
+                    f"on {symbol} with a {risk_mode} risk posture."
+                ),
+                "steps": [
+                    "Pull live funding, basis and volatility metrics for the contract and underlying asset.",
+                    "Translate risk mode into position sizing, leverage ceilings and margin buffers.",
+                    "Assemble trade instructions and hedges before validating exchange-specific constraints.",
+                ],
+                "notes": "Derivatives sizing links to margin requirements; leverage and funding costs were stress tested before recommending trades.",
+            },
+            "spot": {
+                "summary": (
+                    f"Applied quantitative indicators to {symbol} to produce {friendly_name} entries on the {timeframe or 'configured'} timeframe."
+                ),
+                "steps": [
+                    "Compute momentum, mean-reversion and breakout signals over the configured lookback horizon.",
+                    "Filter signals through volatility, liquidity and correlation screens to avoid crowded trades.",
+                    "Translate valid signals into position sizes that respect the configured risk budget.",
+                ],
+                "notes": "Spot allocations rely on historical candles; slippage and execution latency are considered before sizing trades.",
+            },
+            "algorithmic": {
+                "summary": (
+                    f"Ran systematic models for {friendly_name} on {symbol} combining statistical filters and risk overlays."),
+                "steps": [
+                    "Load multi-factor indicators (momentum, mean reversion, volume) and normalise them.",
+                    "Blend signals using the configured strategy archetype to derive directional conviction.",
+                    "Apply Kelly-inspired sizing with volatility caps to produce executable orders.",
+                ],
+                "notes": "Model confidence reflects ensemble agreement and sample depth; allocations are clipped to portfolio risk limits.",
+            },
+            "portfolio": {
+                "summary": (
+                    f"Assessed portfolio level exposures to support {friendly_name} with diversification, drawdown and liquidity checks."),
+                "steps": [
+                    "Gather current holdings and compute return/volatility estimates across the eligible assets.",
+                    "Evaluate allocation heuristics (risk parity, Sharpe optimisation, Kelly scaling) against user constraints.",
+                    "Highlight rebalancing trades and risk hotspots with scenario stress tests.",
+                ],
+                "notes": "Portfolio recommendations blend multiple optimisers; allocations are re-normalised after constraint enforcement.",
+            },
+            "general": {
+                "summary": (
+                    f"Executed {friendly_name} on {symbol} translating platform analytics into actionable guidance."),
+                "steps": [
+                    "Load recent market data and user configuration inputs.",
+                    "Run the relevant analytics engine to score opportunities and quantify risk.",
+                    "Format trade actions with guardrails for slippage, liquidity and drawdown tolerances.",
+                ],
+                "notes": "Outputs include safety checks (liquidity, volatility) before presenting recommendations to the user.",
+            },
+        }
+
+        function_overrides: Dict[str, Dict[str, Any]] = {
+            "calculate_greeks": {
+                "summary": f"Derived option Greeks for {symbol} using Black-Scholes style models with live volatility inputs.",
+                "steps": [
+                    "Fetch underlying price, implied volatility and time to expiry for the specified contract.",
+                    "Compute delta, gamma, theta and vega to describe sensitivity to key risk factors.",
+                    "Provide hedging guidance aligning option exposures with the broader portfolio objective.",
+                ],
+                "notes": "Greeks rely on model assumptions; actual behaviour can deviate under jump risk or illiquid markets.",
+            },
+            "liquidation_price": {
+                "summary": f"Calculated liquidation thresholds for the leveraged {symbol} position to inform risk limits.",
+                "steps": [
+                    "Capture entry price, leverage and maintenance margin rules for the selected exchange.",
+                    "Back out the price move that would breach maintenance margin given current collateral.",
+                    "Report buffer distance and recommended adjustments if the cushion is thin.",
+                ],
+                "notes": "Margin formulas assume static collateral; sudden volatility spikes can trigger faster liquidations.",
+            },
+            "hedge_position": {
+                "summary": f"Built hedge ratios for the provided portfolio basket using correlation and beta estimates.",
+                "steps": [
+                    "Estimate factor exposures and betas for instruments needing protection.",
+                    "Select hedge assets with liquidity and opposite correlation signatures.",
+                    "Size hedges to neutralise targeted risk while respecting capital constraints.",
+                ],
+                "notes": "Hedge effectiveness depends on correlation stability; positions are monitored for basis drift.",
+            },
+            "portfolio_optimization": {
+                "summary": "Compared six optimisation techniques (risk parity, equal weight, max Sharpe, min variance, Kelly scaling, adaptive blend) to surface rebalancing ideas.",
+                "steps": [
+                    "Pull live portfolio holdings and compute expected return plus covariance inputs.",
+                    "Run each optimiser under platform constraints (min/max weight, position cap).",
+                    "Rank outcomes by expected return vs. volatility and highlight required trades to reach targets.",
+                ],
+                "notes": "Each optimiser's weights are scaled to practical limits before combining into the final recommendation set.",
+            },
+            "risk_management": {
+                "summary": "Audited account risk (drawdown, VaR, concentration) before prescribing guardrails and alerts.",
+                "steps": [
+                    "Aggregate current exposures, leverage and collateral usage across accounts.",
+                    "Stress recent volatility regimes to measure Value-at-Risk and tail losses.",
+                    "Propose stop-loss, position limits and diversification improvements tailored to findings.",
+                ],
+                "notes": "Risk metrics mix historical and parametric models; low-liquidity assets require manual review.",
+            },
+        }
+
+        template = function_overrides.get(function_name) or category_templates[category]
+
+        inputs_used = {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "leverage": leverage,
+            "risk_mode": risk_mode,
+            "quantity": quantity,
+            "strategy_type": strategy_type,
+            "simulation_mode": simulation_mode,
+        }
+        inputs_used = {k: v for k, v in inputs_used.items() if v is not None}
+
+        evaluation_metrics: Dict[str, Any] = {}
+        if isinstance(base_response, dict):
+            for metric_key in [
+                "expected_return",
+                "risk_level",
+                "sharpe_ratio",
+                "confidence",
+                "success",
+            ]:
+                if metric_key in base_response:
+                    evaluation_metrics[metric_key] = base_response[metric_key]
+
+            if "optimization_summary" in base_response:
+                evaluation_metrics.update(base_response.get("optimization_summary", {}))
+            if "strategy_analysis" in base_response:
+                evaluation_metrics["strategies_evaluated"] = len(base_response["strategy_analysis"])
+            if "perpetual_analysis" in base_response:
+                evaluation_metrics["funding_rate"] = base_response["perpetual_analysis"].get("funding_info", {}).get("current_funding_rate")
+
+        return {
+            "strategy": friendly_name,
+            "category": category,
+            "summary": template["summary"],
+            "calculation_steps": template["steps"],
+            "calculation_notes": template["notes"],
+            "inputs_used": inputs_used,
+            "evaluation_metrics": evaluation_metrics,
+        }
+
+    def _get_regulatory_disclosures(
+        self,
+        category: str,
+        simulation_mode: bool,
+    ) -> Dict[str, Any]:
+        """Return regulatory messaging tailored to the strategy category."""
+
+        disclosures: Dict[str, Any] = {
+            "risk_warning": (
+                "Crypto assets are highly volatile and can result in substantial or total losses. "
+                "Outputs are informational only and do not constitute investment advice."
+            ),
+            "jurisdiction_notice": (
+                "Confirm digital asset trading is permitted in your jurisdiction and comply with all suitability requirements. "
+                "Consult a licensed advisor for personalised guidance."
+            ),
+            "links": {
+                "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+                "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure",
+            },
+            "last_reviewed": datetime.utcnow().date().isoformat(),
+        }
+
+        if category == "derivatives":
+            disclosures["leverage_warning"] = (
+                "Leverage amplifies gains and losses. Maintain adequate collateral and monitor liquidation thresholds closely."
+            )
+        if category == "portfolio":
+            disclosures["rebalancing_notice"] = (
+                "Portfolio targets assume timely rebalancing and access to sufficient liquidity. Deviations can materially impact performance."
+            )
+        if category == "algorithmic":
+            disclosures["model_risk"] = (
+                "Systematic strategies rely on historical relationships that may break down during structural market changes."
+            )
+
+        if simulation_mode:
+            disclosures["simulation_notice"] = (
+                "Results generated in simulation mode. Live execution, fees and slippage can materially differ from simulated outcomes."
+            )
+
+        return disclosures
+
+    def _get_educational_resources(self, function_name: str) -> List[Dict[str, str]]:
+        """Provide category-aware educational guidance."""
+
+        category = self._get_strategy_category(function_name)
+
+        resources: List[Dict[str, str]] = [
+            {
+                "topic": "Diversification",
+                "title": "Why spreading capital matters",
+                "summary": (
+                    "Holding uncorrelated assets reduces reliance on a single performer and helps dampen portfolio volatility."
+                ),
+                "actionable_tip": "Blend layer-1s, DeFi, infrastructure tokens and stablecoins to improve risk-adjusted returns.",
+            },
+            {
+                "topic": "Crypto volatility",
+                "title": "Prepare for large swings",
+                "summary": (
+                    "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards."
+                ),
+                "actionable_tip": "Stress test positions assuming 30–80% annualised volatility and plan for gap risk.",
+            },
+            {
+                "topic": "Stablecoins vs. alt-coins",
+                "title": "Different roles in a portfolio",
+                "summary": (
+                    "Stablecoins provide liquidity and downside buffers, while alt-coins target growth but contribute most drawdown risk."
+                ),
+                "actionable_tip": "Maintain a stablecoin reserve to cover margin calls and fund opportunistic entries without forced selling.",
+            },
+            {
+                "topic": "Leverage risk",
+                "title": "Use borrowed capital cautiously",
+                "summary": (
+                    "Leverage accelerates losses during volatility spikes. Liquidations can happen quickly when collateral buffers are thin."
+                ),
+                "actionable_tip": "Limit leverage to clearly defined setups, monitor funding costs and avoid stacking multiple leveraged trades.",
+            },
+        ]
+
+        if category == "derivatives":
+            resources.append(
+                {
+                    "topic": "Margin management",
+                    "title": "Track collateral health",
+                    "summary": (
+                        "Margin ratios determine liquidation risk. Monitoring maintenance levels across exchanges prevents forced unwinds."
+                    ),
+                    "actionable_tip": "Set alerts for margin utilisation >70% and keep extra collateral ready to top up positions.",
+                }
+            )
+        if category == "algorithmic":
+            resources.append(
+                {
+                    "topic": "Systematic discipline",
+                    "title": "Stick to tested rules",
+                    "summary": (
+                        "Consistent execution is essential for algorithmic strategies. Deviating from the rule set introduces discretionary risk."
+                    ),
+                    "actionable_tip": "Document strategy logic, monitor performance drift and pause trading if live metrics fall outside tested ranges.",
+                }
+            )
+        if category == "portfolio":
+            resources.append(
+                {
+                    "topic": "Rebalancing cadence",
+                    "title": "Keep allocations aligned",
+                    "summary": (
+                        "Periodic rebalancing locks in gains and reins in concentration. Ignoring drifts can magnify downside during shocks."
+                    ),
+                    "actionable_tip": "Review weights monthly or when allocations move >5% away from targets to maintain intended risk levels.",
+                }
+            )
+
+        return resources
+
+    def _enrich_strategy_response(
+        self,
+        function_name: str,
+        base_response: Dict[str, Any],
+        symbol: str,
+        strategy_type: Optional[str],
+        parameters: StrategyParameters,
+        risk_mode: str,
+        simulation_mode: bool,
+    ) -> Dict[str, Any]:
+        """Attach transparency, compliance and education context to a strategy payload."""
+
+        if not isinstance(base_response, dict):
+            return base_response
+
+        category = self._get_strategy_category(function_name)
+        methodology = self._generate_methodology_summary(
+            function_name=function_name,
+            base_response=base_response,
+            symbol=symbol,
+            strategy_type=strategy_type,
+            parameters=parameters,
+            risk_mode=risk_mode,
+            simulation_mode=simulation_mode,
+        )
+        disclosures = self._get_regulatory_disclosures(
+            category=category,
+            simulation_mode=simulation_mode,
+        )
+        resources = self._get_educational_resources(function_name)
+
+        enriched_response = dict(base_response)
+        enriched_response.setdefault("methodology_summary", methodology)
+        enriched_response.setdefault("regulatory_disclosures", disclosures)
+
+        existing_resources = []
+        if isinstance(enriched_response.get("educational_resources"), list):
+            existing_resources = list(enriched_response["educational_resources"])
+
+        existing_topics = {item.get("topic") for item in existing_resources if isinstance(item, dict)}
+        for resource in resources:
+            topic = resource.get("topic")
+            if topic not in existing_topics:
+                existing_resources.append(resource)
+                existing_topics.add(topic)
+
+        enriched_response["educational_resources"] = existing_resources
+        enriched_response.setdefault("compliance_category", category)
+
+        return enriched_response
+
     async def _load_or_seed_platform_strategies(self, session) -> Dict[str, str]:
         """Load platform strategy mapping or seed missing entries."""
         mapping: Dict[str, str] = {}
@@ -1438,124 +1809,142 @@ class TradingStrategiesService(LoggerMixin):
         simulation_mode: bool = True
     ) -> Dict[str, Any]:
         """Main strategy execution router - handles all 25+ functions."""
-        
+
         start_time = time.time()
         self.logger.info("Executing strategy", function=function, strategy_type=strategy_type, symbol=symbol)
-        
+
+        parameters = parameters or {}
+        strategy_params = StrategyParameters(
+            symbol=symbol,
+            quantity=parameters.get("quantity", 0.01),
+            price=parameters.get("price"),
+            stop_loss=parameters.get("stop_loss"),
+            take_profit=parameters.get("take_profit"),
+            leverage=parameters.get("leverage", 1.0),
+            timeframe=parameters.get("timeframe", "1h"),
+            risk_percentage=parameters.get("risk_percentage", 2.0)
+        )
+
+        strategy_result: Dict[str, Any]
+
         try:
-            # Parse parameters
-            strategy_params = StrategyParameters(
-                symbol=symbol,
-                quantity=parameters.get("quantity", 0.01) if parameters else 0.01,
-                price=parameters.get("price") if parameters else None,
-                stop_loss=parameters.get("stop_loss") if parameters else None,
-                take_profit=parameters.get("take_profit") if parameters else None,
-                leverage=parameters.get("leverage", 1.0) if parameters else 1.0,
-                timeframe=parameters.get("timeframe", "1h") if parameters else "1h",
-                risk_percentage=parameters.get("risk_percentage", 2.0) if parameters else 2.0
-            )
-            
-            # Route to appropriate strategy function
             if function in ["futures_trade", "options_trade", "perpetual_trade", "complex_strategy"]:
-                return await self._execute_derivatives_strategy(
+                strategy_result = await self._execute_derivatives_strategy(
                     function, strategy_type, symbol, strategy_params, exchange, user_id
                 )
-            
+
             elif function in ["spot_momentum_strategy", "spot_mean_reversion", "spot_breakout_strategy"]:
-                return await self._execute_spot_strategy(
+                strategy_result = await self._execute_spot_strategy(
                     function, symbol, strategy_params, user_id
                 )
-            
+
             elif function in ["algorithmic_trading", "pairs_trading", "statistical_arbitrage", "market_making", "scalping_strategy"]:
-                return await self._execute_algorithmic_strategy(
+                strategy_result = await self._execute_algorithmic_strategy(
                     function, strategy_type, symbol, strategy_params, user_id
                 )
-            
+
             elif function == "risk_management":
-                return await self.risk_management(
+                strategy_result = await self.risk_management(
                     symbols=symbol, user_id=user_id
                 )
-            
+
             elif function in ["position_management", "portfolio_optimization"]:
-                return await self._execute_management_function(
+                strategy_result = await self._execute_management_function(
                     function, symbol, strategy_params, user_id
                 )
-            
+
             elif function == "funding_arbitrage":
-                return await self.funding_arbitrage(
+                strategy_result = await self.funding_arbitrage(
                     symbols=symbol, user_id=user_id
                 )
-            
+
             elif function == "calculate_greeks":
-                return await self.calculate_greeks(
+                strike_price = parameters.get("strike_price")
+                if strike_price is None and strategy_params.price:
+                    strike_price = strategy_params.price * 1.1
+                strategy_result = await self.calculate_greeks(
                     option_symbol=symbol,
                     underlying_price=strategy_params.price or 0,
-                    strike_price=parameters.get("strike_price", strategy_params.price * 1.1) if parameters else strategy_params.price * 1.1,
-                    time_to_expiry=parameters.get("time_to_expiry", 30/365) if parameters else 30/365,
-                    volatility=parameters.get("volatility", 0) if parameters else 0,
+                    strike_price=strike_price,
+                    time_to_expiry=parameters.get("time_to_expiry", 30 / 365),
+                    volatility=parameters.get("volatility", 0),
                     user_id=user_id
                 )
-            
+
             elif function == "swing_trading":
-                return await self.swing_trading(
+                strategy_result = await self.swing_trading(
                     symbol=symbol,
                     timeframe=strategy_params.timeframe,
-                    holding_period=parameters.get("holding_period", 7) if parameters else 7,
+                    holding_period=parameters.get("holding_period", 7),
                     user_id=user_id
                 )
-            
+
             elif function == "leverage_position":
-                return await self.leverage_position(
+                leverage_params = dict(parameters)
+                leverage_params.setdefault("position_size", strategy_params.quantity)
+                action = leverage_params.pop("action", "increase_leverage")
+                strategy_result = await self.leverage_position(
                     symbol=symbol,
-                    leverage=strategy_params.leverage,
-                    position_size=strategy_params.quantity,
+                    action=action,
+                    target_leverage=strategy_params.leverage,
+                    parameters=leverage_params,
                     user_id=user_id
                 )
-            
+
             elif function == "margin_status":
-                return await self.margin_status(
+                strategy_result = await self.margin_status(
                     user_id=user_id,
                     exchange=exchange
                 )
-            
+
             elif function == "options_chain":
-                return await self.options_chain(
+                strategy_result = await self.options_chain(
                     underlying_symbol=symbol,
-                    expiry_date=parameters.get("expiry_date") if parameters else None,
+                    expiry_date=parameters.get("expiry_date"),
                     user_id=user_id
                 )
-            
+
             elif function == "basis_trade":
-                return await self.basis_trade(
+                strategy_result = await self.basis_trade(
                     symbol=symbol,
                     user_id=user_id
                 )
-            
+
             elif function == "liquidation_price":
-                return await self.liquidation_price(
+                strategy_result = await self.liquidation_price(
                     symbol=symbol,
                     entry_price=strategy_params.price or 0,
                     leverage=strategy_params.leverage,
-                    position_type=parameters.get("position_type", "long") if parameters else "long",
+                    position_side=parameters.get("position_side")
+                    or parameters.get("position_type", "long"),
+                    position_size=parameters.get("position_size", strategy_params.quantity),
                     user_id=user_id
                 )
-            
+
             elif function == "hedge_position":
-                return await self.hedge_position(
-                    portfolio_symbols=symbol,
-                    hedge_ratio=parameters.get("hedge_ratio", 0.5) if parameters else 0.5,
+                hedge_params = dict(parameters)
+                hedge_params.setdefault("hedge_ratio", parameters.get("hedge_ratio", 0.5))
+                primary_position_size = hedge_params.get("primary_position_size", strategy_params.quantity)
+                primary_side = hedge_params.get("primary_side", "long")
+                hedge_type = hedge_params.get("hedge_type", "direct_hedge")
+                strategy_result = await self.hedge_position(
+                    symbol,
+                    primary_position_size,
+                    primary_side=primary_side,
+                    hedge_type=hedge_type,
+                    parameters=hedge_params,
                     user_id=user_id
                 )
-            
+
             elif function == "strategy_performance":
-                return await self.strategy_performance(
-                    strategy_name=parameters.get("strategy_name") if parameters else None,
-                    analysis_period=parameters.get("analysis_period", "30d") if parameters else "30d",
+                strategy_result = await self.strategy_performance(
+                    strategy_name=parameters.get("strategy_name"),
+                    analysis_period=parameters.get("analysis_period", "30d"),
                     user_id=user_id
                 )
-            
+
             else:
-                return {
+                strategy_result = {
                     "success": False,
                     "error": f"Unknown strategy function: {function}",
                     "available_functions": [
@@ -1569,15 +1958,29 @@ class TradingStrategiesService(LoggerMixin):
                     ],
                     "timestamp": datetime.utcnow().isoformat()
                 }
-            
+
         except Exception as e:
             self.logger.error("Strategy execution failed", error=str(e), exc_info=True)
-            return {
+            strategy_result = {
                 "success": False,
                 "error": str(e),
                 "function": function,
                 "timestamp": datetime.utcnow().isoformat()
             }
+
+        execution_latency = round(time.time() - start_time, 4)
+        if isinstance(strategy_result, dict):
+            strategy_result.setdefault("execution_time_seconds", execution_latency)
+
+        return self._enrich_strategy_response(
+            function_name=function,
+            base_response=strategy_result,
+            symbol=symbol,
+            strategy_type=strategy_type,
+            parameters=strategy_params,
+            risk_mode=risk_mode,
+            simulation_mode=simulation_mode,
+        )
 
     async def run_for_backtest(
         self,
@@ -1918,7 +2321,7 @@ class TradingStrategiesService(LoggerMixin):
                 strategy_enum = StrategyType(default_strategy_type)
             except ValueError:
                 strategy_enum = StrategyType.CALL_OPTION  # Fallback to default
-            
+
             # Get real current price for dynamic strike
             try:
                 price_data = await self._get_symbol_price("auto", symbol)
@@ -1947,7 +2350,26 @@ class TradingStrategiesService(LoggerMixin):
             return await self.derivatives_engine.options_trade(
                 strategy_enum, symbol, parameters, expiry_date, strike_price, user_id
             )
-        
+
+        elif function == "perpetual_trade":
+            default_strategy_type = strategy_type or "long_perpetual"
+            perpetual_parameters = {
+                key: value
+                for key, value in asdict(parameters).items()
+                if value is not None and key != "symbol"
+            }
+
+            if strategy_uuid:
+                perpetual_parameters.setdefault("strategy_id", strategy_uuid)
+
+            return await self.perpetual_trade(
+                symbol=symbol,
+                strategy_type=default_strategy_type,
+                parameters=perpetual_parameters,
+                exchange=exchange,
+                user_id=user_id,
+            )
+
         elif function == "complex_strategy":
             # Get REAL current price for dynamic strike selection
             try:
@@ -5923,6 +6345,48 @@ class TradingStrategiesService(LoggerMixin):
         except Exception:
             return []
 
+    async def _calculate_real_volatility(
+        self,
+        underlying_price: float,
+        time_to_expiry: float,
+        symbol: Optional[str] = None,
+    ) -> float:
+        """Estimate annualized volatility for option pricing."""
+
+        try:
+            base_symbol = symbol or "BTCUSDT"
+            if "-" in base_symbol:
+                base_symbol = base_symbol.split("-")[0]
+
+            base_symbol = base_symbol.replace("/", "")
+
+            if not base_symbol.upper().endswith(("USDT", "USD", "USDC")):
+                base_symbol = f"{base_symbol}USDT"
+
+            daily_volatility = await self._estimate_daily_volatility(base_symbol)
+
+            import math
+
+            annualized_volatility = daily_volatility * math.sqrt(365)
+
+            # Ensure volatility remains within reasonable bounds and is a float
+            annualized_volatility = float(max(0.01, min(annualized_volatility, 3.0)))
+
+            if time_to_expiry and time_to_expiry > 0:
+                # Adjust for shorter expiries to avoid overstating risk
+                annualized_volatility *= math.sqrt(min(time_to_expiry, 1.0))
+                annualized_volatility = float(max(0.01, min(annualized_volatility, 3.0)))
+
+            return annualized_volatility
+
+        except Exception as exc:
+            self.logger.warning(
+                "Falling back to default volatility", error=str(exc), symbol=symbol
+            )
+
+            # Provide a conservative fallback if estimation fails
+            return 0.5 if underlying_price > 0 else 0.3
+
     async def _estimate_daily_volatility(self, symbol: str) -> float:
         """Calculate real daily volatility using historical price data."""
         try:
@@ -6476,8 +6940,11 @@ class TradingStrategiesService(LoggerMixin):
             
             # Get real volatility if not provided
             if volatility <= 0:
-                vol_data = await self._calculate_real_volatility(option_symbol)
-                volatility = vol_data.get("volatility", 0.5)  # Default to 50% if unavailable
+                volatility = await self._calculate_real_volatility(
+                    underlying_price=underlying_price,
+                    time_to_expiry=time_to_expiry,
+                    symbol=option_symbol,
+                )
             
             # Black-Scholes calculations with real data
             S = underlying_price  # Current stock price
