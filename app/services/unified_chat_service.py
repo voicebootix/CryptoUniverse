@@ -37,7 +37,7 @@ from app.services.master_controller import MasterSystemController, TradingMode
 from app.services.ai_consensus_core import AIConsensusService
 from app.services.trade_execution import TradeExecutionService
 # Removed chat_service_adapters - unified_chat_service uses direct integrations
-from app.services.telegram_core import TelegramCommanderService
+from app.services.telegram_core import telegram_commander_service
 from app.services.websocket import manager as websocket_manager
 from app.services.chat_memory import ChatMemoryService
 # Note: unified_ai_manager is imported lazily in methods to avoid initialization at module load
@@ -180,7 +180,7 @@ class UnifiedChatService(LoggerMixin):
         self.master_controller = MasterSystemController()
         self.trade_executor = TradeExecutionService()
 # Direct service integrations - no adapters needed
-        self.telegram_core = TelegramCommanderService()
+        self.telegram_core = telegram_commander_service
         self.market_analysis = MarketAnalysisService()
         self.portfolio_risk = PortfolioRiskService()
         self.trading_strategies = TradingStrategiesService()
