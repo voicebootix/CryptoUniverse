@@ -33,7 +33,7 @@ import copy
 import os
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 import pandas as pd
 import aiohttp
@@ -41,6 +41,7 @@ import structlog
 
 from app.core.logging import LoggerMixin
 from app.services.market_data_feeds import market_data_feeds
+from app.services.exchange_universe_service import exchange_universe_service
 # Avoid circular import - define configurations locally
 
 logger = structlog.get_logger(__name__)
@@ -104,16 +105,19 @@ class ExchangeConfigurations:
 
 class DynamicExchangeManager(LoggerMixin):
     """Dynamic Exchange Manager - handles multi-exchange connectivity."""
-    
+
     def __init__(self):
         self.exchange_configs = {
             "kraken": ExchangeConfigurations.KRAKEN,   # Priority 1: Confirmed working
-            "kucoin": ExchangeConfigurations.KUCOIN,   # Priority 2: Confirmed working  
+            "kucoin": ExchangeConfigurations.KUCOIN,   # Priority 2: Confirmed working
             "binance": ExchangeConfigurations.BINANCE  # Priority 3: Now uses binance.us
         }
         self.rate_limiters = {}
         self.circuit_breakers = {}
-        
+        self._sessions: Dict[str, aiohttp.ClientSession] = {}
+        self._session_locks: Dict[int, asyncio.Lock] = {}
+        self._request_timeout = aiohttp.ClientTimeout(total=5)
+
         # Initialize rate limiters for each exchange
         for exchange in self.exchange_configs:
             self.rate_limiters[exchange] = {
@@ -127,22 +131,51 @@ class DynamicExchangeManager(LoggerMixin):
                 "last_failure": None,
                 "success_count": 0
             }
-    
+
+    async def _get_lock(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+        lock = self._session_locks.get(loop_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._session_locks[loop_id] = lock
+        return lock
+
+    async def _get_session(self, exchange: str) -> aiohttp.ClientSession:
+        lock = await self._get_lock()
+        async with lock:
+            session = self._sessions.get(exchange)
+            if session is None or session.closed:
+                session = aiohttp.ClientSession(timeout=self._request_timeout)
+                self._sessions[exchange] = session
+            return session
+
+    async def close(self) -> None:
+        for session in list(self._sessions.values()):
+            if not session.closed:
+                await session.close()
+        self._sessions.clear()
+
     async def fetch_from_exchange(
-        self, 
-        exchange: str, 
-        endpoint: str, 
+        self,
+        exchange: str,
+        endpoint: str,
         params: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """Fetch data from specific exchange with rate limiting."""
         config = self.exchange_configs[exchange]
         url = config["base_url"] + endpoint
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as response:
+
+        session = await self._get_session(exchange)
+        try:
+            async with session.get(url, params=params) as response:
                 if response.status != 200:
                     raise Exception(f"{exchange} API error: {response.status}")
                 return await response.json()
+        except asyncio.TimeoutError:
+            raise
+        except Exception:
+            raise
     
     async def get_exchange_health(self) -> Dict[str, Any]:
         """Get health status of all exchanges."""
@@ -187,6 +220,9 @@ class MarketAnalysisService(LoggerMixin):
             "volatility_analysis": 60,
             "market_overview": 60,
         }
+        self._max_symbol_concurrency = 6
+        self._per_exchange_timeout = 5
+        self._symbol_semaphores: Dict[int, asyncio.Semaphore] = {}
 
     async def _get_cache_lock(self) -> asyncio.Lock:
         """Provide an asyncio lock scoped to the current event loop."""
@@ -262,17 +298,27 @@ class MarketAnalysisService(LoggerMixin):
                 "expires_at": time.monotonic() + ttl_seconds,
             }
 
+    def _get_symbol_semaphore(self) -> asyncio.Semaphore:
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+        semaphore = self._symbol_semaphores.get(loop_id)
+        if semaphore is None:
+            semaphore = asyncio.Semaphore(self._max_symbol_concurrency)
+            self._symbol_semaphores[loop_id] = semaphore
+        return semaphore
+
     async def realtime_price_tracking(
         self,
-        symbols: str,
-        exchanges: str = "all",
+        symbols: Union[str, Sequence[str]],
+        exchanges: Union[str, Sequence[str]] = "all",
         user_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Real-time price tracking across multiple exchanges."""
         start_time = time.time()
 
         try:
-            symbol_list = [s.strip() for s in symbols.split(",") if s.strip()]
+            symbol_list, exchange_list = await self._resolve_universe(symbols, exchanges, user_id)
+
             if not symbol_list:
                 return {
                     "success": True,
@@ -281,19 +327,12 @@ class MarketAnalysisService(LoggerMixin):
                     "metadata": {
                         "symbols_requested": 0,
                         "symbols_found": 0,
-                        "exchanges_checked": 0,
+                        "exchanges_checked": len(exchange_list),
                         "response_time_ms": 0.0,
                         "timestamp": datetime.utcnow().isoformat(),
                         "cache_status": "skip",
                     },
                 }
-
-            exchange_source = (
-                self.exchange_manager.exchange_configs.keys()
-                if exchanges == "all"
-                else [exchanges]
-            )
-            exchange_list = [str(exchange).lower() for exchange in exchange_source]
 
             cache_key = self._build_cache_key(
                 "realtime_price_tracking",
@@ -307,74 +346,15 @@ class MarketAnalysisService(LoggerMixin):
 
             price_data: Dict[str, Any] = {}
 
-            async def fetch_exchange_price(exchange: str, symbol: str):
-                try:
-                    price_info = await self._get_symbol_price(exchange, symbol)
-                    return exchange, price_info
-                except Exception as exc:  # pragma: no cover - defensive logging
-                    self.logger.warning(
-                        "Failed to get symbol price",
-                        symbol=symbol,
-                        exchange=exchange,
-                        error=str(exc),
-                    )
-                    return exchange, None
+            semaphore = self._get_symbol_semaphore()
 
-            for symbol in symbol_list:
-                tasks = [fetch_exchange_price(exchange, symbol) for exchange in exchange_list]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+            async def process_symbol(symbol: str) -> None:
+                async with semaphore:
+                    symbol_results = await self._collect_symbol_data(symbol, exchange_list)
+                    if symbol_results:
+                        price_data[symbol] = symbol_results
 
-                symbol_data = []
-                for result in results:
-                    if isinstance(result, Exception):  # pragma: no cover - defensive
-                        self.logger.warning(
-                            "Exchange price task failed",
-                            symbol=symbol,
-                            error=str(result),
-                        )
-                        continue
-
-                    exchange, price_info = result
-                    if price_info:
-                        symbol_data.append({"exchange": exchange, **price_info})
-
-                # Get market snapshot from real-time feeds
-                snapshot = await market_data_feeds.get_market_snapshot(symbol, include_onchain=True)
-
-                if symbol_data:
-                    prices = [d["price"] for d in symbol_data]
-                    volumes = [d.get("volume", 0) for d in symbol_data]
-                    min_price = min(prices) if prices else 0
-                    max_price = max(prices) if prices else 0
-                    price_spread = max_price - min_price
-                    spread_percentage = ((max_price - min_price) / min_price) * 100 if min_price > 0 else None
-
-                    price_data[symbol] = {
-                        "exchanges": symbol_data,
-                        "aggregated": {
-                            "average_price": sum(prices) / len(prices),
-                            "price_spread": price_spread,
-                            "spread_percentage": spread_percentage,
-                            "total_volume": sum(volumes),
-                            "exchange_count": len(symbol_data),
-                        },
-                    }
-                elif snapshot.get("success"):
-                    # Use external market data when exchange aggregation fails
-                    price_data[symbol] = {
-                        "exchanges": [],
-                        "aggregated": {
-                            "average_price": snapshot["data"].get("price"),
-                            "price_spread": 0,
-                            "spread_percentage": 0,
-                            "total_volume": snapshot["data"].get("volume_24h", 0),
-                            "exchange_count": 0,
-                        }
-                    }
-
-                if snapshot.get("success"):
-                    price_data.setdefault(symbol, {"exchanges": [], "aggregated": {}})
-                    price_data[symbol]["market_snapshots"] = snapshot["data"]
+            await asyncio.gather(*(process_symbol(symbol) for symbol in symbol_list))
 
             response_time = time.time() - start_time
             await self._update_performance_metrics(response_time, True, user_id)
@@ -399,6 +379,174 @@ class MarketAnalysisService(LoggerMixin):
         except Exception as e:
             await self._update_performance_metrics(time.time() - start_time, False, user_id)
             raise e
+
+    async def _resolve_universe(
+        self,
+        symbols: Union[str, Sequence[str]],
+        exchanges: Union[str, Sequence[str]],
+        user_id: Optional[str],
+    ) -> Tuple[List[str], List[str]]:
+        if isinstance(symbols, str):
+            requested_symbols = [s.strip() for s in symbols.split(",") if s.strip()]
+        else:
+            requested_symbols = [str(s).strip() for s in symbols if str(s).strip()]
+
+        if isinstance(exchanges, str):
+            exchange_tokens = [e.strip() for e in exchanges.split(",") if e.strip()]
+        else:
+            exchange_tokens = [str(e).strip() for e in exchanges if str(e).strip()]
+
+        if not exchange_tokens or any(token.lower() == "all" for token in exchange_tokens):
+            exchange_tokens = []
+
+        exchange_list = await exchange_universe_service.get_user_exchanges(
+            user_id,
+            exchange_tokens,
+            default_exchanges=self.exchange_manager.exchange_configs.keys(),
+        )
+
+        dynamic_tokens = {"SMART_ADAPTIVE", "DYNAMIC_DISCOVERY", "ALL"}
+        effective_symbols: Optional[Sequence[str]] = None
+        if not requested_symbols or any(token.upper() in dynamic_tokens for token in requested_symbols):
+            requested_symbols = []
+        else:
+            effective_symbols = requested_symbols
+
+        symbol_list = await exchange_universe_service.get_symbol_universe(
+            user_id,
+            effective_symbols,
+            exchange_list,
+        )
+
+        normalized_exchanges = [str(exchange).lower() for exchange in exchange_list]
+
+        return symbol_list, normalized_exchanges
+
+    async def _collect_symbol_data(
+        self,
+        symbol: str,
+        exchange_list: List[str],
+    ) -> Optional[Dict[str, Any]]:
+        async def fetch(exchange: str) -> Optional[Dict[str, Any]]:
+            try:
+                price_info = await asyncio.wait_for(
+                    self._get_symbol_price(exchange, symbol),
+                    timeout=self._per_exchange_timeout,
+                )
+                return {"exchange": exchange, **price_info} if price_info else None
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "Exchange price fetch timed out",
+                    symbol=symbol,
+                    exchange=exchange,
+                    timeout=self._per_exchange_timeout,
+                )
+                return None
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self.logger.warning(
+                    "Failed to get symbol price",
+                    symbol=symbol,
+                    exchange=exchange,
+                    error=str(exc),
+                )
+                return None
+
+        tasks = [asyncio.create_task(fetch(exchange)) for exchange in exchange_list]
+
+        exchanges_data: List[Dict[str, Any]] = []
+        try:
+            for task in asyncio.as_completed(tasks):
+                result = await task
+                if result:
+                    exchanges_data.append(result)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+
+        snapshot = await market_data_feeds.get_market_snapshot(symbol, include_onchain=True)
+
+        if exchanges_data:
+            prices = [d["price"] for d in exchanges_data if "price" in d]
+            volumes = [d.get("volume", 0) for d in exchanges_data]
+            min_price = min(prices) if prices else 0
+            max_price = max(prices) if prices else 0
+            spread_percentage = ((max_price - min_price) / min_price) * 100 if min_price > 0 else None
+
+            result = {
+                "exchanges": exchanges_data,
+                "aggregated": {
+                    "average_price": sum(prices) / len(prices) if prices else None,
+                    "price_spread": max_price - min_price if prices else None,
+                    "spread_percentage": spread_percentage,
+                    "total_volume": sum(volumes),
+                    "exchange_count": len(exchanges_data),
+                },
+            }
+        elif snapshot.get("success"):
+            result = {
+                "exchanges": [],
+                "aggregated": {
+                    "average_price": snapshot["data"].get("price"),
+                    "price_spread": 0,
+                    "spread_percentage": 0,
+                    "total_volume": snapshot["data"].get("volume_24h", 0),
+                    "exchange_count": 0,
+                },
+            }
+        else:
+            return None
+
+        if snapshot.get("success"):
+            result.setdefault("market_snapshots", snapshot.get("data", {}))
+
+        return result
+
+    async def _collect_symbol_prices_for_arbitrage(
+        self,
+        symbol: str,
+        exchange_list: List[str],
+    ) -> List[Dict[str, Any]]:
+        async def fetch(exchange: str) -> Optional[Dict[str, Any]]:
+            try:
+                price_info = await asyncio.wait_for(
+                    self._get_symbol_price(exchange, symbol),
+                    timeout=self._per_exchange_timeout,
+                )
+                if price_info:
+                    return {"exchange": exchange, **price_info}
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "Exchange price fetch timed out",
+                    function="cross_exchange_arbitrage_scanner",
+                    symbol=symbol,
+                    exchange=exchange,
+                    timeout=self._per_exchange_timeout,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self.logger.debug(
+                    "Exchange price fetch failed",
+                    function="cross_exchange_arbitrage_scanner",
+                    symbol=symbol,
+                    exchange=exchange,
+                    error=str(exc),
+                )
+            return None
+
+        tasks = [asyncio.create_task(fetch(exchange)) for exchange in exchange_list]
+        results: List[Dict[str, Any]] = []
+
+        try:
+            for task in asyncio.as_completed(tasks):
+                item = await task
+                if item:
+                    results.append(item)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+
+        return results
     
     async def technical_analysis(
         self, 
@@ -2434,118 +2582,137 @@ class MarketAnalysisService(LoggerMixin):
     
     async def cross_exchange_arbitrage_scanner(
         self,
-        symbols: str = "BTC,ETH,SOL,ADA",
-        exchanges: str = "binance,kraken,kucoin",
+        symbols: Union[str, Sequence[str]] = ("BTC", "ETH", "SOL", "ADA"),
+        exchanges: Union[str, Sequence[str]] = ("binance", "kraken", "kucoin"),
         min_profit_bps: int = 5,
         user_id: str = "system"
     ) -> Dict[str, Any]:
         """ENTERPRISE CROSS-EXCHANGE ARBITRAGE SCANNER - Identify profitable arbitrage opportunities."""
-        
+
         start_time = time.time()
-        
+
         try:
-            await self._update_performance_metrics(time.time() - start_time, True, user_id)
-            
-            symbol_list = [s.strip().upper() for s in symbols.split(",")]
-            exchange_list = [e.strip().lower() for e in exchanges.split(",")]
-            
-            opportunities = []
-            total_scanned = 0
-            
-            # Scan each symbol across all exchanges
-            for symbol in symbol_list:
-                prices = {}
-                
-                # Get prices from all exchanges
-                for exchange in exchange_list:
-                    try:
-                        price_data = await self._get_symbol_price(exchange, symbol)
-                        if price_data and price_data.get("price"):
-                            prices[exchange] = {
-                                "price": float(price_data["price"]),
-                                "volume": float(price_data.get("volume", 0)),
-                                "timestamp": price_data.get("timestamp", datetime.utcnow().isoformat())
-                            }
-                    except Exception as e:
-                        self.logger.debug(f"Failed to get {symbol} price from {exchange}: {str(e)}")
-                        continue
-                
-                total_scanned += len(exchange_list)
-                
-                # Find arbitrage opportunities
-                if len(prices) >= 2:
-                    price_items = list(prices.items())
-                    
-                    for i in range(len(price_items)):
-                        for j in range(i + 1, len(price_items)):
-                            buy_exchange, buy_data = price_items[i]
-                            sell_exchange, sell_data = price_items[j]
-                            
-                            # Calculate profit for both directions
-                            profit_direction_1 = (sell_data["price"] - buy_data["price"]) / buy_data["price"] * 10000
-                            profit_direction_2 = (buy_data["price"] - sell_data["price"]) / sell_data["price"] * 10000
-                            
-                            # Check if profit exceeds minimum threshold
-                            if profit_direction_1 >= min_profit_bps:
-                                opportunities.append({
-                                    "id": f"{symbol}_{buy_exchange}_{sell_exchange}_{int(time.time())}",
-                                    "symbol": symbol,
-                                    "buy_exchange": buy_exchange,
-                                    "sell_exchange": sell_exchange,
-                                    "buy_price": buy_data["price"],
-                                    "sell_price": sell_data["price"],
-                                    "profit_bps": round(profit_direction_1, 2),
-                                    "profit_percentage": round(profit_direction_1 / 100, 4),
-                                    "min_volume": min(buy_data["volume"], sell_data["volume"]),
-                                    "confidence": min(85.0, 60.0 + (profit_direction_1 / 10)),
-                                    "risk_score": max(1, 10 - (profit_direction_1 / 2)),
-                                    "timestamp": datetime.utcnow().isoformat()
-                                })
-                            
-                            elif profit_direction_2 >= min_profit_bps:
-                                opportunities.append({
-                                    "id": f"{symbol}_{sell_exchange}_{buy_exchange}_{int(time.time())}",
-                                    "symbol": symbol,
-                                    "buy_exchange": sell_exchange,
-                                    "sell_exchange": buy_exchange,
-                                    "buy_price": sell_data["price"],
-                                    "sell_price": buy_data["price"],
-                                    "profit_bps": round(profit_direction_2, 2),
-                                    "profit_percentage": round(profit_direction_2 / 100, 4),
-                                    "min_volume": min(buy_data["volume"], sell_data["volume"]),
-                                    "confidence": min(85.0, 60.0 + (profit_direction_2 / 10)),
-                                    "risk_score": max(1, 10 - (profit_direction_2 / 2)),
-                                    "timestamp": datetime.utcnow().isoformat()
-                                })
-            
-            # Sort opportunities by profit (descending)
+            symbol_list, exchange_list = await self._resolve_universe(symbols, exchanges, user_id)
+
+            if len(exchange_list) < 2:
+                response_time = time.time() - start_time
+                await self._update_performance_metrics(response_time, True, user_id)
+                return {
+                    "success": True,
+                    "data": {
+                        "opportunities": [],
+                        "summary": {
+                            "total_opportunities": 0,
+                            "symbols_scanned": len(symbol_list),
+                            "exchanges_scanned": len(exchange_list),
+                            "pairs_analyzed": 0,
+                            "min_profit_threshold": min_profit_bps,
+                            "max_profit_found": 0,
+                            "avg_confidence": 0,
+                        },
+                        "metadata": {
+                            "scan_timestamp": datetime.utcnow().isoformat(),
+                            "response_time_ms": round(response_time * 1000, 2),
+                            "user_id": user_id,
+                            "scan_type": "cross_exchange_arbitrage",
+                            "insufficient_exchanges": True,
+                        },
+                    },
+                }
+
+            semaphore = self._get_symbol_semaphore()
+            opportunities: List[Dict[str, Any]] = []
+            total_quotes = 0
+
+            async def analyze_symbol(symbol: str) -> Tuple[str, List[Dict[str, Any]]]:
+                async with semaphore:
+                    prices = await self._collect_symbol_prices_for_arbitrage(symbol, exchange_list)
+                return symbol, prices
+
+            symbol_results = await asyncio.gather(
+                *(analyze_symbol(symbol) for symbol in symbol_list)
+            )
+
+            for symbol, prices in symbol_results:
+                total_quotes += len(prices)
+                if len(prices) < 2:
+                    continue
+
+                for i in range(len(prices)):
+                    for j in range(i + 1, len(prices)):
+                        buy_data = prices[i]
+                        sell_data = prices[j]
+
+                        profit_direction_1 = (sell_data["price"] - buy_data["price"]) / buy_data["price"] * 10000
+                        profit_direction_2 = (buy_data["price"] - sell_data["price"]) / sell_data["price"] * 10000
+
+                        if profit_direction_1 >= min_profit_bps:
+                            opportunities.append({
+                                "id": f"{symbol}_{buy_data['exchange']}_{sell_data['exchange']}_{int(time.time())}",
+                                "symbol": symbol,
+                                "buy_exchange": buy_data["exchange"],
+                                "sell_exchange": sell_data["exchange"],
+                                "buy_price": buy_data["price"],
+                                "sell_price": sell_data["price"],
+                                "profit_bps": round(profit_direction_1, 2),
+                                "profit_percentage": round(profit_direction_1 / 100, 4),
+                                "min_volume": min(buy_data.get("volume", 0), sell_data.get("volume", 0)),
+                                "confidence": min(85.0, 60.0 + (profit_direction_1 / 10)),
+                                "risk_score": max(1, 10 - (profit_direction_1 / 2)),
+                                "timestamp": datetime.utcnow().isoformat(),
+                            })
+
+                        elif profit_direction_2 >= min_profit_bps:
+                            opportunities.append({
+                                "id": f"{symbol}_{sell_data['exchange']}_{buy_data['exchange']}_{int(time.time())}",
+                                "symbol": symbol,
+                                "buy_exchange": sell_data["exchange"],
+                                "sell_exchange": buy_data["exchange"],
+                                "buy_price": sell_data["price"],
+                                "sell_price": buy_data["price"],
+                                "profit_bps": round(profit_direction_2, 2),
+                                "profit_percentage": round(profit_direction_2 / 100, 4),
+                                "min_volume": min(buy_data.get("volume", 0), sell_data.get("volume", 0)),
+                                "confidence": min(85.0, 60.0 + (profit_direction_2 / 10)),
+                                "risk_score": max(1, 10 - (profit_direction_2 / 2)),
+                                "timestamp": datetime.utcnow().isoformat(),
+                            })
+
             opportunities.sort(key=lambda x: x["profit_bps"], reverse=True)
-            
+
             response_time = time.time() - start_time
             await self._update_performance_metrics(response_time, True, user_id)
-            
+
+            summary = {
+                "total_opportunities": len(opportunities),
+                "symbols_scanned": len(symbol_list),
+                "exchanges_scanned": len(exchange_list),
+                "pairs_analyzed": total_quotes,
+                "min_profit_threshold": min_profit_bps,
+                "max_profit_found": max((opp["profit_bps"] for opp in opportunities), default=0),
+                "avg_confidence": round(
+                    sum(opp["confidence"] for opp in opportunities) / len(opportunities), 2
+                ) if opportunities else 0,
+            }
+
+            metadata = {
+                "scan_timestamp": datetime.utcnow().isoformat(),
+                "response_time_ms": round(response_time * 1000, 2),
+                "user_id": user_id,
+                "scan_type": "cross_exchange_arbitrage",
+                "symbols": symbol_list,
+                "exchanges": exchange_list,
+            }
+
             return {
                 "success": True,
                 "data": {
                     "opportunities": opportunities,
-                    "summary": {
-                        "total_opportunities": len(opportunities),
-                        "symbols_scanned": len(symbol_list),
-                        "exchanges_scanned": len(exchange_list),
-                        "pairs_analyzed": total_scanned,
-                        "min_profit_threshold": min_profit_bps,
-                        "max_profit_found": max([opp["profit_bps"] for opp in opportunities]) if opportunities else 0,
-                        "avg_confidence": round(sum([opp["confidence"] for opp in opportunities]) / len(opportunities), 2) if opportunities else 0
-                    },
-                    "metadata": {
-                        "scan_timestamp": datetime.utcnow().isoformat(),
-                        "response_time_ms": round(response_time * 1000, 2),
-                        "user_id": user_id,
-                        "scan_type": "cross_exchange_arbitrage"
-                    }
-                }
+                    "summary": summary,
+                    "metadata": metadata,
+                },
             }
-            
+
         except Exception as e:
             await self._update_performance_metrics(time.time() - start_time, False, user_id)
             self.logger.error("Cross-exchange arbitrage scan failed", error=str(e), exc_info=True)
@@ -2553,8 +2720,8 @@ class MarketAnalysisService(LoggerMixin):
     
     async def market_inefficiency_scanner(
         self,
-        symbols: str,
-        exchanges: str = "all",
+        symbols: Union[str, Sequence[str]],
+        exchanges: Union[str, Sequence[str]] = "all",
         scan_types: str = "spread,volume,time",
         user_id: str = "system"
     ) -> Dict[str, Any]:
@@ -2563,11 +2730,8 @@ class MarketAnalysisService(LoggerMixin):
         start_time = time.time()
         
         try:
-            symbol_list = [s.strip().upper() for s in symbols.split(",")]
-            exchange_list = [e.strip().lower() for e in exchanges.split(",")]
-            if "all" in exchange_list:
-                exchange_list = ["binance", "kraken", "kucoin", "coinbase", "bybit"]
-            
+            symbol_list, exchange_list = await self._resolve_universe(symbols, exchanges, user_id)
+
             scan_type_list = [t.strip().lower() for t in scan_types.split(",")]
             
             inefficiency_results = {}
