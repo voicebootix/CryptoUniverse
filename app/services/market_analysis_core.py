@@ -263,6 +263,86 @@ class MarketAnalysisService(LoggerMixin):
                 "expires_at": time.monotonic() + ttl_seconds,
             }
 
+    # ===== Phase 1: Cached Onchain Data Helpers =====
+
+    async def _get_cached_onchain_data(self, symbols: List[str]) -> Dict[str, Any]:
+        """
+        Retrieve cached onchain data for symbols from in-memory cache.
+        Returns: Dict mapping symbol -> onchain data
+        """
+        onchain_cache = {}
+
+        for symbol in symbols:
+            cache_key = self._build_cache_key("onchain_snapshot", symbol=symbol)
+            cached = await self._get_cached_result(cache_key)
+
+            if cached and cached.get("success"):
+                onchain_cache[symbol] = cached.get("data", {})
+                self.logger.debug(f"Cache hit for onchain data: {symbol}")
+            else:
+                self.logger.debug(f"Cache miss for onchain data: {symbol}")
+
+        return onchain_cache
+
+    async def _fetch_live_onchain_data(self, symbols: List[str]) -> Dict[str, Any]:
+        """
+        Fetch fresh onchain data from market_data_feeds for symbols.
+        This is the slow path - only used when cache misses or on-demand.
+        """
+        onchain_data = {}
+
+        for symbol in symbols:
+            try:
+                snapshot = await market_data_feeds.get_market_snapshot(symbol, include_onchain=True)
+
+                if snapshot.get("success") and "onchain" in snapshot.get("data", {}):
+                    onchain_data[symbol] = snapshot["data"]["onchain"]
+
+                    # Cache the onchain data for 5 minutes
+                    cache_key = self._build_cache_key("onchain_snapshot", symbol=symbol)
+                    await self._set_cached_result(
+                        cache_key,
+                        {"success": True, "data": snapshot["data"]["onchain"]},
+                        ttl=300  # 5 minute TTL for onchain data
+                    )
+                    self.logger.info(f"Fetched and cached onchain data: {symbol}")
+
+            except Exception as e:
+                self.logger.warning(f"Failed to fetch onchain for {symbol}: {e}")
+                continue
+
+        return onchain_data
+
+    async def _get_onchain_with_fallback(self, symbols: List[str], force_refresh: bool = False) -> Dict[str, Any]:
+        """
+        Smart onchain data retrieval with cache fallback.
+        - First tries cache (unless force_refresh=True)
+        - Falls back to live fetch for cache misses
+
+        Args:
+            symbols: List of symbols to fetch onchain data for
+            force_refresh: If True, bypass cache and fetch fresh data
+
+        Returns:
+            Dict mapping symbol -> onchain data (empty dict if unavailable)
+        """
+        if force_refresh:
+            return await self._fetch_live_onchain_data(symbols)
+
+        # Try cache first
+        cached_onchain = await self._get_cached_onchain_data(symbols)
+
+        # Identify symbols with cache misses
+        missing_symbols = [s for s in symbols if s not in cached_onchain]
+
+        # Fetch missing symbols on-demand
+        if missing_symbols:
+            self.logger.info(f"Fetching onchain for {len(missing_symbols)} symbols: {missing_symbols}")
+            fresh_onchain = await self._fetch_live_onchain_data(missing_symbols)
+            cached_onchain.update(fresh_onchain)
+
+        return cached_onchain
+
     async def realtime_price_tracking(
         self,
         symbols: str,
@@ -340,7 +420,8 @@ class MarketAnalysisService(LoggerMixin):
                         symbol_data.append({"exchange": exchange, **price_info})
 
                 # Get market snapshot from real-time feeds
-                snapshot = await market_data_feeds.get_market_snapshot(symbol, include_onchain=True)
+                # Phase 1: Skip slow on-chain in hot path, serve from cache if available
+                snapshot = await market_data_feeds.get_market_snapshot(symbol, include_onchain=False)
 
                 if symbol_data:
                     prices = [d["price"] for d in symbol_data]
@@ -377,6 +458,13 @@ class MarketAnalysisService(LoggerMixin):
                     price_data.setdefault(symbol, {"exchanges": [], "aggregated": {}})
                     price_data[symbol]["market_snapshots"] = snapshot["data"]
 
+            # Phase 1: Add cached onchain data to response (non-blocking)
+            cached_onchain = await self._get_cached_onchain_data(symbol_list)
+            if cached_onchain:
+                for symbol, onchain_data in cached_onchain.items():
+                    if symbol in price_data:
+                        price_data[symbol]["onchain"] = onchain_data
+
             response_time = time.time() - start_time
             await self._update_performance_metrics(response_time, True, user_id)
 
@@ -390,6 +478,7 @@ class MarketAnalysisService(LoggerMixin):
                     "exchanges_checked": len(exchange_list),
                     "response_time_ms": round(response_time * 1000, 2),
                     "timestamp": datetime.utcnow().isoformat(),
+                    "onchain_cached_count": len(cached_onchain),
                 },
             }
 
@@ -2441,14 +2530,24 @@ class MarketAnalysisService(LoggerMixin):
         user_id: str = "system"
     ) -> Dict[str, Any]:
         """ENTERPRISE CROSS-EXCHANGE ARBITRAGE SCANNER - Identify profitable arbitrage opportunities."""
-        
+
         start_time = time.time()
-        
+
         try:
-            await self._update_performance_metrics(time.time() - start_time, True, user_id)
-            
             symbol_list = [s.strip().upper() for s in symbols.split(",")]
             exchange_list = [e.strip().lower() for e in exchanges.split(",")]
+
+            # Phase 1: Add caching for arbitrage opportunities (30s TTL)
+            cache_key = self._build_cache_key(
+                "arbitrage_scanner",
+                symbols=",".join(sorted(symbol_list)),
+                exchanges=",".join(sorted(exchange_list)),
+                min_profit_bps=min_profit_bps
+            )
+            cached_response = await self._get_cached_result(cache_key)
+            if cached_response:
+                await self._update_performance_metrics(time.time() - start_time, True, user_id)
+                return cached_response
             
             opportunities = []
             total_scanned = 0
@@ -2524,8 +2623,8 @@ class MarketAnalysisService(LoggerMixin):
             
             response_time = time.time() - start_time
             await self._update_performance_metrics(response_time, True, user_id)
-            
-            return {
+
+            response = {
                 "success": True,
                 "data": {
                     "opportunities": opportunities,
@@ -2546,6 +2645,10 @@ class MarketAnalysisService(LoggerMixin):
                     }
                 }
             }
+
+            # Phase 1: Cache arbitrage results for 30 seconds
+            await self._set_cached_result(cache_key, response, ttl=30)
+            return response
             
         except Exception as e:
             await self._update_performance_metrics(time.time() - start_time, False, user_id)

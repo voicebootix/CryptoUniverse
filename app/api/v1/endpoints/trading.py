@@ -337,6 +337,13 @@ class MarketDataItem(BaseModel):
 class MarketOverviewResponse(BaseModel):
     market_data: List[MarketDataItem]
 
+class IntelligentAnalysisResponse(BaseModel):
+    """Response for intelligent market analysis with intent-based data."""
+    market_data: List[MarketDataItem]
+    onchain_data: Optional[Dict[str, Any]] = None
+    arbitrage_opportunities: Optional[List[Dict[str, Any]]] = None
+    metadata: Dict[str, Any]
+
 class RecentTrade(BaseModel):
     id: str  # UUID as string
     symbol: str
@@ -915,6 +922,152 @@ async def get_market_overview(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get market overview: {str(e)}"
+        )
+
+@router.get("/intelligent-analysis", response_model=IntelligentAnalysisResponse)
+async def get_intelligent_analysis(
+    symbols: Optional[str] = Query(
+        None,
+        description="Comma-separated list of symbols to analyze",
+    ),
+    query: Optional[str] = Query(
+        None,
+        description="User query for intent detection (e.g., 'find arbitrage opportunities')",
+    ),
+    urgency: Optional[str] = Query(
+        "balanced",
+        description="Analysis urgency: instant (fast), balanced, comprehensive (deep)",
+    ),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Phase 2: Intelligent market analysis with AI intent detection.
+
+    This endpoint analyzes the user's query and intent to determine:
+    - What data to fetch (market prices, onchain, arbitrage)
+    - How fast to respond (instant, balanced, comprehensive)
+    - Whether to use cached or fresh data
+
+    Examples:
+    - "What's the current price of BTC?" -> instant, market prices only
+    - "Find arbitrage opportunities" -> balanced, includes arbitrage scan
+    - "Deep analysis of ETH including DeFi metrics" -> comprehensive, onchain data
+    """
+    await rate_limiter.check_rate_limit(
+        key="market:intelligent",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+
+    try:
+        user_id = str(current_user.id)
+        start_time = datetime.utcnow()
+
+        # Determine symbol list
+        if symbols:
+            symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+        else:
+            symbol_list = await _get_default_market_overview_symbols(user_id=user_id)
+            symbol_list = symbol_list[:8]  # Limit to 8 for intelligent analysis
+
+        if not symbol_list:
+            symbol_list = ["BTC", "ETH", "SOL"]
+
+        symbol_string = ",".join(symbol_list)
+
+        # Phase 2: Intent detection
+        needs_onchain = False
+        needs_arbitrage = False
+
+        if query:
+            query_lower = query.lower()
+            # Detect onchain intent
+            onchain_keywords = ["defi", "tvl", "liquidity", "holders", "onchain", "on-chain", "blockchain"]
+            needs_onchain = any(keyword in query_lower for keyword in onchain_keywords)
+
+            # Detect arbitrage intent
+            arbitrage_keywords = ["arbitrage", "opportunity", "spread", "price difference", "profit"]
+            needs_arbitrage = any(keyword in query_lower for keyword in arbitrage_keywords)
+
+        # Fetch market data (always included, fast)
+        market_result = await market_analysis.realtime_price_tracking(
+            symbols=symbol_string,
+            exchanges="all",
+            user_id=user_id
+        )
+
+        market_data_items = []
+        onchain_data_dict = {}
+        arbitrage_data = None
+
+        if market_result.get("success"):
+            data = market_result.get("data", {})
+
+            for symbol, symbol_data in data.items():
+                if symbol_data.get("aggregated"):
+                    agg = symbol_data["aggregated"]
+                    volume = agg.get("total_volume", 0)
+                    volume_str = f"{volume/1e9:.1f}B" if volume > 1e9 else f"{volume/1e6:.0f}M"
+
+                    market_data_items.append({
+                        "symbol": symbol,
+                        "price": Decimal(str(agg.get("average_price", 0))),
+                        "change": float(symbol_data.get("exchanges", [{}])[0].get("change_24h", 0)) if symbol_data.get("exchanges") else 0.0,
+                        "volume": volume_str
+                    })
+
+                    # Include cached onchain if available
+                    if symbol_data.get("onchain"):
+                        onchain_data_dict[symbol] = symbol_data["onchain"]
+
+        # Fetch onchain data if needed (based on urgency and intent)
+        if needs_onchain and urgency in ["balanced", "comprehensive"]:
+            logger.info(f"Fetching onchain data for {len(symbol_list)} symbols based on intent")
+            onchain_result = await market_analysis._get_onchain_with_fallback(
+                symbol_list,
+                force_refresh=(urgency == "comprehensive")
+            )
+            if onchain_result:
+                onchain_data_dict.update(onchain_result)
+
+        # Fetch arbitrage opportunities if needed
+        if needs_arbitrage:
+            logger.info(f"Scanning arbitrage opportunities for {len(symbol_list)} symbols based on intent")
+            arbitrage_result = await market_analysis.cross_exchange_arbitrage_scanner(
+                symbols=symbol_string,
+                exchanges="binance,kraken,kucoin",
+                min_profit_bps=5,
+                user_id=user_id
+            )
+            if arbitrage_result.get("success"):
+                arbitrage_data = arbitrage_result.get("data", {}).get("opportunities", [])
+
+        response_time_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+
+        return IntelligentAnalysisResponse(
+            market_data=market_data_items,
+            onchain_data=onchain_data_dict if onchain_data_dict else None,
+            arbitrage_opportunities=arbitrage_data,
+            metadata={
+                "response_time_ms": round(response_time_ms, 2),
+                "urgency": urgency,
+                "intent_detected": {
+                    "needs_onchain": needs_onchain,
+                    "needs_arbitrage": needs_arbitrage
+                },
+                "symbols_analyzed": len(symbol_list),
+                "onchain_symbols": len(onchain_data_dict),
+                "arbitrage_count": len(arbitrage_data) if arbitrage_data else 0,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+
+    except Exception as e:
+        logger.error("Intelligent analysis failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to perform intelligent analysis: {str(e)}"
         )
 
 @router.get("/recent-trades", response_model=RecentTradesResponse)

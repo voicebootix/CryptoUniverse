@@ -3994,6 +3994,106 @@ Provide a helpful response using the real data available. Never use placeholder 
                     active_sessions.append(session_id)
         return active_sessions
 
+    # ===== Phase 2: Intelligent Data Fetching =====
+
+    async def _fetch_intelligent_market_data(
+        self,
+        query: str,
+        symbols: Optional[List[str]] = None,
+        intent: Optional[ChatIntent] = None
+    ) -> Dict[str, Any]:
+        """
+        Phase 2: Intelligent market data fetching with intent detection.
+
+        Analyzes the user query to determine:
+        - What data to fetch (prices, onchain, arbitrage)
+        - Urgency level (instant, balanced, comprehensive)
+        - Whether to use the intelligent endpoint or standard endpoint
+
+        Args:
+            query: User's chat message
+            symbols: Optional list of symbols to analyze
+            intent: Detected chat intent
+
+        Returns:
+            Dict with market data, onchain data (optional), arbitrage (optional)
+        """
+        try:
+            query_lower = query.lower()
+
+            # Determine urgency from query
+            urgency = "balanced"  # default
+            if any(word in query_lower for word in ["quick", "fast", "current", "now"]):
+                urgency = "instant"
+            elif any(word in query_lower for word in ["deep", "detailed", "comprehensive", "full"]):
+                urgency = "comprehensive"
+
+            # Detect data needs
+            needs_onchain = any(keyword in query_lower for keyword in
+                               ["defi", "tvl", "liquidity", "holders", "onchain", "blockchain"])
+            needs_arbitrage = any(keyword in query_lower for keyword in
+                                 ["arbitrage", "opportunity", "spread", "profit"])
+
+            # Use intelligent endpoint if complex analysis needed
+            if needs_onchain or needs_arbitrage or urgency == "comprehensive":
+                symbol_string = ",".join(symbols) if symbols else None
+
+                # Call intelligent analysis endpoint logic directly
+                result = await self.market_analysis.realtime_price_tracking(
+                    symbols=symbol_string or "BTC,ETH,SOL",
+                    exchanges="all",
+                    user_id=None
+                )
+
+                enriched_data = {
+                    "market_data": result.get("data", {}),
+                    "metadata": result.get("metadata", {}),
+                    "onchain_data": {},
+                    "arbitrage_opportunities": []
+                }
+
+                # Fetch onchain if needed
+                if needs_onchain and symbols and urgency in ["balanced", "comprehensive"]:
+                    self.logger.info(f"Fetching onchain data for chat query: {query[:50]}...")
+                    onchain = await self.market_analysis._get_onchain_with_fallback(
+                        symbols,
+                        force_refresh=(urgency == "comprehensive")
+                    )
+                    enriched_data["onchain_data"] = onchain
+
+                # Fetch arbitrage if needed
+                if needs_arbitrage and symbols:
+                    self.logger.info(f"Scanning arbitrage for chat query: {query[:50]}...")
+                    arb_result = await self.market_analysis.cross_exchange_arbitrage_scanner(
+                        symbols=",".join(symbols),
+                        exchanges="binance,kraken,kucoin",
+                        min_profit_bps=5
+                    )
+                    if arb_result.get("success"):
+                        enriched_data["arbitrage_opportunities"] = arb_result.get("data", {}).get("opportunities", [])
+
+                return enriched_data
+
+            else:
+                # Fast path for simple price queries
+                result = await self.market_analysis.realtime_price_tracking(
+                    symbols=",".join(symbols) if symbols else "BTC,ETH,SOL",
+                    exchanges="all",
+                    user_id=None
+                )
+
+                return {
+                    "market_data": result.get("data", {}),
+                    "metadata": result.get("metadata", {}),
+                }
+
+        except Exception as e:
+            self.logger.error("Intelligent market data fetch failed", error=str(e), exc_info=True)
+            return {
+                "market_data": {},
+                "metadata": {"error": str(e)},
+            }
+
     async def _get_real_market_data(self, symbol: str) -> Dict[str, Any]:
         """Get real market data for a symbol."""
         try:

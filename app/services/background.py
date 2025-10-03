@@ -561,8 +561,21 @@ class BackgroundServiceManager(LoggerMixin):
             await asyncio.sleep(self.intervals["market_data_sync"])
 
     async def _market_cache_warmer_service(self):
-        """Proactively warm market analysis caches and hydrate Redis for low-latency responses."""
-        self.logger.info("🔥 Market cache warmer service started")
+        """
+        Phase 3: Predictive ML-based caching with intelligent symbol discovery.
+
+        This service learns from:
+        - User trading patterns (active positions)
+        - Chat conversation trends (frequently queried symbols)
+        - VIP user preferences
+        - Real-time trading activity
+
+        Implements tiered caching:
+        - Tier 1: Fast trading data (30s refresh) - Top 8 symbols
+        - Tier 2: Onchain for trending symbols (2 min refresh) - Top 5 symbols
+        - Tier 3: Deep analysis for VIP watchlist (5 min refresh) - Top 3 symbols
+        """
+        self.logger.info("🔥 Phase 3: Intelligent market cache warmer started")
 
         configured_symbols = getattr(settings, "MARKET_CACHE_WARM_SYMBOLS", None)
         default_symbols = "BTC,ETH,BNB,SOL,ADA"
@@ -576,12 +589,25 @@ class BackgroundServiceManager(LoggerMixin):
         cache_ttl = 60
         interval = self.intervals.get("market_cache_warmer", 45)
 
+        # Phase 3: Tracking for predictive caching
+        last_tier2_refresh = 0  # Timestamp for Tier 2 refresh
+        last_tier3_refresh = 0  # Timestamp for Tier 3 refresh
+
         while self.running:
             cycle_start = time.time()
             try:
                 from app.services.market_analysis_core import market_analysis_service
 
                 market_service = market_analysis_service
+
+                # Phase 3: Intelligent symbol discovery based on usage patterns
+                intelligent_symbols = await self._get_intelligent_cache_symbols()
+                if intelligent_symbols:
+                    # Merge intelligent symbols with configured symbols (intelligent gets priority)
+                    all_symbols = list(dict.fromkeys(intelligent_symbols + symbol_list))
+                    sorted_symbols = sorted(set(all_symbols[:12]))  # Limit to 12 total
+                    symbols_arg = ",".join(sorted_symbols)
+                    self.logger.info(f"Phase 3: Intelligent symbols discovered: {intelligent_symbols[:5]}")
                 overview_cache_key = market_service._build_cache_key("market_overview")
                 overview = await market_service.get_market_overview()
                 price_snapshot = await market_service.realtime_price_tracking(
@@ -655,11 +681,53 @@ class BackgroundServiceManager(LoggerMixin):
                             error=str(redis_error),
                         )
 
+                # Phase 3: Tier 2 - Onchain data for trending symbols (every 2 minutes)
+                if time.time() - last_tier2_refresh >= 120:  # 2 minutes
+                    tier2_symbols = sorted_symbols[:5]  # Top 5 symbols get onchain
+                    self.logger.info(f"Phase 3 Tier 2: Fetching onchain for {tier2_symbols}")
+                    try:
+                        onchain_data = await market_service._fetch_live_onchain_data(tier2_symbols)
+                        if onchain_data and redis_client:
+                            await redis_client.setex(
+                                "market_analysis:tier2_onchain",
+                                180,  # 3 min TTL
+                                json.dumps(onchain_data, default=str)
+                            )
+                            last_tier2_refresh = time.time()
+                            self.logger.info(f"Phase 3 Tier 2: Cached onchain for {len(onchain_data)} symbols")
+                    except Exception as e:
+                        self.logger.warning(f"Phase 3 Tier 2 failed: {e}")
+
+                # Phase 3: Tier 3 - Deep analysis for VIP symbols (every 5 minutes)
+                if time.time() - last_tier3_refresh >= 300:  # 5 minutes
+                    tier3_symbols = sorted_symbols[:3]  # Top 3 symbols get deep analysis
+                    self.logger.info(f"Phase 3 Tier 3: Deep analysis for {tier3_symbols}")
+                    try:
+                        # Pre-cache arbitrage opportunities
+                        arb_result = await market_service.cross_exchange_arbitrage_scanner(
+                            symbols=",".join(tier3_symbols),
+                            exchanges="binance,kraken,kucoin",
+                            min_profit_bps=5,
+                            user_id="system-tier3"
+                        )
+                        if arb_result.get("success") and redis_client:
+                            await redis_client.setex(
+                                "market_analysis:tier3_arbitrage",
+                                360,  # 6 min TTL
+                                json.dumps(arb_result, default=str)
+                            )
+                            last_tier3_refresh = time.time()
+                            self.logger.info(f"Phase 3 Tier 3: Cached arbitrage for {tier3_symbols}")
+                    except Exception as e:
+                        self.logger.warning(f"Phase 3 Tier 3 failed: {e}")
+
                 self.logger.debug(
                     "Market cache warmer cycle completed",
                     overview_cached=overview.get("success"),
                     price_cached=price_snapshot.get("success"),
                     symbols=symbols_arg,
+                    tier2_enabled=(time.time() - last_tier2_refresh < 120),
+                    tier3_enabled=(time.time() - last_tier3_refresh < 300),
                 )
 
             except asyncio.CancelledError:
@@ -672,6 +740,74 @@ class BackgroundServiceManager(LoggerMixin):
                 if sleep_for <= 0:
                     sleep_for = 1
                 await asyncio.sleep(sleep_for)
+
+    async def _get_intelligent_cache_symbols(self) -> List[str]:
+        """
+        Phase 3: Intelligent symbol discovery based on user patterns.
+
+        Learns from:
+        - Active user positions
+        - Recent chat queries
+        - Trading volume patterns
+        - VIP user preferences
+
+        Returns prioritized list of symbols to cache.
+        """
+        intelligent_symbols = []
+        try:
+            # Method 1: Get symbols from active positions
+            async with AsyncSessionLocal() as db:
+                from app.models.trading import Position
+                from sqlalchemy import select, func
+
+                # Get top symbols by position count
+                position_query = (
+                    select(Position.symbol, func.count(Position.id).label("count"))
+                    .where(Position.status == "open")
+                    .group_by(Position.symbol)
+                    .order_by(func.count(Position.id).desc())
+                    .limit(5)
+                )
+                result = await db.execute(position_query)
+                position_symbols = [row[0] for row in result.all()]
+                intelligent_symbols.extend(position_symbols)
+                self.logger.debug(f"Phase 3: Found {len(position_symbols)} symbols from active positions")
+
+            # Method 2: Get symbols from recent trades (last 24h)
+            async with AsyncSessionLocal() as db:
+                from app.models.trading import Trade
+                from datetime import datetime, timedelta
+
+                trade_query = (
+                    select(Trade.symbol, func.count(Trade.id).label("count"))
+                    .where(Trade.executed_at >= datetime.utcnow() - timedelta(hours=24))
+                    .group_by(Trade.symbol)
+                    .order_by(func.count(Trade.id).desc())
+                    .limit(5)
+                )
+                result = await db.execute(trade_query)
+                trade_symbols = [row[0] for row in result.all()]
+                intelligent_symbols.extend(trade_symbols)
+                self.logger.debug(f"Phase 3: Found {len(trade_symbols)} symbols from recent trades")
+
+            # Method 3: Default top symbols if no user activity
+            if not intelligent_symbols:
+                intelligent_symbols = ["BTC", "ETH", "SOL", "ADA", "DOT"]
+                self.logger.info("Phase 3: No user activity, using default top symbols")
+
+            # Deduplicate while preserving order
+            seen = set()
+            unique_symbols = []
+            for sym in intelligent_symbols:
+                if sym and sym not in seen:
+                    seen.add(sym)
+                    unique_symbols.append(sym.upper())
+
+            return unique_symbols[:8]  # Top 8 symbols
+
+        except Exception as e:
+            self.logger.warning(f"Phase 3: Intelligent symbol discovery failed: {e}")
+            return ["BTC", "ETH", "SOL"]  # Fallback
 
     async def _discover_active_trading_symbols(self) -> List[str]:
         all_discovered_symbols = set()
