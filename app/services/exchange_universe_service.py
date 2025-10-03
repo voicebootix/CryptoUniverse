@@ -192,9 +192,10 @@ class ExchangeUniverseService(LoggerMixin):
 
         accounts = await self._fetch_exchange_accounts(user_id) if user_id else []
         symbol_set: set[str] = set()
+        exchanges_lower = {str(exchange).lower() for exchange in exchanges if exchange}
 
         for account in accounts:
-            if account.exchange_name.lower() not in exchanges:
+            if account.exchange_name.lower() not in exchanges_lower:
                 continue
             allowed = account.allowed_symbols or []
             for symbol in allowed:
