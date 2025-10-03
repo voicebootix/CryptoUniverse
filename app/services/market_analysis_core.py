@@ -392,6 +392,9 @@ class MarketAnalysisService(LoggerMixin):
             requested_symbols = [str(s).strip() for s in symbols if str(s).strip()]
 
         requested_symbols = [token.upper() for token in requested_symbols]
+        if requested_symbols:
+            # Preserve caller ordering while normalizing case and removing duplicates.
+            requested_symbols = list(dict.fromkeys(requested_symbols))
 
         if isinstance(exchanges, str):
             exchange_tokens = [e.strip() for e in exchanges.split(",") if e.strip()]

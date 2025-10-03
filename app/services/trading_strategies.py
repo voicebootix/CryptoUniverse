@@ -3317,11 +3317,12 @@ class TradingStrategiesService(LoggerMixin):
         single_exchange = opportunity.get("exchange")
         differential = opportunity.get("funding_differential") or opportunity.get("funding_rate", 0)
 
-        has_paired_legs = bool(long_exchange and short_exchange and long_exchange != short_exchange)
+        has_distinct_long_short = bool(long_exchange and short_exchange and long_exchange != short_exchange)
+        is_cross_exchange = opportunity_type == "CROSS_EXCHANGE_FUNDING_ARBITRAGE" or has_distinct_long_short
 
         steps: List[str] = []
 
-        if has_paired_legs or opportunity_type == "CROSS_EXCHANGE_FUNDING_ARBITRAGE":
+        if is_cross_exchange:
             long_leg_exchange = long_exchange or single_exchange
             short_leg_exchange = short_exchange or single_exchange
 
@@ -3355,11 +3356,14 @@ class TradingStrategiesService(LoggerMixin):
         steps.append("Set alerts for funding rate changes and large price deviations.")
 
         if differential:
-            steps.append(
-                f"Monitor funding differential (~{round(differential * 100, 2)}%) every funding interval and rebalance if it narrows."
-            )
+            monitor_statement = f"Monitor funding differential (~{round(differential * 100, 2)}%) every funding interval"
+            if is_cross_exchange:
+                monitor_statement += " and rebalance legs if the spread narrows."
+            else:
+                monitor_statement += " and reassess exposure if the edge compresses."
+            steps.append(monitor_statement)
 
-        if has_paired_legs or opportunity_type == "CROSS_EXCHANGE_FUNDING_ARBITRAGE":
+        if is_cross_exchange:
             steps.append("Close both legs simultaneously when funding edge drops below threshold or volatility spikes.")
         else:
             steps.append("Close the position when funding edge drops below threshold or volatility spikes.")
