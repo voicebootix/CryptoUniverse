@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Dict
 
@@ -25,7 +25,7 @@ class TelemetryRecord:
     resolution: Dict[str, Any]
     state_summary: Dict[str, Any]
     outcome: str
-    created_at: datetime = datetime.utcnow()
+    created_at: datetime = field(default_factory=datetime.utcnow)
 
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)

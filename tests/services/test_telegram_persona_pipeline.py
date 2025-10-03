@@ -11,8 +11,8 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from app.api.v1.endpoints.telegram import _process_natural_language  # noqa: E402
-from app.services.unified_ai_manager import InterfaceType as UnifiedInterfaceType  # noqa: E402
+from app.api.v1.endpoints.telegram import _process_natural_language
+from app.services.unified_ai_manager import InterfaceType as UnifiedInterfaceType
 
 
 @pytest.mark.asyncio
