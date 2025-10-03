@@ -286,19 +286,42 @@ class ExchangeUniverseService(LoggerMixin):
 
             if isinstance(data, dict):
                 candidates: Iterable[Any]
-                if "symbols" in data and isinstance(data["symbols"], (list, tuple)):
-                    candidates = data["symbols"]
-                elif "data" in data and isinstance(data["data"], (list, tuple)):
-                    candidates = data["data"]
+                if "symbols" in data:
+                    symbols_value = data["symbols"]
+                    if isinstance(symbols_value, dict):
+                        candidates = symbols_value.keys()
+                    else:
+                        candidates = symbols_value
+                elif "data" in data:
+                    data_value = data["data"]
+                    if isinstance(data_value, dict):
+                        candidates = data_value.keys()
+                    else:
+                        candidates = data_value
                 else:
                     candidates = data.keys()
-                return [str(item).upper() for item in candidates if isinstance(item, str)]
+                return self._normalize_cached_symbols(candidates)
 
-            if isinstance(data, list):
-                return [str(item).upper() for item in data if isinstance(item, str)]
+            if isinstance(data, (list, tuple, set)):
+                return self._normalize_cached_symbols(data)
         except Exception as exc:  # pragma: no cover - best effort only
             self.logger.warning("Failed to read exchange universe cache", error=str(exc))
         return None
+
+    def _normalize_cached_symbols(self, candidates: Iterable[Any]) -> List[str]:
+        normalized: List[str] = []
+        for item in candidates:
+            value: Any = item
+            if isinstance(value, bytes):
+                try:
+                    value = value.decode()
+                except Exception:  # pragma: no cover - defensive
+                    value = value.decode(errors="ignore") if hasattr(value, "decode") else str(value)
+            if isinstance(value, str):
+                token = value.strip()
+                if token:
+                    normalized.append(token.upper())
+        return normalized
 
     async def _store_in_redis(self, key: str, values: Sequence[str], ttl: int) -> None:
         await self._ensure_redis()

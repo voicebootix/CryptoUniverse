@@ -595,7 +595,17 @@ class MarketDataFeeds:
             if not isinstance(payload, dict):
                 return None
 
-            data = payload.get("data") if "data" in payload else payload
+            data: Any = payload.get("data") if "data" in payload else payload
+            if isinstance(data, bytes):
+                data = data.decode()
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except (json.JSONDecodeError, TypeError):
+                    try:
+                        data = ast.literal_eval(str(data))
+                    except (ValueError, SyntaxError):
+                        return None
             if isinstance(data, dict):
                 return data
             return None
