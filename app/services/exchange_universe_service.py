@@ -256,9 +256,10 @@ class ExchangeUniverseService(LoggerMixin):
         except Exception as exc:  # pragma: no cover - optional dependency
             self.logger.warning("Simple asset discovery failed", error=str(exc))
 
-        # Final fallback – confirmed working majors
-        defaults = ["BTC", "ETH", "SOL", "ADA", "DOT", "AVAX", "MATIC", "LINK"]
-        return defaults[:limit] if limit else defaults
+        # Final fallback – if upstream discovery fails return an empty list so
+        # callers can decide how to proceed without introducing hard-coded
+        # assets that may not exist on the user's exchanges.
+        return []
 
     async def _read_from_redis(self, key: str) -> Optional[List[str]]:
         await self._ensure_redis()

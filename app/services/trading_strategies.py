@@ -33,7 +33,7 @@ import json
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 import uuid
 import numpy as np
 import pandas as pd
@@ -1203,6 +1203,33 @@ class TradingStrategiesService(LoggerMixin):
             async with AsyncSessionLocal() as session:
                 mapping = await self._load_or_seed_platform_strategies(session)
                 self._platform_strategy_ids = mapping
+
+    # ------------------------------------------------------------------
+    # Dynamic universe helpers
+    # ------------------------------------------------------------------
+
+    async def _fetch_dynamic_symbol_bases(
+        self,
+        user_id: Optional[str],
+        exchanges: Sequence[str],
+        *,
+        limit: Optional[int] = None,
+    ) -> List[str]:
+        """Return unique base symbols discovered for the supplied exchanges."""
+
+        effective_exchanges = list(exchanges) if exchanges else list(
+            self.market_analyzer.exchange_manager.exchange_configs.keys()
+        )
+
+        symbol_universe = await exchange_universe_service.get_symbol_universe(
+            user_id,
+            None,
+            effective_exchanges,
+            limit=limit,
+        )
+
+        normalized_symbols = [_normalize_base_symbol(symbol) for symbol in symbol_universe]
+        return list(dict.fromkeys(sym for sym in normalized_symbols if sym))
 
     # ------------------------------------------------------------------
     # Transparency, regulatory and educational context helpers
@@ -2661,15 +2688,25 @@ class TradingStrategiesService(LoggerMixin):
             
             # If no positions exist, suggest initial allocation
             if not current_positions and not all_recommendations:
-                # Suggest diversified initial portfolio
-                suggested_assets = ["BTC", "ETH", "BNB", "SOL", "ADA", "MATIC", "DOT", "AVAX"]
-                for asset in suggested_assets[:6]:  # Top 6 assets
+                exchanges = await exchange_universe_service.get_user_exchanges(
+                    user_id,
+                    None,
+                    default_exchanges=self.market_analyzer.exchange_manager.exchange_configs.keys(),
+                )
+                dynamic_assets = await self._fetch_dynamic_symbol_bases(
+                    user_id,
+                    exchanges,
+                    limit=6,
+                )
+
+                for asset in dynamic_assets:
+                    pair_symbol = asset if "/" in asset else f"{asset}/USDT"
                     all_recommendations.append({
                         "strategy": "INITIAL_ALLOCATION",
-                        "symbol": f"{asset}/USDT",
+                        "symbol": pair_symbol,
                         "action": "BUY",
-                        "amount": 0.167,  # Equal weight ~16.7% each
-                        "rationale": "Initial portfolio allocation - diversified across major assets",
+                        "amount": round(1 / max(len(dynamic_assets), 1), 3),
+                        "rationale": "Initial portfolio allocation derived from dynamic exchange universe",
                         "improvement_potential": 0.15,  # 15% expected annual return
                         "risk_reduction": 0.3,  # 30% risk reduction vs single asset
                         "urgency": "HIGH"
@@ -2928,11 +2965,31 @@ class TradingStrategiesService(LoggerMixin):
         """DEDICATED MARGIN STATUS - Comprehensive margin analysis and monitoring."""
         
         try:
-            symbol_list = symbols.split(",") if symbols else ["BTC", "ETH", "BNB"]
-            exchange_list = [e.strip().lower() for e in exchanges.split(",")]
-            if "all" in exchange_list:
-                exchange_list = ["binance", "kraken", "kucoin", "bybit"]
-            
+            if isinstance(exchanges, str):
+                requested_exchanges = [e.strip() for e in exchanges.split(",") if e.strip()]
+            else:
+                requested_exchanges = [str(e).strip() for e in exchanges or [] if str(e).strip()]
+
+            if not requested_exchanges or any(token.lower() == "all" for token in requested_exchanges):
+                requested_exchanges = []
+
+            exchange_list = await exchange_universe_service.get_user_exchanges(
+                user_id,
+                requested_exchanges,
+                default_exchanges=self.market_analyzer.exchange_manager.exchange_configs.keys(),
+            )
+            if not exchange_list:
+                exchange_list = list(self.market_analyzer.exchange_manager.exchange_configs.keys())
+
+            if symbols:
+                symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+            else:
+                symbol_list = await self._fetch_dynamic_symbol_bases(
+                    user_id,
+                    exchange_list,
+                    limit=25,
+                )
+
             margin_result = {
                 "overall_margin_health": {},
                 "by_exchange": {},
@@ -3094,6 +3151,8 @@ class TradingStrategiesService(LoggerMixin):
                 requested_exchanges,
                 default_exchanges=self.market_analyzer.exchange_manager.exchange_configs.keys(),
             )
+            if not exchange_list:
+                exchange_list = list(self.market_analyzer.exchange_manager.exchange_configs.keys())
 
             symbol_universe = await exchange_universe_service.get_symbol_universe(
                 user_id,
@@ -3105,7 +3164,11 @@ class TradingStrategiesService(LoggerMixin):
             symbol_list = list(dict.fromkeys(s for s in normalized_symbols if s))
 
             if not symbol_list:
-                symbol_list = ["BTC", "ETH", "SOL", "ADA"]
+                symbol_list = await self._fetch_dynamic_symbol_bases(
+                    user_id,
+                    exchange_list,
+                    limit=25,
+                )
 
             funding_result = {
                 "opportunities": [],
@@ -3989,6 +4052,8 @@ class TradingStrategiesService(LoggerMixin):
                 requested_exchanges,
                 default_exchanges=self.market_analyzer.exchange_manager.exchange_configs.keys(),
             )
+            if not exchange_list:
+                exchange_list = list(self.market_analyzer.exchange_manager.exchange_configs.keys())
 
             symbol_universe = await exchange_universe_service.get_symbol_universe(
                 user_id,
@@ -4001,8 +4066,14 @@ class TradingStrategiesService(LoggerMixin):
             symbol_list = list(dict.fromkeys(s for s in normalized_symbols if s))
 
             if not symbol_list:
-                fallback = [s.strip().upper() for s in universe.split(",") if s.strip()]
-                symbol_list = fallback or ["BTC", "ETH", "SOL", "ADA", "MATIC"]
+                fallback_limit = params.get("max_universe")
+                symbol_list = await self._fetch_dynamic_symbol_bases(
+                    user_id,
+                    exchange_list,
+                    limit=fallback_limit,
+                )
+                if not symbol_list and universe:
+                    symbol_list = [s.strip().upper() for s in universe.split(",") if s.strip()]
 
             stat_arb_result = {
                 "universe": symbol_list,
