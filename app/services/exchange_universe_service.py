@@ -15,7 +15,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy import select
 
@@ -30,7 +30,7 @@ SYMBOL_CACHE_TTL = 900    # 15 minutes
 
 @dataclass
 class _CacheEntry:
-    value: Sequence[str]
+    value: Sequence[str] | Tuple[str, int]
     expires_at: float
 
 
@@ -42,6 +42,7 @@ class ExchangeUniverseService(LoggerMixin):
         self._redis_lock = asyncio.Lock()
         self._exchange_cache: dict[str, _CacheEntry] = {}
         self._symbol_cache: dict[str, _CacheEntry] = {}
+        self._user_asset_cache: dict[str, _CacheEntry] = {}
 
     async def _ensure_redis(self) -> None:
         if self._redis:
@@ -103,7 +104,11 @@ class ExchangeUniverseService(LoggerMixin):
         if normalized_request:
             return normalized_request[:limit] if limit else normalized_request
 
-        key_components = [user_id or "global", ",".join(sorted(exchanges))]
+        asset_prefs = await self._get_user_asset_preferences(user_id)
+        effective_limit = limit or (asset_prefs.symbol_limit if asset_prefs else None)
+        min_tier = asset_prefs.max_tier if asset_prefs else "tier_retail"
+
+        key_components = [user_id or "global", ",".join(sorted(exchanges)), min_tier]
         if asset_types:
             key_components.append(",".join(sorted(asset_types)))
         cache_key = "symbols:" + "|".join(key_components)
@@ -111,14 +116,17 @@ class ExchangeUniverseService(LoggerMixin):
         cached = await self._get_cached_value(self._symbol_cache, cache_key)
         if cached is not None:
             cached_list = list(cached)
-            return cached_list[:limit] if limit else cached_list
+            return cached_list[:effective_limit] if effective_limit else cached_list
 
-        symbols = await self._load_user_symbols(user_id, exchanges, asset_types or ("spot",))
+        symbols = await self._load_user_symbols(
+            user_id,
+            exchanges,
+            asset_types or ("spot",),
+            min_tier,
+            effective_limit,
+        )
         if not symbols:
-            symbols = await self._fallback_symbols(limit)
-
-        if limit:
-            symbols = symbols[:limit]
+            symbols = await self._fallback_symbols(effective_limit, min_tier)
 
         await self._set_cached_value(self._symbol_cache, cache_key, symbols, SYMBOL_CACHE_TTL)
         await self._store_in_redis(cache_key, symbols, SYMBOL_CACHE_TTL)
@@ -136,6 +144,7 @@ class ExchangeUniverseService(LoggerMixin):
         for key in keys_to_delete:
             self._exchange_cache.pop(key, None)
             self._symbol_cache.pop(key, None)
+        self._user_asset_cache.pop(f"asset_prefs:{user_id}", None)
 
         await self._ensure_redis()
         if self._redis:
@@ -166,11 +175,20 @@ class ExchangeUniverseService(LoggerMixin):
         user_id: Optional[str],
         exchanges: Sequence[str],
         asset_types: Sequence[str],
+        min_tier: str,
+        limit: Optional[int],
     ) -> List[str]:
-        redis_key = "symbols:" + "|".join([user_id or "global", ",".join(sorted(exchanges)), ",".join(sorted(asset_types))])
+        redis_key = "symbols:" + "|".join(
+            [
+                user_id or "global",
+                ",".join(sorted(exchanges)),
+                ",".join(sorted(asset_types)),
+                min_tier,
+            ]
+        )
         redis_values = await self._read_from_redis(redis_key)
         if redis_values is not None:
-            return redis_values
+            return redis_values[:limit] if limit else redis_values
 
         accounts = await self._fetch_exchange_accounts(user_id) if user_id else []
         symbol_set: set[str] = set()
@@ -183,10 +201,10 @@ class ExchangeUniverseService(LoggerMixin):
                 if isinstance(symbol, str) and symbol:
                     symbol_set.add(symbol.upper())
 
-        symbols: List[str] = sorted(symbol_set)
+        symbols: List[str] = await self._rank_symbols_by_volume(symbol_set, min_tier, limit)
 
         if not symbols:
-            symbols = await self._fallback_symbols(None)
+            symbols = await self._fallback_symbols(limit, min_tier)
 
         await self._store_in_redis(redis_key, symbols, SYMBOL_CACHE_TTL)
         return symbols
@@ -209,7 +227,7 @@ class ExchangeUniverseService(LoggerMixin):
             )
             return list(result.scalars().all())
 
-    async def _fallback_symbols(self, limit: Optional[int]) -> List[str]:
+    async def _fallback_symbols(self, limit: Optional[int], min_tier: str) -> List[str]:
         """Best-effort discovery for dynamic symbols when user data is absent."""
 
         try:
@@ -220,7 +238,7 @@ class ExchangeUniverseService(LoggerMixin):
 
             assets = await enterprise_asset_filter.get_top_assets(
                 count=limit or 50,
-                min_tier="tier_retail",
+                min_tier=min_tier,
             )
             symbols = [asset.symbol.upper() for asset in assets if getattr(asset, "symbol", None)]
             if symbols:
@@ -273,7 +291,7 @@ class ExchangeUniverseService(LoggerMixin):
         self,
         cache: dict[str, _CacheEntry],
         key: str,
-    ) -> Optional[Sequence[str]]:
+    ) -> Optional[Sequence[str] | Tuple[str, int]]:
         entry = cache.get(key)
         if not entry:
             return None
@@ -286,7 +304,7 @@ class ExchangeUniverseService(LoggerMixin):
         self,
         cache: dict[str, _CacheEntry],
         key: str,
-        values: Sequence[str],
+        values: Sequence[str] | Tuple[str, int],
         ttl: int,
     ) -> None:
         cache[key] = _CacheEntry(value=tuple(values), expires_at=time.monotonic() + ttl)
@@ -310,6 +328,118 @@ class ExchangeUniverseService(LoggerMixin):
             seen.add(item.lower())
             unique.append(item)
         return unique
+
+    async def _get_asset_filter(self):  # pragma: no cover - exercised via higher level tests
+        try:
+            from app.services.dynamic_asset_filter import enterprise_asset_filter
+
+            if not getattr(enterprise_asset_filter, "session", None):
+                await enterprise_asset_filter.async_init()
+
+            return enterprise_asset_filter
+        except Exception as exc:
+            self.logger.warning("Asset filter unavailable", error=str(exc))
+            return None
+
+    async def _get_user_asset_preferences(self, user_id: Optional[str]) -> Optional["_UserAssetPreferences"]:
+        if not user_id:
+            return None
+
+        cache_key = f"asset_prefs:{user_id}"
+        cached = await self._get_cached_value(self._user_asset_cache, cache_key)
+        if cached is not None:
+            return _UserAssetPreferences(*cached)
+
+        tier_mapping: dict[str, Tuple[str, int]] = {
+            "basic": ("tier_retail", 50),
+            "pro": ("tier_professional", 200),
+            "enterprise": ("tier_institutional", 1000),
+        }
+
+        tier_name = "basic"
+        try:
+            from app.services.strategy_marketplace_service import strategy_marketplace_service
+
+            portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+            if portfolio.get("success"):
+                strategies = portfolio.get("active_strategies", [])
+                total_cost = portfolio.get("total_monthly_cost", 0)
+
+                if len(strategies) >= 10 and total_cost >= 300:
+                    tier_name = "enterprise"
+                elif len(strategies) >= 5 and total_cost >= 100:
+                    tier_name = "pro"
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to determine user asset tier", user_id=user_id, error=str(exc)
+            )
+
+        max_tier, symbol_limit = tier_mapping.get(tier_name, ("tier_retail", 50))
+        prefs = _UserAssetPreferences(max_tier=max_tier, symbol_limit=symbol_limit)
+
+        await self._set_cached_value(
+            self._user_asset_cache,
+            cache_key,
+            (prefs.max_tier, prefs.symbol_limit),
+            SYMBOL_CACHE_TTL,
+        )
+        return prefs
+
+    async def _rank_symbols_by_volume(
+        self,
+        symbols: Iterable[str],
+        min_tier: str,
+        limit: Optional[int],
+    ) -> List[str]:
+        normalized: List[str] = []
+        seen = set()
+        for symbol in symbols:
+            if not symbol:
+                continue
+            upper = str(symbol).upper()
+            if upper in seen:
+                continue
+            seen.add(upper)
+            normalized.append(upper)
+
+        if not normalized:
+            return []
+
+        asset_filter = await self._get_asset_filter()
+        if not asset_filter:
+            return normalized[:limit] if limit else normalized
+
+        try:
+            asset_map = await asset_filter.get_assets_for_symbol_list(normalized)
+        except Exception as exc:
+            self.logger.warning("Symbol ranking failed", error=str(exc))
+            return normalized[:limit] if limit else normalized
+
+        priority_map = {tier.name: tier.priority for tier in asset_filter.VOLUME_TIERS}
+        allowed_priority = priority_map.get(min_tier, priority_map.get("tier_any", 99))
+
+        filtered = [
+            symbol
+            for symbol in normalized
+            if priority_map.get(getattr(asset_map.get(symbol), "tier", "tier_any"), 99)
+            <= allowed_priority
+        ]
+
+        if not filtered:
+            filtered = normalized
+
+        filtered.sort(
+            key=lambda sym: getattr(asset_map.get(sym), "volume_24h_usd", 0),
+            reverse=True,
+        )
+
+        return filtered[:limit] if limit else filtered
+
+
+@dataclass
+class _UserAssetPreferences:
+    max_tier: str
+    symbol_limit: int
 
 
 exchange_universe_service = ExchangeUniverseService()
