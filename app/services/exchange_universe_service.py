@@ -15,7 +15,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy import select
 
@@ -270,9 +270,29 @@ class ExchangeUniverseService(LoggerMixin):
             raw = await self._redis.get(key)
             if not raw:
                 return None
-            if isinstance(raw, bytes):
-                raw = raw.decode()
-            data = json.loads(raw)
+
+            if isinstance(raw, (list, tuple)):
+                data: Any = list(raw)
+            elif isinstance(raw, dict):
+                data = raw
+            else:
+                if isinstance(raw, bytes):
+                    raw = raw.decode()
+                if isinstance(raw, str):
+                    data = json.loads(raw)
+                else:
+                    return None
+
+            if isinstance(data, dict):
+                candidates: Iterable[Any]
+                if "symbols" in data and isinstance(data["symbols"], (list, tuple)):
+                    candidates = data["symbols"]
+                elif "data" in data and isinstance(data["data"], (list, tuple)):
+                    candidates = data["data"]
+                else:
+                    candidates = data.keys()
+                return [str(item).upper() for item in candidates if isinstance(item, str)]
+
             if isinstance(data, list):
                 return [str(item).upper() for item in data if isinstance(item, str)]
         except Exception as exc:  # pragma: no cover - best effort only

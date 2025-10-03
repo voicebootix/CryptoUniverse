@@ -586,7 +586,7 @@ class MarketDataFeeds:
                     payload = json.loads(raw)
                 except (json.JSONDecodeError, TypeError):
                     try:
-                        payload = ast.literal_eval(raw)
+                        payload = ast.literal_eval(str(raw))
                     except (ValueError, SyntaxError):
                         return None
             else:
