@@ -64,9 +64,28 @@ from app.models.analytics import PerformanceMetric, RiskMetric
 from app.models.market_data import BacktestResult
 from app.services.trade_execution import TradeExecutionService
 from app.services.market_analysis_core import MarketAnalysisService
+from app.services.exchange_universe_service import exchange_universe_service
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
+
+
+def _normalize_base_symbol(symbol: str) -> str:
+    """Return a base asset code suitable for exchange universe queries."""
+
+    if not symbol:
+        return ""
+
+    normalized = str(symbol).upper().strip()
+    if "/" in normalized:
+        return normalized.split("/", 1)[0]
+
+    stable_suffixes = ("USDT", "USDC", "BUSD", "USD")
+    for suffix in stable_suffixes:
+        if normalized.endswith(suffix) and len(normalized) > len(suffix):
+            return normalized[: -len(suffix)]
+
+    return normalized
 
 
 # Platform AI strategy definitions
@@ -1814,6 +1833,16 @@ class TradingStrategiesService(LoggerMixin):
         self.logger.info("Executing strategy", function=function, strategy_type=strategy_type, symbol=symbol)
 
         parameters = parameters or {}
+        symbol_override = parameters.get("symbol")
+        if symbol_override:
+            symbol = str(symbol_override)
+
+        symbols_param = parameters.get("symbols")
+        exchanges_param = parameters.get("exchanges")
+        universe_param = parameters.get("universe")
+        pair_symbols_param = parameters.get("pair_symbols") or parameters.get("pair_symbol")
+        analysis_type_param = parameters.get("analysis_type")
+
         strategy_params = StrategyParameters(
             symbol=symbol,
             quantity=parameters.get("quantity", 0.01),
@@ -1839,13 +1868,26 @@ class TradingStrategiesService(LoggerMixin):
                 )
 
             elif function in ["algorithmic_trading", "pairs_trading", "statistical_arbitrage", "market_making", "scalping_strategy"]:
+                strategy_symbol = symbol
+                if function == "pairs_trading" and pair_symbols_param:
+                    strategy_symbol = str(pair_symbols_param)
+                elif function == "statistical_arbitrage" and universe_param:
+                    strategy_symbol = str(universe_param)
+                elif symbol_override:
+                    strategy_symbol = str(symbol)
+
+                strategy_params.symbol = strategy_symbol
+
                 strategy_result = await self._execute_algorithmic_strategy(
-                    function, strategy_type, symbol, strategy_params, user_id
+                    function, strategy_type, strategy_symbol, strategy_params, user_id, parameters
                 )
 
             elif function == "risk_management":
                 strategy_result = await self.risk_management(
-                    symbols=symbol, user_id=user_id
+                    analysis_type=analysis_type_param or "comprehensive",
+                    symbols=symbols_param or symbol,
+                    parameters=parameters,
+                    user_id=user_id
                 )
 
             elif function in ["position_management", "portfolio_optimization"]:
@@ -1855,7 +1897,10 @@ class TradingStrategiesService(LoggerMixin):
 
             elif function == "funding_arbitrage":
                 strategy_result = await self.funding_arbitrage(
-                    symbols=symbol, user_id=user_id
+                    symbols=symbols_param or symbol,
+                    exchanges=exchanges_param or "all",
+                    min_funding_rate=parameters.get("min_funding_rate", 0.005),
+                    user_id=user_id
                 )
 
             elif function == "calculate_greeks":
@@ -2466,25 +2511,29 @@ class TradingStrategiesService(LoggerMixin):
         strategy_type: str,
         symbol: str,
         parameters: StrategyParameters,
-        user_id: str
+        user_id: str,
+        raw_parameters: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute algorithmic trading strategies with real implementations."""
-        
+
         try:
+            raw_params = raw_parameters or {}
+
             if function == "pairs_trading":
                 return await self.pairs_trading(
                     pair_symbols=symbol,
                     strategy_type=strategy_type or "statistical_arbitrage",
                     user_id=user_id
                 )
-            
+
             elif function == "statistical_arbitrage":
                 return await self.statistical_arbitrage(
                     universe=symbol,
                     strategy_type=strategy_type or "mean_reversion",
+                    parameters=raw_params,
                     user_id=user_id
                 )
-            
+
             elif function == "market_making":
                 return await self.market_making(
                     symbol=symbol,
@@ -3022,9 +3071,42 @@ class TradingStrategiesService(LoggerMixin):
         """DEDICATED FUNDING ARBITRAGE - Exploit funding rate differentials."""
         
         try:
-            symbol_list = [s.strip().upper() for s in symbols.split(",")]
-            exchange_list = [e.strip().lower() for e in exchanges.split(",")]
-            
+            if isinstance(symbols, str):
+                requested_symbols = [s.strip() for s in symbols.split(",") if s.strip()]
+            else:
+                requested_symbols = [str(s).strip() for s in symbols or [] if str(s).strip()]
+
+            dynamic_tokens = {"SMART_ADAPTIVE", "DYNAMIC_DISCOVERY", "ALL"}
+            if not requested_symbols or any(token.upper() in dynamic_tokens for token in requested_symbols):
+                requested_symbols = []
+
+            if isinstance(exchanges, str):
+                requested_exchanges = [e.strip() for e in exchanges.split(",") if e.strip()]
+            else:
+                requested_exchanges = [str(e).strip() for e in exchanges or [] if str(e).strip()]
+
+            dynamic_exchange_tokens = {"all"}
+            if not requested_exchanges or any(token.lower() in dynamic_exchange_tokens for token in requested_exchanges):
+                requested_exchanges = []
+
+            exchange_list = await exchange_universe_service.get_user_exchanges(
+                user_id,
+                requested_exchanges,
+                default_exchanges=self.market_analyzer.exchange_manager.exchange_configs.keys(),
+            )
+
+            symbol_universe = await exchange_universe_service.get_symbol_universe(
+                user_id,
+                requested_symbols or None,
+                exchange_list,
+            )
+
+            normalized_symbols = [_normalize_base_symbol(symbol) for symbol in symbol_universe]
+            symbol_list = list(dict.fromkeys(s for s in normalized_symbols if s))
+
+            if not symbol_list:
+                symbol_list = ["BTC", "ETH", "SOL", "ADA"]
+
             funding_result = {
                 "opportunities": [],
                 "funding_analysis": {},
@@ -3161,7 +3243,30 @@ class TradingStrategiesService(LoggerMixin):
         except Exception as e:
             self.logger.error("Funding arbitrage analysis failed", error=str(e), exc_info=True)
             return {"success": False, "error": str(e), "function": "funding_arbitrage"}
-    
+
+    def _generate_funding_arbitrage_steps(self, opportunity: Dict[str, Any]) -> List[str]:
+        """Create a deterministic playbook for executing a funding arbitrage trade."""
+
+        long_exchange = opportunity.get("long_exchange") or opportunity.get("exchange")
+        short_exchange = opportunity.get("short_exchange") or opportunity.get("exchange")
+        differential = opportunity.get("funding_differential") or opportunity.get("funding_rate", 0)
+
+        steps = [
+            "Allocate capital to both exchanges and confirm wallet balances.",
+            f"Open LONG perpetual position on {long_exchange} to collect positive funding.",
+            f"Open SHORT perpetual position on {short_exchange} to hedge price exposure.",
+            "Verify position sizes are matched notional to remain delta neutral.",
+            "Set alerts for funding rate changes and large price deviations.",
+        ]
+
+        if differential:
+            steps.append(
+                f"Monitor funding differential (~{round(differential * 100, 2)}%) every funding interval and rebalance if it narrows."
+            )
+
+        steps.append("Close both legs simultaneously when funding edge drops below threshold or volatility spikes.")
+        return steps
+
     async def basis_trade(
         self,
         symbol: str = "BTC",
@@ -3863,8 +3968,42 @@ class TradingStrategiesService(LoggerMixin):
         
         try:
             params = parameters or {}
-            symbol_list = [s.strip().upper() for s in universe.split(",")]
-            
+
+            if isinstance(universe, str):
+                requested_symbols = [s.strip() for s in universe.split(",") if s.strip()]
+            else:
+                requested_symbols = [str(s).strip() for s in universe or [] if str(s).strip()]
+
+            dynamic_tokens = {"SMART_ADAPTIVE", "DYNAMIC_DISCOVERY", "ALL"}
+            if not requested_symbols or any(token.upper() in dynamic_tokens for token in requested_symbols):
+                requested_symbols = []
+
+            param_exchanges = params.get("exchanges")
+            if isinstance(param_exchanges, str):
+                requested_exchanges = [e.strip() for e in param_exchanges.split(",") if e.strip()]
+            else:
+                requested_exchanges = [str(e).strip() for e in param_exchanges or [] if str(e).strip()]
+
+            exchange_list = await exchange_universe_service.get_user_exchanges(
+                user_id,
+                requested_exchanges,
+                default_exchanges=self.market_analyzer.exchange_manager.exchange_configs.keys(),
+            )
+
+            symbol_universe = await exchange_universe_service.get_symbol_universe(
+                user_id,
+                requested_symbols or None,
+                exchange_list,
+                limit=params.get("max_universe"),
+            )
+
+            normalized_symbols = [_normalize_base_symbol(symbol) for symbol in symbol_universe]
+            symbol_list = list(dict.fromkeys(s for s in normalized_symbols if s))
+
+            if not symbol_list:
+                fallback = [s.strip().upper() for s in universe.split(",") if s.strip()]
+                symbol_list = fallback or ["BTC", "ETH", "SOL", "ADA", "MATIC"]
+
             stat_arb_result = {
                 "universe": symbol_list,
                 "strategy_type": strategy_type,
@@ -3876,8 +4015,12 @@ class TradingStrategiesService(LoggerMixin):
             
             # Analyze the universe
             universe_data = {}
+            reference_exchange = exchange_list[0] if exchange_list else "binance"
+
             for symbol in symbol_list:
-                price_data = await self._get_symbol_price("binance", f"{symbol}USDT")
+                price_data = await self._get_symbol_price(reference_exchange, f"{symbol}USDT")
+                if not price_data and reference_exchange != "binance":
+                    price_data = await self._get_symbol_price("binance", f"{symbol}USDT")
                 if price_data:
                     universe_data[symbol] = {
                         "price": float(price_data.get("price", 0)),
@@ -3916,6 +4059,7 @@ class TradingStrategiesService(LoggerMixin):
             stat_arb_result["universe_analysis"] = {
                 "total_symbols": len(symbol_list),
                 "analyzed_symbols": len(performance_scores),
+                "exchanges_scanned": exchange_list,
                 "performance_scores": performance_scores,
                 "ranking": [symbol for symbol, _ in ranked_symbols]
             }
