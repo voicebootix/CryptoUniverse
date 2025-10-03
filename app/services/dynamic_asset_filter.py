@@ -162,25 +162,51 @@ class EnterpriseAssetFilter(LoggerMixin):
         
     async def async_init(self):
         """Initialize async components."""
+
+        if self.session and not self.session.closed and self.dynamic_exchanges:
+            return
+
         try:
             self.redis = await get_redis_client()
-            self.session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=15),
-                headers={
-                    "User-Agent": "CryptoUniverse-Enterprise/2.0 (+https://cryptouniverse.onrender.com)",
-                    "Accept": "application/json",
-                    "Accept-Encoding": "gzip, deflate"
-                }
-            )
-            
-            # Load dynamic exchanges (replaces hardcoded EXCHANGE_APIS)
+        except Exception as exc:  # pragma: no cover - optional dependency
+            self.logger.warning("Redis unavailable for asset filter", error=str(exc))
+            self.redis = None
+
+        await self._ensure_http_session()
+
+        try:
             await self._load_dynamic_exchanges()
-            
-            self.logger.info("🔧 Enterprise Asset Filter initialized with dynamic exchanges",
-                           total_exchanges=len(self.dynamic_exchanges))
-            
-        except Exception as e:
-            self.logger.error("Failed to initialize Asset Filter", error=str(e))
+        except Exception as exc:
+            self.logger.warning(
+                "Dynamic exchange discovery failed; using static roster",
+                error=str(exc),
+            )
+            if not self.dynamic_exchanges:
+                self.dynamic_exchanges = {
+                    exchange_id: {**config, "source": "static_fallback", "priority": 0}
+                    for exchange_id, config in self.EXCHANGE_APIS.items()
+                }
+
+        self.logger.info(
+            "🔧 Enterprise Asset Filter initialised",
+            exchanges=len(self.dynamic_exchanges),
+            http_session_closed=self.session.closed if self.session else True,
+        )
+
+    async def _ensure_http_session(self) -> None:
+        """Create the shared HTTP session if required."""
+
+        if self.session and not self.session.closed:
+            return
+
+        self.session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=15),
+            headers={
+                "User-Agent": "CryptoUniverse-Enterprise/2.0 (+https://cryptouniverse.onrender.com)",
+                "Accept": "application/json",
+                "Accept-Encoding": "gzip, deflate",
+            },
+        )
     
     async def _load_dynamic_exchanges(self):
         """
@@ -190,89 +216,95 @@ class EnterpriseAssetFilter(LoggerMixin):
         NO MORE HARDCODED LIMITATIONS.
         """
         
+        self.dynamic_exchanges = {}
+
+        available_exchanges: List[Dict[str, Any]] = []
+
         try:
-            # Get available exchanges from discovery service
-            available_exchanges = await dynamic_exchange_discovery.get_available_exchanges(
+            discovery_task = dynamic_exchange_discovery.get_available_exchanges(
                 capabilities=["spot_trading", "price_data"],
-                min_volume=1000000  # $1M+ daily volume
+                min_volume=1_000_000,
             )
-            
-            # Convert discovered exchanges to our API format
-            priority = 1
-            # Apply configurable exchange limit (no hardcoded limitations)
-            if self.max_exchanges and self.max_exchanges > 0:
-                exchange_list = available_exchanges[:self.max_exchanges]
-            else:
-                exchange_list = available_exchanges
-            
-            for exchange in exchange_list:
-                exchange_id = exchange["id"]
+            available_exchanges = await asyncio.wait_for(discovery_task, timeout=8.0)
+        except asyncio.TimeoutError:
+            self.logger.warning(
+                "Dynamic exchange discovery timed out; falling back to cached/static list",
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Dynamic exchange discovery failed", error=str(exc), exc_info=True
+            )
+
+        if not available_exchanges:
+            cached_results = getattr(dynamic_exchange_discovery, "discovered_exchanges", {})
+            cached_map = (
+                cached_results.get("discovered_exchanges")
+                if isinstance(cached_results, dict)
+                else {}
+            )
+            for exchange_id, info in cached_map.items():
+                available_exchanges.append(
+                    {
+                        "id": exchange_id,
+                        "name": info.get("name", exchange_id),
+                        "api_url": info.get("api_url", ""),
+                        "capabilities": info.get("capabilities", {}),
+                        "volume_24h": info.get("trade_volume_24h_btc", 0),
+                        "trust_score": info.get("trust_score", 0),
+                    }
+                )
+
+        priority = 1
+        if available_exchanges:
+            exchange_iterable = (
+                available_exchanges[: self.max_exchanges]
+                if self.max_exchanges and self.max_exchanges > 0
+                else available_exchanges
+            )
+
+            for exchange in exchange_iterable:
+                exchange_id = exchange.get("id")
                 api_url = exchange.get("api_url", "")
-                
-                if not api_url:
+
+                if not exchange_id or not api_url:
                     continue
-                
-                # Construct API endpoints based on common patterns
+
                 spot_url = self._construct_spot_api(exchange_id, api_url)
                 futures_url = self._construct_futures_api(exchange_id, api_url)
-                
+                capabilities = exchange.get("capabilities", {})
+
                 self.dynamic_exchanges[exchange_id] = {
-                    "name": exchange["name"],
+                    "name": exchange.get("name", exchange_id),
                     "spot_url": spot_url,
-                    "futures_url": futures_url if exchange["capabilities"].get("futures_trading") else None,
+                    "futures_url": futures_url if capabilities.get("futures_trading") else None,
                     "parser": f"{exchange_id}_parser",
                     "priority": priority,
                     "rate_limit_per_minute": self._estimate_rate_limit(exchange),
                     "trust_score": exchange.get("trust_score", 0),
                     "volume_24h": exchange.get("volume_24h", 0),
-                    "capabilities": exchange["capabilities"],
-                    "source": "dynamic_discovery"
+                    "capabilities": capabilities,
+                    "source": "dynamic_discovery",
                 }
-                
+
                 priority += 1
-            
-            # ALWAYS merge static exchanges with working parsers FIRST
-            # This ensures we have working exchanges even if dynamic discovery finds others
-            static_exchanges = self.EXCHANGE_APIS.copy()
-            for exchange_id, config in static_exchanges.items():
-                config["source"] = "static_with_parser"
-                config["priority"] = 0  # Highest priority
-            
-            # Merge dynamic exchanges (lower priority)
-            for exchange_id, config in list(self.dynamic_exchanges.items()):
-                if exchange_id not in static_exchanges:
-                    # Only add if we don't already have it statically
-                    config["priority"] = config.get("priority", 999) + 100  # Lower priority
-            
-            # Combine: static exchanges first, then dynamic
-            combined_exchanges = {**static_exchanges, **self.dynamic_exchanges}
-            self.dynamic_exchanges = combined_exchanges
-            
-            self.logger.info(f"✅ Exchange loading completed with static priority",
-                           static_exchanges=len(static_exchanges),
-                           dynamic_exchanges=len([e for e in self.dynamic_exchanges.values() 
-                                                if e.get("source") == "dynamic_discovery"]),
-                           total_exchanges=len(self.dynamic_exchanges))
-            
-            self.logger.info(f"✅ Dynamic exchange loading completed",
-                           total_loaded=len(self.dynamic_exchanges),
-                           dynamic_count=len([e for e in self.dynamic_exchanges.values() 
-                                            if e.get("source") == "dynamic_discovery"]))
-            
-        except Exception as e:
-            self.logger.error(f"Failed to load dynamic exchanges", error=str(e))
-            
-            # Use static fallback with working parsers
-            self.dynamic_exchanges = self.EXCHANGE_APIS.copy()
-            for exchange_id in self.dynamic_exchanges:
-                self.dynamic_exchanges[exchange_id]["source"] = "static_fallback"
-                # Ensure parser names match method names
-                if exchange_id == "binance":
-                    self.dynamic_exchanges[exchange_id]["parser"] = "binance_parser"
-                elif exchange_id == "kraken":
-                    self.dynamic_exchanges[exchange_id]["parser"] = "kraken_parser"
-                elif exchange_id == "kucoin":
-                    self.dynamic_exchanges[exchange_id]["parser"] = "kucoin_parser"
+
+        for exchange_id, config in self.EXCHANGE_APIS.items():
+            merged = {**config, "source": config.get("source", "static_with_parser"), "priority": 0}
+            self.dynamic_exchanges.setdefault(exchange_id, merged)
+
+        if not self.dynamic_exchanges:
+            self.dynamic_exchanges = {
+                exchange_id: {**config, "source": "static_fallback", "priority": 0}
+                for exchange_id, config in self.EXCHANGE_APIS.items()
+            }
+
+        self.logger.info(
+            "✅ Exchange roster ready",
+            dynamic_count=sum(
+                1 for cfg in self.dynamic_exchanges.values() if cfg.get("source") == "dynamic_discovery"
+            ),
+            total_exchanges=len(self.dynamic_exchanges),
+        )
     
     def _construct_spot_api(self, exchange_id: str, api_url: str) -> str:
         """Construct spot trading API URL for discovered exchange."""
