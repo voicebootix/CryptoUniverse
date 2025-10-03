@@ -447,44 +447,43 @@ class MessageRouter(LoggerMixin):
             # Keep only last 10 messages for context
             context = context[-10:]
             
-            # Build AI request
-            ai_request = {
-                "query": text,
-                "context": {
-                    "conversation_history": context,
-                    "user_id": user_id,
-                    "chat_id": chat_id,
-                    "system_context": "crypto_trading_assistant"
-                }
+            unified_context = {
+                "conversation_history": context,
+                "previous_intents": [
+                    msg.get("intent")
+                    for msg in context
+                    if isinstance(msg, dict) and msg.get("intent")
+                ],
+                "chat_id": chat_id,
             }
-            
-            # Get AI response
-            from app.services.ai_consensus import ai_consensus_service
-            ai_response = await ai_consensus_service.analyze_opportunity(
-                json.dumps(ai_request),
-                confidence_threshold=75.0,
-                ai_models="cost_optimized",
-                user_id=user_id
+
+            from app.services.unified_ai_manager import (  # type: ignore
+                unified_ai_manager,
+                InterfaceType as UnifiedInterfaceType,
             )
-            
-            if ai_response.get("success"):
-                response_text = self._format_ai_response(ai_response)
-            else:
-                response_text = "🤖 I'm having trouble processing your request right now. Please try again or use a specific command."
-            
-            # Send response
+
+            unified_response = await unified_ai_manager.process_user_request(
+                user_id=user_id,
+                request=text,
+                interface=UnifiedInterfaceType.TELEGRAM,
+                context=unified_context,
+            )
+
+            response_text = self._render_unified_response(unified_response)
+
             await self.telegram_api.send_message(chat_id, response_text)
-            
-            # Update conversation context
+
+            metadata = unified_response.get("metadata", {}) if isinstance(unified_response, dict) else {}
             context.append({
-                "role": "assistant", 
+                "role": "assistant",
                 "content": response_text,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
+                "intent": metadata.get("intent"),
             })
             self.conversation_contexts[user_id] = context
-            
-            return {"success": True, "response": "AI conversation handled"}
-            
+
+            return {"success": True, "response": "AI conversation handled", "metadata": metadata}
+
         except Exception as e:
             self.logger.error("Fallback natural language processing failed", error=str(e))
             return {"success": False, "error": str(e)}
@@ -506,9 +505,9 @@ class MessageRouter(LoggerMixin):
     
     def _format_ai_response(self, ai_response: Dict[str, Any]) -> str:
         """Format AI consensus response for Telegram."""
-        
+
         opportunity_analysis = ai_response.get("opportunity_analysis", {})
-        
+
         if not opportunity_analysis:
             return "🤖 Analysis complete, but no specific insights to share."
         
@@ -542,8 +541,37 @@ class MessageRouter(LoggerMixin):
         models_used = cost_summary.get("models_used", 0)
         if models_used > 0:
             response_parts.append(f"\n🤖 **Models consulted:** {models_used}")
-        
+
         return "\n".join(response_parts)
+
+    def _render_unified_response(self, unified_response: Dict[str, Any]) -> str:
+        """Translate unified AI manager responses into Telegram-friendly text."""
+
+        if not isinstance(unified_response, dict):
+            return "🤖 I completed the request, but I don't have extra details to share yet."
+
+        if not unified_response.get("success"):
+            return unified_response.get("content") or unified_response.get("error") or "I'm still syncing data—give me another moment."
+
+        action = unified_response.get("action")
+        content = unified_response.get("content")
+
+        if action == "executed":
+            execution_result = unified_response.get("result", {})
+            if isinstance(execution_result, dict) and execution_result.get("success"):
+                return "Orders placed successfully. I'll keep monitoring performance and report back."
+            error_message = execution_result.get("error") if isinstance(execution_result, dict) else None
+            return f"I attempted the execution but hit an issue: {error_message or 'please review the execution log.'}"
+
+        if isinstance(content, str) and content.strip():
+            return content
+
+        if isinstance(content, dict):
+            # Provide a compact summary if structured data returned
+            return json.dumps(content, indent=2)[:3500]
+
+        fallback = unified_response.get("ai_analysis") or "Analysis complete."
+        return str(fallback)
     
     async def _update_user_session(self, user_id: str, chat_id: str, user_data: Dict[str, Any]):
         """Update user session information."""
