@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Any
 from decimal import Decimal
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, WebSocket, WebSocketDisconnect, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -43,6 +43,198 @@ trade_executor = TradeExecutionService()
 master_controller = MasterSystemController()
 risk_service = PortfolioRiskServiceExtended()
 market_analysis = market_analysis_service  # Use global singleton
+
+
+# Market overview symbol discovery cache configuration
+MARKET_OVERVIEW_SYMBOL_LIMIT = getattr(settings, "MARKET_OVERVIEW_SYMBOL_LIMIT", 12)
+MARKET_OVERVIEW_DISCOVERY_TTL_SECONDS = getattr(settings, "MARKET_OVERVIEW_DISCOVERY_TTL", 300)
+
+_market_overview_symbol_cache: Dict[str, Any] = {
+    "symbols": [],
+    "expires_at": datetime.utcnow() - timedelta(seconds=1),
+}
+_market_overview_symbol_lock = asyncio.Lock()
+
+
+def _normalize_symbol(symbol: Any) -> Optional[str]:
+    """Normalize symbol strings to uppercase asset tickers."""
+
+    if not isinstance(symbol, str):
+        return None
+
+    candidate = symbol.strip().upper()
+    if not candidate:
+        return None
+
+    if "/" in candidate:
+        candidate = candidate.split("/", 1)[0]
+    if "-" in candidate:
+        candidate = candidate.split("-", 1)[0]
+
+    return candidate or None
+
+
+def _extract_symbols_from_discovery(discovery_result: Dict[str, Any], limit: int) -> List[str]:
+    """Extract a ranked list of symbols from the discovery response."""
+
+    discovery_data = discovery_result.get("asset_discovery", {}) if discovery_result else {}
+    detailed_results = discovery_data.get("detailed_results", {}) if isinstance(discovery_data, dict) else {}
+
+    symbol_scores: Dict[str, float] = {}
+
+    for exchange_data in detailed_results.values():
+        if not isinstance(exchange_data, dict):
+            continue
+
+        spot_data = (exchange_data.get("asset_types") or {}).get("spot", {})
+        volume_leaders = spot_data.get("volume_leaders", []) if isinstance(spot_data, dict) else []
+
+        if isinstance(volume_leaders, list):
+            for leader in volume_leaders:
+                if not isinstance(leader, dict):
+                    continue
+
+                base_asset = leader.get("base_asset") or leader.get("symbol") or leader.get("asset")
+                symbol = _normalize_symbol(base_asset)
+                if not symbol:
+                    continue
+
+                volume_value = leader.get("volume_24h") or leader.get("volume_usd") or leader.get("volume")
+                try:
+                    volume_float = float(volume_value) if volume_value is not None else 0.0
+                except (TypeError, ValueError):
+                    volume_float = 0.0
+
+                previous = symbol_scores.get(symbol)
+                if previous is None or volume_float > previous:
+                    symbol_scores[symbol] = volume_float
+
+        base_assets = spot_data.get("base_assets") if isinstance(spot_data, dict) else None
+        if isinstance(base_assets, list):
+            for base in base_assets:
+                symbol = _normalize_symbol(base)
+                if symbol and symbol not in symbol_scores:
+                    symbol_scores[symbol] = 0.0
+
+    if not symbol_scores and isinstance(discovery_data, dict):
+        cross_summary = discovery_data.get("cross_exchange_summary", {})
+        if isinstance(cross_summary, dict):
+            common_assets = cross_summary.get("common_assets", [])
+            if isinstance(common_assets, list):
+                for asset in common_assets:
+                    symbol = _normalize_symbol(asset)
+                    if symbol:
+                        symbol_scores.setdefault(symbol, 0.0)
+
+    sorted_symbols = sorted(symbol_scores.items(), key=lambda item: item[1], reverse=True)
+    trimmed_symbols = [symbol for symbol, _ in sorted_symbols][:limit]
+
+    return trimmed_symbols
+
+
+async def _get_default_market_overview_symbols(user_id: str) -> List[str]:
+    """Fetch (and cache) the default symbol list for the market overview."""
+
+    now = datetime.utcnow()
+    cached_symbols = _market_overview_symbol_cache.get("symbols") or []
+    cache_expiration = _market_overview_symbol_cache.get("expires_at", now)
+
+    if cached_symbols and isinstance(cache_expiration, datetime) and cache_expiration > now:
+        return cached_symbols
+
+    async with _market_overview_symbol_lock:
+        refreshed_now = datetime.utcnow()
+        cache_expiration = _market_overview_symbol_cache.get("expires_at", refreshed_now)
+        cached_symbols = _market_overview_symbol_cache.get("symbols") or []
+        if cached_symbols and isinstance(cache_expiration, datetime) and cache_expiration > refreshed_now:
+            return cached_symbols
+
+        try:
+            discovery_result = await market_analysis.discover_exchange_assets(
+                exchanges="all",
+                asset_types="spot",
+                user_id=user_id,
+            )
+            discovered_symbols = _extract_symbols_from_discovery(
+                discovery_result,
+                limit=MARKET_OVERVIEW_SYMBOL_LIMIT,
+            )
+
+            if discovered_symbols:
+                _market_overview_symbol_cache["symbols"] = discovered_symbols
+                _market_overview_symbol_cache["expires_at"] = datetime.utcnow() + timedelta(
+                    seconds=MARKET_OVERVIEW_DISCOVERY_TTL_SECONDS
+                )
+                return discovered_symbols
+
+            logger.warning(
+                "Symbol discovery returned no symbols, using fallback", user_id=user_id
+            )
+        except Exception as discovery_error:  # pragma: no cover - defensive logging
+            logger.warning(
+                "Failed to discover symbols for market overview", error=str(discovery_error)
+            )
+
+        fallback_symbols = await _get_fallback_market_overview_symbols(
+            limit=MARKET_OVERVIEW_SYMBOL_LIMIT
+        )
+        if fallback_symbols:
+            _market_overview_symbol_cache["symbols"] = fallback_symbols
+            _market_overview_symbol_cache["expires_at"] = datetime.utcnow() + timedelta(seconds=60)
+            return fallback_symbols
+
+        logger.warning(
+            "No fallback symbols available for market overview", user_id=user_id
+        )
+
+        return cached_symbols
+
+
+async def _get_fallback_market_overview_symbols(limit: int) -> List[str]:
+    """Build a resilient fallback symbol list when discovery fails."""
+
+    configured_default = getattr(settings, "MARKET_OVERVIEW_DEFAULT_SYMBOLS", None)
+    normalized_configured: List[str] = []
+
+    if configured_default:
+        if isinstance(configured_default, str):
+            candidates = configured_default.split(",")
+        elif isinstance(configured_default, (list, tuple)):
+            candidates = configured_default
+        else:
+            candidates = []
+
+        for candidate in candidates:
+            symbol = _normalize_symbol(candidate)
+            if symbol and symbol not in normalized_configured:
+                normalized_configured.append(symbol)
+
+    if normalized_configured:
+        return normalized_configured[:limit]
+
+    try:
+        from app.services.simple_asset_discovery import simple_asset_discovery
+
+        await simple_asset_discovery.async_init()
+        discovered = await simple_asset_discovery.get_top_assets(count=limit * 2)
+
+        normalized: List[str] = []
+        for asset_symbol in discovered:
+            symbol = _normalize_symbol(asset_symbol)
+            if symbol and symbol not in normalized:
+                normalized.append(symbol)
+            if len(normalized) >= limit:
+                break
+
+        if normalized:
+            return normalized
+
+    except Exception as fallback_error:  # pragma: no cover - best effort logging
+        logger.warning(
+            "Fallback symbol discovery failed", error=str(fallback_error)
+        )
+
+    return []
 
 
 # Request/Response Models
@@ -144,6 +336,13 @@ class MarketDataItem(BaseModel):
 
 class MarketOverviewResponse(BaseModel):
     market_data: List[MarketDataItem]
+
+class IntelligentAnalysisResponse(BaseModel):
+    """Response for intelligent market analysis with intent-based data."""
+    market_data: List[MarketDataItem]
+    onchain_data: Optional[Dict[str, Any]] = None
+    arbitrage_opportunities: Optional[List[Dict[str, Any]]] = None
+    metadata: Dict[str, Any]
 
 class RecentTrade(BaseModel):
     id: str  # UUID as string
@@ -628,6 +827,10 @@ async def get_trading_system_status(
 
 @router.get("/market-overview", response_model=MarketOverviewResponse)
 async def get_market_overview(
+    symbols: Optional[str] = Query(
+        None,
+        description="Comma-separated list of symbols to include in the market overview",
+    ),
     current_user: User = Depends(get_current_user)
 ):
     """Get market overview data."""
@@ -638,11 +841,35 @@ async def get_market_overview(
         user_id=str(current_user.id)
     )
     try:
+        user_id = str(current_user.id)
+
+        if symbols:
+            symbol_candidates = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+        else:
+            symbol_candidates = await _get_default_market_overview_symbols(user_id=user_id)
+
+        if not symbol_candidates:
+            symbol_candidates = await _get_fallback_market_overview_symbols(
+                limit=MARKET_OVERVIEW_SYMBOL_LIMIT
+            )
+
+        if not symbol_candidates:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No market symbols available for overview",
+            )
+
+        unique_symbols = list(dict.fromkeys(symbol_candidates))
+        if len(unique_symbols) > MARKET_OVERVIEW_SYMBOL_LIMIT:
+            unique_symbols = unique_symbols[:MARKET_OVERVIEW_SYMBOL_LIMIT]
+
+        symbol_string = ",".join(unique_symbols)
+
         # Get real market data from MarketAnalysisService with fallback chain
         market_result = await market_analysis.realtime_price_tracking(
-            symbols="BTC,ETH,SOL,ADA,DOT,MATIC,LINK,UNI",
+            symbols=symbol_string,
             exchanges="all",
-            user_id=str(current_user.id)
+            user_id=user_id
         )
         
         if market_result.get("success"):
@@ -695,6 +922,152 @@ async def get_market_overview(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get market overview: {str(e)}"
+        )
+
+@router.get("/intelligent-analysis", response_model=IntelligentAnalysisResponse)
+async def get_intelligent_analysis(
+    symbols: Optional[str] = Query(
+        None,
+        description="Comma-separated list of symbols to analyze",
+    ),
+    query: Optional[str] = Query(
+        None,
+        description="User query for intent detection (e.g., 'find arbitrage opportunities')",
+    ),
+    urgency: Optional[str] = Query(
+        "balanced",
+        description="Analysis urgency: instant (fast), balanced, comprehensive (deep)",
+    ),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Phase 2: Intelligent market analysis with AI intent detection.
+
+    This endpoint analyzes the user's query and intent to determine:
+    - What data to fetch (market prices, onchain, arbitrage)
+    - How fast to respond (instant, balanced, comprehensive)
+    - Whether to use cached or fresh data
+
+    Examples:
+    - "What's the current price of BTC?" -> instant, market prices only
+    - "Find arbitrage opportunities" -> balanced, includes arbitrage scan
+    - "Deep analysis of ETH including DeFi metrics" -> comprehensive, onchain data
+    """
+    await rate_limiter.check_rate_limit(
+        key="market:intelligent",
+        limit=50,
+        window=60,
+        user_id=str(current_user.id)
+    )
+
+    try:
+        user_id = str(current_user.id)
+        start_time = datetime.utcnow()
+
+        # Determine symbol list
+        if symbols:
+            symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+        else:
+            symbol_list = await _get_default_market_overview_symbols(user_id=user_id)
+            symbol_list = symbol_list[:8]  # Limit to 8 for intelligent analysis
+
+        if not symbol_list:
+            symbol_list = ["BTC", "ETH", "SOL"]
+
+        symbol_string = ",".join(symbol_list)
+
+        # Phase 2: Intent detection
+        needs_onchain = False
+        needs_arbitrage = False
+
+        if query:
+            query_lower = query.lower()
+            # Detect onchain intent
+            onchain_keywords = ["defi", "tvl", "liquidity", "holders", "onchain", "on-chain", "blockchain"]
+            needs_onchain = any(keyword in query_lower for keyword in onchain_keywords)
+
+            # Detect arbitrage intent
+            arbitrage_keywords = ["arbitrage", "opportunity", "spread", "price difference", "profit"]
+            needs_arbitrage = any(keyword in query_lower for keyword in arbitrage_keywords)
+
+        # Fetch market data (always included, fast)
+        market_result = await market_analysis.realtime_price_tracking(
+            symbols=symbol_string,
+            exchanges="all",
+            user_id=user_id
+        )
+
+        market_data_items = []
+        onchain_data_dict = {}
+        arbitrage_data = None
+
+        if market_result.get("success"):
+            data = market_result.get("data", {})
+
+            for symbol, symbol_data in data.items():
+                if symbol_data.get("aggregated"):
+                    agg = symbol_data["aggregated"]
+                    volume = agg.get("total_volume", 0)
+                    volume_str = f"{volume/1e9:.1f}B" if volume > 1e9 else f"{volume/1e6:.0f}M"
+
+                    market_data_items.append({
+                        "symbol": symbol,
+                        "price": Decimal(str(agg.get("average_price", 0))),
+                        "change": float(symbol_data.get("exchanges", [{}])[0].get("change_24h", 0)) if symbol_data.get("exchanges") else 0.0,
+                        "volume": volume_str
+                    })
+
+                    # Include cached onchain if available
+                    if symbol_data.get("onchain"):
+                        onchain_data_dict[symbol] = symbol_data["onchain"]
+
+        # Fetch onchain data if needed (based on urgency and intent)
+        if needs_onchain and urgency in ["balanced", "comprehensive"]:
+            logger.info(f"Fetching onchain data for {len(symbol_list)} symbols based on intent")
+            onchain_result = await market_analysis._get_onchain_with_fallback(
+                symbol_list,
+                force_refresh=(urgency == "comprehensive")
+            )
+            if onchain_result:
+                onchain_data_dict.update(onchain_result)
+
+        # Fetch arbitrage opportunities if needed
+        if needs_arbitrage:
+            logger.info(f"Scanning arbitrage opportunities for {len(symbol_list)} symbols based on intent")
+            arbitrage_result = await market_analysis.cross_exchange_arbitrage_scanner(
+                symbols=symbol_string,
+                exchanges="binance,kraken,kucoin",
+                min_profit_bps=5,
+                user_id=user_id
+            )
+            if arbitrage_result.get("success"):
+                arbitrage_data = arbitrage_result.get("data", {}).get("opportunities", [])
+
+        response_time_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
+
+        return IntelligentAnalysisResponse(
+            market_data=market_data_items,
+            onchain_data=onchain_data_dict if onchain_data_dict else None,
+            arbitrage_opportunities=arbitrage_data,
+            metadata={
+                "response_time_ms": round(response_time_ms, 2),
+                "urgency": urgency,
+                "intent_detected": {
+                    "needs_onchain": needs_onchain,
+                    "needs_arbitrage": needs_arbitrage
+                },
+                "symbols_analyzed": len(symbol_list),
+                "onchain_symbols": len(onchain_data_dict),
+                "arbitrage_count": len(arbitrage_data) if arbitrage_data else 0,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+
+    except Exception as e:
+        logger.error("Intelligent analysis failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to perform intelligent analysis: {str(e)}"
         )
 
 @router.get("/recent-trades", response_model=RecentTradesResponse)
