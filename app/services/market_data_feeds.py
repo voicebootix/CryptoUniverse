@@ -576,19 +576,28 @@ class MarketDataFeeds:
             raw = await self.redis.get(f"price:{symbol}")
             if not raw:
                 return None
+            payload: Any = raw
             if isinstance(raw, bytes):
                 raw = raw.decode()
-            try:
-                payload = json.loads(raw)
-            except json.JSONDecodeError:
+            if isinstance(raw, dict):
+                payload = raw
+            elif isinstance(raw, str):
                 try:
-                    payload = ast.literal_eval(raw)
-                except Exception:
-                    return None
-            if isinstance(payload, dict):
-                data = payload.get("data") if "data" in payload else payload
-                if isinstance(data, dict):
-                    return data
+                    payload = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    try:
+                        payload = ast.literal_eval(raw)
+                    except (ValueError, SyntaxError):
+                        return None
+            else:
+                return None
+
+            if not isinstance(payload, dict):
+                return None
+
+            data = payload.get("data") if "data" in payload else payload
+            if isinstance(data, dict):
+                return data
             return None
 
         for symbol in symbols:
