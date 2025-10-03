@@ -59,6 +59,12 @@ def _get_unified_persona_pipeline():
 
     return _unified_ai_manager_ref, _unified_interface_type_ref
 
+
+def get_unified_persona_pipeline():
+    """Public accessor for the cached unified persona pipeline references."""
+
+    return _get_unified_persona_pipeline()
+
 settings = get_settings()
 logger = structlog.get_logger(__name__)
 

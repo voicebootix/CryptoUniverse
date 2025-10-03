@@ -28,13 +28,12 @@ from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
 from app.models.telegram_integration import UserTelegramConnection, TelegramMessage
-from app.services.telegram_core import telegram_commander_service
+from app.services.telegram_core import (
+    telegram_commander_service,
+    get_unified_persona_pipeline,
+)
 from app.services.telegram_commander import MessageType
 from app.services.rate_limit import rate_limiter
-from app.services.unified_ai_manager import (
-    unified_ai_manager,
-    InterfaceType as UnifiedInterfaceType,
-)
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -850,11 +849,13 @@ async def _process_natural_language(
         except AttributeError:
             context["last_active_at"] = str(connection.last_active_at)
 
+    unified_ai_manager, unified_interface_type = get_unified_persona_pipeline()
+
     try:
         ai_result = await unified_ai_manager.process_user_request(
             user_id=str(connection.user_id),
             request=message,
-            interface=UnifiedInterfaceType.TELEGRAM,
+            interface=unified_interface_type.TELEGRAM,
             context=context,
         )
     except Exception as exc:

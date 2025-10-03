@@ -43,10 +43,12 @@ async def test_telegram_natural_language_routes_through_unified_manager():
         {"success": True, "action": "recommendation", "content": persona_responses[2], "confidence": 0.9},
     ]
 
+    persona_manager = SimpleNamespace(process_user_request=AsyncMock(side_effect=ai_side_effects))
+
     with patch(
-        "app.api.v1.endpoints.telegram.unified_ai_manager.process_user_request",
-        AsyncMock(side_effect=ai_side_effects),
-    ) as mocked_manager:
+        "app.api.v1.endpoints.telegram.get_unified_persona_pipeline",
+        return_value=(persona_manager, UnifiedInterfaceType),
+    ):
         outputs = []
         for prompt in prompts:
             outputs.append(await _process_natural_language(connection, prompt, None))
@@ -55,6 +57,7 @@ async def test_telegram_natural_language_routes_through_unified_manager():
     assert outputs == persona_responses
 
     # Confirm the persona tone remains narrative (no bullet characters) and context was forwarded properly
+    mocked_manager = persona_manager.process_user_request
     for idx, call in enumerate(mocked_manager.await_args_list):
         kwargs = call.kwargs
         assert kwargs["interface"] == UnifiedInterfaceType.TELEGRAM
