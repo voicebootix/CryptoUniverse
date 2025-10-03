@@ -3310,24 +3310,60 @@ class TradingStrategiesService(LoggerMixin):
     def _generate_funding_arbitrage_steps(self, opportunity: Dict[str, Any]) -> List[str]:
         """Create a deterministic playbook for executing a funding arbitrage trade."""
 
-        long_exchange = opportunity.get("long_exchange") or opportunity.get("exchange")
-        short_exchange = opportunity.get("short_exchange") or opportunity.get("exchange")
+        opportunity_type = (opportunity.get("type") or "").upper()
+        recommended_side = (opportunity.get("recommended_side") or "").lower()
+        long_exchange = opportunity.get("long_exchange")
+        short_exchange = opportunity.get("short_exchange")
+        single_exchange = opportunity.get("exchange")
         differential = opportunity.get("funding_differential") or opportunity.get("funding_rate", 0)
 
-        steps = [
-            "Allocate capital to both exchanges and confirm wallet balances.",
-            f"Open LONG perpetual position on {long_exchange} to collect positive funding.",
-            f"Open SHORT perpetual position on {short_exchange} to hedge price exposure.",
-            "Verify position sizes are matched notional to remain delta neutral.",
-            "Set alerts for funding rate changes and large price deviations.",
-        ]
+        has_paired_legs = bool(long_exchange and short_exchange and long_exchange != short_exchange)
+
+        steps: List[str] = []
+
+        if has_paired_legs or opportunity_type == "CROSS_EXCHANGE_FUNDING_ARBITRAGE":
+            long_leg_exchange = long_exchange or single_exchange
+            short_leg_exchange = short_exchange or single_exchange
+
+            steps.extend([
+                "Allocate capital to both exchanges and confirm wallet balances.",
+                f"Open LONG perpetual position on {long_leg_exchange} to collect positive funding.",
+                f"Open SHORT perpetual position on {short_leg_exchange} to hedge price exposure.",
+                "Verify position sizes are matched notional to remain delta neutral.",
+            ])
+        else:
+            target_exchange = single_exchange or long_exchange or short_exchange
+            steps.append(
+                f"Allocate capital on {target_exchange} and confirm available margin." if target_exchange else "Allocate margin for the selected perpetual market."
+            )
+
+            if recommended_side == "short":
+                steps.append(
+                    f"Open SHORT perpetual position on {target_exchange} to collect positive funding." if target_exchange else "Open SHORT perpetual position to collect positive funding."
+                )
+            elif recommended_side == "long":
+                steps.append(
+                    f"Open LONG perpetual position on {target_exchange} to benefit from negative funding pressure." if target_exchange else "Open LONG perpetual position to benefit from negative funding pressure."
+                )
+            else:
+                steps.append(
+                    f"Open the preferred perpetual position on {target_exchange} based on funding direction." if target_exchange else "Open the preferred perpetual position based on funding direction."
+                )
+
+            steps.append("Optionally hedge directional exposure with spot or delta-neutral instruments if mandate requires it.")
+
+        steps.append("Set alerts for funding rate changes and large price deviations.")
 
         if differential:
             steps.append(
                 f"Monitor funding differential (~{round(differential * 100, 2)}%) every funding interval and rebalance if it narrows."
             )
 
-        steps.append("Close both legs simultaneously when funding edge drops below threshold or volatility spikes.")
+        if has_paired_legs or opportunity_type == "CROSS_EXCHANGE_FUNDING_ARBITRAGE":
+            steps.append("Close both legs simultaneously when funding edge drops below threshold or volatility spikes.")
+        else:
+            steps.append("Close the position when funding edge drops below threshold or volatility spikes.")
+
         return steps
 
     async def basis_trade(
