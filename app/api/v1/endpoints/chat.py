@@ -178,15 +178,49 @@ async def send_message(
     except HTTPException:
         # Re-raise HTTP exceptions as-is
         raise
-    except Exception as e:
-        logger.error("Chat message processing failed", 
-                    error=str(e), 
-                    error_type=type(e).__name__,
-                    user_id=current_user.id,
-                    exc_info=True)
+    except asyncio.TimeoutError as exc:
+        error_id = str(uuid.uuid4())
+        friendly_message = (
+            "Our AI assistant couldn't complete that request because a supporting service took too long to respond. "
+            "Please try again in a few moments or contact support if the issue continues."
+        )
+        logger.error(
+            "Chat message processing timed out",
+            error=str(exc),
+            error_type=type(exc).__name__,
+            user_id=current_user.id,
+            exc_info=True,
+            extra={"error_id": error_id},
+        )
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Chat processing error: {str(e)}"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "chat_service_unavailable",
+                "message": friendly_message,
+                "error_id": error_id,
+            }
+        )
+    except Exception as e:
+        error_id = str(uuid.uuid4())
+        logger.error(
+            "Chat message processing failed",
+            error=str(e),
+            error_type=type(e).__name__,
+            user_id=current_user.id,
+            exc_info=True,
+            extra={"error_id": error_id},
+        )
+        friendly_message = (
+            "Our AI assistant couldn't complete that request because a supporting service took too long to respond. "
+            "Please try again in a few moments or contact support if the issue continues."
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": "chat_service_unavailable",
+                "message": friendly_message,
+                "error_id": error_id,
+            }
         )
 
 

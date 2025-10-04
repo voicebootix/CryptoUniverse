@@ -38,7 +38,7 @@ import time
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import uuid
 import math
@@ -54,6 +54,11 @@ from app.services.real_market_data import (
     real_market_data_service,
 )
 from app.services.dynamic_asset_filter import AssetInfo, enterprise_asset_filter
+from app.services.market_data_profiles import (
+    DEFAULT_EXPECTED_RETURN,
+    DEFAULT_VOLATILITY,
+    get_asset_profile,
+)
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal
@@ -140,6 +145,9 @@ class OptimizationResult:
     confidence: float
     rebalancing_needed: bool
     suggested_trades: List[Dict[str, Any]]
+    methodology_summary: Dict[str, Any] = field(default_factory=dict)
+    regulatory_disclosures: Dict[str, Any] = field(default_factory=dict)
+    educational_resources: List[Dict[str, str]] = field(default_factory=list)
     
     def get(self, key: str, default=None):
         """Make OptimizationResult compatible with dict.get() calls."""
@@ -614,6 +622,8 @@ class RiskCalculationEngine(LoggerMixin):
     def __init__(self):
         self.market_data_cache = {}
         self.correlation_cache = {}
+        self._market_data_service: RealMarketDataService = real_market_data_service
+        self._rng = np.random.default_rng()
     
     async def calculate_portfolio_risk(
         self,
@@ -667,35 +677,55 @@ class RiskCalculationEngine(LoggerMixin):
         )
     
     async def _get_historical_returns(
-        self, 
-        positions: List[Dict], 
+        self,
+        positions: List[Dict],
         lookback_days: int
     ) -> Dict[str, List[float]]:
         """Get historical returns for portfolio assets."""
-        
-        # In production, this would fetch real historical data
-        # For now, simulate realistic return series
-        
+
         symbols = list(set(pos["symbol"] for pos in positions))
         returns_data = {}
-        
+
         for symbol in symbols:
-            # Simulate realistic crypto returns
-            if symbol == "BTC":
-                daily_returns = np.random.normal(0.001, 0.04, lookback_days)  # ~0.1% daily, 4% volatility
-            elif symbol == "ETH":
-                daily_returns = np.random.normal(0.0015, 0.05, lookback_days)  # Higher vol than BTC
-            elif symbol == "ADA":
-                daily_returns = np.random.normal(0.002, 0.08, lookback_days)   # Altcoin volatility
-            elif symbol == "SOL":
-                daily_returns = np.random.normal(0.0025, 0.09, lookback_days)  # High vol altcoin
-            else:
-                daily_returns = np.random.normal(0.001, 0.06, lookback_days)   # Default crypto
-            
-            returns_data[symbol] = daily_returns.tolist()
-        
+            market_symbol = self._normalize_market_symbol(symbol)
+            ohlcv: List[Dict[str, Any]] = []
+
+            if self._market_data_service:
+                try:
+                    ohlcv = await self._market_data_service.get_historical_ohlcv(
+                        symbol=market_symbol,
+                        timeframe="1d",
+                        limit=min(lookback_days + 1, 365),
+                        exchange="auto",
+                    )
+                except Exception as exc:
+                    self.logger.debug(
+                        "Historical OHLCV fetch failed", symbol=symbol, market_symbol=market_symbol, error=str(exc)
+                    )
+
+            closes: List[float] = []
+            for candle in ohlcv or []:
+                close_val = candle.get("close")
+                if not close_val:
+                    continue
+                try:
+                    closes.append(float(close_val))
+                except (TypeError, ValueError):
+                    continue
+
+            if len(closes) > 1:
+                closes_array = np.asarray(closes, dtype=float)
+                log_returns = np.diff(np.log(closes_array))
+                if log_returns.size > 0:
+                    trimmed = log_returns[-lookback_days:]
+                    returns_data[symbol] = trimmed.tolist()
+                    continue
+
+            # Fallback to profile-based simulation when real data is not available
+            returns_data[symbol] = self._simulate_returns(symbol, lookback_days)
+
         return returns_data
-    
+
     async def _calculate_portfolio_returns(
         self,
         positions: List[Dict],
@@ -728,6 +758,44 @@ class RiskCalculationEngine(LoggerMixin):
             portfolio_returns.append(daily_return)
         
         return portfolio_returns
+
+    def _simulate_returns(self, symbol: str, lookback_days: int) -> List[float]:
+        """Generate fallback return series using asset profile statistics."""
+
+        profile = get_asset_profile(symbol)
+        annual_return = profile.total_expected_return or DEFAULT_EXPECTED_RETURN
+        # Convert to daily expected return and volatility
+        daily_mean = (1 + annual_return) ** (1 / 252) - 1 if annual_return else 0.0
+        annual_volatility = profile.volatility or DEFAULT_VOLATILITY
+        daily_vol = max(annual_volatility / np.sqrt(252), 1e-4)
+
+        simulated = self._rng.normal(daily_mean, daily_vol, lookback_days)
+        return simulated.tolist()
+
+    def _normalize_market_symbol(self, symbol: str) -> str:
+        """Normalize symbols to exchange trading pairs for historical fetches."""
+
+        if not symbol:
+            return symbol
+
+        if "/" in symbol:
+            return symbol
+
+        if "-" in symbol:
+            return symbol.replace("-", "/")
+
+        base = symbol.upper()
+        stablecoin_pairs = {
+            "USDC": "USDC/USDT",
+            "USDT": "USDT/USDC",
+            "BUSD": "BUSD/USDT",
+            "DAI": "DAI/USDT",
+        }
+
+        if base in stablecoin_pairs:
+            return stablecoin_pairs[base]
+
+        return f"{base}/USDT"
     
     def _calculate_var(self, returns: List[float], confidence: float) -> float:
         """Calculate Value at Risk at given confidence level."""
@@ -1175,13 +1243,25 @@ class PortfolioOptimizationEngine(LoggerMixin):
         """Fallback to deterministic defaults when market data is unavailable."""
 
         expected_returns: Dict[str, float] = {}
-        for symbol in symbols:
-            if symbol == "USDC":
-                expected_returns[symbol] = 0.03
-            else:
-                expected_returns[symbol] = 0.18
+        variances: List[float] = []
 
-        covariance_matrix = np.eye(len(symbols)) * 0.12
+        for symbol in symbols:
+            profile = get_asset_profile(symbol)
+            asset_info = self._asset_metadata_cache.get(symbol.upper()) if hasattr(self, "_asset_metadata_cache") else None
+            tier = (getattr(asset_info, "tier", "") or "").lower() if asset_info else ""
+            liquidity_multiplier = self._tier_liquidity_bias.get(tier, self._default_liquidity_multiplier)
+            liquidity_multiplier = max(liquidity_multiplier, 0.3)
+
+            expected_returns[symbol] = profile.total_expected_return * liquidity_multiplier
+
+            profile_vol = profile.volatility or DEFAULT_VOLATILITY
+            adjusted_vol = profile_vol / max(liquidity_multiplier, 1e-3)
+            variances.append(adjusted_vol ** 2)
+
+        if not variances:
+            variances = [DEFAULT_VOLATILITY ** 2 for _ in symbols]
+
+        covariance_matrix = np.diag(variances)
         return expected_returns, covariance_matrix
 
     async def _get_optimization_inputs(
@@ -1193,6 +1273,8 @@ class PortfolioOptimizationEngine(LoggerMixin):
         symbols = self._extract_symbols(positions)
         if not symbols:
             return {}, np.array([[]])
+
+        await self._ensure_asset_metadata(symbols)
 
         lookback = 180
         timeframe = "1d"
@@ -1248,6 +1330,14 @@ class PortfolioOptimizationEngine(LoggerMixin):
                 expected_returns[symbol] = float(fallback_expected.get(symbol, 0.0))
             else:
                 expected_returns[symbol] = float(symbol_mean)
+
+            profile = get_asset_profile(symbol)
+            expected_returns[symbol] += profile.staking_yield
+
+            asset_info = self._asset_metadata_cache.get(symbol.upper()) if hasattr(self, "_asset_metadata_cache") else None
+            if asset_info and getattr(asset_info, "tier", None):
+                tier_multiplier = self._tier_liquidity_bias.get((asset_info.tier or "").lower(), 1.0)
+                expected_returns[symbol] *= tier_multiplier
 
         covariance_df = returns_df.cov().fillna(0.0) * 252.0
         covariance_df = covariance_df.reindex(index=symbols, columns=symbols)
@@ -1392,6 +1482,18 @@ class PortfolioOptimizationEngine(LoggerMixin):
         max_drawdown = self._estimate_portfolio_drawdown(normalized_weights)
         confidence = self._calculate_confidence_metric(normalized_weights)
 
+        methodology_summary = self._create_methodology_summary(
+            strategy=strategy,
+            symbols=symbols,
+            normalized_weights=normalized_weights,
+            expected_returns=expected_returns,
+            covariance_matrix=matrix,
+            expected_volatility=expected_volatility,
+            sharpe_ratio=sharpe_ratio,
+        )
+        regulatory_disclosures = self._get_regulatory_disclosures()
+        educational_resources = self._get_educational_resources()
+
         return OptimizationResult(
             strategy=strategy,
             weights=normalized_weights,
@@ -1402,8 +1504,224 @@ class PortfolioOptimizationEngine(LoggerMixin):
             confidence=confidence,
             rebalancing_needed=rebalancing_needed,
             suggested_trades=suggested_trades or [],
+            methodology_summary=methodology_summary,
+            regulatory_disclosures=regulatory_disclosures,
+            educational_resources=educational_resources,
         )
-    
+
+    def _create_methodology_summary(
+        self,
+        strategy: OptimizationStrategy,
+        symbols: List[str],
+        normalized_weights: Dict[str, float],
+        expected_returns: Dict[str, float],
+        covariance_matrix: np.ndarray,
+        expected_volatility: float,
+        sharpe_ratio: float,
+    ) -> Dict[str, Any]:
+        """Generate human-readable transparency for optimization outputs."""
+
+        volatility_estimates: Dict[str, float] = {}
+        try:
+            diagonal = np.diag(covariance_matrix) if covariance_matrix is not None else []
+        except Exception:
+            diagonal = []
+
+        for index, symbol in enumerate(symbols):
+            variance = float(diagonal[index]) if index < len(diagonal) else 0.0
+            volatility_estimates[symbol] = float(math.sqrt(variance)) if variance > 0 else 0.0
+
+        expected_return_map = {
+            symbol: float(expected_returns.get(symbol, 0.0)) for symbol in symbols
+        }
+
+        top_allocations = [
+            {
+                "symbol": symbol,
+                "weight": round(normalized_weights.get(symbol, 0.0), 6),
+                "volatility": round(volatility_estimates.get(symbol, 0.0), 6),
+                "expected_return": round(expected_return_map.get(symbol, 0.0), 6),
+            }
+            for symbol in sorted(
+                symbols,
+                key=lambda s: normalized_weights.get(s, 0.0),
+                reverse=True,
+            )[:3]
+        ]
+
+        summary = ""
+        steps: List[str] = []
+        calculation_notes = ""
+
+        risk_free_rate = getattr(self, "_risk_free_rate", 0.0)
+
+        if strategy == OptimizationStrategy.RISK_PARITY:
+            summary = (
+                "Applied risk-parity so each asset contributes the same amount of volatility. "
+                "Weights are proportional to the inverse of each asset's volatility before normalisation."
+            )
+            steps = [
+                "Estimate asset volatility from the covariance matrix diagonal.",
+                "Invert those volatility estimates and normalise them so weights sum to one.",
+                "Re-apply portfolio constraints and renormalise after clipping negative allocations.",
+            ]
+            calculation_notes = "w_i ∝ 1/σ_i with σ_i derived from recent return covariance."
+        elif strategy == OptimizationStrategy.EQUAL_WEIGHT:
+            summary = (
+                "Distributed capital equally across the eligible symbols. This maximises diversification "
+                "when no asset-specific edge is available."
+            )
+            steps = [
+                "Assign the same starting weight to every asset.",
+                "Clip negative values (none expected) and renormalise to 100%.",
+                "Verify exposure is within portfolio risk limits.",
+            ]
+            calculation_notes = "Each asset receives 1/N of the portfolio after constraints."
+        elif strategy == OptimizationStrategy.MAX_SHARPE:
+            summary = (
+                "Solved a mean-variance optimisation that maximises the Sharpe ratio using expected returns, "
+                "the covariance matrix and a risk-free rate of "
+                f"{risk_free_rate:.2%}."
+            )
+            steps = [
+                "Build the expected return vector and covariance matrix from recent market data.",
+                "Optimise weights to maximise (μ - r_f)'w / sqrt(w'Σw) with long-only and sum-to-one constraints.",
+                "Stabilise the solution by clipping infeasible weights and renormalising.",
+            ]
+            calculation_notes = (
+                f"Optimised Sharpe: {sharpe_ratio:.3f}, expected volatility: {expected_volatility:.3f}."
+            )
+        elif strategy == OptimizationStrategy.MIN_VARIANCE:
+            summary = (
+                "Minimised total portfolio variance to prioritise capital preservation. "
+                "The optimiser searches for the lowest possible volatility subject to allocation constraints."
+            )
+            steps = [
+                "Use the covariance matrix to estimate marginal risk contributions.",
+                "Solve a quadratic program that minimises w'Σw subject to weights ≥ 0 and Σw = 1.",
+                "Clip extreme weights and re-normalise to maintain feasibility.",
+            ]
+            calculation_notes = (
+                f"Resulting volatility target: {expected_volatility:.3f}; Sharpe provided for reference."
+            )
+        elif strategy == OptimizationStrategy.KELLY_CRITERION:
+            summary = (
+                "Calculated Kelly-optimal position sizes from expected excess returns and covariance, then "
+                "scaled them to 25% of full Kelly to limit drawdowns."
+            )
+            steps = [
+                "Compute excess returns (μ - r_f) and invert the covariance matrix.",
+                "Solve for Kelly weights w = Σ⁻¹ (μ - r_f).",
+                "Scale to 25% Kelly, clip negatives to zero and renormalise to keep exposure conservative.",
+            ]
+            calculation_notes = (
+                "Kelly fraction capped at 0.25× to keep risk of ruin low while still reflecting the edge estimate."
+            )
+        elif strategy == OptimizationStrategy.ADAPTIVE:
+            summary = (
+                "Blended risk parity (80%) with the Max Sharpe solution (20%) to capture upside while maintaining "
+                "stable risk contributions."
+            )
+            steps = [
+                "Run both risk-parity and Max Sharpe optimisations independently.",
+                "Blend the resulting weights using an 80/20 split favouring risk parity.",
+                "Apply dynamic constraints and renormalise to maintain feasibility.",
+            ]
+            calculation_notes = "Adaptive mix = 0.8 × risk parity + 0.2 × Max Sharpe after constraints."
+        else:
+            summary = (
+                "Generated portfolio weights using the configured optimisation routine with standard risk controls "
+                "and normalisation."
+            )
+            steps = [
+                "Generate inputs from market data.",
+                "Solve the optimisation problem with long-only constraints.",
+                "Apply post-processing constraints and renormalise.",
+            ]
+
+        return {
+            "summary": summary,
+            "calculation_steps": steps,
+            "calculation_notes": calculation_notes,
+            "inputs_used": {
+                "expected_returns": {
+                    symbol: round(expected_return_map.get(symbol, 0.0), 6)
+                    for symbol in symbols
+                },
+                "volatility_estimates": {
+                    symbol: round(volatility_estimates.get(symbol, 0.0), 6)
+                    for symbol in symbols
+                },
+                "risk_free_rate": round(risk_free_rate, 6),
+            },
+            "top_allocations": top_allocations,
+            "portfolio_metrics": {
+                "expected_volatility": round(expected_volatility, 6),
+                "sharpe_ratio": round(sharpe_ratio, 6),
+            },
+        }
+
+    def _get_regulatory_disclosures(self) -> Dict[str, Any]:
+        """Return standardised risk warnings and disclosure links."""
+
+        return {
+            "risk_warning": (
+                "Digital asset markets are highly volatile and you can lose more than your original investment. "
+                "These allocations are informational and do not constitute investment advice."
+            ),
+            "jurisdiction_notice": (
+                "Ensure trading is permitted in your jurisdiction and that you satisfy all suitability requirements. "
+                "Consult a licensed professional if you need personalised advice."
+            ),
+            "links": {
+                "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+                "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure",
+            },
+            "last_reviewed": datetime.utcnow().date().isoformat(),
+        }
+
+    def _get_educational_resources(self) -> List[Dict[str, str]]:
+        """Provide short-form educational content to reinforce best practices."""
+
+        return [
+            {
+                "topic": "Diversification",
+                "title": "Why spreading capital matters",
+                "summary": (
+                    "Holding uncorrelated assets reduces the impact of any single position underperforming. "
+                    "Even simple equal-weight portfolios can meaningfully lower volatility."
+                ),
+                "actionable_tip": "Hold assets with different drivers (layer-1s, DeFi, stablecoins) to smooth returns.",
+            },
+            {
+                "topic": "Crypto volatility",
+                "title": "Prepare for large swings",
+                "summary": (
+                    "Crypto assets routinely experience double-digit daily moves. Risk controls such as position "
+                    "sizing, stop-losses and diversification help manage this turbulence."
+                ),
+                "actionable_tip": "Size positions assuming 30–80% annualised volatility and stress test extreme scenarios.",
+            },
+            {
+                "topic": "Stablecoins vs. alt-coins",
+                "title": "Different roles in a portfolio",
+                "summary": (
+                    "Stablecoins track fiat currencies and help preserve capital, while alt-coins target growth but "
+                    "carry higher drawdown risk. Balancing the two can stabilise liquidity."
+                ),
+                "actionable_tip": "Maintain a cash-like buffer in reputable stablecoins to fund rebalancing opportunities.",
+            },
+            {
+                "topic": "Leverage risk",
+                "title": "Use borrowed capital cautiously",
+                "summary": (
+                    "Leverage amplifies gains and losses. Liquidations can occur quickly during volatility spikes, "
+                    "so keep utilisation low and monitor collateral ratios."
+                ),
+                "actionable_tip": "Limit leverage to scenarios with defined exit plans and avoid stacking multiple leveraged trades.",
+            },
+        ]
+
     async def _optimize_risk_parity(
         self,
         positions: List[Dict],

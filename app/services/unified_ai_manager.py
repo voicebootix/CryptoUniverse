@@ -197,7 +197,7 @@ class UnifiedAIManager(LoggerMixin):
             intent = intent_resolution.intent
 
             # Clarify when we are unsure instead of falling back to canned help
-            if intent_resolution.confidence < 0.55:
+            if intent_resolution.confidence < 0.40:
                 clarification = self.response_builder.clarify(
                     request=request,
                     intent_candidates=intent_resolution.candidates,
@@ -1044,7 +1044,7 @@ class UnifiedAIManager(LoggerMixin):
         for intent_name, keywords in keyword_map.items():
             match_count = sum(1 for keyword in keywords if keyword in request_lower)
             if match_count:
-                base_score = 0.45 + 0.1 * (match_count - 1)
+                base_score = 0.60 + 0.1 * (match_count - 1)
                 candidates[intent_name] = min(0.95, base_score)
 
         if raw_intent:
