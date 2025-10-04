@@ -2505,6 +2505,45 @@ Respond naturally using ONLY the real data provided."""
                     "personality": personality["name"]
                 }
 
+            # Apply persona middleware to the complete response
+            try:
+                persona_response = persona_middleware.apply(
+                    full_response,
+                    intent=intent.value if hasattr(intent, "value") else str(intent),
+                )
+
+                # Check if persona modified the response
+                if persona_response != full_response:
+                    # Verify persona only appended content (didn't modify existing)
+                    if persona_response.startswith(full_response):
+                        # Persona only appended - send just the additional content
+                        additional_content = persona_response[len(full_response):]
+                        yield {
+                            "type": "response",
+                            "content": additional_content,
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "personality": personality["name"],
+                            "persona_applied": True
+                        }
+                    else:
+                        # Persona modified/restructured content - send full replacement
+                        self.logger.warning(
+                            "Persona middleware modified response content, not just appended",
+                            full_length=len(full_response),
+                            persona_length=len(persona_response)
+                        )
+                        yield {
+                            "type": "persona_enriched",
+                            "content": persona_response,
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "personality": personality["name"],
+                            "replaces_previous": True
+                        }
+            except Exception as e:
+                # Log error but continue without persona enrichment
+                self.logger.error("Persona middleware failed during streaming", error=str(e))
+                persona_response = full_response  # Use original response without persona
+
             # Handle action requirements
             if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
                 decision_id = str(uuid.uuid4())
@@ -2524,12 +2563,12 @@ Respond naturally using ONLY the real data provided."""
                     "timestamp": datetime.utcnow().isoformat()
                 }
 
-            # Save conversation
+            # Save conversation with persona-applied response
             await self._save_conversation(
                 session.session_id,
                 session.user_id,
                 message,
-                full_response,
+                persona_response,  # Save the persona-applied version
                 intent,
                 intent_analysis["confidence"]
             )

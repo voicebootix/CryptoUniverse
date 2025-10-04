@@ -44,6 +44,37 @@ router = APIRouter()
 telegram_service = telegram_commander_service
 
 
+def _render_unified_ai_result(result: Dict[str, Any]) -> str:
+    """Render a unified AI manager response using the shared Telegram persona renderer."""
+
+    # Try to get the renderer from message_router
+    message_router = getattr(telegram_service, "message_router", None)
+    if message_router:
+        renderer = getattr(message_router, "_render_unified_response", None)
+        if callable(renderer):
+            try:
+                return renderer(result)
+            except Exception as e:  # pragma: no cover - defensive fallback
+                # Log the exception for debugging
+                if hasattr(telegram_service, 'logger'):
+                    telegram_service.logger.exception(
+                        "Failed to render unified AI response",
+                        error=str(e),
+                        result_type=type(result).__name__
+                    )
+                else:
+                    logger.exception(
+                        "Failed to render unified AI response",
+                        error=str(e),
+                        result_type=type(result).__name__
+                    )
+
+    # Fallback if renderer is not available or fails
+    if isinstance(result, dict):
+        return str(result.get("content") or result.get("error") or "")
+    return str(result)
+
+
 # Request/Response Models
 class TelegramConnectionRequest(BaseModel):
     telegram_username: Optional[str] = None
@@ -866,38 +897,10 @@ async def _process_natural_language(
         )
         ai_result = None
 
-    if ai_result and ai_result.get("success"):
-        action = ai_result.get("action")
-        content = ai_result.get("content")
-
-        if action == "executed":
-            execution_result = ai_result.get("result", {}) or {}
-            summary_bits: List[str] = []
-            summary = execution_result.get("message") or execution_result.get("status")
-            if summary:
-                summary_bits.append(str(summary))
-            if ai_result.get("ai_analysis"):
-                summary_bits.append(str(ai_result["ai_analysis"]))
-            details = execution_result.get("details")
-            if details:
-                summary_bits.append(str(details))
-            if not summary_bits:
-                summary_bits.append(
-                    "Execution completed. Let me know if you want me to monitor the fill or set follow-up levels."
-                )
-            return " ".join(summary_bits)
-
-        if content:
-            return str(content)
-
-        if ai_result.get("ai_analysis"):
-            return str(ai_result["ai_analysis"])
-
-        if action == "clarify":
-            return (
-                ai_result.get("content")
-                or "Just to confirm—do you need portfolio context, strategy guidance, or trade execution help?"
-            )
+    if ai_result:
+        rendered_response = _render_unified_ai_result(ai_result)
+        if rendered_response:
+            return rendered_response
 
     logger.warning(
         "Unified AI manager returned no conversational content; falling back to persona-safe default",

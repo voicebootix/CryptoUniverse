@@ -817,7 +817,12 @@ I encountered an error during the 5-phase execution. The trade was not completed
         self, message: str, context: Dict[str, Any]
     ) -> ChatIntent:
         """Classify user message intent with conversation context."""
-        
+
+        # Ensure supporting services and intent patterns are initialized when the
+        # classifier is invoked outside the primary chat workflow (e.g., unified
+        # AI manager / Telegram entrypoints).
+        await self._ensure_services()
+
         message_lower = message.lower()
         
         # Check for emergency patterns first
