@@ -37,7 +37,7 @@ from app.services.master_controller import MasterSystemController, TradingMode
 from app.services.ai_consensus_core import AIConsensusService
 from app.services.trade_execution import TradeExecutionService
 # Removed chat_service_adapters - unified_chat_service uses direct integrations
-from app.services.telegram_core import TelegramCommanderService
+from app.services.telegram_core import telegram_commander_service
 from app.services.websocket import manager as websocket_manager
 from app.services.chat_memory import ChatMemoryService
 # Note: unified_ai_manager is imported lazily in methods to avoid initialization at module load
@@ -49,6 +49,7 @@ from app.services.portfolio_risk_core import PortfolioRiskService
 from app.services.trading_strategies import TradingStrategiesService
 from app.services.strategy_marketplace_service import strategy_marketplace_service
 from app.services.paper_trading_engine import paper_trading_engine
+from app.services.conversation.persona_middleware import persona_middleware
 from app.services.user_opportunity_discovery import user_opportunity_discovery
 from app.services.user_onboarding_service import user_onboarding_service
 from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
@@ -179,7 +180,7 @@ class UnifiedChatService(LoggerMixin):
         self.master_controller = MasterSystemController()
         self.trade_executor = TradeExecutionService()
 # Direct service integrations - no adapters needed
-        self.telegram_core = TelegramCommanderService()
+        self.telegram_core = telegram_commander_service
         self.market_analysis = MarketAnalysisService()
         self.portfolio_risk = PortfolioRiskService()
         self.trading_strategies = TradingStrategiesService()
@@ -2384,14 +2385,18 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
             system_message=system_message,
             temperature=0.7
         )
-        
+
         if response["success"]:
             content = response["content"]
-            
+            content = persona_middleware.apply(
+                content,
+                intent=intent.value if hasattr(intent, "value") else str(intent),
+            )
+
             # Handle action requirements
             requires_approval = False
             decision_id = None
-            
+
             if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
                 requires_approval = True
                 decision_id = str(uuid.uuid4())
@@ -2403,7 +2408,7 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                     session.user_id,
                     session.conversation_mode
                 )
-            
+
             # Save to memory
             await self._save_conversation(
                 session.session_id,
@@ -2500,6 +2505,45 @@ Respond naturally using ONLY the real data provided."""
                     "personality": personality["name"]
                 }
 
+            # Apply persona middleware to the complete response
+            try:
+                persona_response = persona_middleware.apply(
+                    full_response,
+                    intent=intent.value if hasattr(intent, "value") else str(intent),
+                )
+
+                # Check if persona modified the response
+                if persona_response != full_response:
+                    # Verify persona only appended content (didn't modify existing)
+                    if persona_response.startswith(full_response):
+                        # Persona only appended - send just the additional content
+                        additional_content = persona_response[len(full_response):]
+                        yield {
+                            "type": "response",
+                            "content": additional_content,
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "personality": personality["name"],
+                            "persona_applied": True
+                        }
+                    else:
+                        # Persona modified/restructured content - send full replacement
+                        self.logger.warning(
+                            "Persona middleware modified response content, not just appended",
+                            full_length=len(full_response),
+                            persona_length=len(persona_response)
+                        )
+                        yield {
+                            "type": "persona_enriched",
+                            "content": persona_response,
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "personality": personality["name"],
+                            "replaces_previous": True
+                        }
+            except Exception as e:
+                # Log error but continue without persona enrichment
+                self.logger.error("Persona middleware failed during streaming", error=str(e))
+                persona_response = full_response  # Use original response without persona
+
             # Handle action requirements
             if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
                 decision_id = str(uuid.uuid4())
@@ -2519,12 +2563,12 @@ Respond naturally using ONLY the real data provided."""
                     "timestamp": datetime.utcnow().isoformat()
                 }
 
-            # Save conversation
+            # Save conversation with persona-applied response
             await self._save_conversation(
                 session.session_id,
                 session.user_id,
                 message,
-                full_response,
+                persona_response,  # Save the persona-applied version
                 intent,
                 intent_analysis["confidence"]
             )

@@ -40,7 +40,7 @@ from app.services.trading_strategies import trading_strategies_service
 from app.services.portfolio_risk_core import portfolio_risk_service
 from app.services.market_analysis_core import MarketAnalysisService
 from app.services.ai_consensus_core import AIConsensusService
-from app.services.telegram_core import TelegramCommanderService
+from app.services.telegram_core import telegram_commander_service
 from app.services.chat_memory import ChatMemoryService
 from app.services.user_opportunity_discovery import user_opportunity_discovery
 from app.services.user_onboarding_service import user_onboarding_service
@@ -138,7 +138,13 @@ class ConversationalAIOrchestrator(LoggerMixin):
         self.portfolio_risk = portfolio_risk_service
         self.market_analysis = MarketAnalysisService()
         self.ai_consensus = AIConsensusService()
-        self.telegram_core = TelegramCommanderService()
+        # Reuse the shared Telegram commander so persona, telemetry, and
+        # connection state stay aligned with the unified AI manager across
+        # every interface.
+        self.telegram_core = (
+            getattr(unified_ai_manager, "telegram_core", None)
+            or telegram_commander_service
+        )
         self.memory_service = ChatMemoryService()
         self.opportunity_discovery = user_opportunity_discovery
         self.onboarding_service = user_onboarding_service
