@@ -48,7 +48,8 @@ class BackgroundServiceManager(LoggerMixin):
             "market_data_sync": 180,      # 3 minutes (reduced frequency)
             "balance_sync": 600,          # 10 minutes (reduced frequency)
             "risk_monitor": 60,           # 1 minute (increased from 30s)
-            "rate_limit_cleanup": 3600    # 1 hour (reduced frequency)
+            "rate_limit_cleanup": 3600,   # 1 hour (reduced frequency)
+            "market_cache_warmer": 45     # 45 seconds for proactive cache hydration
         }
         
         # Dynamic service configurations (no hardcoded restrictions)
@@ -122,6 +123,7 @@ class BackgroundServiceManager(LoggerMixin):
             ("market_data_sync", self._market_data_sync_service),
             ("balance_sync", self._balance_sync_service),
             ("risk_monitor", self._risk_monitor_service),
+            ("market_cache_warmer", self._market_cache_warmer_service),
         ]
         
         for service_name, service_func in deferred_services:
@@ -153,13 +155,14 @@ class BackgroundServiceManager(LoggerMixin):
         # Start individual services with error isolation
         services_to_start = [
             ("health_monitor", self._health_monitor_service),
-            ("metrics_collector", self._metrics_collector_service), 
+            ("metrics_collector", self._metrics_collector_service),
             ("cleanup_service", self._cleanup_service),
             ("autonomous_cycles", self._autonomous_cycles_service),
             ("market_data_sync", self._market_data_sync_service),
             ("balance_sync", self._balance_sync_service),
             ("risk_monitor", self._risk_monitor_service),
-            ("rate_limit_cleanup", self._rate_limit_cleanup_service)
+            ("rate_limit_cleanup", self._rate_limit_cleanup_service),
+            ("market_cache_warmer", self._market_cache_warmer_service),
         ]
         
         for service_name, service_func in services_to_start:
@@ -519,7 +522,7 @@ class BackgroundServiceManager(LoggerMixin):
     async def _market_data_sync_service(self):
         """Sync market data for configured symbols using real APIs."""
         self.logger.info("📈 Market data sync service started")
-        
+
         while self.running:
             try:
                 # Dynamically discover tradeable symbols (no hardcoded lists)
@@ -554,9 +557,122 @@ class BackgroundServiceManager(LoggerMixin):
                 
             except Exception as e:
                 self.logger.error("Market data sync error", error=str(e))
-            
+
             await asyncio.sleep(self.intervals["market_data_sync"])
-    
+
+    async def _market_cache_warmer_service(self):
+        """Proactively warm market analysis caches and hydrate Redis for low-latency responses."""
+        self.logger.info("🔥 Market cache warmer service started")
+
+        configured_symbols = getattr(settings, "MARKET_CACHE_WARM_SYMBOLS", None)
+        default_symbols = "BTC,ETH,BNB,SOL,ADA"
+        symbols_source = configured_symbols or default_symbols
+        symbol_list = [s.strip().upper() for s in symbols_source.split(",") if s.strip()]
+        if not symbol_list:
+            symbol_list = [s.strip().upper() for s in default_symbols.split(",") if s.strip()]
+
+        sorted_symbols = sorted(set(symbol_list))
+        symbols_arg = ",".join(sorted_symbols)
+        cache_ttl = 60
+        interval = self.intervals.get("market_cache_warmer", 45)
+
+        while self.running:
+            cycle_start = time.time()
+            try:
+                from app.services.market_analysis_core import market_analysis_service
+
+                market_service = market_analysis_service
+                overview_cache_key = market_service._build_cache_key("market_overview")
+                overview = await market_service.get_market_overview()
+                price_snapshot = await market_service.realtime_price_tracking(
+                    symbols=symbols_arg,
+                    exchanges="all",
+                    user_id="system-cache-warm",
+                )
+
+                redis_client = self.redis
+                if not redis_client:
+                    try:
+                        redis_client = await get_redis_client()
+                        if redis_client:
+                            self.redis = redis_client
+                    except Exception as redis_error:  # pragma: no cover - defensive
+                        self.logger.debug(
+                            "Cache warmer unable to acquire Redis client",
+                            error=str(redis_error),
+                        )
+                        redis_client = None
+
+                now_iso = datetime.utcnow().isoformat()
+
+                if redis_client:
+                    # Persist market overview so API handlers can reuse warm data
+                    if overview.get("success"):
+                        try:
+                            await redis_client.setex(
+                                overview_cache_key,
+                                cache_ttl,
+                                json.dumps(overview, default=str),
+                            )
+                            await redis_client.set("market_analysis:last_overview_refresh", now_iso)
+                            await redis_client.set(
+                                "market_analysis:last_overview_cache_key",
+                                overview_cache_key,
+                            )
+                        except Exception as redis_error:  # pragma: no cover - defensive
+                            self.logger.warning(
+                                "Failed to persist warmed market overview to Redis",
+                                error=str(redis_error),
+                            )
+
+                    # Persist realtime price tracking snapshot including on-chain metrics
+                    if price_snapshot.get("success"):
+                        price_cache_key = market_service._build_cache_key(
+                            "realtime_price_tracking",
+                            symbols=",".join(sorted_symbols),
+                            exchanges="all",
+                        )
+                        try:
+                            await redis_client.setex(
+                                price_cache_key,
+                                cache_ttl,
+                                json.dumps(price_snapshot, default=str),
+                            )
+                            await redis_client.set("market_analysis:last_price_refresh", now_iso)
+                            await redis_client.set("market_analysis:last_onchain_refresh", now_iso)
+                            await redis_client.set("market_analysis:last_price_cache_key", price_cache_key)
+                        except Exception as redis_error:  # pragma: no cover - defensive
+                            self.logger.warning(
+                                "Failed to persist warmed realtime price snapshot to Redis",
+                                error=str(redis_error),
+                            )
+
+                    try:
+                        await redis_client.set("market_analysis:last_cache_warmer_run", now_iso)
+                    except Exception as redis_error:  # pragma: no cover - defensive
+                        self.logger.debug(
+                            "Failed to update cache warmer heartbeat",
+                            error=str(redis_error),
+                        )
+
+                self.logger.debug(
+                    "Market cache warmer cycle completed",
+                    overview_cached=overview.get("success"),
+                    price_cached=price_snapshot.get("success"),
+                    symbols=symbols_arg,
+                )
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self.logger.warning("Market cache warmer cycle failed", error=str(exc))
+            finally:
+                elapsed = time.time() - cycle_start
+                sleep_for = interval - elapsed
+                if sleep_for <= 0:
+                    sleep_for = 1
+                await asyncio.sleep(sleep_for)
+
     async def _discover_active_trading_symbols(self) -> List[str]:
         all_discovered_symbols = set()
         strategies = [
