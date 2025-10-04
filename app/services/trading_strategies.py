@@ -33,7 +33,7 @@ import json
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 import uuid
 import numpy as np
 import pandas as pd
@@ -64,9 +64,30 @@ from app.models.analytics import PerformanceMetric, RiskMetric
 from app.models.market_data import BacktestResult
 from app.services.trade_execution import TradeExecutionService
 from app.services.market_analysis_core import MarketAnalysisService
+from app.services.market_analysis import market_analysis_service
+from app.services.market_data_feeds import market_data_feeds
+from app.services.exchange_universe_service import exchange_universe_service
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
+
+
+def _normalize_base_symbol(symbol: str) -> str:
+    """Return a base asset code suitable for exchange universe queries."""
+
+    if not symbol:
+        return ""
+
+    normalized = str(symbol).upper().strip()
+    if "/" in normalized:
+        return normalized.split("/", 1)[0]
+
+    stable_suffixes = ("USDT", "USDC", "BUSD", "USD")
+    for suffix in stable_suffixes:
+        if normalized.endswith(suffix) and len(normalized) > len(suffix):
+            return normalized[: -len(suffix)]
+
+    return normalized
 
 
 # Platform AI strategy definitions
@@ -1186,6 +1207,33 @@ class TradingStrategiesService(LoggerMixin):
                 self._platform_strategy_ids = mapping
 
     # ------------------------------------------------------------------
+    # Dynamic universe helpers
+    # ------------------------------------------------------------------
+
+    async def _fetch_dynamic_symbol_bases(
+        self,
+        user_id: Optional[str],
+        exchanges: Sequence[str],
+        *,
+        limit: Optional[int] = None,
+    ) -> List[str]:
+        """Return unique base symbols discovered for the supplied exchanges."""
+
+        effective_exchanges = list(exchanges) if exchanges else list(
+            self.market_analyzer.exchange_manager.exchange_configs.keys()
+        )
+
+        symbol_universe = await exchange_universe_service.get_symbol_universe(
+            user_id,
+            None,
+            effective_exchanges,
+            limit=limit,
+        )
+
+        normalized_symbols = [_normalize_base_symbol(symbol) for symbol in symbol_universe]
+        return list(dict.fromkeys(sym for sym in normalized_symbols if sym))
+
+    # ------------------------------------------------------------------
     # Transparency, regulatory and educational context helpers
     # ------------------------------------------------------------------
 
@@ -1814,6 +1862,16 @@ class TradingStrategiesService(LoggerMixin):
         self.logger.info("Executing strategy", function=function, strategy_type=strategy_type, symbol=symbol)
 
         parameters = parameters or {}
+        symbol_override = parameters.get("symbol")
+        if symbol_override:
+            symbol = str(symbol_override)
+
+        symbols_param = parameters.get("symbols")
+        exchanges_param = parameters.get("exchanges")
+        universe_param = parameters.get("universe")
+        pair_symbols_param = parameters.get("pair_symbols") or parameters.get("pair_symbol")
+        analysis_type_param = parameters.get("analysis_type")
+
         strategy_params = StrategyParameters(
             symbol=symbol,
             quantity=parameters.get("quantity", 0.01),
@@ -1839,13 +1897,26 @@ class TradingStrategiesService(LoggerMixin):
                 )
 
             elif function in ["algorithmic_trading", "pairs_trading", "statistical_arbitrage", "market_making", "scalping_strategy"]:
+                strategy_symbol = symbol
+                if function == "pairs_trading" and pair_symbols_param:
+                    strategy_symbol = str(pair_symbols_param)
+                elif function == "statistical_arbitrage" and universe_param:
+                    strategy_symbol = str(universe_param)
+                elif symbol_override:
+                    strategy_symbol = str(symbol)
+
+                strategy_params.symbol = strategy_symbol
+
                 strategy_result = await self._execute_algorithmic_strategy(
-                    function, strategy_type, symbol, strategy_params, user_id
+                    function, strategy_type, strategy_symbol, strategy_params, user_id, parameters
                 )
 
             elif function == "risk_management":
                 strategy_result = await self.risk_management(
-                    symbols=symbol, user_id=user_id
+                    analysis_type=analysis_type_param or "comprehensive",
+                    symbols=symbols_param or symbol,
+                    parameters=parameters,
+                    user_id=user_id
                 )
 
             elif function in ["position_management", "portfolio_optimization"]:
@@ -1855,7 +1926,10 @@ class TradingStrategiesService(LoggerMixin):
 
             elif function == "funding_arbitrage":
                 strategy_result = await self.funding_arbitrage(
-                    symbols=symbol, user_id=user_id
+                    symbols=symbols_param or symbol,
+                    exchanges=exchanges_param or "all",
+                    min_funding_rate=parameters.get("min_funding_rate", 0.005),
+                    user_id=user_id
                 )
 
             elif function == "calculate_greeks":
@@ -2466,25 +2540,29 @@ class TradingStrategiesService(LoggerMixin):
         strategy_type: str,
         symbol: str,
         parameters: StrategyParameters,
-        user_id: str
+        user_id: str,
+        raw_parameters: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute algorithmic trading strategies with real implementations."""
-        
+
         try:
+            raw_params = raw_parameters or {}
+
             if function == "pairs_trading":
                 return await self.pairs_trading(
                     pair_symbols=symbol,
                     strategy_type=strategy_type or "statistical_arbitrage",
                     user_id=user_id
                 )
-            
+
             elif function == "statistical_arbitrage":
                 return await self.statistical_arbitrage(
                     universe=symbol,
                     strategy_type=strategy_type or "mean_reversion",
+                    parameters=raw_params,
                     user_id=user_id
                 )
-            
+
             elif function == "market_making":
                 return await self.market_making(
                     symbol=symbol,
@@ -2612,15 +2690,25 @@ class TradingStrategiesService(LoggerMixin):
             
             # If no positions exist, suggest initial allocation
             if not current_positions and not all_recommendations:
-                # Suggest diversified initial portfolio
-                suggested_assets = ["BTC", "ETH", "BNB", "SOL", "ADA", "MATIC", "DOT", "AVAX"]
-                for asset in suggested_assets[:6]:  # Top 6 assets
+                exchanges = await exchange_universe_service.get_user_exchanges(
+                    user_id,
+                    None,
+                    default_exchanges=self.market_analyzer.exchange_manager.exchange_configs.keys(),
+                )
+                dynamic_assets = await self._fetch_dynamic_symbol_bases(
+                    user_id,
+                    exchanges,
+                    limit=6,
+                )
+
+                for asset in dynamic_assets:
+                    pair_symbol = asset if "/" in asset else f"{asset}/USDT"
                     all_recommendations.append({
                         "strategy": "INITIAL_ALLOCATION",
-                        "symbol": f"{asset}/USDT",
+                        "symbol": pair_symbol,
                         "action": "BUY",
-                        "amount": 0.167,  # Equal weight ~16.7% each
-                        "rationale": "Initial portfolio allocation - diversified across major assets",
+                        "amount": round(1 / max(len(dynamic_assets), 1), 3),
+                        "rationale": "Initial portfolio allocation derived from dynamic exchange universe",
                         "improvement_potential": 0.15,  # 15% expected annual return
                         "risk_reduction": 0.3,  # 30% risk reduction vs single asset
                         "urgency": "HIGH"
@@ -2879,11 +2967,31 @@ class TradingStrategiesService(LoggerMixin):
         """DEDICATED MARGIN STATUS - Comprehensive margin analysis and monitoring."""
         
         try:
-            symbol_list = symbols.split(",") if symbols else ["BTC", "ETH", "BNB"]
-            exchange_list = [e.strip().lower() for e in exchanges.split(",")]
-            if "all" in exchange_list:
-                exchange_list = ["binance", "kraken", "kucoin", "bybit"]
-            
+            if isinstance(exchanges, str):
+                requested_exchanges = [e.strip() for e in exchanges.split(",") if e.strip()]
+            else:
+                requested_exchanges = [str(e).strip() for e in exchanges or [] if str(e).strip()]
+
+            if not requested_exchanges or any(token.lower() == "all" for token in requested_exchanges):
+                requested_exchanges = []
+
+            exchange_list = await exchange_universe_service.get_user_exchanges(
+                user_id,
+                requested_exchanges,
+                default_exchanges=self.market_analyzer.exchange_manager.exchange_configs.keys(),
+            )
+            if not exchange_list:
+                exchange_list = list(self.market_analyzer.exchange_manager.exchange_configs.keys())
+
+            if symbols:
+                symbol_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+            else:
+                symbol_list = await self._fetch_dynamic_symbol_bases(
+                    user_id,
+                    exchange_list,
+                    limit=25,
+                )
+
             margin_result = {
                 "overall_margin_health": {},
                 "by_exchange": {},
@@ -3022,9 +3130,48 @@ class TradingStrategiesService(LoggerMixin):
         """DEDICATED FUNDING ARBITRAGE - Exploit funding rate differentials."""
         
         try:
-            symbol_list = [s.strip().upper() for s in symbols.split(",")]
-            exchange_list = [e.strip().lower() for e in exchanges.split(",")]
-            
+            if isinstance(symbols, str):
+                requested_symbols = [s.strip() for s in symbols.split(",") if s.strip()]
+            else:
+                requested_symbols = [str(s).strip() for s in symbols or [] if str(s).strip()]
+
+            dynamic_tokens = {"SMART_ADAPTIVE", "DYNAMIC_DISCOVERY", "ALL"}
+            if not requested_symbols or any(token.upper() in dynamic_tokens for token in requested_symbols):
+                requested_symbols = []
+
+            if isinstance(exchanges, str):
+                requested_exchanges = [e.strip() for e in exchanges.split(",") if e.strip()]
+            else:
+                requested_exchanges = [str(e).strip() for e in exchanges or [] if str(e).strip()]
+
+            dynamic_exchange_tokens = {"all"}
+            if not requested_exchanges or any(token.lower() in dynamic_exchange_tokens for token in requested_exchanges):
+                requested_exchanges = []
+
+            exchange_list = await exchange_universe_service.get_user_exchanges(
+                user_id,
+                requested_exchanges,
+                default_exchanges=self.market_analyzer.exchange_manager.exchange_configs.keys(),
+            )
+            if not exchange_list:
+                exchange_list = list(self.market_analyzer.exchange_manager.exchange_configs.keys())
+
+            symbol_universe = await exchange_universe_service.get_symbol_universe(
+                user_id,
+                requested_symbols or None,
+                exchange_list,
+            )
+
+            normalized_symbols = [_normalize_base_symbol(symbol) for symbol in symbol_universe]
+            symbol_list = list(dict.fromkeys(s for s in normalized_symbols if s))
+
+            if not symbol_list:
+                symbol_list = await self._fetch_dynamic_symbol_bases(
+                    user_id,
+                    exchange_list,
+                    limit=25,
+                )
+
             funding_result = {
                 "opportunities": [],
                 "funding_analysis": {},
@@ -3161,7 +3308,70 @@ class TradingStrategiesService(LoggerMixin):
         except Exception as e:
             self.logger.error("Funding arbitrage analysis failed", error=str(e), exc_info=True)
             return {"success": False, "error": str(e), "function": "funding_arbitrage"}
-    
+
+    def _generate_funding_arbitrage_steps(self, opportunity: Dict[str, Any]) -> List[str]:
+        """Create a deterministic playbook for executing a funding arbitrage trade."""
+
+        opportunity_type = (opportunity.get("type") or "").upper()
+        recommended_side = (opportunity.get("recommended_side") or "").lower()
+        long_exchange = opportunity.get("long_exchange")
+        short_exchange = opportunity.get("short_exchange")
+        single_exchange = opportunity.get("exchange")
+        differential = opportunity.get("funding_differential") or opportunity.get("funding_rate", 0)
+
+        has_distinct_long_short = bool(long_exchange and short_exchange and long_exchange != short_exchange)
+        is_cross_exchange = opportunity_type == "CROSS_EXCHANGE_FUNDING_ARBITRAGE" or has_distinct_long_short
+
+        steps: List[str] = []
+
+        if is_cross_exchange:
+            long_leg_exchange = long_exchange or single_exchange
+            short_leg_exchange = short_exchange or single_exchange
+
+            steps.extend([
+                "Allocate capital to both exchanges and confirm wallet balances.",
+                f"Open LONG perpetual position on {long_leg_exchange} to collect positive funding.",
+                f"Open SHORT perpetual position on {short_leg_exchange} to hedge price exposure.",
+                "Verify position sizes are matched notional to remain delta neutral.",
+            ])
+        else:
+            target_exchange = single_exchange or long_exchange or short_exchange
+            steps.append(
+                f"Allocate capital on {target_exchange} and confirm available margin." if target_exchange else "Allocate margin for the selected perpetual market."
+            )
+
+            if recommended_side == "short":
+                steps.append(
+                    f"Open SHORT perpetual position on {target_exchange} to collect positive funding." if target_exchange else "Open SHORT perpetual position to collect positive funding."
+                )
+            elif recommended_side == "long":
+                steps.append(
+                    f"Open LONG perpetual position on {target_exchange} to benefit from negative funding pressure." if target_exchange else "Open LONG perpetual position to benefit from negative funding pressure."
+                )
+            else:
+                steps.append(
+                    f"Open the preferred perpetual position on {target_exchange} based on funding direction." if target_exchange else "Open the preferred perpetual position based on funding direction."
+                )
+
+            steps.append("Optionally hedge directional exposure with spot or delta-neutral instruments if mandate requires it.")
+
+        steps.append("Set alerts for funding rate changes and large price deviations.")
+
+        if differential:
+            monitor_statement = f"Monitor funding differential (~{round(differential * 100, 2)}%) every funding interval"
+            if is_cross_exchange:
+                monitor_statement += " and rebalance legs if the spread narrows."
+            else:
+                monitor_statement += " and reassess exposure if the edge compresses."
+            steps.append(monitor_statement)
+
+        if is_cross_exchange:
+            steps.append("Close both legs simultaneously when funding edge drops below threshold or volatility spikes.")
+        else:
+            steps.append("Close the position when funding edge drops below threshold or volatility spikes.")
+
+        return steps
+
     async def basis_trade(
         self,
         symbol: str = "BTC",
@@ -3863,8 +4073,50 @@ class TradingStrategiesService(LoggerMixin):
         
         try:
             params = parameters or {}
-            symbol_list = [s.strip().upper() for s in universe.split(",")]
-            
+
+            if isinstance(universe, str):
+                requested_symbols = [s.strip() for s in universe.split(",") if s.strip()]
+            else:
+                requested_symbols = [str(s).strip() for s in universe or [] if str(s).strip()]
+
+            dynamic_tokens = {"SMART_ADAPTIVE", "DYNAMIC_DISCOVERY", "ALL"}
+            if not requested_symbols or any(token.upper() in dynamic_tokens for token in requested_symbols):
+                requested_symbols = []
+
+            param_exchanges = params.get("exchanges")
+            if isinstance(param_exchanges, str):
+                requested_exchanges = [e.strip() for e in param_exchanges.split(",") if e.strip()]
+            else:
+                requested_exchanges = [str(e).strip() for e in param_exchanges or [] if str(e).strip()]
+
+            exchange_list = await exchange_universe_service.get_user_exchanges(
+                user_id,
+                requested_exchanges,
+                default_exchanges=self.market_analyzer.exchange_manager.exchange_configs.keys(),
+            )
+            if not exchange_list:
+                exchange_list = list(self.market_analyzer.exchange_manager.exchange_configs.keys())
+
+            symbol_universe = await exchange_universe_service.get_symbol_universe(
+                user_id,
+                requested_symbols or None,
+                exchange_list,
+                limit=params.get("max_universe"),
+            )
+
+            normalized_symbols = [_normalize_base_symbol(symbol) for symbol in symbol_universe]
+            symbol_list = list(dict.fromkeys(s for s in normalized_symbols if s))
+
+            if not symbol_list:
+                fallback_limit = params.get("max_universe")
+                symbol_list = await self._fetch_dynamic_symbol_bases(
+                    user_id,
+                    exchange_list,
+                    limit=fallback_limit,
+                )
+                if not symbol_list and universe:
+                    symbol_list = [s.strip().upper() for s in universe.split(",") if s.strip()]
+
             stat_arb_result = {
                 "universe": symbol_list,
                 "strategy_type": strategy_type,
@@ -3876,8 +4128,12 @@ class TradingStrategiesService(LoggerMixin):
             
             # Analyze the universe
             universe_data = {}
+            reference_exchange = exchange_list[0] if exchange_list else "binance"
+
             for symbol in symbol_list:
-                price_data = await self._get_symbol_price("binance", f"{symbol}USDT")
+                price_data = await self._get_symbol_price(reference_exchange, f"{symbol}USDT")
+                if not price_data and reference_exchange != "binance":
+                    price_data = await self._get_symbol_price("binance", f"{symbol}USDT")
                 if price_data:
                     universe_data[symbol] = {
                         "price": float(price_data.get("price", 0)),
@@ -3916,6 +4172,7 @@ class TradingStrategiesService(LoggerMixin):
             stat_arb_result["universe_analysis"] = {
                 "total_symbols": len(symbol_list),
                 "analyzed_symbols": len(performance_scores),
+                "exchanges_scanned": exchange_list,
                 "performance_scores": performance_scores,
                 "ranking": [symbol for symbol, _ in ranked_symbols]
             }
@@ -5871,68 +6128,65 @@ class TradingStrategiesService(LoggerMixin):
             return 0.0
 
     async def _get_symbol_price(self, exchange: str, symbol: str) -> Dict[str, Any]:
-        """Get current price data for a symbol - Direct Binance API call to avoid circular imports."""
-        try:
-            # Direct Binance API call - simple, no circular imports
-            import aiohttp
-            
-            # Convert symbol format (BTC/USDT -> BTCUSDT)
-            binance_symbol = symbol.replace("/", "").replace("-", "")
-            
-            # If it doesn't end with USDT, add it
-            if not binance_symbol.endswith("USDT"):
-                binance_symbol += "USDT"
-            
-            url = f"https://api.binance.com/api/v3/ticker/price?symbol={binance_symbol}"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=5) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        price = float(data.get("price", 0))
-                        
-                        if price > 0:
-                            return {
-                                "success": True,
-                                "price": price,
-                                "symbol": symbol,
-                                "timestamp": datetime.utcnow().isoformat()
-                            }
-            
-            # Fallback to realistic defaults if API fails
-            price_defaults = {
-                "BTC/USDT": 45000.0, "ETH/USDT": 2500.0, "SOL/USDT": 60.0,
-                "ADA/USDT": 0.45, "MATIC/USDT": 0.85, "DOT/USDT": 7.5
-            }
-            
-            if symbol in price_defaults:
-                return {
-                    "success": True,
-                    "price": price_defaults[symbol],
-                    "symbol": symbol,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            
-            return {"success": False, "error": f"Price unavailable for {symbol}"}
+        """Resolve the latest market price for the supplied symbol using the shared price cache."""
 
-        except Exception as e:
-            # Return a default price to keep the system running
-            self.logger.warning(f"Price fetch failed for {symbol}: {e}")
-            
-            # Emergency fallback prices
-            emergency_prices = {
-                "BTC/USDT": 45000.0, "ETH/USDT": 2500.0, "SOL/USDT": 60.0
-            }
-            
-            if symbol in emergency_prices:
+        target_exchange = (exchange or "").strip().lower() or "binance"
+        if target_exchange in {"auto", "spot", "default"}:
+            target_exchange = "binance"
+
+        normalized_symbol = str(symbol or "").strip().upper()
+        if not normalized_symbol:
+            return {"success": False, "error": "symbol_required"}
+
+        if "/" not in normalized_symbol and "-" not in normalized_symbol:
+            normalized_symbol = f"{normalized_symbol}/USDT"
+        normalized_symbol = normalized_symbol.replace("-", "/")
+
+        try:
+            price_payload = await market_analysis_service.get_exchange_price(
+                target_exchange,
+                normalized_symbol,
+            )
+            if price_payload and price_payload.get("price"):
                 return {
                     "success": True,
-                    "price": emergency_prices[symbol],
-                    "symbol": symbol,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "price": float(price_payload["price"]),
+                    "symbol": normalized_symbol,
+                    "volume": price_payload.get("volume"),
+                    "change_24h": price_payload.get("change_24h"),
+                    "timestamp": price_payload.get("timestamp", datetime.utcnow().isoformat()),
                 }
-            
-            return {"success": False, "error": str(e)}
+        except Exception as exc:
+            self.logger.warning(
+                "Primary price fetch failed",
+                exchange=target_exchange,
+                symbol=normalized_symbol,
+                error=str(exc),
+            )
+
+        base_symbol = normalized_symbol.split("/", 1)[0]
+        try:
+            snapshot = await market_data_feeds.get_market_snapshot(base_symbol)
+            if snapshot.get("success"):
+                data = snapshot.get("data", {})
+                price = data.get("price")
+                if price:
+                    return {
+                        "success": True,
+                        "price": float(price),
+                        "symbol": normalized_symbol,
+                        "volume": data.get("volume_24h"),
+                        "change_24h": data.get("change_24h"),
+                        "timestamp": data.get("timestamp", datetime.utcnow().isoformat()),
+                    }
+        except Exception as exc:
+            self.logger.warning(
+                "Market snapshot fallback failed",
+                symbol=normalized_symbol,
+                error=str(exc),
+            )
+
+        return {"success": False, "error": f"Price unavailable for {normalized_symbol}"}
 
     async def _get_perpetual_funding_info(self, symbol: str, exchange: str) -> Dict[str, Any]:
         """Get perpetual funding rate information."""

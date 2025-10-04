@@ -6,6 +6,8 @@ and other free sources for the AI money manager platform.
 """
 
 import asyncio
+import ast
+import json
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
@@ -245,14 +247,33 @@ class MarketDataFeeds:
         current_time = time.time()
         
         # ENTERPRISE CIRCUIT BREAKER CHECK
-        breaker = self.circuit_breakers.get(api_name, {})
-        if current_time < breaker.get("open_until", 0):
-            logger.debug(f"Circuit breaker OPEN for {api_name}")
-            return False
-        
+        circuit_breaker = self.circuit_breakers.get(api_name)
+        if circuit_breaker:
+            try:
+                should_try = await circuit_breaker._should_try()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning(
+                    "Circuit breaker check failed",
+                    api=api_name,
+                    error=str(exc),
+                )
+                should_try = True
+
+            if not should_try:
+                logger.debug(f"Circuit breaker OPEN for {api_name}")
+                return False
+
         # Check traditional rate limits
-        limiter = self.rate_limiters.get(api_name, {})
-        
+        limiter = self.rate_limiters.get(api_name)
+        if limiter is None:
+            api_config = self.apis.get(api_name, {})
+            limiter = {
+                "requests": 0,
+                "window_start": current_time,
+                "max_requests": api_config.get("rate_limit", 60),
+            }
+            self.rate_limiters[api_name] = limiter
+
         # Reset window if needed (1 minute windows)
         if current_time - limiter.get("window_start", 0) >= 60:
             limiter["requests"] = 0
@@ -499,44 +520,127 @@ class MarketDataFeeds:
                 "include_market_cap": "true"
             }
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        
-                        # Transform data
-                        result = {"success": True, "data": {}}
-                        
-                        for coin_id, coin_data in data.items():
-                            symbol = symbol_map.get(coin_id, coin_id.upper())
-                            result["data"][symbol] = {
-                                "symbol": symbol,
-                                "price": coin_data.get("usd", 0),
-                                "change_24h": coin_data.get("usd_24h_change", 0),
-                                "volume_24h": coin_data.get("usd_24h_vol", 0),
-                                "market_cap": coin_data.get("usd_market_cap", 0),
-                                "timestamp": datetime.utcnow().isoformat(),
-                                "source": "coingecko"
-                            }
-                            
-                            # ENTERPRISE REDIS RESILIENCE - Cache individual prices if Redis is available
-                            if self.redis:
-                                await self.redis.setex(
-                                    f"price:{symbol}",
-                                    self.cache_ttl["price"],
-                                    str({
-                                        "success": True,
-                                        "data": result["data"][symbol]
-                                    })
-                                )
-                        
-                        return result
-                    else:
+            timeout = aiohttp.ClientTimeout(total=6)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                try:
+                    async with session.get(url, params=params) as response:
+                        if response.status == 200:
+                            data = await response.json()
+
+                            # Transform data
+                            result = {"success": True, "data": {}}
+
+                            for coin_id, coin_data in data.items():
+                                symbol = symbol_map.get(coin_id, coin_id.upper())
+                                result["data"][symbol] = {
+                                    "symbol": symbol,
+                                    "price": coin_data.get("usd", 0),
+                                    "change_24h": coin_data.get("usd_24h_change", 0),
+                                    "volume_24h": coin_data.get("usd_24h_vol", 0),
+                                    "market_cap": coin_data.get("usd_market_cap", 0),
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                    "source": "coingecko"
+                                }
+
+                                # ENTERPRISE REDIS RESILIENCE - Cache individual prices if Redis is available
+                                if self.redis:
+                                    await self.redis.setex(
+                                        f"price:{symbol}",
+                                        self.cache_ttl["price"],
+                                        json.dumps({
+                                            "success": True,
+                                            "data": result["data"][symbol]
+                                        })
+                                    )
+
+                            return result
                         return {"success": False, "error": f"API error: {response.status}"}
-                        
+                except asyncio.TimeoutError:
+                    logger.warning("CoinGecko multiple price request timed out", symbols=symbols)
+                    return await self._fallback_cached_prices(symbols)
+
         except Exception as e:
             logger.error("Failed to get multiple prices", error=str(e))
-            return {"success": False, "error": str(e)}
+            return await self._fallback_cached_prices(symbols, error=str(e))
+
+    async def _fallback_cached_prices(
+        self,
+        symbols: List[str],
+        error: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        cached: Dict[str, Any] = {}
+
+        async def load_from_redis(symbol: str) -> Optional[Dict[str, Any]]:
+            if not self.redis:
+                return None
+
+            raw = await self.redis.get(f"price:{symbol}")
+            if not raw:
+                return None
+
+            return self._deserialize_price_cache(raw)
+
+        for symbol in symbols:
+            cached_data = await load_from_redis(symbol)
+            if cached_data:
+                cached[symbol] = cached_data
+
+        if cached:
+            metadata = {"source": "cache"}
+            if error:
+                metadata["error"] = error
+            return {"success": True, "data": cached, "metadata": metadata}
+
+        return {
+            "success": False,
+            "error": error or "Price service unavailable",
+        }
+
+    def _deserialize_price_cache(self, raw: Any) -> Optional[Dict[str, Any]]:
+        """Normalise cached price payloads into dictionaries."""
+
+        payload: Any = raw
+
+        if isinstance(payload, bytes):
+            try:
+                payload = payload.decode()
+            except Exception:  # pragma: no cover - defensive decode
+                payload = payload.decode(errors="ignore") if hasattr(payload, "decode") else payload
+
+        if isinstance(payload, dict):
+            container: Any = payload
+        elif isinstance(payload, str):
+            try:
+                container = json.loads(payload)
+            except (json.JSONDecodeError, TypeError):
+                try:
+                    container = ast.literal_eval(str(payload))
+                except (ValueError, SyntaxError):
+                    return None
+        else:
+            return None
+
+        if not isinstance(container, dict):
+            return None
+
+        data: Any = container.get("data") if "data" in container else container
+
+        if isinstance(data, bytes):
+            try:
+                data = data.decode()
+            except Exception:  # pragma: no cover - defensive decode
+                data = data.decode(errors="ignore") if hasattr(data, "decode") else data
+
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                try:
+                    data = ast.literal_eval(str(data))
+                except (ValueError, SyntaxError):
+                    return None
+
+        return data if isinstance(data, dict) else None
 
     async def get_trending_coins(self, limit: int = 10) -> Dict[str, Any]:
         """Get trending coins from CoinGecko."""
