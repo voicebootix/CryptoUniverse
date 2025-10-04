@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 import os
 import sys
@@ -379,3 +380,39 @@ async def test_portfolio_optimization_profit_scales_with_capital(monkeypatch, ca
 
     capital_assumptions = opportunity.metadata["capital_assumptions"]
     assert capital_assumptions["deployable_capital_usd"] == pytest.approx(capital)
+
+
+
+@pytest.mark.asyncio
+async def test_discover_opportunities_returns_partial_then_final(monkeypatch):
+    service = UserOpportunityDiscoveryService()
+    service._scan_response_budget = 0.01
+    user_id = "user-partial"
+
+    async def fake_execute(user_id: str, force_refresh: bool = False, include_strategy_recommendations: bool = True):
+        await asyncio.sleep(0.005)
+        partial_payload = {
+            "success": True,
+            "opportunities": [],
+            "metadata": {"scan_state": "partial"},
+        }
+        await service._update_cached_scan_result(user_id, partial_payload, partial=True)
+        await asyncio.sleep(0.05)
+        final_payload = {
+            "success": True,
+            "opportunities": ["complete"],
+            "metadata": {"scan_state": "complete"},
+        }
+        await service._update_cached_scan_result(user_id, final_payload, partial=False)
+        return final_payload
+
+    monkeypatch.setattr(service, "_execute_opportunity_discovery", fake_execute)
+
+    partial_result = await service.discover_opportunities_for_user(user_id)
+    assert partial_result["metadata"]["scan_state"] == "partial"
+
+    await asyncio.sleep(0.08)
+
+    final_result = await service.discover_opportunities_for_user(user_id)
+    assert final_result["metadata"]["scan_state"] == "complete"
+    assert final_result["opportunities"] == ["complete"]

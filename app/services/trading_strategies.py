@@ -64,6 +64,8 @@ from app.models.analytics import PerformanceMetric, RiskMetric
 from app.models.market_data import BacktestResult
 from app.services.trade_execution import TradeExecutionService
 from app.services.market_analysis_core import MarketAnalysisService
+from app.services.market_analysis import market_analysis_service
+from app.services.market_data_feeds import market_data_feeds
 from app.services.exchange_universe_service import exchange_universe_service
 
 settings = get_settings()
@@ -6126,68 +6128,109 @@ class TradingStrategiesService(LoggerMixin):
             return 0.0
 
     async def _get_symbol_price(self, exchange: str, symbol: str) -> Dict[str, Any]:
-        """Get current price data for a symbol - Direct Binance API call to avoid circular imports."""
-        try:
-            # Direct Binance API call - simple, no circular imports
-            import aiohttp
-            
-            # Convert symbol format (BTC/USDT -> BTCUSDT)
-            binance_symbol = symbol.replace("/", "").replace("-", "")
-            
-            # If it doesn't end with USDT, add it
-            if not binance_symbol.endswith("USDT"):
-                binance_symbol += "USDT"
-            
-            url = f"https://api.binance.com/api/v3/ticker/price?symbol={binance_symbol}"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=5) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        price = float(data.get("price", 0))
-                        
-                        if price > 0:
-                            return {
-                                "success": True,
-                                "price": price,
-                                "symbol": symbol,
-                                "timestamp": datetime.utcnow().isoformat()
-                            }
-            
-            # Fallback to realistic defaults if API fails
-            price_defaults = {
-                "BTC/USDT": 45000.0, "ETH/USDT": 2500.0, "SOL/USDT": 60.0,
-                "ADA/USDT": 0.45, "MATIC/USDT": 0.85, "DOT/USDT": 7.5
-            }
-            
-            if symbol in price_defaults:
-                return {
-                    "success": True,
-                    "price": price_defaults[symbol],
-                    "symbol": symbol,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            
-            return {"success": False, "error": f"Price unavailable for {symbol}"}
+        """Resolve the latest market price for the supplied symbol using the shared price cache."""
 
-        except Exception as e:
-            # Return a default price to keep the system running
-            self.logger.warning(f"Price fetch failed for {symbol}: {e}")
-            
-            # Emergency fallback prices
-            emergency_prices = {
-                "BTC/USDT": 45000.0, "ETH/USDT": 2500.0, "SOL/USDT": 60.0
-            }
-            
-            if symbol in emergency_prices:
+        target_exchange = (exchange or "").strip().lower() or "binance"
+        if target_exchange in {"auto", "spot", "default"}:
+            target_exchange = "binance"
+
+        normalized_symbol = str(symbol or "").strip().upper()
+        if not normalized_symbol:
+            return {"success": False, "error": "symbol_required"}
+
+        # Handle various symbol formats
+        if "/" in normalized_symbol or "-" in normalized_symbol:
+            # Already has separator, just normalize it
+            normalized_symbol = normalized_symbol.replace("-", "/")
+        else:
+            # List of known stablecoins that should NOT be split
+            standalone_stables = {"BUSD", "TUSD", "USDT", "USDC", "DAI", "FRAX", "GUSD", "USDP"}
+
+            # If it's a standalone stablecoin, pair it with USDT (or another stable)
+            if normalized_symbol in standalone_stables:
+                # For stablecoins, create a pair with USDT (except USDT itself)
+                if normalized_symbol == "USDT":
+                    normalized_symbol = "USDT/USD"  # USDT typically pairs with USD
+                else:
+                    normalized_symbol = f"{normalized_symbol}/USDT"
+            else:
+                # Check for known quote currency suffixes, longest first to avoid partial matches
+                # Include crypto quotes (BTC, ETH, BNB) and fiat quotes (EUR, GBP, JPY)
+                quote_suffixes = (
+                    "USDT",  # Stablecoins first (most common)
+                    "USDC",
+                    "BUSD",
+                    "TUSD",
+                    "USD",
+                    "DAI",
+                    "BTC",   # Crypto quotes
+                    "ETH",
+                    "BNB",
+                    "EUR",   # Fiat quotes
+                    "GBP",
+                    "JPY",
+                    "AUD",
+                    "CAD"
+                )
+                matched = False
+                for suffix in quote_suffixes:
+                    if normalized_symbol.endswith(suffix) and len(normalized_symbol) > len(suffix):
+                        base_symbol = normalized_symbol[:-len(suffix)]
+                        # Ensure base symbol is at least 2 characters (avoid "B/USD" from "BUSD")
+                        if len(base_symbol) >= 2:
+                            normalized_symbol = f"{base_symbol}/{suffix}"
+                            matched = True
+                            break
+
+                if not matched:
+                    # No recognized suffix found, default to USDT pair
+                    normalized_symbol = f"{normalized_symbol}/USDT"
+
+        try:
+            price_payload = await market_analysis_service.get_exchange_price(
+                target_exchange,
+                normalized_symbol,
+            )
+            if price_payload and price_payload.get("price"):
                 return {
                     "success": True,
-                    "price": emergency_prices[symbol],
-                    "symbol": symbol,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "price": float(price_payload["price"]),
+                    "symbol": normalized_symbol,
+                    "volume": price_payload.get("volume"),
+                    "change_24h": price_payload.get("change_24h"),
+                    "timestamp": price_payload.get("timestamp", datetime.utcnow().isoformat()),
                 }
-            
-            return {"success": False, "error": str(e)}
+        except Exception as exc:
+            self.logger.warning(
+                "Primary price fetch failed",
+                exchange=target_exchange,
+                symbol=normalized_symbol,
+                error=str(exc),
+            )
+
+        base_symbol = normalized_symbol.split("/", 1)[0]
+        try:
+            snapshot = await market_data_feeds.get_market_snapshot(base_symbol)
+            if snapshot.get("success"):
+                data = snapshot.get("data", {})
+                price = data.get("price")
+                if price:
+                    return {
+                        "success": True,
+                        "price": float(price),
+                        "symbol": normalized_symbol,
+                        "volume": data.get("volume_24h"),
+                        "change_24h": data.get("change_24h"),
+                        "timestamp": data.get("timestamp", datetime.utcnow().isoformat()),
+                    }
+        except Exception as exc:
+            self.logger.warning(
+                "Market snapshot fallback failed",
+                symbol=normalized_symbol,
+                error=str(exc),
+            )
+
+        return {"success": False, "error": f"Price unavailable for {normalized_symbol}"}
 
     async def _get_perpetual_funding_info(self, symbol: str, exchange: str) -> Dict[str, Any]:
         """Get perpetual funding rate information."""

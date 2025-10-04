@@ -29,22 +29,46 @@ Functions migrated:
 """
 
 import asyncio
+import ast
 import copy
+import json
 import os
 import time
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+
+import aiohttp
 import numpy as np
 import pandas as pd
-import aiohttp
 import structlog
 
 from app.core.logging import LoggerMixin
+from app.core.redis import get_redis_client
 from app.services.market_data_feeds import market_data_feeds
 from app.services.exchange_universe_service import exchange_universe_service
 # Avoid circular import - define configurations locally
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass
+class _PriceCacheEntry:
+    data: Dict[str, Any]
+    expires_at: float
+
+
+def _chunked(iterable: Iterable[Any], size: int) -> Iterable[List[Any]]:
+    """Yield fixed-size chunks from an iterable."""
+    chunk: List[Any] = []
+    for item in iterable:
+        chunk.append(item)
+        if len(chunk) == size:
+            yield chunk
+            chunk = []
+    if chunk:
+        yield chunk
 
 
 class ExchangeConfigurations:
@@ -86,19 +110,74 @@ class ExchangeConfigurations:
             "stats": 1
         }
     }
+
+    COINBASE = {
+        "base_url": "https://api.exchange.coinbase.com",
+        "endpoints": {
+            "ticker": "/products/{}/ticker",
+            "products": "/products"
+        },
+        "rate_limit": 10,
+        "purpose": "market_data_only"
+    }
+
+    BYBIT = {
+        "base_url": "https://api.bybit.com",
+        "endpoints": {
+            "ticker": "/v5/market/tickers",
+            "orderbook": "/v5/market/orderbook"
+        },
+        "rate_limit": 120,
+        "purpose": "market_data_only"
+    }
+
+    OKX = {
+        "base_url": "https://www.okx.com",
+        "endpoints": {
+            "ticker": "/api/v5/market/ticker",
+            "tickers": "/api/v5/market/tickers"
+        },
+        "rate_limit": 20,
+        "purpose": "market_data_only"
+    }
+
+    BITGET = {
+        "base_url": "https://api.bitget.com",
+        "endpoints": {
+            "ticker": "/api/spot/v1/market/ticker",
+            "tickers": "/api/spot/v1/market/tickers"
+        },
+        "rate_limit": 20,
+        "purpose": "market_data_only"
+    }
+
+    GATEIO = {
+        "base_url": "https://api.gateio.ws",
+        "endpoints": {
+            "ticker": "/api/v4/spot/tickers",
+            "orderbook": "/api/v4/spot/order_book"
+        },
+        "rate_limit": 900,
+        "purpose": "market_data_only"
+    }
     
     @classmethod
     def get_all_exchanges(cls) -> list[str]:
         """Get list of all supported exchanges."""
-        return ["binance", "kraken", "kucoin"]
-    
+        return ["binance", "kraken", "kucoin", "coinbase", "bybit", "okx", "bitget", "gateio"]
+
     @classmethod
     def get_config(cls, exchange: str) -> dict:
         """Get configuration for specific exchange."""
         configs = {
             "binance": cls.BINANCE,
-            "kraken": cls.KRAKEN, 
-            "kucoin": cls.KUCOIN
+            "kraken": cls.KRAKEN,
+            "kucoin": cls.KUCOIN,
+            "coinbase": cls.COINBASE,
+            "bybit": cls.BYBIT,
+            "okx": cls.OKX,
+            "bitget": cls.BITGET,
+            "gateio": cls.GATEIO
         }
         return configs.get(exchange.lower(), {})
 
@@ -110,7 +189,12 @@ class DynamicExchangeManager(LoggerMixin):
         self.exchange_configs = {
             "kraken": ExchangeConfigurations.KRAKEN,   # Priority 1: Confirmed working
             "kucoin": ExchangeConfigurations.KUCOIN,   # Priority 2: Confirmed working
-            "binance": ExchangeConfigurations.BINANCE  # Priority 3: Now uses binance.us
+            "binance": ExchangeConfigurations.BINANCE,  # Priority 3: Now uses binance.us
+            "coinbase": ExchangeConfigurations.COINBASE,
+            "bybit": ExchangeConfigurations.BYBIT,
+            "okx": ExchangeConfigurations.OKX,
+            "bitget": ExchangeConfigurations.BITGET,
+            "gateio": ExchangeConfigurations.GATEIO
         }
         self.rate_limiters = {}
         self.circuit_breakers = {}
@@ -203,6 +287,15 @@ class MarketAnalysisService(LoggerMixin):
     ALL SOPHISTICATION PRESERVED - NO SIMPLIFICATION
     """
     
+    EXCHANGE_DEFAULT_QUOTES: Dict[str, str] = {
+        "binance": "USDT",
+        "kucoin": "USDT",
+        "kraken": "USD",
+        "coinbase": "USD",
+        "gateio": "USDT",
+        "bybit": "USDT",
+    }
+
     def __init__(self):
         self.exchange_manager = DynamicExchangeManager()
         self.service_health = {"status": "OPERATIONAL", "last_check": datetime.utcnow()}
@@ -223,6 +316,12 @@ class MarketAnalysisService(LoggerMixin):
         self._max_symbol_concurrency = 6
         self._per_exchange_timeout = 5
         self._symbol_semaphores: Dict[int, asyncio.Semaphore] = {}
+        self._price_cache: Dict[str, _PriceCacheEntry] = {}
+        self._price_lock_map: Dict[str, asyncio.Lock] = {}
+        self._price_lock_map_lock = asyncio.Lock()
+        self._price_cache_ttl = 30
+        self._redis = None
+        self._redis_lock = asyncio.Lock()
 
     async def _get_cache_lock(self) -> asyncio.Lock:
         """Provide an asyncio lock scoped to the current event loop."""
@@ -264,6 +363,195 @@ class MarketAnalysisService(LoggerMixin):
             "cache_retrieved_at": datetime.utcnow().isoformat(),
         })
         return response_copy
+
+    def _build_price_cache_key(self, exchange: str, symbol: str) -> str:
+        symbol_token = symbol.replace("/", "_").upper()
+        return f"price::{exchange.lower()}::{symbol_token}"
+
+    async def _get_price_lock(self, cache_key: str) -> asyncio.Lock:
+        async with self._price_lock_map_lock:
+            lock = self._price_lock_map.get(cache_key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._price_lock_map[cache_key] = lock
+            return lock
+
+    async def _ensure_price_redis(self) -> None:
+        if self._redis is not None:
+            return
+        async with self._redis_lock:
+            if self._redis is not None:
+                return
+            try:
+                self._redis = await get_redis_client()
+            except Exception as exc:  # pragma: no cover - optional dependency
+                self.logger.warning(
+                    "Redis unavailable for market analysis price cache",
+                    error=str(exc),
+                )
+                self._redis = None
+
+    def _normalize_symbol_for_exchange(self, exchange: str, symbol: str) -> Tuple[str, str]:
+        exchange_key = (exchange or "").strip().lower() or "binance"
+        if exchange_key in {"auto", "spot", "default"}:
+            exchange_key = "binance"
+
+        token = (symbol or "").strip().upper().replace("-", "/")
+        if not token:
+            return exchange_key, ""
+        if "/" not in token:
+            quote = self.EXCHANGE_DEFAULT_QUOTES.get(exchange_key, "USDT")
+            token = f"{token}/{quote}"
+        return exchange_key, token
+
+    async def _load_price_from_redis(self, cache_key: str) -> Optional[Dict[str, Any]]:
+        await self._ensure_price_redis()
+        if not self._redis:
+            return None
+        try:
+            raw = await self._redis.get(cache_key)
+            if not raw:
+                return None
+
+            payload: Any
+            if isinstance(raw, dict):
+                payload = raw
+            else:
+                if isinstance(raw, bytes):
+                    raw = raw.decode()
+                if isinstance(raw, str):
+                    try:
+                        payload = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError):
+                        try:
+                            payload = ast.literal_eval(str(raw))
+                        except (ValueError, SyntaxError):
+                            return None
+                else:
+                    return None
+
+            if isinstance(payload, dict):
+                candidate = payload.get("data", payload)
+                if isinstance(candidate, dict):
+                    return candidate
+        except Exception as exc:  # pragma: no cover - best effort
+            self.logger.debug("Failed to load price cache from redis", error=str(exc))
+        return None
+
+    async def _store_price_in_redis(
+        self,
+        cache_key: str,
+        data: Dict[str, Any],
+        ttl: int,
+    ) -> None:
+        await self._ensure_price_redis()
+        if not self._redis:
+            return
+        try:
+            payload = json.dumps({"data": data, "timestamp": datetime.utcnow().isoformat()})
+            await self._redis.setex(cache_key, ttl, payload)
+        except Exception as exc:  # pragma: no cover - best effort
+            self.logger.debug("Failed to store price cache", error=str(exc))
+
+    async def get_exchange_price(
+        self,
+        exchange: str,
+        symbol: str,
+        *,
+        ttl: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        exchange_key, normalized_symbol = self._normalize_symbol_for_exchange(exchange, symbol)
+        if not normalized_symbol:
+            return None
+
+        cache_key = self._build_price_cache_key(exchange_key, normalized_symbol)
+        ttl_value = ttl or self._price_cache_ttl
+        now = time.monotonic()
+
+        entry = self._price_cache.get(cache_key)
+        if entry and entry.expires_at > now:
+            return dict(entry.data)
+
+        lock = await self._get_price_lock(cache_key)
+        async with lock:
+            entry = self._price_cache.get(cache_key)
+            if entry and entry.expires_at > now:
+                return dict(entry.data)
+
+            cached = await self._load_price_from_redis(cache_key)
+            if cached:
+                self._price_cache[cache_key] = _PriceCacheEntry(data=cached, expires_at=now + ttl_value)
+                return dict(cached)
+
+            fetched_map = await self._fetch_bulk_symbol_prices(exchange_key, [normalized_symbol])
+            fetched = fetched_map.get(normalized_symbol)
+            if fetched:
+                self._price_cache[cache_key] = _PriceCacheEntry(data=fetched, expires_at=now + ttl_value)
+                await self._store_price_in_redis(cache_key, fetched, ttl_value)
+                return dict(fetched)
+
+            return None
+
+    async def preload_exchange_prices(
+        self,
+        pairs: Sequence[Tuple[str, str]],
+        *,
+        ttl: Optional[int] = None,
+        concurrency: int = 20,
+    ) -> Dict[Tuple[str, str], Optional[Dict[str, Any]]]:
+        if not pairs:
+            return {}
+
+        unique_pairs: Dict[str, List[str]] = defaultdict(list)
+        seen_keys: set[str] = set()
+        for exchange, symbol in pairs:
+            exchange_key, normalized_symbol = self._normalize_symbol_for_exchange(exchange, symbol)
+            if not normalized_symbol:
+                continue
+            cache_key = self._build_price_cache_key(exchange_key, normalized_symbol)
+            if cache_key in seen_keys:
+                continue
+            seen_keys.add(cache_key)
+            unique_pairs[exchange_key].append(normalized_symbol)
+
+        if not unique_pairs:
+            return {}
+
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+        ttl_value = ttl or self._price_cache_ttl
+        results: Dict[Tuple[str, str], Optional[Dict[str, Any]]] = {}
+
+        async def _preload_exchange(exchange_key: str, symbols: Sequence[str]) -> None:
+            async with semaphore:
+                try:
+                    fetched = await self._fetch_bulk_symbol_prices(exchange_key, symbols)
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    self.logger.debug(
+                        "Bulk price preload failed",
+                        exchange=exchange_key,
+                        symbols=len(symbols),
+                        error=str(exc),
+                    )
+                    fetched = {}
+
+                now_inner = time.monotonic()
+                for symbol in symbols:
+                    price = fetched.get(symbol)
+                    cache_key = self._build_price_cache_key(exchange_key, symbol)
+                    if price:
+                        self._price_cache[cache_key] = _PriceCacheEntry(data=price, expires_at=now_inner + ttl_value)
+                        await self._store_price_in_redis(cache_key, price, ttl_value)
+                    results[(exchange_key, symbol)] = price
+
+        tasks = []
+        for exchange_key, symbol_list in unique_pairs.items():
+            chunk_size = max(1, min(100, len(symbol_list)))
+            for chunk in _chunked(symbol_list, chunk_size):
+                tasks.append(_preload_exchange(exchange_key, chunk))
+
+        if tasks:
+            await asyncio.gather(*tasks)
+        return results
 
     async def _get_cached_result(self, cache_key: str) -> Optional[Dict[str, Any]]:
         """Retrieve a cached response if it is still fresh."""
@@ -909,67 +1197,252 @@ class MarketAnalysisService(LoggerMixin):
     
     # Helper methods (implementation details)
     
-    async def _get_symbol_price(self, exchange: str, symbol: str) -> Optional[Dict[str, Any]]:
-        """Get price for symbol from specific exchange with proper error handling."""
+    async def _fetch_bulk_symbol_prices(
+        self, exchange: str, symbols: Sequence[str]
+    ) -> Dict[str, Optional[Dict[str, Any]]]:
+        """Fetch prices for a batch of symbols from a single exchange."""
+        if not symbols:
+            return {}
+
+        exchange_key = (exchange or "").strip().lower() or "binance"
+        normalized: List[str] = []
+        for symbol in symbols:
+            _, normalized_symbol = self._normalize_symbol_for_exchange(exchange_key, symbol)
+            if normalized_symbol:
+                normalized.append(normalized_symbol)
+
+        if not normalized:
+            return {}
+
+        try:
+            if exchange_key == "binance":
+                return await self._fetch_binance_bulk(normalized)
+            if exchange_key == "kraken":
+                return await self._fetch_kraken_bulk(normalized)
+            if exchange_key == "kucoin":
+                return await self._fetch_kucoin_bulk(normalized)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.debug(
+                "Bulk price fetch failed, falling back to single requests",
+                exchange=exchange_key,
+                symbols=len(normalized),
+                error=str(exc),
+            )
+
+        results: Dict[str, Optional[Dict[str, Any]]] = {}
+        for symbol in normalized:
+            try:
+                price = await self._fetch_symbol_price_uncached(exchange_key, symbol)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self.logger.debug(
+                    "Single price fetch failed during bulk fallback",
+                    exchange=exchange_key,
+                    symbol=symbol,
+                    error=str(exc),
+                )
+                price = None
+            results[symbol] = price
+        return results
+
+    async def _fetch_binance_bulk(
+        self, symbols: Sequence[str]
+    ) -> Dict[str, Optional[Dict[str, Any]]]:
+        if not symbols:
+            return {}
+
+        request_symbols = []
+        reverse_map: Dict[str, str] = {}
+        for symbol in symbols:
+            mapped = self._convert_to_binance_symbol(symbol)
+            if not mapped:
+                continue
+            request_symbols.append(mapped)
+            reverse_map[mapped] = symbol
+
+        if not request_symbols:
+            return {}
+
+        params = {"symbols": json.dumps(request_symbols)}
+        data = await self.exchange_manager.fetch_from_exchange(
+            "binance", "/api/v3/ticker/price", params
+        )
+
+        results: Dict[str, Optional[Dict[str, Any]]] = {}
+        payload: Iterable[Dict[str, Any]]
+        if isinstance(data, list):
+            payload = data
+        elif isinstance(data, dict) and "symbol" in data:
+            payload = [data]
+        else:
+            payload = []
+
+        for entry in payload:
+            symbol_code = entry.get("symbol")
+            mapped_symbol = reverse_map.get(symbol_code)
+            if not mapped_symbol:
+                continue
+            price_value = entry.get("price")
+            if price_value is None:
+                continue
+            results[mapped_symbol] = {
+                "price": float(price_value),
+                "volume": 0.0,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+
+        missing = set(symbols) - set(results.keys())
+        for symbol in missing:
+            results[symbol] = await self._fetch_symbol_price_uncached("binance", symbol)
+
+        return results
+
+    async def _fetch_kraken_bulk(
+        self, symbols: Sequence[str]
+    ) -> Dict[str, Optional[Dict[str, Any]]]:
+        if not symbols:
+            return {}
+
+        reverse_map: Dict[str, str] = {}
+        pair_tokens: List[str] = []
+        for symbol in symbols:
+            pair = self._convert_to_kraken_symbol(symbol)
+            if not pair:
+                continue
+            reverse_map[pair] = symbol
+            pair_tokens.append(pair)
+
+        if not pair_tokens:
+            return {}
+
+        params = {"pair": ",".join(pair_tokens)}
+        data = await self.exchange_manager.fetch_from_exchange(
+            "kraken", "/0/public/Ticker", params
+        )
+
+        result_payload = data.get("result") if isinstance(data, dict) else None
+        results: Dict[str, Optional[Dict[str, Any]]] = {}
+        if isinstance(result_payload, dict):
+            for pair_code, ticker in result_payload.items():
+                mapped_symbol = reverse_map.get(pair_code)
+                if not mapped_symbol:
+                    continue
+                close_data = None
+                if isinstance(ticker, dict):
+                    close_values = ticker.get("c")
+                    if isinstance(close_values, list) and close_values:
+                        close_data = close_values[0]
+                if close_data is None:
+                    continue
+                results[mapped_symbol] = {
+                    "price": float(close_data),
+                    "volume": 0.0,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+
+        missing = set(symbols) - set(results.keys())
+        for symbol in missing:
+            results[symbol] = await self._fetch_symbol_price_uncached("kraken", symbol)
+
+        return results
+
+    async def _fetch_kucoin_bulk(
+        self, symbols: Sequence[str]
+    ) -> Dict[str, Optional[Dict[str, Any]]]:
+        if not symbols:
+            return {}
+
+        data = await self.exchange_manager.fetch_from_exchange(
+            "kucoin", "/api/v1/market/allTickers"
+        )
+
+        payload = data.get("data", {}) if isinstance(data, dict) else {}
+        tickers = payload.get("ticker") if isinstance(payload, dict) else None
+        results: Dict[str, Optional[Dict[str, Any]]] = {}
+        if isinstance(tickers, list):
+            reverse_map: Dict[str, str] = {}
+            for symbol in symbols:
+                reverse_map[symbol.replace("/", "-")] = symbol
+
+            for ticker in tickers:
+                if not isinstance(ticker, dict):
+                    continue
+                code = ticker.get("symbol")
+                mapped_symbol = reverse_map.get(code)
+                if not mapped_symbol:
+                    continue
+                last_price = ticker.get("last")
+                if last_price is None:
+                    continue
+                results[mapped_symbol] = {
+                    "price": float(last_price),
+                    "volume": float(ticker.get("vol", 0) or 0),
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+
+        missing = set(symbols) - set(results.keys())
+        for symbol in missing:
+            results[symbol] = await self._fetch_symbol_price_uncached("kucoin", symbol)
+
+        return results
+
+    async def _fetch_symbol_price_uncached(self, exchange: str, symbol: str) -> Optional[Dict[str, Any]]:
+        """Fetch a symbol price from the requested exchange without consulting caches."""
         try:
             if exchange == "binance":
-                # Convert single symbols to USDT trading pairs for Binance
                 binance_symbol = self._convert_to_binance_symbol(symbol)
                 if not binance_symbol:
                     return None
-                    
+
                 try:
                     data = await self.exchange_manager.fetch_from_exchange(
-                        exchange, 
+                        exchange,
                         "/api/v3/ticker/price",
-                        {"symbol": binance_symbol}
+                        {"symbol": binance_symbol},
                     )
                     if data and "price" in data:
                         return {
                             "price": float(data["price"]),
-                            "volume": 0.0,  # Price endpoint doesn't include volume
-                            "timestamp": datetime.utcnow().isoformat()
+                            "volume": 0.0,
+                            "timestamp": datetime.utcnow().isoformat(),
                         }
                 except Exception:
-                    # Fallback to 24hr ticker
                     try:
                         data = await self.exchange_manager.fetch_from_exchange(
-                            exchange, 
+                            exchange,
                             "/api/v3/ticker/24hr",
-                            {"symbol": binance_symbol}
+                            {"symbol": binance_symbol},
                         )
                         if data and "lastPrice" in data:
                             return {
                                 "price": float(data["lastPrice"]),
                                 "volume": float(data.get("volume", 0)),
-                                "timestamp": datetime.utcnow().isoformat()
+                                "timestamp": datetime.utcnow().isoformat(),
                             }
                     except Exception:
-                        pass
-            
+                        return None
+
             elif exchange == "kraken":
                 kraken_symbol = self._convert_to_kraken_symbol(symbol)
                 data = await self.exchange_manager.fetch_from_exchange(
                     exchange,
                     "/0/public/Ticker",
-                    {"pair": kraken_symbol}
+                    {"pair": kraken_symbol},
                 )
-                # Check if response has result and the symbol exists
                 if data and "result" in data and kraken_symbol in data["result"]:
                     ticker = data["result"][kraken_symbol]
                     if ticker and "c" in ticker and ticker["c"]:
                         return {
                             "price": float(ticker["c"][0]),
-                            "volume": float(ticker["v"][1]) if "v" in ticker and ticker["v"] else 0.0,
-                            "timestamp": datetime.utcnow().isoformat()
+                            "volume": float(ticker.get("v", [0, 0])[1]) if isinstance(ticker.get("v"), list) else 0.0,
+                            "timestamp": datetime.utcnow().isoformat(),
                         }
-            
+
             elif exchange == "kucoin":
                 kucoin_symbol = symbol.replace("/", "-")
                 data = await self.exchange_manager.fetch_from_exchange(
                     exchange,
                     "/api/v1/market/stats",
-                    {"symbol": kucoin_symbol}
+                    {"symbol": kucoin_symbol},
                 )
                 if data and "data" in data and data["data"]:
                     market_data = data["data"]
@@ -977,91 +1450,100 @@ class MarketAnalysisService(LoggerMixin):
                     if last_price is not None:
                         return {
                             "price": float(last_price),
-                            "volume": float(market_data.get("vol", 0)) if market_data.get("vol") is not None else 0.0,
-                            "change_24h": float(market_data.get("changeRate", 0)) * 100 if market_data.get("changeRate") is not None else 0.0,
-                            "timestamp": datetime.utcnow().isoformat()
+                            "volume": float(market_data.get("vol", 0) or 0),
+                            "change_24h": float(market_data.get("changeRate", 0) or 0) * 100,
+                            "timestamp": datetime.utcnow().isoformat(),
                         }
-            
+
             elif exchange == "coinbase":
                 coinbase_symbol = symbol.replace("/", "-")
                 data = await self.exchange_manager.fetch_from_exchange(
                     exchange,
-                    f"/products/{coinbase_symbol}/ticker"
+                    f"/products/{coinbase_symbol}/ticker",
                 )
-                return {
-                    "price": float(data["price"]),
-                    "volume": float(data["volume"]),
-                    "change_24h": 0,  # Calculate from price and open
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            
+                if data:
+                    return {
+                        "price": float(data.get("price", 0)),
+                        "volume": float(data.get("volume", 0)),
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+
             elif exchange == "bybit":
                 bybit_symbol = symbol.replace("/", "")
                 data = await self.exchange_manager.fetch_from_exchange(
                     exchange,
                     "/v5/market/tickers",
-                    {"category": "spot", "symbol": bybit_symbol}
+                    {"category": "spot", "symbol": bybit_symbol},
                 )
-                if data.get("result", {}).get("list"):
-                    ticker = data["result"]["list"][0]
+                listings = data.get("result", {}).get("list") if isinstance(data, dict) else None
+                if listings:
+                    ticker = listings[0]
                     return {
-                        "price": float(ticker["lastPrice"]),
-                        "volume": float(ticker["volume24h"]),
-                        "change_24h": float(ticker["price24hPcnt"]) * 100,
-                        "timestamp": datetime.utcnow().isoformat()
+                        "price": float(ticker.get("lastPrice", 0)),
+                        "volume": float(ticker.get("volume24h", 0)),
+                        "change_24h": float(ticker.get("price24hPcnt", 0)) * 100,
+                        "timestamp": datetime.utcnow().isoformat(),
                     }
-            
+
             elif exchange == "okx":
                 okx_symbol = symbol.replace("/", "-")
                 data = await self.exchange_manager.fetch_from_exchange(
                     exchange,
                     "/api/v5/market/ticker",
-                    {"instId": okx_symbol}
+                    {"instId": okx_symbol},
                 )
-                if data.get("data"):
+                if isinstance(data, dict) and data.get("data"):
                     ticker = data["data"][0]
                     return {
-                        "price": float(ticker["last"]),
-                        "volume": float(ticker["vol24h"]),
-                        "change_24h": float(ticker["chgPct"]) * 100,
-                        "timestamp": datetime.utcnow().isoformat()
+                        "price": float(ticker.get("last", 0)),
+                        "volume": float(ticker.get("vol24h", 0)),
+                        "change_24h": float(ticker.get("chgPct", 0)) * 100,
+                        "timestamp": datetime.utcnow().isoformat(),
                     }
-            
+
             elif exchange == "bitget":
                 bitget_symbol = symbol.replace("/", "")
                 data = await self.exchange_manager.fetch_from_exchange(
                     exchange,
                     "/api/spot/v1/market/ticker",
-                    {"symbol": bitget_symbol}
+                    {"symbol": bitget_symbol},
                 )
-                if data.get("data"):
-                    ticker = data["data"]
+                ticker = data.get("data") if isinstance(data, dict) else None
+                if ticker:
                     return {
-                        "price": float(ticker["close"]),
-                        "volume": float(ticker["baseVol"]),
-                        "change_24h": float(ticker["chgRate"]) * 100,
-                        "timestamp": datetime.utcnow().isoformat()
+                        "price": float(ticker.get("close", 0)),
+                        "volume": float(ticker.get("baseVol", 0)),
+                        "change_24h": float(ticker.get("chgRate", 0)) * 100,
+                        "timestamp": datetime.utcnow().isoformat(),
                     }
-            
+
             elif exchange == "gateio":
                 gateio_symbol = symbol.replace("/", "_")
                 data = await self.exchange_manager.fetch_from_exchange(
                     exchange,
                     "/api/v4/spot/tickers",
-                    {"currency_pair": gateio_symbol}
+                    {"currency_pair": gateio_symbol},
                 )
                 if isinstance(data, list) and data:
                     ticker = data[0]
                     return {
-                        "price": float(ticker["last"]),
-                        "volume": float(ticker["base_volume"]),
-                        "change_24h": float(ticker["change_percentage"]),
-                        "timestamp": datetime.utcnow().isoformat()
+                        "price": float(ticker.get("last", 0)),
+                        "volume": float(ticker.get("base_volume", 0)),
+                        "change_24h": float(ticker.get("change_percentage", 0)),
+                        "timestamp": datetime.utcnow().isoformat(),
                     }
-        
-        except Exception as e:
-            self.logger.error(f"Error fetching price for {symbol} from {exchange}: {str(e)}")
-            return None
+
+        except Exception as exc:
+            self.logger.error(
+                "Error fetching price from exchange",
+                exchange=exchange,
+                symbol=symbol,
+                error=str(exc),
+            )
+        return None
+
+    async def _get_symbol_price(self, exchange: str, symbol: str) -> Optional[Dict[str, Any]]:
+        return await self.get_exchange_price(exchange, symbol)
     
     def _convert_to_binance_symbol(self, symbol: str) -> str:
         """Convert standard symbol format to Binance trading pair format."""
