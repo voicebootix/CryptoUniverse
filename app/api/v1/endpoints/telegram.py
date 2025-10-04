@@ -47,12 +47,20 @@ telegram_service = telegram_commander_service
 def _render_unified_ai_result(result: Dict[str, Any]) -> str:
     """Render a unified AI manager response using the shared Telegram persona renderer."""
 
-    try:
-        return telegram_service._render_unified_response(result)  # type: ignore[attr-defined]
-    except Exception:  # pragma: no cover - defensive fallback
-        if isinstance(result, dict):
-            return str(result.get("content") or result.get("error") or "")
-        return str(result)
+    # Try to get the renderer from message_router
+    message_router = getattr(telegram_service, "message_router", None)
+    if message_router:
+        renderer = getattr(message_router, "_render_unified_response", None)
+        if callable(renderer):
+            try:
+                return renderer(result)
+            except Exception:  # pragma: no cover - defensive fallback
+                pass
+
+    # Fallback if renderer is not available or fails
+    if isinstance(result, dict):
+        return str(result.get("content") or result.get("error") or "")
+    return str(result)
 
 
 # Request/Response Models
