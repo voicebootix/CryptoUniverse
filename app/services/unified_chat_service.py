@@ -2506,32 +2506,43 @@ Respond naturally using ONLY the real data provided."""
                 }
 
             # Apply persona middleware to the complete response
-            persona_response = persona_middleware.apply(
-                full_response,
-                intent=intent.value if hasattr(intent, "value") else str(intent),
-            )
+            try:
+                persona_response = persona_middleware.apply(
+                    full_response,
+                    intent=intent.value if hasattr(intent, "value") else str(intent),
+                )
 
-            # If persona added or modified content, send a final enriched chunk
-            if persona_response != full_response:
-                # Extract the additional content added by persona
-                if len(persona_response) > len(full_response):
-                    additional_content = persona_response[len(full_response):]
-                    yield {
-                        "type": "response",
-                        "content": additional_content,
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "personality": personality["name"],
-                        "persona_applied": True
-                    }
-                # If persona modified the entire response, send a correction chunk
-                else:
-                    yield {
-                        "type": "persona_enriched",
-                        "content": persona_response,
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "personality": personality["name"],
-                        "replaces_previous": True
-                    }
+                # Check if persona modified the response
+                if persona_response != full_response:
+                    # Verify persona only appended content (didn't modify existing)
+                    if persona_response.startswith(full_response):
+                        # Persona only appended - send just the additional content
+                        additional_content = persona_response[len(full_response):]
+                        yield {
+                            "type": "response",
+                            "content": additional_content,
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "personality": personality["name"],
+                            "persona_applied": True
+                        }
+                    else:
+                        # Persona modified/restructured content - send full replacement
+                        self.logger.warning(
+                            "Persona middleware modified response content, not just appended",
+                            full_length=len(full_response),
+                            persona_length=len(persona_response)
+                        )
+                        yield {
+                            "type": "persona_enriched",
+                            "content": persona_response,
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "personality": personality["name"],
+                            "replaces_previous": True
+                        }
+            except Exception as e:
+                # Log error but continue without persona enrichment
+                self.logger.error("Persona middleware failed during streaming", error=str(e))
+                persona_response = full_response  # Use original response without persona
 
             # Handle action requirements
             if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:

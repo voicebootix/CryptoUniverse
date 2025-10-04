@@ -54,8 +54,20 @@ def _render_unified_ai_result(result: Dict[str, Any]) -> str:
         if callable(renderer):
             try:
                 return renderer(result)
-            except Exception:  # pragma: no cover - defensive fallback
-                pass
+            except Exception as e:  # pragma: no cover - defensive fallback
+                # Log the exception for debugging
+                if hasattr(telegram_service, 'logger'):
+                    telegram_service.logger.exception(
+                        "Failed to render unified AI response",
+                        error=str(e),
+                        result_type=type(result).__name__
+                    )
+                else:
+                    logger.exception(
+                        "Failed to render unified AI response",
+                        error=str(e),
+                        result_type=type(result).__name__
+                    )
 
     # Fallback if renderer is not available or fails
     if isinstance(result, dict):
