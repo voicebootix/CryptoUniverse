@@ -6138,8 +6138,15 @@ class TradingStrategiesService(LoggerMixin):
         if not normalized_symbol:
             return {"success": False, "error": "symbol_required"}
 
-        if "/" not in normalized_symbol and "-" not in normalized_symbol:
+        # Handle various symbol formats
+        if "USDT" in normalized_symbol and "/" not in normalized_symbol:
+            # Convert BTCUSDT -> BTC/USDT
+            normalized_symbol = normalized_symbol.replace("USDT", "/USDT")
+        elif "/" not in normalized_symbol and "-" not in normalized_symbol:
+            # Convert BTC -> BTC/USDT
             normalized_symbol = f"{normalized_symbol}/USDT"
+
+        # Normalize separators
         normalized_symbol = normalized_symbol.replace("-", "/")
 
         try:

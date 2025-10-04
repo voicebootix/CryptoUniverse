@@ -110,19 +110,74 @@ class ExchangeConfigurations:
             "stats": 1
         }
     }
+
+    COINBASE = {
+        "base_url": "https://api.exchange.coinbase.com",
+        "endpoints": {
+            "ticker": "/products/{}/ticker",
+            "products": "/products"
+        },
+        "rate_limit": 10,
+        "purpose": "market_data_only"
+    }
+
+    BYBIT = {
+        "base_url": "https://api.bybit.com",
+        "endpoints": {
+            "ticker": "/v5/market/tickers",
+            "orderbook": "/v5/market/orderbook"
+        },
+        "rate_limit": 120,
+        "purpose": "market_data_only"
+    }
+
+    OKX = {
+        "base_url": "https://www.okx.com",
+        "endpoints": {
+            "ticker": "/api/v5/market/ticker",
+            "tickers": "/api/v5/market/tickers"
+        },
+        "rate_limit": 20,
+        "purpose": "market_data_only"
+    }
+
+    BITGET = {
+        "base_url": "https://api.bitget.com",
+        "endpoints": {
+            "ticker": "/api/spot/v1/market/ticker",
+            "tickers": "/api/spot/v1/market/tickers"
+        },
+        "rate_limit": 20,
+        "purpose": "market_data_only"
+    }
+
+    GATEIO = {
+        "base_url": "https://api.gateio.ws",
+        "endpoints": {
+            "ticker": "/api/v4/spot/tickers",
+            "orderbook": "/api/v4/spot/order_book"
+        },
+        "rate_limit": 900,
+        "purpose": "market_data_only"
+    }
     
     @classmethod
     def get_all_exchanges(cls) -> list[str]:
         """Get list of all supported exchanges."""
-        return ["binance", "kraken", "kucoin"]
-    
+        return ["binance", "kraken", "kucoin", "coinbase", "bybit", "okx", "bitget", "gateio"]
+
     @classmethod
     def get_config(cls, exchange: str) -> dict:
         """Get configuration for specific exchange."""
         configs = {
             "binance": cls.BINANCE,
-            "kraken": cls.KRAKEN, 
-            "kucoin": cls.KUCOIN
+            "kraken": cls.KRAKEN,
+            "kucoin": cls.KUCOIN,
+            "coinbase": cls.COINBASE,
+            "bybit": cls.BYBIT,
+            "okx": cls.OKX,
+            "bitget": cls.BITGET,
+            "gateio": cls.GATEIO
         }
         return configs.get(exchange.lower(), {})
 
@@ -134,7 +189,12 @@ class DynamicExchangeManager(LoggerMixin):
         self.exchange_configs = {
             "kraken": ExchangeConfigurations.KRAKEN,   # Priority 1: Confirmed working
             "kucoin": ExchangeConfigurations.KUCOIN,   # Priority 2: Confirmed working
-            "binance": ExchangeConfigurations.BINANCE  # Priority 3: Now uses binance.us
+            "binance": ExchangeConfigurations.BINANCE,  # Priority 3: Now uses binance.us
+            "coinbase": ExchangeConfigurations.COINBASE,
+            "bybit": ExchangeConfigurations.BYBIT,
+            "okx": ExchangeConfigurations.OKX,
+            "bitget": ExchangeConfigurations.BITGET,
+            "gateio": ExchangeConfigurations.GATEIO
         }
         self.rate_limiters = {}
         self.circuit_breakers = {}
