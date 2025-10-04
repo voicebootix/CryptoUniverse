@@ -15,7 +15,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
 from sqlalchemy import select
 
@@ -192,9 +192,10 @@ class ExchangeUniverseService(LoggerMixin):
 
         accounts = await self._fetch_exchange_accounts(user_id) if user_id else []
         symbol_set: set[str] = set()
+        exchanges_lower = {str(exchange).lower() for exchange in exchanges if exchange}
 
         for account in accounts:
-            if account.exchange_name.lower() not in exchanges:
+            if account.exchange_name.lower() not in exchanges_lower:
                 continue
             allowed = account.allowed_symbols or []
             for symbol in allowed:
@@ -270,14 +271,57 @@ class ExchangeUniverseService(LoggerMixin):
             raw = await self._redis.get(key)
             if not raw:
                 return None
-            if isinstance(raw, bytes):
-                raw = raw.decode()
-            data = json.loads(raw)
-            if isinstance(data, list):
-                return [str(item).upper() for item in data if isinstance(item, str)]
+
+            if isinstance(raw, (list, tuple)):
+                data: Any = list(raw)
+            elif isinstance(raw, dict):
+                data = raw
+            else:
+                if isinstance(raw, bytes):
+                    raw = raw.decode()
+                if isinstance(raw, str):
+                    data = json.loads(raw)
+                else:
+                    return None
+
+            if isinstance(data, dict):
+                candidates: Iterable[Any]
+                if "symbols" in data:
+                    symbols_value = data["symbols"]
+                    if isinstance(symbols_value, dict):
+                        candidates = symbols_value.keys()
+                    else:
+                        candidates = symbols_value
+                elif "data" in data:
+                    data_value = data["data"]
+                    if isinstance(data_value, dict):
+                        candidates = data_value.keys()
+                    else:
+                        candidates = data_value
+                else:
+                    candidates = data.keys()
+                return self._normalize_cached_symbols(candidates)
+
+            if isinstance(data, (list, tuple, set)):
+                return self._normalize_cached_symbols(data)
         except Exception as exc:  # pragma: no cover - best effort only
             self.logger.warning("Failed to read exchange universe cache", error=str(exc))
         return None
+
+    def _normalize_cached_symbols(self, candidates: Iterable[Any]) -> List[str]:
+        normalized: List[str] = []
+        for item in candidates:
+            value: Any = item
+            if isinstance(value, bytes):
+                try:
+                    value = value.decode()
+                except Exception:  # pragma: no cover - defensive
+                    value = value.decode(errors="ignore") if hasattr(value, "decode") else str(value)
+            if isinstance(value, str):
+                token = value.strip()
+                if token:
+                    normalized.append(token.upper())
+        return normalized
 
     async def _store_in_redis(self, key: str, values: Sequence[str], ttl: int) -> None:
         await self._ensure_redis()

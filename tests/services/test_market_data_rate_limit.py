@@ -1,3 +1,4 @@
+import json
 import os
 
 import pytest
@@ -45,3 +46,47 @@ async def test_check_rate_limit_counts_requests(monkeypatch):
     assert limiter["requests"] == limiter["max_requests"]
 
     assert await feeds._check_rate_limit("coingecko") is False
+
+
+@pytest.mark.asyncio
+async def test_fallback_cached_prices_accepts_dict_payload(monkeypatch):
+    feeds = MarketDataFeeds()
+
+    class DummyRedis:
+        def __init__(self, mapping):
+            self.mapping = mapping
+
+        async def get(self, key):
+            return self.mapping.get(key)
+
+    feeds.redis = DummyRedis({
+        "price:BTC": {"data": {"price": 25000, "symbol": "BTC"}}
+    })
+
+    response = await feeds._fallback_cached_prices(["BTC"])
+
+    assert response["success"] is True
+    assert response["data"]["BTC"]["price"] == 25000
+
+
+@pytest.mark.asyncio
+async def test_fallback_cached_prices_accepts_bytes_json(monkeypatch):
+    feeds = MarketDataFeeds()
+
+    class DummyRedis:
+        def __init__(self, mapping):
+            self.mapping = mapping
+
+        async def get(self, key):
+            return self.mapping.get(key)
+
+    payload = json.dumps({"data": {"price": 123, "symbol": "ETH"}}).encode()
+
+    feeds.redis = DummyRedis({
+        "price:ETH": payload
+    })
+
+    response = await feeds._fallback_cached_prices(["ETH"])
+
+    assert response["success"] is True
+    assert response["data"]["ETH"]["price"] == 123
