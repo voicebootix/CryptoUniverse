@@ -6154,11 +6154,26 @@ class TradingStrategiesService(LoggerMixin):
                 else:
                     normalized_symbol = f"{normalized_symbol}/USDT"
             else:
-                # Check for known quote currency suffixes, but order matters
-                # Longer suffixes first to avoid false matches
-                stable_suffixes = ("USDT", "USDC", "BUSD", "TUSD", "USD", "DAI")
+                # Check for known quote currency suffixes, longest first to avoid partial matches
+                # Include crypto quotes (BTC, ETH, BNB) and fiat quotes (EUR, GBP, JPY)
+                quote_suffixes = (
+                    "USDT",  # Stablecoins first (most common)
+                    "USDC",
+                    "BUSD",
+                    "TUSD",
+                    "USD",
+                    "DAI",
+                    "BTC",   # Crypto quotes
+                    "ETH",
+                    "BNB",
+                    "EUR",   # Fiat quotes
+                    "GBP",
+                    "JPY",
+                    "AUD",
+                    "CAD"
+                )
                 matched = False
-                for suffix in stable_suffixes:
+                for suffix in quote_suffixes:
                     if normalized_symbol.endswith(suffix) and len(normalized_symbol) > len(suffix):
                         base_symbol = normalized_symbol[:-len(suffix)]
                         # Ensure base symbol is at least 2 characters (avoid "B/USD" from "BUSD")
