@@ -573,42 +573,12 @@ class MarketDataFeeds:
         async def load_from_redis(symbol: str) -> Optional[Dict[str, Any]]:
             if not self.redis:
                 return None
+
             raw = await self.redis.get(f"price:{symbol}")
             if not raw:
                 return None
-            payload: Any = raw
-            if isinstance(raw, bytes):
-                raw = raw.decode()
-            if isinstance(raw, dict):
-                payload = raw
-            elif isinstance(raw, str):
-                try:
-                    payload = json.loads(raw)
-                except (json.JSONDecodeError, TypeError):
-                    try:
-                        payload = ast.literal_eval(str(raw))
-                    except (ValueError, SyntaxError):
-                        return None
-            else:
-                return None
 
-            if not isinstance(payload, dict):
-                return None
-
-            data: Any = payload.get("data") if "data" in payload else payload
-            if isinstance(data, bytes):
-                data = data.decode()
-            if isinstance(data, str):
-                try:
-                    data = json.loads(data)
-                except (json.JSONDecodeError, TypeError):
-                    try:
-                        data = ast.literal_eval(str(data))
-                    except (ValueError, SyntaxError):
-                        return None
-            if isinstance(data, dict):
-                return data
-            return None
+            return self._deserialize_price_cache(raw)
 
         for symbol in symbols:
             cached_data = await load_from_redis(symbol)
@@ -625,6 +595,52 @@ class MarketDataFeeds:
             "success": False,
             "error": error or "Price service unavailable",
         }
+
+    def _deserialize_price_cache(self, raw: Any) -> Optional[Dict[str, Any]]:
+        """Normalise cached price payloads into dictionaries."""
+
+        payload: Any = raw
+
+        if isinstance(payload, bytes):
+            try:
+                payload = payload.decode()
+            except Exception:  # pragma: no cover - defensive decode
+                payload = payload.decode(errors="ignore") if hasattr(payload, "decode") else payload
+
+        if isinstance(payload, dict):
+            container: Any = payload
+        elif isinstance(payload, str):
+            try:
+                container = json.loads(payload)
+            except (json.JSONDecodeError, TypeError):
+                try:
+                    container = ast.literal_eval(str(payload))
+                except (ValueError, SyntaxError):
+                    return None
+        else:
+            return None
+
+        if not isinstance(container, dict):
+            return None
+
+        data: Any = container.get("data") if "data" in container else container
+
+        if isinstance(data, bytes):
+            try:
+                data = data.decode()
+            except Exception:  # pragma: no cover - defensive decode
+                data = data.decode(errors="ignore") if hasattr(data, "decode") else data
+
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (json.JSONDecodeError, TypeError):
+                try:
+                    data = ast.literal_eval(str(data))
+                except (ValueError, SyntaxError):
+                    return None
+
+        return data if isinstance(data, dict) else None
 
     async def get_trending_coins(self, limit: int = 10) -> Dict[str, Any]:
         """Get trending coins from CoinGecko."""

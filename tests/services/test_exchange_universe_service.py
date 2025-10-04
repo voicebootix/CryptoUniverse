@@ -164,3 +164,49 @@ async def test_get_symbol_universe_respects_user_asset_preferences(exchange_serv
     assert symbols == ["BTC", "SOL"]
     assert "LOWCAP" not in symbols
     assert len(symbols) <= 3
+
+
+@pytest.mark.asyncio
+async def test_read_from_redis_accepts_dict_payload(monkeypatch):
+    service = ExchangeUniverseService()
+
+    class DummyRedis:
+        def __init__(self, mapping):
+            self.mapping = mapping
+
+        async def get(self, key):
+            return self.mapping.get(key)
+
+    redis_data = {
+        "symbols:test": {"symbols": ["btc", "eth"]}
+    }
+
+    service._redis = DummyRedis(redis_data)
+    monkeypatch.setattr(service, "_ensure_redis", AsyncMock())
+
+    result = await service._read_from_redis("symbols:test")
+
+    assert result == ["BTC", "ETH"]
+
+
+@pytest.mark.asyncio
+async def test_read_from_redis_accepts_list_payload(monkeypatch):
+    service = ExchangeUniverseService()
+
+    class DummyRedis:
+        def __init__(self, mapping):
+            self.mapping = mapping
+
+        async def get(self, key):
+            return self.mapping.get(key)
+
+    redis_data = {
+        "symbols:test_list": [b"sol", "avax"]
+    }
+
+    service._redis = DummyRedis(redis_data)
+    monkeypatch.setattr(service, "_ensure_redis", AsyncMock())
+
+    result = await service._read_from_redis("symbols:test_list")
+
+    assert result == ["SOL", "AVAX"]
