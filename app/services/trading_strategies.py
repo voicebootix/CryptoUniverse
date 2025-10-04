@@ -6139,15 +6139,20 @@ class TradingStrategiesService(LoggerMixin):
             return {"success": False, "error": "symbol_required"}
 
         # Handle various symbol formats
-        if "USDT" in normalized_symbol and "/" not in normalized_symbol:
-            # Convert BTCUSDT -> BTC/USDT
-            normalized_symbol = normalized_symbol.replace("USDT", "/USDT")
-        elif "/" not in normalized_symbol and "-" not in normalized_symbol:
-            # Convert BTC -> BTC/USDT
-            normalized_symbol = f"{normalized_symbol}/USDT"
-
-        # Normalize separators
-        normalized_symbol = normalized_symbol.replace("-", "/")
+        if "/" in normalized_symbol or "-" in normalized_symbol:
+            # Already has separator, just normalize it
+            normalized_symbol = normalized_symbol.replace("-", "/")
+        else:
+            # Check for known quote currency suffixes
+            stable_suffixes = ("USDT", "USDC", "BUSD", "USD", "TUSD", "DAI")
+            for suffix in stable_suffixes:
+                if normalized_symbol.endswith(suffix) and len(normalized_symbol) > len(suffix):
+                    base_symbol = normalized_symbol[:-len(suffix)]
+                    normalized_symbol = f"{base_symbol}/{suffix}"
+                    break
+            else:
+                # No recognized suffix found, default to USDT pair
+                normalized_symbol = f"{normalized_symbol}/USDT"
 
         try:
             price_payload = await market_analysis_service.get_exchange_price(
