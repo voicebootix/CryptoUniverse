@@ -13,7 +13,6 @@ Features:
 """
 
 import asyncio
-import hashlib
 import secrets
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
@@ -29,10 +28,12 @@ from app.core.database import get_database
 from app.api.v1.endpoints.auth import get_current_user
 from app.models.user import User
 from app.models.telegram_integration import UserTelegramConnection, TelegramMessage
-from app.services.telegram_core import TelegramCommanderService as TelegramService
+from app.services.telegram_core import (
+    telegram_commander_service,
+    get_unified_persona_pipeline,
+)
 from app.services.telegram_commander import MessageType
 from app.services.rate_limit import rate_limiter
-from app.services.unified_chat_service import InterfaceType, ConversationMode
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -40,7 +41,7 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 # Initialize Telegram service
-telegram_service = TelegramService()
+telegram_service = telegram_commander_service
 
 
 # Request/Response Models
@@ -748,35 +749,7 @@ async def _process_authenticated_message(
         if message_text.startswith("/"):
             response = await _process_telegram_command(connection, message_text, db)
         else:
-            # Try UnifiedChatService first
-            try:
-                from app.services.unified_chat_service import unified_chat_service
-                
-                # Process through unified chat (singleton instance)
-                chat_result = await unified_chat_service.process_message(
-                    message=message_text,
-                    user_id=str(connection.user_id),
-                    session_id=f"telegram_{chat_id}",
-                    interface=InterfaceType.TELEGRAM,
-                    conversation_mode=ConversationMode.LIVE_TRADING,
-                    stream=False
-                )
-                
-                if chat_result.get("success"):
-                    response = chat_result.get("content", chat_result.get("response", ""))
-                    
-                    # If we got an empty response, fall back
-                    if not response:
-                        logger.warning("UnifiedChat returned empty response")
-                        response = await _process_natural_language(connection, message_text, db)
-                else:
-                    logger.warning(f"UnifiedChat failed: {chat_result.get('error')}")
-                    response = await _process_natural_language(connection, message_text, db)
-                    
-            except Exception as e:
-                logger.error(f"Failed to use UnifiedChat: {e}", exc_info=True)
-                # Fallback to simple processing
-                response = await _process_natural_language(connection, message_text, db)
+            response = await _process_natural_language(connection, message_text, db)
         
         # Send response
         if response:
@@ -852,58 +825,89 @@ async def _process_natural_language(
     message_text: str,
     db: AsyncSession
 ) -> Optional[str]:
-    """Process natural language message using simple keyword matching."""
+    """Process natural language messages through the unified AI persona pipeline."""
+    del db  # Natural language routing no longer needs the raw database handle directly
+
+    message = (message_text or "").strip()
+    if not message:
+        return (
+            "I didn't catch a question there. Let me know what you want to review—portfolio status, strategies,"
+            " or fresh trade ideas—and I'll walk you through it."
+        )
+
+    context = {
+        "chat_id": connection.telegram_chat_id,
+        "platform": "telegram",
+        "interface_session": f"telegram_{connection.telegram_chat_id}",
+        "telegram_username": connection.telegram_username,
+        "telegram_connection_id": str(connection.id),
+    }
+
+    if connection.last_active_at:
+        try:
+            context["last_active_at"] = connection.last_active_at.isoformat()
+        except AttributeError:
+            context["last_active_at"] = str(connection.last_active_at)
+
+    unified_ai_manager, unified_interface_type = get_unified_persona_pipeline()
+
     try:
-        # Convert to lowercase for matching
-        text_lower = message_text.lower()
-        
-        # Simple greeting responses
-        if any(word in text_lower for word in ["hi", "hello", "hey", "good morning", "good evening"]):
-            return "👋 Hello! I'm your CryptoUniverse AI assistant. How can I help you today?\n\nYou can ask about:\n• Trading opportunities\n• Portfolio balance\n• Market analysis\n• Buy/sell crypto\n\nOr use `/help` for all commands."
-        
-        # Check for specific keywords
-        if any(word in text_lower for word in ["opportunities", "opportunity", "recommendations", "suggest"]):
-            return await _handle_opportunities_command(connection, db)
-        
-        if any(word in text_lower for word in ["balance", "portfolio", "worth", "value"]):
-            return await _handle_balance_command(connection, db)
-        
-        if any(word in text_lower for word in ["buy", "purchase"]):
-            return "💡 To buy crypto, use: `/buy BTC 100` (symbol and amount in USD)\n\nExample: `/buy ETH 500` to buy $500 worth of Ethereum."
-        
-        if any(word in text_lower for word in ["sell", "liquidate"]):
-            return "💡 To sell crypto, use: `/sell BTC 100` (symbol and amount in USD)\n\nExample: `/sell BTC 1000` to sell $1000 worth of Bitcoin."
-        
-        if any(word in text_lower for word in ["status", "how am i doing", "performance"]):
-            return await _handle_status_command(connection, db)
-        
-        if any(word in text_lower for word in ["help", "what can you do", "commands"]):
-            return await _handle_help_command(connection.telegram_chat_id, connection.user_id, [])
-        
-        if any(word in text_lower for word in ["ai", "autonomous", "auto trade"]):
-            return "🤖 To control AI trading:\n• `/autonomous start` - Enable AI trading\n• `/autonomous stop` - Disable AI trading\n• `/autonomous status` - Check AI status"
-        
-        if any(word in text_lower for word in ["market", "analysis", "trend"]):
-            return "📊 For market analysis, try:\n• `/market BTC` - Analyze specific asset\n• `/opportunities` - Find trading opportunities\n• `/alerts` - Set price alerts"
-        
-        # Default response with suggestions
-        return """🤔 I'm not sure what you're asking about. Here are some things you can try:
+        ai_result = await unified_ai_manager.process_user_request(
+            user_id=str(connection.user_id),
+            request=message,
+            interface=unified_interface_type.TELEGRAM,
+            context=context,
+        )
+    except Exception as exc:
+        logger.error(
+            "Unified AI manager failed to handle Telegram message",
+            error=str(exc),
+            user_id=str(connection.user_id),
+        )
+        ai_result = None
 
-📊 **Trading & Analysis:**
-• "Show me opportunities" - Find trading opportunities
-• "What's my balance?" - Check portfolio value
-• "How do I buy Bitcoin?" - Get trading help
+    if ai_result and ai_result.get("success"):
+        action = ai_result.get("action")
+        content = ai_result.get("content")
 
-💬 **Or use commands:**
-• `/opportunities` - Trading opportunities
-• `/portfolio` - Portfolio overview
-• `/help` - All available commands
+        if action == "executed":
+            execution_result = ai_result.get("result", {}) or {}
+            summary_bits: List[str] = []
+            summary = execution_result.get("message") or execution_result.get("status")
+            if summary:
+                summary_bits.append(str(summary))
+            if ai_result.get("ai_analysis"):
+                summary_bits.append(str(ai_result["ai_analysis"]))
+            details = execution_result.get("details")
+            if details:
+                summary_bits.append(str(details))
+            if not summary_bits:
+                summary_bits.append(
+                    "Execution completed. Let me know if you want me to monitor the fill or set follow-up levels."
+                )
+            return " ".join(summary_bits)
 
-What would you like to do?"""
-        
-    except Exception as e:
-        logger.error("Natural language processing failed", error=str(e))
-        return "❌ Sorry, I encountered an error. Please try again or use `/help` for available commands."
+        if content:
+            return str(content)
+
+        if ai_result.get("ai_analysis"):
+            return str(ai_result["ai_analysis"])
+
+        if action == "clarify":
+            return (
+                ai_result.get("content")
+                or "Just to confirm—do you need portfolio context, strategy guidance, or trade execution help?"
+            )
+
+    logger.warning(
+        "Unified AI manager returned no conversational content; falling back to persona-safe default",
+        user_id=str(connection.user_id),
+    )
+
+    return (
+        "I want to make sure I'm pointing you in the right direction. Ask about your holdings, strategy lineup,"
+        " or today's market setups and I'll break it down with the same diligence I'd give on the trading desk."
+    )
 
 
 async def _handle_opportunities_command(connection: UserTelegramConnection, db: AsyncSession) -> str:
@@ -911,57 +915,66 @@ async def _handle_opportunities_command(connection: UserTelegramConnection, db: 
     try:
         # Import the opportunity discovery service
         from app.services.user_opportunity_discovery import user_opportunity_discovery
-        
+
         # Discover opportunities
         opportunities_result = await user_opportunity_discovery.discover_opportunities_for_user(
             user_id=str(connection.user_id),
             force_refresh=True,
             include_strategy_recommendations=True
         )
-        
+
         if not opportunities_result.get("success"):
             return "❌ Failed to fetch opportunities. Please try again."
-        
+
         opportunities = opportunities_result.get("opportunities", [])
         total_count = opportunities_result.get("total_opportunities", 0)
-        
+
         if total_count == 0:
             return "📊 No trading opportunities found at the moment. Markets are being analyzed continuously."
-        
-        # Group opportunities by strategy
-        by_strategy = {}
-        for opp in opportunities[:10]:  # Limit to top 10 for Telegram
-            strategy = opp.get("strategy_name", "Unknown")
-            if strategy not in by_strategy:
-                by_strategy[strategy] = []
-            by_strategy[strategy].append(opp)
-        
-        # Build response
-        response_parts = [f"🎯 **Found {total_count} Trading Opportunities**\n"]
-        
-        for strategy, opps in by_strategy.items():
-            response_parts.append(f"\n**{strategy}** ({len(opps)} opportunities):")
-            
-            if "portfolio" in strategy.lower():
-                # Special handling for portfolio optimization
-                for opp in opps[:3]:
-                    metadata = opp.get("metadata", {})
-                    if metadata.get("strategy_used"):
-                        response_parts.append(f"• {metadata['strategy_used']}: ${opp.get('profit_potential_usd', 0):,.0f} potential")
-                    else:
-                        response_parts.append(f"• {opp.get('symbol', 'N/A')}: {metadata.get('rebalance_action', 'Rebalance')}")
-            else:
-                # Regular opportunities
-                for opp in opps[:3]:
-                    symbol = opp.get("symbol", "N/A")
-                    confidence = opp.get("confidence_score", 0)
-                    profit = opp.get("profit_potential_usd", 0)
-                    response_parts.append(f"• {symbol}: {confidence:.0f}% confidence, ${profit:,.0f} potential")
-        
-        response_parts.append(f"\n💡 Use `/opportunities` for full details or `/trade <symbol>` to execute.")
-        
+        # Prioritize the strongest fits for a balanced profile
+        def _opportunity_rank(opp: Dict[str, Any]) -> float:
+            confidence = float(opp.get("confidence_score", 0))
+            profit = float(opp.get("profit_potential_usd", 0))
+            return confidence * max(profit, 1)
+
+        top_opportunities = sorted(opportunities, key=_opportunity_rank, reverse=True)[:3]
+
+        response_parts = [
+            f"I just reviewed {total_count} live setups. Here are the ones that align best with your balanced risk profile:"  # noqa: E501
+        ]
+
+        for opp in top_opportunities:
+            symbol = opp.get("symbol", "N/A")
+            strategy_name = opp.get("strategy_name", "Strategy")
+            profit = float(opp.get("profit_potential_usd", 0))
+            confidence = float(opp.get("confidence_score", 0))
+            risk_level = (opp.get("risk_level") or "medium").upper()
+            timeframe = opp.get("estimated_timeframe") or opp.get("metadata", {}).get("timeframe")
+            rationale = opp.get("metadata", {}).get("rationale") or opp.get("metadata", {}).get("summary")
+
+            line = (
+                f"• {symbol}: {strategy_name} setup, ~${profit:,.0f} upside with {confidence:.0f}% confidence"
+                f" ({risk_level} risk)"
+            )
+            if timeframe:
+                line += f", targeting {timeframe}"
+            if rationale:
+                line += f". Rationale: {rationale}"
+
+            response_parts.append(line)
+
+        if total_count > len(top_opportunities):
+            response_parts.append(
+                f"I have {total_count - len(top_opportunities)} more opportunities queued."
+                " Ask for a specific symbol or say `Show me more` to drill down."
+            )
+
+        response_parts.append(
+            "Want me to open a trade ticket or compare any of these against your current holdings?"
+        )
+
         return "\n".join(response_parts)
-        
+
     except Exception as e:
         logger.error("Failed to handle opportunities command", error=str(e))
         return "❌ Error fetching opportunities. Please try `/opportunities` command instead."
@@ -972,26 +985,38 @@ async def _handle_status_command(connection: UserTelegramConnection, db: AsyncSe
     try:
         # Get user's portfolio status using your existing service
         from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
-        
+        from app.models.credit import CreditAccount
+
         portfolio_data = await get_user_portfolio_from_exchanges(str(connection.user_id), db)
-        
+
         if portfolio_data.get("success"):
             total_value = portfolio_data.get("total_value_usd", 0)
             exchange_count = len(portfolio_data.get("exchanges", []))
-            
-            return f"""
-📊 **Account Status**
+            positions = [b for b in portfolio_data.get("balances", []) if b.get("total", 0) > 0]
 
-💰 **Portfolio Value**: ${total_value:,.2f}
-🏦 **Connected Exchanges**: {exchange_count}
-🤖 **AI Status**: Active
-💳 **Credits**: [Loading...]
+            credit_stmt = select(CreditAccount).where(CreditAccount.user_id == connection.user_id)
+            credit_result = await db.execute(credit_stmt)
+            credit_account = credit_result.scalar_one_or_none()
 
-⏰ **Last Updated**: {datetime.utcnow().strftime('%H:%M:%S UTC')}
-"""
+            if credit_account:
+                available_credits = credit_account.available_credits
+                profit_potential = credit_account.total_purchased_credits * 4
+                credit_line = (
+                    f"Credits: {available_credits:,} available (~${profit_potential:,.0f} deployable capital)."
+                )
+            else:
+                credit_line = "Credits: no active balance yet—say `Purchase credits` when you're ready."
+
+            status_lines = [
+                f"Portfolio checks in at ${total_value:,.2f} across {len(positions)} holdings on {exchange_count} exchanges.",
+                credit_line,
+                "AI monitoring is live—I’m watching risk, liquidity, and open orders in the background."
+            ]
+
+            return "\n".join(status_lines)
         else:
             return "❌ Unable to fetch account status. Please check your exchange connections."
-        
+
     except Exception as e:
         logger.error("Status command failed", error=str(e))
         return "❌ Status command failed"
@@ -1002,33 +1027,88 @@ async def _handle_balance_command(connection: UserTelegramConnection, db: AsyncS
     try:
         # Get portfolio balances
         from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
-        
+
         portfolio_data = await get_user_portfolio_from_exchanges(str(connection.user_id), db)
-        
+
         if portfolio_data.get("success"):
             balances = portfolio_data.get("balances", [])
             total_value = portfolio_data.get("total_value_usd", 0)
-            
-            balance_text = f"💰 **Total Portfolio**: ${total_value:,.2f}\n\n"
-            
-            # Show top 10 balances
-            sorted_balances = sorted(balances, key=lambda x: x.get("value_usd", 0), reverse=True)
-            for balance in sorted_balances[:10]:
-                if balance.get("total", 0) > 0:
-                    asset = balance.get("asset", "")
-                    amount = balance.get("total", 0)
-                    value_usd = balance.get("value_usd", 0)
-                    exchange = balance.get("exchange", "")
-                    
-                    balance_text += f"• **{asset}**: {amount:.6f} (${value_usd:.2f}) [{exchange}]\n"
-            
-            return balance_text
+
+            if total_value <= 0 or not balances:
+                return (
+                    "I’m not seeing any funded positions right now. Once capital lands in the account,"
+                    " I’ll start tracking performance and opportunities automatically."
+                )
+
+            positions = [b for b in balances if b.get("total", 0) > 0]
+
+            # Estimate readily deployable capital
+            available_usd = 0.0
+            for balance in positions:
+                total_units = float(balance.get("total", 0) or 0)
+                free_units = float(balance.get("free", 0) or 0)
+                value_usd = float(balance.get("value_usd", 0) or 0)
+                if total_units > 0 and value_usd:
+                    available_usd += value_usd * (free_units / total_units)
+
+            top_holdings = _summarize_top_holdings(positions, total_value)
+
+            response_lines = [
+                f"Your portfolio is sitting at ${total_value:,.2f} across {len(positions)} active holdings."
+            ]
+
+            if available_usd > 0:
+                response_lines.append(f"Liquid capital ready to deploy: ${available_usd:,.2f}.")
+
+            if top_holdings:
+                response_lines.append("Top positions: " + ", ".join(top_holdings) + ".")
+
+            response_lines.append("Need a closer look at any position or the risk profile? Just let me know.")
+
+            return "\n".join(response_lines)
         else:
             return "❌ Unable to fetch balance. Please check your exchange connections."
-        
+
     except Exception as e:
         logger.error("Balance command failed", error=str(e))
         return "❌ Balance command failed"
+
+
+def _summarize_top_holdings(balances: List[Dict[str, Any]], total_value: float, limit: int = 3) -> List[str]:
+    """Create human-friendly snippets for the largest holdings."""
+
+    if not balances:
+        return []
+
+    safe_total = total_value or sum(float(b.get("value_usd", 0) or 0) for b in balances)
+    if safe_total <= 0:
+        return []
+
+    sorted_balances = sorted(
+        balances,
+        key=lambda b: float(b.get("value_usd", 0) or 0),
+        reverse=True
+    )
+
+    snippets: List[str] = []
+
+    for balance in sorted_balances[:limit]:
+        value_usd = float(balance.get("value_usd", 0) or 0)
+        if value_usd <= 0:
+            continue
+
+        asset = balance.get("asset") or balance.get("symbol") or "Asset"
+        exchange = balance.get("exchange")
+        share = (value_usd / safe_total) * 100
+        share_display = f"{share:.1f}%" if share < 10 else f"{share:.0f}%"
+
+        exchange_label = ""
+        if exchange:
+            exchange_label = f" via {exchange.upper()}"
+
+        snippets.append(f"{asset} ~{share_display} (${value_usd:,.0f}{exchange_label})")
+
+    return snippets
 
 
 async def _handle_buy_command(
@@ -1098,23 +1178,92 @@ async def _handle_credits_command(connection: UserTelegramConnection, db: AsyncS
         
         if credit_account:
             profit_potential = credit_account.total_purchased_credits * 4  # 4x multiplier
-            
-            return f"""
-💳 **Credit Status**
 
-🪙 **Available Credits**: {credit_account.available_credits:,}
-💰 **Profit Potential**: ${profit_potential:,}
-📊 **Total Purchased**: {credit_account.total_purchased_credits:,}
-📈 **Total Used**: {credit_account.total_used_credits:,}
-
-💡 **Need more credits?** Go to dashboard → Credit Center
-"""
+            return (
+                f"You have {credit_account.available_credits:,} credits ready, giving you roughly ${profit_potential:,.0f}"
+                " of deployable trading capacity."
+                f" Lifetime purchased: {credit_account.total_purchased_credits:,}; consumed so far: {credit_account.total_used_credits:,}."
+                " Want me to line up a top-up or allocate credits to a new strategy?"
+            )
         else:
             return "❌ No credit account found. Please purchase credits in the dashboard first."
-        
+
     except Exception as e:
         logger.error("Credits command failed", error=str(e))
         return "❌ Credits command failed"
+
+
+async def _handle_strategy_overview(connection: UserTelegramConnection, db: AsyncSession) -> str:
+    """Provide a natural-language summary of the user's strategy portfolio."""
+
+    try:
+        from app.services.strategy_marketplace_service import strategy_marketplace_service
+
+        portfolio = await strategy_marketplace_service.get_user_strategy_portfolio(str(connection.user_id))
+
+        if not portfolio.get("success"):
+            return (
+                "I'm ready to review your strategy lineup, but the marketplace data is taking a moment to respond."
+                " Let's try again in a few seconds."
+            )
+
+        strategies = portfolio.get("active_strategies", [])
+
+        if not strategies:
+            return (
+                "You're trading in manual mode right now with no automated strategies running."
+                " We can activate Kelly Criterion portfolio optimization, algorithmic pattern recognition,"
+                " or AI-driven futures/options modules whenever you're ready—just say the word."
+            )
+
+        categories = sorted({
+            (strategy.get("category") or "").replace("_", " ").title()
+            for strategy in strategies
+            if strategy.get("category")
+        })
+
+        total_monthly_cost = portfolio.get("total_monthly_cost") or portfolio.get("summary", {}).get("monthly_credit_cost", 0)
+
+        def _strategy_sort_key(item: Dict[str, Any]) -> tuple:
+            win_rate = float(item.get("win_rate", 0) or 0)
+            pnl = float(item.get("total_pnl_usd", 0) or 0)
+            return win_rate, pnl
+
+        highlights = sorted(strategies, key=_strategy_sort_key, reverse=True)[:3]
+
+        response_lines = []
+
+        category_text = ", ".join(categories) if categories else "mixed focus"
+        response_lines.append(
+            f"You have {len(strategies)} automated strategies running right now across {category_text} themes."
+        )
+
+        for strategy in highlights:
+            name = strategy.get("name", "Strategy")
+            risk_level = (strategy.get("risk_level") or "medium").capitalize()
+            win_rate = float(strategy.get("win_rate", 0) or 0)
+            win_rate_display = f"{win_rate * 100:.0f}%" if win_rate else "--"
+            monthly_cost = float(strategy.get("credit_cost_monthly", 0) or 0)
+            pnl = float(strategy.get("total_pnl_usd", 0) or 0)
+            cost_text = "included" if monthly_cost == 0 else f"{monthly_cost:.0f} credits/mo"
+            pnl_text = f"running {pnl:+,.0f} USD" if pnl else "gathering live performance data"
+
+            response_lines.append(
+                f"{name}: {risk_level} risk, win rate {win_rate_display}, {cost_text}, {pnl_text}."
+            )
+
+        if total_monthly_cost:
+            response_lines.append(f"Total monthly credit commitment: {total_monthly_cost:.0f} credits.")
+
+        response_lines.append(
+            "Want me to pause, reallocate, or add another module? Just point me to the strategy you're thinking about."
+        )
+
+        return "\n".join(response_lines)
+
+    except Exception as e:
+        logger.error("Strategy overview failed", error=str(e))
+        return "❌ I couldn't load your strategy lineup just now. Let's try again shortly."
 
 
 def _generate_help_message(connection: UserTelegramConnection) -> str:

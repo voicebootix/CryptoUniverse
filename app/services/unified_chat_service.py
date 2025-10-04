@@ -37,7 +37,7 @@ from app.services.master_controller import MasterSystemController, TradingMode
 from app.services.ai_consensus_core import AIConsensusService
 from app.services.trade_execution import TradeExecutionService
 # Removed chat_service_adapters - unified_chat_service uses direct integrations
-from app.services.telegram_core import TelegramCommanderService
+from app.services.telegram_core import telegram_commander_service
 from app.services.websocket import manager as websocket_manager
 from app.services.chat_memory import ChatMemoryService
 # Note: unified_ai_manager is imported lazily in methods to avoid initialization at module load
@@ -49,6 +49,7 @@ from app.services.portfolio_risk_core import PortfolioRiskService
 from app.services.trading_strategies import TradingStrategiesService
 from app.services.strategy_marketplace_service import strategy_marketplace_service
 from app.services.paper_trading_engine import paper_trading_engine
+from app.services.conversation.persona_middleware import persona_middleware
 from app.services.user_opportunity_discovery import user_opportunity_discovery
 from app.services.user_onboarding_service import user_onboarding_service
 from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
@@ -179,7 +180,7 @@ class UnifiedChatService(LoggerMixin):
         self.master_controller = MasterSystemController()
         self.trade_executor = TradeExecutionService()
 # Direct service integrations - no adapters needed
-        self.telegram_core = TelegramCommanderService()
+        self.telegram_core = telegram_commander_service
         self.market_analysis = MarketAnalysisService()
         self.portfolio_risk = PortfolioRiskService()
         self.trading_strategies = TradingStrategiesService()
@@ -2384,14 +2385,18 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
             system_message=system_message,
             temperature=0.7
         )
-        
+
         if response["success"]:
             content = response["content"]
-            
+            content = persona_middleware.apply(
+                content,
+                intent=intent.value if hasattr(intent, "value") else str(intent),
+            )
+
             # Handle action requirements
             requires_approval = False
             decision_id = None
-            
+
             if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
                 requires_approval = True
                 decision_id = str(uuid.uuid4())
@@ -2403,7 +2408,7 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                     session.user_id,
                     session.conversation_mode
                 )
-            
+
             # Save to memory
             await self._save_conversation(
                 session.session_id,
