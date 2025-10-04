@@ -6143,16 +6143,33 @@ class TradingStrategiesService(LoggerMixin):
             # Already has separator, just normalize it
             normalized_symbol = normalized_symbol.replace("-", "/")
         else:
-            # Check for known quote currency suffixes
-            stable_suffixes = ("USDT", "USDC", "BUSD", "USD", "TUSD", "DAI")
-            for suffix in stable_suffixes:
-                if normalized_symbol.endswith(suffix) and len(normalized_symbol) > len(suffix):
-                    base_symbol = normalized_symbol[:-len(suffix)]
-                    normalized_symbol = f"{base_symbol}/{suffix}"
-                    break
+            # List of known stablecoins that should NOT be split
+            standalone_stables = {"BUSD", "TUSD", "USDT", "USDC", "DAI", "FRAX", "GUSD", "USDP"}
+
+            # If it's a standalone stablecoin, pair it with USDT (or another stable)
+            if normalized_symbol in standalone_stables:
+                # For stablecoins, create a pair with USDT (except USDT itself)
+                if normalized_symbol == "USDT":
+                    normalized_symbol = "USDT/USD"  # USDT typically pairs with USD
+                else:
+                    normalized_symbol = f"{normalized_symbol}/USDT"
             else:
-                # No recognized suffix found, default to USDT pair
-                normalized_symbol = f"{normalized_symbol}/USDT"
+                # Check for known quote currency suffixes, but order matters
+                # Longer suffixes first to avoid false matches
+                stable_suffixes = ("USDT", "USDC", "BUSD", "TUSD", "USD", "DAI")
+                matched = False
+                for suffix in stable_suffixes:
+                    if normalized_symbol.endswith(suffix) and len(normalized_symbol) > len(suffix):
+                        base_symbol = normalized_symbol[:-len(suffix)]
+                        # Ensure base symbol is at least 2 characters (avoid "B/USD" from "BUSD")
+                        if len(base_symbol) >= 2:
+                            normalized_symbol = f"{base_symbol}/{suffix}"
+                            matched = True
+                            break
+
+                if not matched:
+                    # No recognized suffix found, default to USDT pair
+                    normalized_symbol = f"{normalized_symbol}/USDT"
 
         try:
             price_payload = await market_analysis_service.get_exchange_price(
