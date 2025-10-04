@@ -2505,6 +2505,34 @@ Respond naturally using ONLY the real data provided."""
                     "personality": personality["name"]
                 }
 
+            # Apply persona middleware to the complete response
+            persona_response = persona_middleware.apply(
+                full_response,
+                intent=intent.value if hasattr(intent, "value") else str(intent),
+            )
+
+            # If persona added or modified content, send a final enriched chunk
+            if persona_response != full_response:
+                # Extract the additional content added by persona
+                if len(persona_response) > len(full_response):
+                    additional_content = persona_response[len(full_response):]
+                    yield {
+                        "type": "response",
+                        "content": additional_content,
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "personality": personality["name"],
+                        "persona_applied": True
+                    }
+                # If persona modified the entire response, send a correction chunk
+                else:
+                    yield {
+                        "type": "persona_enriched",
+                        "content": persona_response,
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "personality": personality["name"],
+                        "replaces_previous": True
+                    }
+
             # Handle action requirements
             if intent in [ChatIntent.TRADE_EXECUTION, ChatIntent.REBALANCING]:
                 decision_id = str(uuid.uuid4())
@@ -2524,12 +2552,12 @@ Respond naturally using ONLY the real data provided."""
                     "timestamp": datetime.utcnow().isoformat()
                 }
 
-            # Save conversation
+            # Save conversation with persona-applied response
             await self._save_conversation(
                 session.session_id,
                 session.user_id,
                 message,
-                full_response,
+                persona_response,  # Save the persona-applied version
                 intent,
                 intent_analysis["confidence"]
             )
