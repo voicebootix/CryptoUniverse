@@ -33,7 +33,7 @@ export interface ChatResponse {
 }
 
 export interface StreamChunk {
-  type: 'chunk' | 'complete' | 'error' | 'progress';
+  type: 'chunk' | 'response' | 'processing' | 'complete' | 'error' | 'progress';
   content?: string;
   progress?: {
     stage: string;
@@ -42,6 +42,7 @@ export interface StreamChunk {
   };
   error?: string;
   timestamp?: string;
+  personality?: string;
 }
 
 /**
@@ -114,14 +115,35 @@ export function streamChatMessage(
       const data: StreamChunk = JSON.parse(event.data);
       
       switch (data.type) {
-        case 'chunk':
+        case 'response':
+          // Backend sends 'response' type for AI response chunks
           if (data.content) {
             fullContent += data.content;
             onChunk(data.content);
           }
           break;
           
+        case 'chunk':
+          // Legacy support for 'chunk' type (if backend ever sends it)
+          if (data.content) {
+            fullContent += data.content;
+            onChunk(data.content);
+          }
+          break;
+          
+        case 'processing':
+          // Backend sends 'processing' type for initial processing message
+          if (onProgress) {
+            onProgress({
+              stage: 'processing',
+              message: data.content || 'Processing your request...',
+              percent: 10
+            });
+          }
+          break;
+          
         case 'progress':
+          // Backend sends 'progress' type for detailed progress updates
           if (data.progress && onProgress) {
             onProgress(data.progress);
           }
