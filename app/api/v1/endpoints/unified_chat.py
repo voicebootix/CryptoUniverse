@@ -244,14 +244,18 @@ async def stream_message(
                 # Generate session ID if not provided
                 actual_session_id = session_id or str(uuid.uuid4())
                 
-                async for chunk in unified_chat_service.process_message(
+                # Await process_message to get the async generator
+                generator = await unified_chat_service.process_message(
                     message=message,
                     user_id=str(current_user.id),
                     session_id=actual_session_id,
                     interface=InterfaceType.WEB_CHAT,
                     conversation_mode=validated_mode,
                     stream=True
-                ):
+                )
+                
+                # Now iterate over the async generator
+                async for chunk in generator:
                     # Format as SSE
                     data = json.dumps(chunk)
                     yield f"data: {data}\n\n"
@@ -691,15 +695,18 @@ async def chat_websocket(
                 
                 if user_message.strip():
                     try:
-                        # Stream response
-                        async for chunk in unified_chat_service.process_message(
+                        # Stream response - await to get the async generator first
+                        generator = await unified_chat_service.process_message(
                             message=user_message,
                             user_id=user_id,
                             session_id=session_id,
                             interface=InterfaceType.WEB_CHAT,
                             conversation_mode=conversation_mode,
                             stream=True
-                        ):
+                        )
+                        
+                        # Now iterate over the async generator
+                        async for chunk in generator:
                             await websocket.send_text(json.dumps({
                                 "type": "chat_response",
                                 "session_id": session_id,
