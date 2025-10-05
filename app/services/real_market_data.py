@@ -44,31 +44,40 @@ class RealMarketDataService(LoggerMixin):
         self._initialize_exchanges()
 
     def _initialize_exchanges(self):
-        """Initialize CCXT exchange connections."""
+        """Initialize CCXT exchange connections with timeout configuration."""
         try:
-            # Initialize multiple exchanges for redundancy
-            self.exchanges['binance'] = ccxt.binance({
+            # Common timeout configuration
+            timeout_config = {
                 'enableRateLimit': True,
+                'timeout': 10000,  # 10 second timeout
                 'options': {
                     'defaultType': 'spot',
-                    'adjustForTimeDifference': True
+                    'adjustForTimeDifference': True,
+                    'timeout': 10000  # Additional timeout option
                 }
-            })
+            }
+            
+            # Initialize multiple exchanges for redundancy
+            self.exchanges['binance'] = ccxt.binance(timeout_config)
 
             self.exchanges['kucoin'] = ccxt.kucoin({
                 'enableRateLimit': True,
+                'timeout': 10000,
                 'options': {
-                    'defaultType': 'spot'
+                    'defaultType': 'spot',
+                    'timeout': 10000
                 }
             })
 
             self.exchanges['kraken'] = ccxt.kraken({
-                'enableRateLimit': True
+                'enableRateLimit': True,
+                'timeout': 10000
             })
 
             # Coinbase for US market
             self.exchanges['coinbase'] = ccxt.coinbase({
-                'enableRateLimit': True
+                'enableRateLimit': True,
+                'timeout': 10000
             })
 
             self.logger.info("✅ Initialized real market data connections",
@@ -217,11 +226,14 @@ class RealMarketDataService(LoggerMixin):
             exchange_obj = self.exchanges[exchange]
             ccxt_symbol = self._normalize_symbol(symbol)
 
-            # Fetch real OHLCV data
-            ohlcv_raw = await exchange_obj.fetch_ohlcv(
-                ccxt_symbol,
-                timeframe,
-                limit=limit
+            # Fetch real OHLCV data with timeout
+            ohlcv_raw = await asyncio.wait_for(
+                exchange_obj.fetch_ohlcv(
+                    ccxt_symbol,
+                    timeframe,
+                    limit=limit
+                ),
+                timeout=15.0  # 15 second timeout for OHLCV data
             )
 
             # Convert to structured format
@@ -242,6 +254,9 @@ class RealMarketDataService(LoggerMixin):
             self.logger.info(f"✅ Fetched {len(ohlcv_data)} real candles for {symbol}")
             return ohlcv_data
 
+        except asyncio.TimeoutError:
+            self.logger.warning("Timeout fetching OHLCV data", symbol=symbol, exchange=exchange)
+            return []
         except Exception as e:
             self.logger.error(f"Failed to fetch OHLCV data", error=str(e))
 
