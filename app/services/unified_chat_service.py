@@ -2428,6 +2428,7 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                 "confidence": intent_analysis["confidence"],
                 "requires_approval": requires_approval,
                 "decision_id": decision_id,
+                "context": context_data,  # FIXED: Include full context data so frontend can access opportunities
                 "metadata": {
                     "personality": personality["name"],
                     "response_time": response["elapsed_time"],
