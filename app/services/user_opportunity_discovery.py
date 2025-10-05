@@ -966,10 +966,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             user_portfolio = portfolio_result
             owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
             
+            # FIXED: Log but don't block - dispatcher already handles strategy filtering
             if strategy_id not in owned_strategy_ids:
-                self.logger.info("User doesn't own funding arbitrage strategy, skipping", 
-                               user_id=user_profile.user_id, scan_id=scan_id)
-                return opportunities  # Return empty for non-owned strategies
+                self.logger.warning("Strategy not in portfolio, scanning anyway", 
+                                   user_id=user_profile.user_id, 
+                                   scan_id=scan_id,
+                                   strategy_id=strategy_id,
+                                   portfolio_strategies=len(owned_strategy_ids))
             
             # User owns strategy - execute directly without credit consumption
             arbitrage_result = await trading_strategies_service.execute_strategy(
@@ -1172,10 +1175,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             user_portfolio = portfolio_result
             owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
             
+            # FIXED: Log but don't block - dispatcher already handles strategy filtering
             if strategy_id not in owned_strategy_ids:
-                self.logger.info("User doesn't own spot momentum strategy, skipping", 
-                               user_id=user_profile.user_id, scan_id=scan_id)
-                return opportunities
+                self.logger.warning("Strategy not in portfolio, scanning anyway", 
+                                   user_id=user_profile.user_id, 
+                                   scan_id=scan_id,
+                                   strategy_id=strategy_id,
+                                   portfolio_strategies=len(owned_strategy_ids))
             
             # Get symbols suitable for momentum trading
             momentum_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=30)
@@ -1428,10 +1434,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             user_portfolio = portfolio_result
             owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
             
+            # FIXED: Log but don't block - dispatcher already handles strategy filtering
             if strategy_id not in owned_strategy_ids:
-                self.logger.info("User doesn't own risk management strategy, skipping", 
-                               user_id=user_profile.user_id, scan_id=scan_id)
-                return opportunities
+                self.logger.warning("Strategy not in portfolio, scanning anyway", 
+                                   user_id=user_profile.user_id, 
+                                   scan_id=scan_id,
+                                   strategy_id=strategy_id,
+                                   portfolio_strategies=len(owned_strategy_ids))
             
             # User owns strategy - execute using unified approach
             hedge_result = await trading_strategies_service.execute_strategy(
@@ -1530,10 +1539,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             user_portfolio = portfolio_result
             owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
             
+            # FIXED: Log but don't block - dispatcher already handles strategy filtering
             if strategy_id not in owned_strategy_ids:
-                self.logger.info("User doesn't own portfolio optimization strategy, skipping", 
-                               user_id=user_profile.user_id, scan_id=scan_id)
-                return opportunities
+                self.logger.warning("Strategy not in portfolio, scanning anyway", 
+                                   user_id=user_profile.user_id, 
+                                   scan_id=scan_id,
+                                   strategy_id=strategy_id,
+                                   portfolio_strategies=len(owned_strategy_ids))
             
             # User owns strategy - execute using unified approach
             optimization_result = await trading_strategies_service.execute_strategy(
@@ -1801,10 +1813,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             strategy_id = "ai_scalping_strategy"
             owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
             
+            # FIXED: Log but don't block - dispatcher already handles strategy filtering
             if strategy_id not in owned_strategy_ids:
-                self.logger.info("User doesn't own scalping strategy, skipping", 
-                               user_id=user_profile.user_id, scan_id=scan_id)
-                return opportunities
+                self.logger.warning("Strategy not in portfolio, scanning anyway", 
+                                   user_id=user_profile.user_id, 
+                                   scan_id=scan_id,
+                                   strategy_id=strategy_id,
+                                   portfolio_strategies=len(owned_strategy_ids))
             
             # Get highest volume symbols for scalping (need liquidity)
             symbols = self._get_top_symbols_by_volume(discovered_assets, limit=8)
@@ -1885,10 +1900,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             strategy_id = "ai_market_making"
             owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
             
+            # FIXED: Log but don't block - dispatcher already handles strategy filtering
             if strategy_id not in owned_strategy_ids:
-                self.logger.info("User doesn't own market making strategy, skipping", 
-                               user_id=user_profile.user_id, scan_id=scan_id)
-                return opportunities
+                self.logger.warning("Strategy not in portfolio, scanning anyway", 
+                                   user_id=user_profile.user_id, 
+                                   scan_id=scan_id,
+                                   strategy_id=strategy_id,
+                                   portfolio_strategies=len(owned_strategy_ids))
             
             # Get highly liquid symbols for market making
             symbols = self._get_top_symbols_by_volume(discovered_assets, limit=10)
@@ -1967,10 +1985,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             strategy_id = "ai_futures_trade"
             owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
             
+            # FIXED: Log but don't block - dispatcher already handles strategy filtering
             if strategy_id not in owned_strategy_ids:
-                self.logger.info("User doesn't own futures trading strategy, skipping", 
-                               user_id=user_profile.user_id, scan_id=scan_id)
-                return opportunities
+                self.logger.warning("Strategy not in portfolio, scanning anyway", 
+                                   user_id=user_profile.user_id, 
+                                   scan_id=scan_id,
+                                   strategy_id=strategy_id,
+                                   portfolio_strategies=len(owned_strategy_ids))
             
             # Get top volume symbols for futures analysis
             symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
@@ -2015,10 +2036,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             strategy_id = "ai_options_trade"
             owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
             
+            # FIXED: Log but don't block - dispatcher already handles strategy filtering
             if strategy_id not in owned_strategy_ids:
-                self.logger.info("User doesn't own options trading strategy, skipping", 
-                               user_id=user_profile.user_id, scan_id=scan_id)
-                return opportunities
+                self.logger.warning("Strategy not in portfolio, scanning anyway", 
+                                   user_id=user_profile.user_id, 
+                                   scan_id=scan_id,
+                                   strategy_id=strategy_id,
+                                   portfolio_strategies=len(owned_strategy_ids))
             
             # Get top volume symbols for options analysis
             symbols = self._get_top_symbols_by_volume(discovered_assets, limit=15)
