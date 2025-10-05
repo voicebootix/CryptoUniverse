@@ -2564,9 +2564,11 @@ class TradingStrategiesService(LoggerMixin):
                 )
 
             elif function == "market_making":
+                # FIXED: Pass parameters as dict, not as kwargs
                 return await self.market_making(
                     symbol=symbol,
-                    spread_percentage=parameters.spread_percentage if hasattr(parameters, 'spread_percentage') else 0.1,
+                    strategy_type=strategy_type or "dual_side",
+                    parameters=raw_params,
                     user_id=user_id
                 )
             
