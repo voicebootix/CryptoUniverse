@@ -896,22 +896,49 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         strategy_id = strategy_info.get("strategy_id", "")
         strategy_name = strategy_info.get("name", "Unknown")
         
-        # Extract strategy function name
+        # FIXED: Try multiple ID formats to find scanner
+        # Extract strategy function name with multiple fallback attempts
+        strategy_func_candidates = []
+        
+        # Try removing "ai_" prefix
         if strategy_id.startswith("ai_"):
-            strategy_func = strategy_id.replace("ai_", "")
-        else:
-            strategy_func = strategy_id
+            strategy_func_candidates.append(strategy_id.replace("ai_", ""))
+        
+        # Try the ID as-is
+        strategy_func_candidates.append(strategy_id)
+        
+        # Try adding "ai_" prefix if not present
+        if not strategy_id.startswith("ai_"):
+            strategy_func_candidates.append(f"ai_{strategy_id}")
+        
+        # Try removing "_strategy" suffix
+        if strategy_id.endswith("_strategy"):
+            strategy_func_candidates.append(strategy_id.replace("_strategy", ""))
+        
+        # Find matching scanner
+        strategy_func = None
+        for candidate in strategy_func_candidates:
+            if candidate in self.strategy_scanners:
+                strategy_func = candidate
+                break
         
         self.logger.info("🎯 Scanning strategy opportunities",
                         scan_id=scan_id,
                         strategy=strategy_name,
-                        strategy_func=strategy_func)
+                        strategy_id=strategy_id,
+                        strategy_func=strategy_func,
+                        tried_candidates=strategy_func_candidates,
+                        available_scanners=list(self.strategy_scanners.keys())[:5])
         
         try:
             # Check if we have a scanner for this strategy
-            if strategy_func not in self.strategy_scanners:
-                self.logger.warning("No scanner found for strategy", 
-                                  strategy_func=strategy_func, scan_id=scan_id)
+            if not strategy_func or strategy_func not in self.strategy_scanners:
+                self.logger.warning("❌ No scanner found for strategy", 
+                                  strategy_id=strategy_id,
+                                  strategy_func=strategy_func,
+                                  tried_candidates=strategy_func_candidates,
+                                  available_scanners=list(self.strategy_scanners.keys()),
+                                  scan_id=scan_id)
                 return {"strategy_id": strategy_id, "opportunities": []}
             
             # Run the strategy-specific scanner with portfolio data
