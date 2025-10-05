@@ -19,7 +19,7 @@ from urllib.parse import parse_qs
 import time
 from collections import defaultdict
 
-from app.api.v1.endpoints.auth import get_current_user
+from app.api.v1.endpoints.auth import get_current_user, auth_service
 from app.api.dependencies.sse_auth import get_current_user_sse
 from app.models.user import User
 from app.services.unified_chat_service import (

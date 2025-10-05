@@ -16,7 +16,8 @@ import structlog
 from app.core.database import get_database
 from app.core.redis import get_redis_client
 from app.models.user import User, UserStatus
-from app.services.auth import auth_service
+# Import auth_service from auth.py endpoint (where it's actually defined)
+from app.api.v1.endpoints.auth import auth_service
 
 logger = structlog.get_logger(__name__)
 security = HTTPBearer(auto_error=False)
