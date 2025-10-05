@@ -112,7 +112,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self._scan_cache_lock = asyncio.Lock()
         self._scan_cache_ttl = 1800  # 30 minutes - increased from 10 to reduce expensive scans
         self._partial_cache_ttl = 300  # 5 minutes - increased from 2 for better partial result reuse
-        self._scan_response_budget = 60.0  # 60 seconds - increased from 25 to allow completion before timeout
+        self._scan_response_budget = 150.0  # 150 seconds - allow all 14 strategies to complete (portfolio optimization takes ~80s)
 
         # Strategy scanning methods mapping
         self.strategy_scanners = {
