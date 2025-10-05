@@ -2480,6 +2480,33 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
         }
 
         intent = intent_analysis["intent"]
+        
+        # Emit progress for opportunity discovery
+        if intent == ChatIntent.OPPORTUNITY_DISCOVERY:
+            yield {
+                "type": "progress",
+                "progress": {
+                    "stage": "scanning_strategies",
+                    "message": "Scanning your active strategies for opportunities...",
+                    "percent": 30
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            # Check if we have opportunities in context
+            opportunities = context_data.get("opportunities", {})
+            opp_count = len(opportunities.get("opportunities", []))
+            
+            yield {
+                "type": "progress",
+                "progress": {
+                    "stage": "opportunities_found",
+                    "message": f"Found {opp_count} opportunities. Generating analysis...",
+                    "percent": 70
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        
         personality = self.personalities[session.trading_mode]
 
         # Build system message

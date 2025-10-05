@@ -20,6 +20,7 @@ import time
 from collections import defaultdict
 
 from app.api.v1.endpoints.auth import get_current_user
+from app.api.dependencies.sse_auth import get_current_user_sse
 from app.models.user import User
 from app.services.unified_chat_service import (
     unified_chat_service,
@@ -222,7 +223,7 @@ async def stream_message(
     message: str = Query(..., description="The user's message"),
     session_id: Optional[str] = Query(None, description="Session ID for conversation continuity"),
     conversation_mode: str = Query("live_trading", description="Conversation mode"),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user_sse)
 ):
     """
     Stream a chat response for real-time conversation experience.

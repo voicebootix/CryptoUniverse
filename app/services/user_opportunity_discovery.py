@@ -95,9 +95,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         super().__init__()
         self.redis: Optional[Any] = None
         
-        # ENTERPRISE CACHING LAYER - Phase 1 Performance Fix
+        # ENTERPRISE CACHING LAYER - Optimized for Performance
         self._portfolio_cache = {}  # {user_id: {'data': portfolio, 'expires': timestamp}}
-        self._cache_ttl = 300  # 5 minutes
+        self._cache_ttl = 900  # 15 minutes - increased from 5 to reduce DB queries
         
         # CIRCUIT BREAKER for external calls
         self._circuit_breaker = {
@@ -110,9 +110,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self.opportunity_cache = {}
         self._scan_tasks: Dict[str, asyncio.Task] = {}
         self._scan_cache_lock = asyncio.Lock()
-        self._scan_cache_ttl = 600  # 10 minutes for full results
-        self._partial_cache_ttl = 120  # 2 minutes for in-flight results
-        self._scan_response_budget = 25.0  # seconds to wait on request path
+        self._scan_cache_ttl = 1800  # 30 minutes - increased from 10 to reduce expensive scans
+        self._partial_cache_ttl = 300  # 5 minutes - increased from 2 for better partial result reuse
+        self._scan_response_budget = 60.0  # 60 seconds - increased from 25 to allow completion before timeout
 
         # Strategy scanning methods mapping
         self.strategy_scanners = {
@@ -132,22 +132,22 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             "complex_strategy": self._scan_complex_strategy_opportunities
         }
         
-        # User tier configurations
+        # User tier configurations - Enterprise-grade with dynamic limits
         self.tier_configs = {
             "basic": {
                 "max_asset_tier": "tier_retail",
-                "scan_limit": 50,
-                "max_strategies": 5
+                "scan_limit": None,  # No hard limit - scan all available opportunities
+                "max_strategies": None  # No hard limit - user can purchase unlimited strategies
             },
             "pro": {
                 "max_asset_tier": "tier_professional",
-                "scan_limit": 200,
-                "max_strategies": 15
+                "scan_limit": None,  # No hard limit
+                "max_strategies": None  # No hard limit
             },
             "enterprise": {
                 "max_asset_tier": "tier_institutional",
-                "scan_limit": 1000,
-                "max_strategies": 999
+                "scan_limit": None,  # No hard limit
+                "max_strategies": None  # No hard limit
             }
         }
 
@@ -598,8 +598,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             )
             await self._update_cached_scan_result(user_id, initial_snapshot, partial=True)
 
-            # Create semaphore for bounded concurrency
-            strategy_semaphore = asyncio.Semaphore(3)  # Run max 3 strategies concurrently
+            # Create semaphore for bounded concurrency - Optimized for performance
+            strategy_semaphore = asyncio.Semaphore(15)  # Run max 15 strategies concurrently (increased from 3)
             
             async def scan_strategy_with_semaphore(strategy_info):
                 async with strategy_semaphore:
@@ -2805,7 +2805,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 reverse=True,
             )
 
-            max_assets = user_profile.opportunity_scan_limit or len(symbol_candidates)
+            # No hard limit - preload all available assets (sorted by volume)
+            # Limit only by practical considerations (top 1000 by volume for performance)
+            max_assets = min(1000, len(symbol_candidates)) if len(symbol_candidates) > 1000 else len(symbol_candidates)
             selected_assets = symbol_candidates[: max_assets]
 
             preload_pairs: List[Tuple[str, str]] = []
@@ -2819,8 +2821,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             if preload_pairs:
                 await market_analysis_service.preload_exchange_prices(
                     preload_pairs,
-                    ttl=45,
-                    concurrency=20,
+                    ttl=300,  # 5 minutes - increased from 45s for better cache reuse
+                    concurrency=50,  # Increased from 20 for faster parallel loading
                 )
                 self.logger.info(
                     "Preloaded price cache for opportunity scan",
@@ -2853,14 +2855,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             reverse=True
         )
         
-        # Apply user's scan limit
-        limited_opportunities = ranked_opportunities[:user_profile.opportunity_scan_limit]
+        # Apply user's scan limit only if set (None = unlimited)
+        if user_profile.opportunity_scan_limit is not None:
+            limited_opportunities = ranked_opportunities[:user_profile.opportunity_scan_limit]
+        else:
+            limited_opportunities = ranked_opportunities  # Return all opportunities
         
         self.logger.info("🎯 Opportunities ranked and filtered",
                         scan_id=scan_id,
                         total_found=len(opportunities),
                         after_filtering=len(limited_opportunities),
-                        user_limit=user_profile.opportunity_scan_limit)
+                        user_limit=user_profile.opportunity_scan_limit or "unlimited")
         
         return limited_opportunities
     

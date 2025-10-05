@@ -313,13 +313,13 @@ class MarketAnalysisService(LoggerMixin):
             "volatility_analysis": 60,
             "market_overview": 60,
         }
-        self._max_symbol_concurrency = 6
-        self._per_exchange_timeout = 5
+        self._max_symbol_concurrency = 20  # Increased from 6 for better parallel processing
+        self._per_exchange_timeout = 10  # Increased from 5 to handle slower exchanges
         self._symbol_semaphores: Dict[int, asyncio.Semaphore] = {}
         self._price_cache: Dict[str, _PriceCacheEntry] = {}
         self._price_lock_map: Dict[str, asyncio.Lock] = {}
         self._price_lock_map_lock = asyncio.Lock()
-        self._price_cache_ttl = 30
+        self._price_cache_ttl = 300  # 5 minutes - increased from 30s for better cache reuse
         self._redis = None
         self._redis_lock = asyncio.Lock()
 
