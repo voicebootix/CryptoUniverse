@@ -2207,40 +2207,102 @@ class UnifiedChatService(LoggerMixin):
             context_data["technical_analysis"] = {"signals": [], "error": "Technical analysis integration pending"}
             
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-            # Get real opportunities with error handling
+            # BULLETPROOF OPPORTUNITY DISCOVERY
+            # Strategy: Always return cached results immediately for fast response
+            # Background scans update cache automatically every 5 minutes
+            
+            self.logger.info("Opportunity discovery requested",
+                           user_id=user_id,
+                           intent=intent)
+            
             try:
-                # Use async pattern: Try to get cached results with short timeout
-                # If not available, return scan_id for frontend to poll
-                try:
-                    context_data["opportunities"] = await asyncio.wait_for(
-                        self.opportunity_discovery.discover_opportunities_for_user(
-                            user_id=user_id,
-                            force_refresh=False,
-                            include_strategy_recommendations=True
-                        ),
-                        timeout=5.0  # 5 second timeout - return cached or initiate scan
-                    )
-                except asyncio.TimeoutError:
-                    # Timeout - scan is running in background
-                    # Return scan info for frontend to poll
-                    scan_id = f"scan_{user_id}_{int(datetime.utcnow().timestamp())}"
-                    context_data["opportunities"] = {
-                        "success": True,
-                        "status": "scanning",
-                        "scan_id": scan_id,
-                        "message": "Opportunity scan in progress. Poll /api/v1/opportunities/status/{scan_id} for updates.",
-                        "poll_url": f"/api/v1/opportunities/status/{scan_id}",
-                        "opportunities": [],  # Empty for now
-                        "estimated_completion_seconds": 120
-                    }
-                    self.logger.info("Opportunity discovery timeout - scan running in background",
+                # Call discovery service WITHOUT timeout wrapper
+                # Service handles caching internally and returns immediately if cache exists
+                discovery_result = await self.opportunity_discovery.discover_opportunities_for_user(
+                    user_id=user_id,
+                    force_refresh=False,  # Use cache - fast response
+                    include_strategy_recommendations=True
+                )
+                
+                # Validate result structure
+                if not isinstance(discovery_result, dict):
+                    raise ValueError(f"Invalid discovery result type: {type(discovery_result)}")
+                
+                # Check if we got actual opportunities
+                opportunities_list = discovery_result.get("opportunities", [])
+                success = discovery_result.get("success", False)
+                
+                if success and len(opportunities_list) > 0:
+                    # SUCCESS: We have opportunities
+                    context_data["opportunities"] = discovery_result
+                    self.logger.info("Opportunity discovery successful",
                                    user_id=user_id,
-                                   scan_id=scan_id)
-            except Exception as e:
-                self.logger.error("Failed to discover opportunities", error=str(e), user_id=user_id)
+                                   opportunities_count=len(opportunities_list),
+                                   scan_state=discovery_result.get("scan_state", "unknown"))
+                    
+                elif success and len(opportunities_list) == 0:
+                    # Cache is empty or scan returned 0 opportunities
+                    scan_state = discovery_result.get("scan_state", "unknown")
+                    
+                    if scan_state == "partial":
+                        # Scan is in progress, return partial results
+                        context_data["opportunities"] = {
+                            "success": True,
+                            "status": "scanning",
+                            "message": "Opportunity scan in progress. Results will appear as strategies complete.",
+                            "opportunities": [],
+                            "scan_state": "partial",
+                            "metadata": discovery_result.get("metadata", {})
+                        }
+                        self.logger.info("Opportunity scan in progress",
+                                       user_id=user_id,
+                                       scan_state=scan_state)
+                    else:
+                        # No opportunities found (legitimate result)
+                        context_data["opportunities"] = {
+                            "success": True,
+                            "message": "No trading opportunities found at this time. Market conditions may not be favorable.",
+                            "opportunities": [],
+                            "scan_state": scan_state,
+                            "metadata": discovery_result.get("metadata", {})
+                        }
+                        self.logger.warning("No opportunities found",
+                                          user_id=user_id,
+                                          scan_state=scan_state)
+                else:
+                    # Discovery failed
+                    error_msg = discovery_result.get("error", "Unknown error")
+                    context_data["opportunities"] = {
+                        "success": False,
+                        "error": f"Opportunity discovery failed: {error_msg}",
+                        "opportunities": []
+                    }
+                    self.logger.error("Opportunity discovery failed",
+                                    user_id=user_id,
+                                    error=error_msg)
+                    
+            except asyncio.TimeoutError:
+                # This should NOT happen anymore since we removed timeout wrapper
+                # But keep as safety net
+                self.logger.error("Unexpected timeout in opportunity discovery",
+                                user_id=user_id,
+                                exc_info=True)
                 context_data["opportunities"] = {
                     "success": False,
-                    "error": "Opportunity discovery temporarily unavailable",
+                    "error": "Opportunity discovery timed out. Please try again.",
+                    "opportunities": []
+                }
+                
+            except Exception as e:
+                # Catch-all for any unexpected errors
+                self.logger.error("Opportunity discovery exception",
+                                error=str(e),
+                                error_type=type(e).__name__,
+                                user_id=user_id,
+                                exc_info=True)
+                context_data["opportunities"] = {
+                    "success": False,
+                    "error": "Opportunity discovery temporarily unavailable. Please try again in a moment.",
                     "opportunities": []
                 }
 
