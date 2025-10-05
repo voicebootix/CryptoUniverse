@@ -256,6 +256,11 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     setIsConnected(connectionStatus === 'Open');
   }, [connectionStatus]);
 
+  // State for streaming progress
+  const [streamProgress, setStreamProgress] = useState<string | null>(null);
+  const [currentStreamingMessageId, setCurrentStreamingMessageId] = useState<string | null>(null);
+  const abortStreamRef = useRef<(() => void) | null>(null);
+
   const sendMessage = useCallback(async () => {
     const messageToSend = inputValue.trim();
     console.log('🚀 SEND MESSAGE CALLED!', { messageToSend, isLoading, sessionId });
@@ -278,107 +283,177 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
+    setStreamProgress('Connecting...');
 
     const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const streamingMessageId = `streaming-${requestId}`;
+    setCurrentStreamingMessageId(streamingMessageId);
     pendingMessageRef.current = messageToSend;
     pendingRequestIdRef.current = requestId;
 
     try {
-      console.log('💬 Sending message:', { isConnected, hasWsMessage: !!sendWsMessage, messageToSend });
-      if (isConnected && sendWsMessage) {
-        console.log('📤 Sending via WebSocket');
-        // Send via WebSocket for real-time response
-        sendWsMessage({
-          type: 'chat_message',
-          message: messageToSend,
-          session_id: sessionId
-        });
-
-        // Set timeout to fall back to REST API if no WebSocket response
-        clearFallbackTimer();
-        const fallbackRequestId = requestId;
-        fallbackTimerRef.current = setTimeout(async () => {
-          if (!pendingMessageRef.current || pendingRequestIdRef.current !== fallbackRequestId) {
-            return;
+      // Use Server-Sent Events (SSE) for streaming response
+      console.log('📡 Using SSE streaming for real-time response');
+      
+      const token = localStorage.getItem('token');
+      const baseURL = apiClient.defaults.baseURL || '';
+      
+      // Build SSE URL
+      const params = new URLSearchParams({
+        message: messageToSend,
+        session_id: sessionId,
+        conversation_mode: 'live_trading'
+      });
+      
+      const url = `${baseURL}/unified-chat/stream?${params.toString()}`;
+      
+      // Create EventSource for SSE
+      const eventSource = new EventSource(url);
+      
+      let fullContent = '';
+      let streamCompleted = false;
+      
+      // Create placeholder message for streaming content
+      const streamingMessage: ChatMessage = {
+        id: streamingMessageId,
+        content: '',
+        type: 'assistant',
+        timestamp: new Date().toISOString(),
+        metadata: { streaming: true }
+      };
+      setMessages(prev => [...prev, streamingMessage]);
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          switch (data.type) {
+            case 'processing':
+              setStreamProgress(data.content || 'Processing...');
+              break;
+              
+            case 'progress':
+              if (data.progress) {
+                setStreamProgress(data.progress.message || 'Processing...');
+              }
+              break;
+              
+            case 'response':
+            case 'chunk':
+              if (data.content) {
+                fullContent += data.content;
+                // Update the streaming message with accumulated content
+                setMessages(prev => 
+                  prev.map(msg => 
+                    msg.id === streamingMessageId
+                      ? { ...msg, content: fullContent }
+                      : msg
+                  )
+                );
+              }
+              break;
+              
+            case 'complete':
+              streamCompleted = true;
+              eventSource.close();
+              setIsLoading(false);
+              setStreamProgress(null);
+              setCurrentStreamingMessageId(null);
+              pendingMessageRef.current = null;
+              pendingRequestIdRef.current = null;
+              
+              // Finalize the message
+              setMessages(prev => 
+                prev.map(msg => 
+                  msg.id === streamingMessageId
+                    ? { ...msg, metadata: { ...msg.metadata, streaming: false } }
+                    : msg
+                )
+              );
+              break;
+              
+            case 'error':
+              streamCompleted = true;
+              eventSource.close();
+              setIsLoading(false);
+              setStreamProgress(null);
+              setCurrentStreamingMessageId(null);
+              
+              // Remove streaming message and show error
+              setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
+              
+              const errorMessage = data.error || 'An error occurred while processing your request.';
+              pushSystemMessage(errorMessage);
+              toast({
+                title: 'Error',
+                description: errorMessage,
+                variant: 'destructive',
+              });
+              break;
           }
-
-          console.log('⏰ WebSocket timeout, falling back to REST API');
-          let shouldFinalize = false;
-          const pendingMessage = pendingMessageRef.current;
-
-          try {
-            const response = await apiClient.post('/chat/message', {
-              message: pendingMessage,
-              session_id: sessionId
-            });
-
-            if (pendingRequestIdRef.current !== fallbackRequestId) {
-              return;
-            }
-
-            shouldFinalize = true;
-
-            if (response.data.success) {
-              const assistantMessage: ChatMessage = {
-                id: response.data.message_id,
-                content: response.data.content,
-                type: 'assistant',
-                timestamp: response.data.timestamp,
-                intent: response.data.intent,
-                confidence: response.data.confidence,
-                metadata: response.data.metadata
-              };
-              setMessages(prev => [...prev, assistantMessage]);
-            } else {
-              throw new Error('Failed to send message');
-            }
-          } catch (fallbackError) {
-            if (pendingRequestIdRef.current !== fallbackRequestId) {
-              return;
-            }
-
-            shouldFinalize = true;
-            const friendlyMessage = buildErrorMessage(fallbackError);
-            pushSystemMessage(friendlyMessage);
-            toast({
-              title: 'Message Failed',
-              description: friendlyMessage,
-              variant: 'destructive',
-            });
-          } finally {
-            if (shouldFinalize && pendingRequestIdRef.current === fallbackRequestId) {
-              finalizePendingRequest();
-            }
-          }
-        }, 10000); // 10 second timeout
-      } else {
-        console.log('📡 Using REST API (WebSocket not connected)');
-        // Fallback to REST API
-        const response = await apiClient.post('/chat/message', {
+        } catch (error) {
+          console.error('Failed to parse SSE data:', error);
+        }
+      };
+      
+      eventSource.onerror = (error) => {
+        if (streamCompleted) return;
+        
+        console.error('SSE connection error:', error);
+        eventSource.close();
+        setIsLoading(false);
+        setStreamProgress(null);
+        setCurrentStreamingMessageId(null);
+        
+        // Remove streaming message
+        setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
+        
+        // Fallback to regular API
+        console.log('⏰ SSE failed, falling back to regular API');
+        
+        apiClient.post('/unified-chat/message', {
           message: messageToSend,
-          session_id: sessionId
+          session_id: sessionId,
+          conversation_mode: 'live_trading',
+          stream: false
+        })
+        .then(response => {
+          if (response.data.success) {
+            const assistantMessage: ChatMessage = {
+              id: response.data.message_id,
+              content: response.data.content,
+              type: 'assistant',
+              timestamp: response.data.timestamp,
+              intent: response.data.intent,
+              confidence: response.data.confidence,
+              metadata: response.data.metadata
+            };
+            setMessages(prev => [...prev, assistantMessage]);
+          }
+        })
+        .catch(fallbackError => {
+          const friendlyMessage = buildErrorMessage(fallbackError);
+          pushSystemMessage(friendlyMessage);
+          toast({
+            title: 'Message Failed',
+            description: friendlyMessage,
+            variant: 'destructive',
+          });
+        })
+        .finally(() => {
+          pendingMessageRef.current = null;
+          pendingRequestIdRef.current = null;
         });
-
-        if (response.data.success) {
-          const assistantMessage: ChatMessage = {
-            id: response.data.message_id,
-            content: response.data.content,
-            type: 'assistant',
-            timestamp: response.data.timestamp,
-            intent: response.data.intent,
-            confidence: response.data.confidence,
-            metadata: response.data.metadata
-          };
-
-          setMessages(prev => [...prev, assistantMessage]);
-        } else {
-          throw new Error('Failed to send message');
-        }
-
-        if (pendingRequestIdRef.current === requestId) {
-          finalizePendingRequest();
-        }
-      }
+      };
+      
+      // Store abort function
+      abortStreamRef.current = () => {
+        eventSource.close();
+        setIsLoading(false);
+        setStreamProgress(null);
+        setCurrentStreamingMessageId(null);
+      };
+      
     } catch (error) {
       const friendlyMessage = buildErrorMessage(error);
       pushSystemMessage(friendlyMessage);
@@ -387,19 +462,19 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         description: friendlyMessage,
         variant: 'destructive',
       });
-      finalizePendingRequest();
+      setIsLoading(false);
+      setStreamProgress(null);
+      setCurrentStreamingMessageId(null);
+      pendingMessageRef.current = null;
+      pendingRequestIdRef.current = null;
     }
   }, [
     buildErrorMessage,
-    finalizePendingRequest,
     inputValue,
-    isConnected,
     isLoading,
     pushSystemMessage,
-    sendWsMessage,
     sessionId,
     toast,
-    clearFallbackTimer,
   ]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -642,14 +717,16 @@ Just chat with me naturally! How can I help you manage your crypto investments t
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
                   <Loader className="h-4 w-4 animate-spin text-primary" />
                 </div>
-                <div className="bg-muted rounded-lg px-4 py-3">
+                <div className="bg-muted rounded-lg px-4 py-3 min-w-[200px]">
                   <div className="flex items-center gap-2">
                     <div className="flex space-x-1">
                       <div className="w-2 h-2 bg-primary/60 rounded-full animate-bounce"></div>
                       <div className="w-2 h-2 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
                       <div className="w-2 h-2 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                     </div>
-                    <span className="text-sm text-muted-foreground">AI is thinking...</span>
+                    <span className="text-sm text-muted-foreground">
+                      {streamProgress || 'AI is thinking...'}
+                    </span>
                   </div>
                 </div>
               </motion.div>
