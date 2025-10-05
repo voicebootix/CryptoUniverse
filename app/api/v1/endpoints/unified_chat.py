@@ -59,6 +59,7 @@ class UnifiedChatResponse(BaseModel):
     requires_action: bool = False
     decision_id: Optional[str] = None
     action_data: Optional[Dict[str, Any]] = None
+    context: Optional[Dict[str, Any]] = None  # FIXED: Add context field for opportunities and other data
     metadata: Optional[Dict[str, Any]] = None
     timestamp: datetime
 
@@ -156,6 +157,7 @@ async def send_message(
                 requires_action=result.get("requires_action", False),
                 decision_id=result.get("decision_id"),
                 action_data=result.get("action_data"),
+                context=result.get("context"),  # FIXED: Pass through context with opportunities
                 metadata=result.get("metadata", {}),
                 timestamp=result["timestamp"]
             )
