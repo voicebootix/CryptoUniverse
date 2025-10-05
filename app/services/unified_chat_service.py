@@ -2207,13 +2207,23 @@ class UnifiedChatService(LoggerMixin):
             context_data["technical_analysis"] = {"signals": [], "error": "Technical analysis integration pending"}
             
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-            # Get real opportunities with error handling
+            # Get real opportunities with error handling and timeout
             try:
-                context_data["opportunities"] = await self.opportunity_discovery.discover_opportunities_for_user(
-                    user_id=user_id,
-                    force_refresh=False,
-                    include_strategy_recommendations=True
+                context_data["opportunities"] = await asyncio.wait_for(
+                    self.opportunity_discovery.discover_opportunities_for_user(
+                        user_id=user_id,
+                        force_refresh=False,
+                        include_strategy_recommendations=True
+                    ),
+                    timeout=45.0  # 45 second timeout for opportunity discovery
                 )
+            except asyncio.TimeoutError:
+                self.logger.error("Opportunity discovery timed out", user_id=user_id)
+                context_data["opportunities"] = {
+                    "success": False,
+                    "error": "Opportunity discovery timed out - please try again",
+                    "opportunities": []
+                }
             except Exception as e:
                 self.logger.error("Failed to discover opportunities", error=str(e), user_id=user_id)
                 context_data["opportunities"] = {

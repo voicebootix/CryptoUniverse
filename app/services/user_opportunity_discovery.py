@@ -607,13 +607,24 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         strategy_info, discovered_assets, user_profile, scan_id, portfolio_result
                     )
             
-            # Run all strategy scans concurrently
+            # Run all strategy scans concurrently with timeout
             strategy_tasks = [
                 scan_strategy_with_semaphore(strategy)
                 for strategy in active_strategies
             ]
             
-            strategy_scan_results = await asyncio.gather(*strategy_tasks, return_exceptions=True)
+            try:
+                strategy_scan_results = await asyncio.wait_for(
+                    asyncio.gather(*strategy_tasks, return_exceptions=True),
+                    timeout=60.0  # 60 second timeout for all strategy scans
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Strategy scanning timed out, using partial results", scan_id=scan_id)
+                # Cancel remaining tasks
+                for task in strategy_tasks:
+                    if not task.done():
+                        task.cancel()
+                strategy_scan_results = []
             
             # Process results
             for i, result in enumerate(strategy_scan_results):

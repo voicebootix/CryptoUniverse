@@ -6686,19 +6686,26 @@ class TradingStrategiesService(LoggerMixin):
             return 0.5 if underlying_price > 0 else 0.3
 
     async def _estimate_daily_volatility(self, symbol: str) -> float:
-        """Calculate real daily volatility using historical price data."""
+        """Calculate real daily volatility using historical price data with timeout handling."""
         try:
             # Initialize market analysis service if needed
             if not hasattr(self, '_market_analysis'):
                 from app.services.market_analysis_core import MarketAnalysisService
                 self._market_analysis = MarketAnalysisService()
             
-            # Get 30 days of historical price data for volatility calculation
-            historical_data = await self._market_analysis._get_historical_price_data(
-                symbol=symbol, 
-                timeframe="1d", 
-                periods=30
-            )
+            # Get 30 days of historical price data for volatility calculation with timeout
+            try:
+                historical_data = await asyncio.wait_for(
+                    self._market_analysis._get_historical_price_data(
+                        symbol=symbol, 
+                        timeframe="1d", 
+                        periods=30
+                    ),
+                    timeout=20.0  # 20 second timeout for historical data
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Timeout fetching historical data for {symbol}, using fallback volatility")
+                return 0.05  # 5% default fallback
             
             if not historical_data or len(historical_data) < 5:
                 # Fallback to conservative estimate if no data
