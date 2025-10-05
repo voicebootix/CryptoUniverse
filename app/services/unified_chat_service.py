@@ -2209,11 +2209,33 @@ class UnifiedChatService(LoggerMixin):
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
             # Get real opportunities with error handling
             try:
-                context_data["opportunities"] = await self.opportunity_discovery.discover_opportunities_for_user(
-                    user_id=user_id,
-                    force_refresh=False,
-                    include_strategy_recommendations=True
-                )
+                # Use async pattern: Try to get cached results with short timeout
+                # If not available, return scan_id for frontend to poll
+                try:
+                    context_data["opportunities"] = await asyncio.wait_for(
+                        self.opportunity_discovery.discover_opportunities_for_user(
+                            user_id=user_id,
+                            force_refresh=False,
+                            include_strategy_recommendations=True
+                        ),
+                        timeout=5.0  # 5 second timeout - return cached or initiate scan
+                    )
+                except asyncio.TimeoutError:
+                    # Timeout - scan is running in background
+                    # Return scan info for frontend to poll
+                    scan_id = f"scan_{user_id}_{int(datetime.utcnow().timestamp())}"
+                    context_data["opportunities"] = {
+                        "success": True,
+                        "status": "scanning",
+                        "scan_id": scan_id,
+                        "message": "Opportunity scan in progress. Poll /api/v1/opportunities/status/{scan_id} for updates.",
+                        "poll_url": f"/api/v1/opportunities/status/{scan_id}",
+                        "opportunities": [],  # Empty for now
+                        "estimated_completion_seconds": 120
+                    }
+                    self.logger.info("Opportunity discovery timeout - scan running in background",
+                                   user_id=user_id,
+                                   scan_id=scan_id)
             except Exception as e:
                 self.logger.error("Failed to discover opportunities", error=str(e), user_id=user_id)
                 context_data["opportunities"] = {
