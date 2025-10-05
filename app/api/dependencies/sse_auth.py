@@ -98,9 +98,7 @@ async def get_current_user_sse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has been revoked"
             )
-        logger.debug("Token blacklist check passed", token_hash=token
-
-_hash[:16])
+        logger.debug("Token blacklist check passed", token_hash=token_hash[:16])
     else:
         logger.warning("Redis unavailable for blacklist check, proceeding without")
     
