@@ -366,10 +366,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 self._circuit_breaker['failures'] = 0
         
         try:
-            # Fetch with hard timeout to prevent 55+ second hangs
+            # Fetch with timeout (increased to 15s to allow proper strategy loading)
+            # Note: strategy_marketplace_service has its own 60s timeout internally
             portfolio_result = await asyncio.wait_for(
                 strategy_marketplace_service.get_user_strategy_portfolio(user_id), 
-                timeout=5.0
+                timeout=15.0
             )
             
             # Cache successful result
@@ -384,8 +385,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self.logger.debug("✅ Portfolio fetched and cached", user_id=user_id)
             return portfolio_result
             
-        except (asyncio.TimeoutError, Exception) as e:
-            self.logger.error("❌ Portfolio fetch failed", user_id=user_id, error=str(e))
+        except asyncio.TimeoutError as e:
+            self.logger.error("❌ Portfolio fetch TIMEOUT after 15s", 
+                            user_id=user_id, 
+                            error=str(e),
+                            timeout_seconds=15.0)
             
             # Increment circuit breaker
             self._circuit_breaker['failures'] += 1
@@ -397,10 +401,32 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             
             # Return cached data if available, otherwise empty
             if cached:
-                self.logger.info("🔄 Returning stale cache due to fetch failure", user_id=user_id)
+                self.logger.info("🔄 Returning stale cache due to timeout", user_id=user_id)
                 return cached['data']
             
-            return {'success': True, 'active_strategies': [], 'error': 'temporary_failure'}
+            return {'success': True, 'active_strategies': [], 'error': 'portfolio_fetch_timeout'}
+            
+        except Exception as e:
+            self.logger.error("❌ Portfolio fetch EXCEPTION", 
+                            user_id=user_id, 
+                            error=str(e),
+                            error_type=type(e).__name__,
+                            exc_info=True)
+            
+            # Increment circuit breaker
+            self._circuit_breaker['failures'] += 1
+            self._circuit_breaker['last_failure'] = time.time()
+            
+            if self._circuit_breaker['failures'] >= self._circuit_breaker['threshold']:
+                self._circuit_breaker['is_open'] = True
+                self.logger.warning("🔥 Circuit breaker opened due to repeated failures")
+            
+            # Return cached data if available, otherwise empty
+            if cached:
+                self.logger.info("🔄 Returning stale cache due to exception", user_id=user_id)
+                return cached['data']
+            
+            return {'success': True, 'active_strategies': [], 'error': f'portfolio_fetch_error: {type(e).__name__}'}
     
     async def discover_opportunities_for_user(
         self,
