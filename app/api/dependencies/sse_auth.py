@@ -119,5 +119,12 @@ async def get_current_user_sse(
             detail="User account is not active"
         )
     
-    logger.debug("SSE authentication successful", user_id=str(user.id), email=user.email)
+    # Log authentication success without PII
+    # Use deterministic hash of email for correlation without exposing PII
+    email_hash = hashlib.sha256(user.email.encode('utf-8')).hexdigest()[:16]
+    logger.debug(
+        "SSE authentication successful",
+        user_id=str(user.id),
+        email_hash=email_hash  # Non-reversible identifier for debugging
+    )
     return user
