@@ -152,17 +152,29 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 )
             except asyncio.TimeoutError:
                 logger.warning("Pricing loading timed out, using fallback")
-                # Use fallback pricing immediately
+                # Use fallback pricing immediately - ONLY REAL STRATEGIES
                 fallback_pricing = {
-                    "futures_trade": 50, "options_trade": 45, "perpetual_trade": 40,
-                    "leverage_position": 35, "complex_strategy": 60, "margin_status": 15,
-                    "funding_arbitrage": 30, "basis_trade": 25, "options_chain": 20,
-                    "calculate_greeks": 15, "liquidation_price": 10, "hedge_position": 25,
-                    "spot_momentum_strategy": 30, "spot_breakout_strategy": 25,
-                    "algorithmic_trading": 35, "pairs_trading": 30, "statistical_arbitrage": 40,
-                    "scalping_strategy": 20, "swing_trading": 25, "position_management": 15,
-                    "risk_management": 20, "portfolio_optimization": 35, "strategy_performance": 10,
-                    "spot_mean_reversion": 20, "market_making": 25
+                    # Spot Trading (3)
+                    "spot_momentum_strategy": 0,      # Free
+                    "spot_mean_reversion": 20,
+                    "spot_breakout_strategy": 25,
+                    
+                    # Algorithmic Trading (5)
+                    "pairs_trading": 30,
+                    "statistical_arbitrage": 40,
+                    "market_making": 25,
+                    "scalping_strategy": 20,
+                    "complex_strategy": 60,
+                    
+                    # Derivatives (3)
+                    "futures_trade": 50,
+                    "options_trade": 45,
+                    "funding_arbitrage": 30,
+                    
+                    # Risk & Portfolio (3)
+                    "risk_management": 0,             # Free
+                    "portfolio_optimization": 0,      # Free
+                    "hedge_position": 25
                 }
                 self.strategy_pricing = fallback_pricing
     
@@ -190,7 +202,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 self.strategy_pricing = strategy_pricing
                 return strategy_pricing
             else:
-                # Set defaults and save for admin
+                # Set defaults and save for admin - ONLY REAL STRATEGIES
                 default_pricing = {
                     # FREE Basic Strategies (included with any credit purchase)
                     "risk_management": 0,           # Free - essential risk control
@@ -200,15 +212,15 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     # Premium AI Strategies - Dynamic pricing
                     "spot_mean_reversion": 20,
                     "spot_breakout_strategy": 25,
-                    "scalping_strategy": 35,
-                    "pairs_trading": 40,
-                    "statistical_arbitrage": 50,
-                    "market_making": 55,
-                    "futures_trade": 60,
-                    "options_trade": 75,
-                    "complex_strategy": 100,
-                    "funding_arbitrage": 45,
-                    "hedge_position": 65
+                    "scalping_strategy": 20,
+                    "pairs_trading": 30,
+                    "statistical_arbitrage": 40,
+                    "market_making": 25,
+                    "futures_trade": 50,
+                    "options_trade": 45,
+                    "complex_strategy": 60,
+                    "funding_arbitrage": 30,
+                    "hedge_position": 25
                 }
                 
                 # Save defaults for admin to modify
@@ -229,27 +241,40 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             return fallback_pricing
             
     def _build_ai_strategy_catalog(self) -> Dict[str, Dict[str, Any]]:
-        """Build catalog dynamically from ALL available strategy functions."""
+        """Build catalog dynamically from REAL trading strategies with opportunity scanners."""
         
-        # Get ALL available functions from trading strategies service
+        # FIXED: Only include REAL trading strategies that have opportunity scanners
+        # These match the 14 scanners in user_opportunity_discovery.py
         all_strategy_functions = [
-            # Derivatives Trading - ALL 12 FUNCTIONS
-            "futures_trade", "options_trade", "perpetual_trade",
-            "leverage_position", "complex_strategy", "margin_status",
-            "funding_arbitrage", "basis_trade", "options_chain",
-            "calculate_greeks", "liquidation_price", "hedge_position",
+            # Spot Trading Strategies (3) - All have scanners
+            "spot_momentum_strategy",
+            "spot_mean_reversion", 
+            "spot_breakout_strategy",
             
-            # Spot Algorithms - ALL 3 FUNCTIONS  
-            "spot_momentum_strategy", "spot_mean_reversion", "spot_breakout_strategy",
+            # Algorithmic Trading Strategies (5) - All have scanners
+            "pairs_trading",
+            "statistical_arbitrage",
+            "market_making",
+            "scalping_strategy",
+            "complex_strategy",
             
-            # Algorithmic Trading - ALL 6 FUNCTIONS
-            "algorithmic_trading", "pairs_trading", "statistical_arbitrage",
-            "market_making", "scalping_strategy", "swing_trading",
+            # Derivatives Trading Strategies (3) - All have scanners
+            "futures_trade",
+            "options_trade",
+            "funding_arbitrage",
             
-            # Risk & Portfolio - ALL 4 FUNCTIONS
-            "position_management", "risk_management", "portfolio_optimization",
-            "strategy_performance"
+            # Risk & Portfolio Management (3) - All have scanners
+            "risk_management",
+            "portfolio_optimization",
+            "hedge_position"
         ]
+        
+        # NOTE: Excluded utility functions that are NOT trading strategies:
+        # - margin_status, liquidation_price, calculate_greeks (calculators)
+        # - options_chain, strategy_performance (data retrieval)
+        # - position_management, leverage_position (utilities)
+        # - perpetual_trade, basis_trade (duplicates/placeholders)
+        # - algorithmic_trading, swing_trading (placeholders)
         
         # Dynamic catalog generation based on function analysis
         catalog = {}
@@ -299,33 +324,29 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     
     def _generate_strategy_name(self, strategy_func: str) -> str:
         """Generate human-readable strategy name from function name."""
-        # Convert function names to readable names
+        # Convert function names to readable names - ONLY REAL STRATEGIES
         name_mapping = {
-            "futures_trade": "AI Futures Trading",
-            "options_trade": "AI Options Strategies", 
-            "perpetual_trade": "AI Perpetual Contracts",
-            "leverage_position": "AI Leverage Manager",
-            "complex_strategy": "AI Complex Derivatives",
-            "margin_status": "AI Margin Monitor",
-            "funding_arbitrage": "AI Funding Arbitrage",
-            "basis_trade": "AI Basis Trading",
-            "options_chain": "AI Options Chain Analysis",
-            "calculate_greeks": "AI Greeks Calculator",
-            "liquidation_price": "AI Liquidation Monitor",
-            "hedge_position": "AI Portfolio Hedging",
+            # Spot Trading (3)
             "spot_momentum_strategy": "AI Momentum Trading",
             "spot_mean_reversion": "AI Mean Reversion",
             "spot_breakout_strategy": "AI Breakout Trading",
-            "algorithmic_trading": "AI Algorithmic Trading",
+            
+            # Algorithmic Trading (5)
             "pairs_trading": "AI Pairs Trading",
             "statistical_arbitrage": "AI Statistical Arbitrage",
             "market_making": "AI Market Making",
             "scalping_strategy": "AI Scalping",
-            "swing_trading": "AI Swing Trading",
-            "position_management": "AI Position Manager",
+            "complex_strategy": "AI Complex Derivatives",
+            
+            # Derivatives (3)
+            "futures_trade": "AI Futures Trading",
+            "options_trade": "AI Options Strategies",
+            "funding_arbitrage": "AI Funding Arbitrage",
+            
+            # Risk & Portfolio (3)
             "risk_management": "AI Risk Manager",
             "portfolio_optimization": "AI Portfolio Optimizer",
-            "strategy_performance": "AI Performance Tracker"
+            "hedge_position": "AI Portfolio Hedging"
         }
         
         return name_mapping.get(strategy_func, f"AI {strategy_func.replace('_', ' ').title()}")
