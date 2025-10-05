@@ -94,16 +94,19 @@ export function streamChatMessage(
     conversation_mode: conversationMode
   });
   
+  // Add JWT token for authentication (EventSource doesn't support custom headers)
+  // Only add if token exists and is not empty
+  if (token && token.trim().length > 0) {
+    params.append('token', token);
+  }
+  
   const url = `${baseURL}/unified-chat/stream?${params.toString()}`;
   
   // Create EventSource for SSE
+  // Note: EventSource doesn't support custom headers, so we pass token via query param
   const eventSource = new EventSource(url, {
     withCredentials: false
   });
-  
-  // Note: EventSource doesn't support custom headers directly
-  // The backend should accept token via query param or cookie for SSE
-  // For now, we'll rely on cookie-based auth or modify backend to accept token in query
   
   let fullContent = '';
   let aborted = false;
