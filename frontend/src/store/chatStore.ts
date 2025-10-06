@@ -237,12 +237,13 @@ export const useChatStore = create<ChatState>()(
             onmessage: (event) => {
               try {
                 const data = JSON.parse(event.data);
+                console.log('[SSE] Received event:', data.type, 'Content length:', fullContent.length);
 
                 switch (data.type) {
                   case 'processing':
                   case 'progress': {
                     // Optional: Update UI with progress message
-                    console.log('Progress:', data.content || data.progress?.message);
+                    console.log('[SSE] Progress:', data.content || data.progress?.message);
                     break;
                   }
 
@@ -251,6 +252,7 @@ export const useChatStore = create<ChatState>()(
                     // Accumulate content chunks
                     if (data.content) {
                       fullContent += data.content;
+                      console.log('[SSE] Accumulated content:', fullContent.length, 'chars');
                       
                       // Update the streaming message with accumulated content
                       set((state) => ({
@@ -269,12 +271,40 @@ export const useChatStore = create<ChatState>()(
                     break;
                   }
 
+                  case 'persona_enriched': {
+                    // Handle persona-enriched content
+                    // If replaces_previous is true, replace the entire content
+                    if (data.replaces_previous && data.content) {
+                      fullContent = data.content;
+                    } else if (data.content) {
+                      // Otherwise append the persona content
+                      fullContent += data.content;
+                    }
+                    
+                    // Update the streaming message
+                    set((state) => ({
+                      messages: state.messages.map(msg =>
+                        msg.id === streamingMessageId
+                          ? { ...msg, content: fullContent }
+                          : msg
+                      )
+                    }));
+                    
+                    // Store persona metadata
+                    if (data.personality) {
+                      streamMetadata = { ...streamMetadata, personality: data.personality };
+                    }
+                    break;
+                  }
+
                   case 'complete': {
+                    console.log('[SSE] Stream complete! Total content:', fullContent.length, 'chars');
                     streamCompleted = true;
                     clearTimeout(timeoutId);
                     abortController.abort(); // Close connection
 
                     // Finalize the message with all metadata
+                    console.log('[SSE] Finalizing message with ID:', streamingMessageId);
                     set((state) => ({
                       messages: state.messages.map(msg =>
                         msg.id === streamingMessageId
@@ -355,6 +385,12 @@ export const useChatStore = create<ChatState>()(
 
             onerror: (error) => {
               console.error('SSE connection error:', error);
+              console.error('Error details:', {
+                message: error.message,
+                type: error.constructor.name,
+                streamCompleted,
+                chunksReceived: fullContent.length
+              });
               
               if (!streamCompleted) {
                 streamCompleted = true;
