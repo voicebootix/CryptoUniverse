@@ -54,7 +54,8 @@ class UserTelegramConnection(Base):
     notifications_enabled = Column(Boolean, default=True, nullable=False)
     trading_enabled = Column(Boolean, default=False, nullable=False)  # Requires explicit opt-in
     voice_commands_enabled = Column(Boolean, default=False, nullable=False)
-    
+    signal_preferences = Column(JSON, default=dict, nullable=False)
+
     # Security settings
     two_factor_enabled = Column(Boolean, default=False, nullable=False)
     allowed_commands = Column(JSON, default=list, nullable=False)  # Specific commands allowed

@@ -131,6 +131,11 @@ class User(Base):
     orders = relationship("Order", back_populates="user", cascade="all, delete-orphan")
     trading_strategies = relationship("TradingStrategy", back_populates="user", cascade="all, delete-orphan")
     telegram_connections = relationship("UserTelegramConnection", back_populates="user", cascade="all, delete-orphan")
+    signal_subscriptions = relationship(
+        "SignalSubscription",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     ab_tests = relationship("ABTest", back_populates="creator", cascade="all, delete-orphan")
     strategy_performance_history = relationship("StrategyPerformanceHistory", back_populates="user", cascade="all, delete-orphan")
     backtest_results = relationship("BacktestResult", back_populates="user", cascade="all, delete-orphan")

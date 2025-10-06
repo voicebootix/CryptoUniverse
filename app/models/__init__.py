@@ -62,6 +62,12 @@ from app.models.market_data import (
     BacktestResult,
 )
 from app.models.strategy_access import UserStrategyAccess, StrategyAccessType, StrategyType
+from app.models.signal import (
+    SignalChannel,
+    SignalSubscription,
+    SignalEvent,
+    SignalDeliveryLog,
+)
 
 __all__ = [
     "Base",
@@ -140,4 +146,9 @@ __all__ = [
     "UserStrategyAccess",
     "StrategyAccessType",
     "StrategyType",
+    # Signal distribution models
+    "SignalChannel",
+    "SignalSubscription",
+    "SignalEvent",
+    "SignalDeliveryLog",
 ]

@@ -15,10 +15,15 @@ from app.core.logging import LoggerMixin
 from app.core.config import get_settings
 from app.core.redis_manager import get_redis_manager
 from app.core.redis import get_redis_client
+from app.core.database import AsyncSessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
+from sqlalchemy import select, and_, distinct, func
 from app.models.user import User
-from sqlalchemy import select, and_, distinct
+from app.models.signal import SignalChannel, SignalSubscription, SignalDeliveryLog
+from app.services.signal_channel_service import signal_channel_service
+from app.services.signal_delivery_service import signal_delivery_service
+from app.services.system_monitoring import system_monitoring_service
 import json
 
 settings = get_settings()
@@ -48,7 +53,8 @@ class BackgroundServiceManager(LoggerMixin):
             "market_data_sync": 180,      # 3 minutes (reduced frequency)
             "balance_sync": 600,          # 10 minutes (reduced frequency)
             "risk_monitor": 60,           # 1 minute (increased from 30s)
-            "rate_limit_cleanup": 3600    # 1 hour (reduced frequency)
+            "rate_limit_cleanup": 3600,   # 1 hour (reduced frequency)
+            "signal_dispatch": 300        # 5 minutes between signal batches
         }
         
         # Dynamic service configurations (no hardcoded restrictions)
@@ -122,6 +128,7 @@ class BackgroundServiceManager(LoggerMixin):
             ("market_data_sync", self._market_data_sync_service),
             ("balance_sync", self._balance_sync_service),
             ("risk_monitor", self._risk_monitor_service),
+            ("signal_dispatch", self._signal_dispatch_service),
         ]
         
         for service_name, service_func in deferred_services:
@@ -153,13 +160,14 @@ class BackgroundServiceManager(LoggerMixin):
         # Start individual services with error isolation
         services_to_start = [
             ("health_monitor", self._health_monitor_service),
-            ("metrics_collector", self._metrics_collector_service), 
+            ("metrics_collector", self._metrics_collector_service),
             ("cleanup_service", self._cleanup_service),
             ("autonomous_cycles", self._autonomous_cycles_service),
             ("market_data_sync", self._market_data_sync_service),
             ("balance_sync", self._balance_sync_service),
             ("risk_monitor", self._risk_monitor_service),
-            ("rate_limit_cleanup", self._rate_limit_cleanup_service)
+            ("rate_limit_cleanup", self._rate_limit_cleanup_service),
+            ("signal_dispatch", self._signal_dispatch_service),
         ]
         
         for service_name, service_func in services_to_start:
@@ -398,7 +406,7 @@ class BackgroundServiceManager(LoggerMixin):
     async def _metrics_collector_service(self):
         """Collect and store system metrics."""
         self.logger.info(" Metrics collector service started")
-        
+
         while self.running:
             try:
                 metrics = await self.get_system_metrics()
@@ -422,8 +430,149 @@ class BackgroundServiceManager(LoggerMixin):
                 
             except Exception as e:
                 self.logger.error("Metrics collector error", error=str(e))
-            
+
             await asyncio.sleep(self.intervals["metrics_collector"])
+
+    async def _signal_dispatch_service(self):
+        """Evaluate and dispatch signal intelligence on a cadence."""
+        self.logger.info(" Signal dispatch service started")
+
+        while self.running:
+            interval = self.intervals.get("signal_dispatch", 300)
+            try:
+                await self._run_signal_dispatch_cycle()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # pragma: no cover - defensive logging
+                self.logger.exception("Signal dispatch cycle failed", error=str(e))
+            await asyncio.sleep(interval)
+
+    async def _run_signal_dispatch_cycle(self):
+        if not await self._is_signal_dispatch_allowed():
+            return
+
+        lock_key = "background:signal_dispatch_lock"
+        lock_acquired = True
+        if self.redis:
+            try:
+                lock_acquired = await self.redis.set(
+                    lock_key,
+                    "1",
+                    ex=self.intervals.get("signal_dispatch", 300),
+                    nx=True,
+                )
+            except Exception as e:
+                self.logger.warning("Unable to acquire signal dispatch lock", error=str(e))
+                lock_acquired = True  # proceed without Redis coordination
+
+        if not lock_acquired:
+            self.logger.debug("Signal dispatch skipped - lock already held")
+            return
+
+        total_deliveries = 0
+        try:
+            async with AsyncSessionLocal() as db:
+                await signal_channel_service.seed_default_channels(db)
+
+                channels_result = await db.execute(
+                    select(SignalChannel).where(SignalChannel.is_active.is_(True))
+                )
+                channels = channels_result.scalars().all()
+
+                for channel in channels:
+                    subscriptions_result = await db.execute(
+                        select(SignalSubscription).where(
+                            SignalSubscription.channel_id == channel.id,
+                            SignalSubscription.is_active.is_(True),
+                        )
+                    )
+                    subscriptions = subscriptions_result.scalars().all()
+
+                    due_subscriptions = []
+                    user_ids = set()
+                    for subscription in subscriptions:
+                        if not self._subscription_due(channel, subscription):
+                            continue
+                        if not await self._under_daily_limit(db, subscription, channel):
+                            continue
+                        due_subscriptions.append(subscription)
+                        user_ids.add(subscription.user_id)
+
+                    if not due_subscriptions:
+                        continue
+
+                    users_result = await db.execute(
+                        select(User).where(User.id.in_(list(user_ids)))
+                    )
+                    user_map = {str(user.id): user for user in users_result.scalars().all()}
+
+                    deliveries = await signal_delivery_service.dispatch_channel(
+                        db,
+                        channel=channel,
+                        subscriptions=due_subscriptions,
+                        user_map=user_map,
+                    )
+                    total_deliveries += len(deliveries)
+
+                await db.commit()
+
+        finally:
+            if self.redis:
+                try:
+                    await self.redis.delete(lock_key)
+                except Exception:
+                    pass
+
+        if total_deliveries:
+            system_monitoring_service.metrics_collector.record_metric(
+                "signal_dispatch_deliveries",
+                float(total_deliveries),
+                {"timestamp": datetime.utcnow().isoformat()},
+            )
+            self.logger.info("Signal dispatch cycle complete", deliveries=total_deliveries)
+
+    async def _is_signal_dispatch_allowed(self) -> bool:
+        if not self.redis:
+            return True
+        try:
+            global_stop = await self.redis.get("global_emergency_stop")
+            market_halt = await self.redis.get("market_halt_active")
+        except Exception as e:
+            self.logger.warning("Signal dispatch emergency check failed", error=str(e))
+            return True
+
+        if global_stop:
+            self.logger.warning("Signal dispatch paused due to global emergency stop")
+            return False
+        if market_halt:
+            self.logger.warning("Signal dispatch paused due to market halt flag")
+            return False
+        return True
+
+    def _subscription_due(self, channel: SignalChannel, subscription: SignalSubscription) -> bool:
+        cadence = subscription.cadence_override_minutes or channel.cadence_minutes or 15
+        last_event = subscription.last_event_at
+        if not last_event:
+            return True
+        return datetime.utcnow() >= last_event + timedelta(minutes=cadence)
+
+    async def _under_daily_limit(
+        self,
+        db: AsyncSession,
+        subscription: SignalSubscription,
+        channel: SignalChannel,
+    ) -> bool:
+        limit = min(subscription.max_daily_events or 0, channel.max_daily_events or 0)
+        if limit <= 0:
+            return True
+        day_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        count_stmt = select(func.count(SignalDeliveryLog.id)).where(
+            SignalDeliveryLog.subscription_id == subscription.id,
+            SignalDeliveryLog.delivered_at >= day_start,
+        )
+        result = await db.execute(count_stmt)
+        count = result.scalar_one() or 0
+        return count < limit
     
     async def _cleanup_service(self):
         """Clean up old data and optimize storage."""
