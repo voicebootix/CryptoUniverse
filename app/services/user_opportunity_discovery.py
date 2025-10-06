@@ -109,6 +109,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         }
         self.opportunity_cache = {}
         self._scan_tasks: Dict[str, asyncio.Task] = {}
+        self._scan_tasks_lock = asyncio.Lock()
         self._scan_cache_lock = asyncio.Lock()
         self._scan_cache_ttl = 300  # 5 minutes to align with fast-refresh chat expectations
         self._partial_cache_ttl = 300  # 5 minutes - increased from 2 for better partial result reuse
@@ -434,36 +435,43 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         force_refresh: bool = False,
         include_strategy_recommendations: bool = True,
     ) -> Dict[str, Any]:
-        if force_refresh:
-            existing = self._scan_tasks.pop(user_id, None)
-            if existing and not existing.done():
-                existing.cancel()
-
         cached_entry = await self._get_cached_scan_entry(user_id)
         if cached_entry and not force_refresh and not cached_entry.partial:
             return copy.deepcopy(cached_entry.payload)
 
-        task = self._scan_tasks.get(user_id)
-        if task and task.done():
-            self._scan_tasks.pop(user_id, None)
-            task = None
+        if force_refresh:
+            async with self._scan_tasks_lock:
+                existing = self._scan_tasks.pop(user_id, None)
+            if existing and not existing.done():
+                existing.cancel()
 
-        scan_id: Optional[str] = getattr(task, "scan_id", None)
+        scan_id_local: Optional[str] = None
+        task: Optional[asyncio.Task] = None
 
-        if not task:
-            scan_id = f"user_discovery_{user_id}_{int(time.time())}"
-            task = asyncio.create_task(
-                self._execute_opportunity_discovery(
-                    user_id=user_id,
-                    force_refresh=force_refresh,
-                    include_strategy_recommendations=include_strategy_recommendations,
-                    existing_scan_id=scan_id,
-                ),
-                name=f"opportunity-discovery:{scan_id}",
-            )
-            setattr(task, "scan_id", scan_id)
-            self._scan_tasks[user_id] = task
-            self._schedule_scan_cleanup(user_id, task)
+        async with self._scan_tasks_lock:
+            task = self._scan_tasks.get(user_id)
+            if task and task.done():
+                self._scan_tasks.pop(user_id, None)
+                task = None
+
+            scan_id_local = getattr(task, "scan_id", None)
+
+            if not task:
+                scan_id_local = f"user_discovery_{user_id}_{int(time.time())}"
+                task = asyncio.create_task(
+                    self._execute_opportunity_discovery(
+                        user_id=user_id,
+                        force_refresh=force_refresh,
+                        include_strategy_recommendations=include_strategy_recommendations,
+                        existing_scan_id=scan_id_local,
+                    ),
+                    name=f"opportunity-discovery:{scan_id_local}",
+                )
+                task.scan_id = scan_id_local
+                self._scan_tasks[user_id] = task
+                self._schedule_scan_cleanup(user_id, task)
+
+        scan_id = scan_id_local or getattr(task, "scan_id", None)
 
         if cached_entry and not force_refresh:
             payload = copy.deepcopy(cached_entry.payload)

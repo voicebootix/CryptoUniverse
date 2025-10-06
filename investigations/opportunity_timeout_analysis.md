@@ -2,7 +2,7 @@
 
 ## Summary
 - **Environment:** Production deployment at `cryptouniverse.onrender.com` and frontend `cryptouniverse-frontend.onrender.com` (Render).
-- **User Account:** `admin@cryptouniverse.com` / `AdminPass123!`.
+- **User Account:** `REDACTED_CREDENTIALS`.
 - **Focus:** Chat messages that ask the AI money manager to "find opportunities" hang until the client times out. Streaming responses on the frontend fail for the same request type.
 - **Latest trace correlation:** A follow-up Render-hosted trace (205 s successful responses, 490 s client timeout on another phrasing, HTTP 405s on `/chat/quick/opportunities`) reproduces the same slow synchronous opportunity discovery path rather than exposing a new defect. The "streaming" success recorded after ~180 s still reflects the delayed generator handoff described below, so the new trace aligns with the original diagnosis.
 
@@ -21,7 +21,7 @@
 - The service starts new scans with `asyncio.create_task(...)` and then waits up to `_scan_response_budget` seconds for them to finish. Without cached results this means the chat request blocks until the scan completes. If the scan overruns, the chat call will also run past common HTTP timeouts (Render's ingress and the browser both default below 150 s).【F:app/services/user_opportunity_discovery.py†L431-L493】
 
 ## Frontend Findings
-- The React chat UI opens an SSE connection to `/api/v1/unified-chat/stream` and expects to receive `processing` / `progress` events quickly. It passes the JWT token in the query string per `get_current_user_sse` requirements.【F:frontend/src/components/chat/ChatInterface.tsx†L295-L358】【F:app/api/dependencies/sse_auth.py†L20-L71】
+- The React chat UI opens an SSE connection to `/api/v1/unified-chat/stream` and expects to receive `processing` / `progress` events quickly. It supplies the JWT token via the `Authorization: Bearer` header to satisfy `get_current_user_sse` requirements.【F:frontend/src/components/chat/ChatInterface.tsx†L295-L358】【F:app/api/dependencies/sse_auth.py†L20-L71】
 - If the SSE stream fails it falls back to the REST endpoint `/unified-chat/message`, but the fallback uses the same synchronous backend path and therefore inherits the long-running call and timeout.【F:frontend/src/components/chat/ChatInterface.tsx†L404-L451】
 - Because the backend does not return the SSE generator until after `_gather_context_data` completes, the browser never receives the initial event; the EventSource eventually emits `error`, triggering the fallback (which still times out).
 
