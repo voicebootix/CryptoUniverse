@@ -159,13 +159,12 @@ export const useChatStore = create<ChatState>()(
             throw new Error('No authentication token found');
           }
 
-          // Build SSE URL with query parameters
+          // Build SSE URL without token (use headers instead)
           const baseURL = apiClient.defaults.baseURL || '';
           const params = new URLSearchParams({
             message: content,
             session_id: currentSessionId || '',
-            conversation_mode: currentMode || 'live_trading',
-            token: token  // SSE doesn't support headers, so pass token as query param
+            conversation_mode: currentMode || 'live_trading'
           });
 
           const url = `${baseURL}/unified-chat/stream?${params.toString()}`;
@@ -187,156 +186,18 @@ export const useChatStore = create<ChatState>()(
             )
           }));
 
-          // Create EventSource for SSE
-          const eventSource = new EventSource(url);
+          // Use fetch-event-source for header-based authentication
+          const { fetchEventSource } = await import('@microsoft/fetch-event-source');
+          
           let fullContent = '';
           let streamMetadata: any = {};
           let streamCompleted = false;
-
-          // Handle incoming SSE messages
-          eventSource.onmessage = (event) => {
-            try {
-              const data = JSON.parse(event.data);
-
-              switch (data.type) {
-                case 'processing':
-                case 'progress':
-                  // Optional: Update UI with progress message
-                  // For now, we just log it
-                  console.log('Progress:', data.content || data.progress?.message);
-                  break;
-
-                case 'response':
-                case 'chunk':
-                  // Accumulate content chunks
-                  if (data.content) {
-                    fullContent += data.content;
-                    
-                    // Update the streaming message with accumulated content
-                    set((state) => ({
-                      messages: state.messages.map(msg =>
-                        msg.id === streamingMessageId
-                          ? { ...msg, content: fullContent }
-                          : msg
-                      )
-                    }));
-                  }
-
-                  // Store metadata if provided
-                  if (data.metadata) {
-                    streamMetadata = { ...streamMetadata, ...data.metadata };
-                  }
-                  break;
-
-                case 'complete':
-                  streamCompleted = true;
-                  eventSource.close();
-
-                  // Finalize the message with all metadata
-                  set((state) => ({
-                    messages: state.messages.map(msg =>
-                      msg.id === streamingMessageId
-                        ? {
-                            ...msg,
-                            content: fullContent,
-                            confidence: data.confidence || streamMetadata.confidence,
-                            metadata: {
-                              ...streamMetadata,
-                              streaming: false,
-                              intent: data.intent || streamMetadata.intent,
-                              requires_approval: data.requires_approval,
-                              decision_id: data.decision_id,
-                              ai_analysis: data.ai_analysis
-                            }
-                          }
-                        : msg
-                    ),
-                    isLoading: false,
-                    pendingAction: null
-                  }));
-
-                  // Handle approval requests
-                  if (data.requires_approval && data.decision_id) {
-                    const finalMessage = get().messages.find(m => m.id === streamingMessageId);
-                    if (finalMessage) {
-                      set((state) => ({
-                        ...state,
-                        pendingDecision: {
-                          id: data.decision_id,
-                          message: finalMessage,
-                          timestamp: new Date().toISOString()
-                        }
-                      }));
-                    }
-                  }
-
-                  // Handle action requirements
-                  if (data.requires_action && data.action_data) {
-                    set({
-                      pendingAction: {
-                        type: data.action_data.type,
-                        data: data.action_data,
-                        messageId: streamingMessageId
-                      }
-                    });
-                  }
-                  break;
-
-                case 'error':
-                  streamCompleted = true;
-                  eventSource.close();
-
-                  // Remove streaming message and show error
-                  set((state) => ({
-                    messages: state.messages.filter(msg => msg.id !== streamingMessageId),
-                    isLoading: false
-                  }));
-
-                  const errorMessage: ChatMessage = {
-                    id: `error-${Date.now()}`,
-                    content: data.error || "I'm having trouble processing your request. Please try again.",
-                    type: 'assistant',
-                    timestamp: new Date(userTimestamp.getTime() + 200).toISOString(),
-                    mode: currentMode
-                  };
-
-                  get().addMessage(errorMessage);
-                  break;
-              }
-            } catch (error) {
-              console.error('Failed to parse SSE data:', error);
-            }
-          };
-
-          // Handle connection errors
-          eventSource.onerror = (error) => {
-            console.error('SSE connection error:', error);
-            
-            if (!streamCompleted) {
-              eventSource.close();
-
-              // Remove streaming message
-              set((state) => ({
-                messages: state.messages.filter(msg => msg.id !== streamingMessageId),
-                isLoading: false
-              }));
-
-              const errorMessage: ChatMessage = {
-                id: `error-${Date.now()}`,
-                content: "I'm having trouble connecting right now. Please try again in a moment.",
-                type: 'assistant',
-                timestamp: new Date(userTimestamp.getTime() + 200).toISOString(),
-                mode: currentMode
-              };
-
-              get().addMessage(errorMessage);
-            }
-          };
+          let abortController = new AbortController();
 
           // Set timeout for SSE connection (3 minutes)
-          setTimeout(() => {
+          const timeoutId = setTimeout(() => {
             if (!streamCompleted) {
-              eventSource.close();
+              abortController.abort();
 
               // Remove streaming message
               set((state) => ({
@@ -355,6 +216,174 @@ export const useChatStore = create<ChatState>()(
               get().addMessage(timeoutMessage);
             }
           }, 180000); // 3 minutes
+
+          await fetchEventSource(url, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Accept': 'text/event-stream',
+            },
+            signal: abortController.signal,
+            
+            onopen: async (response) => {
+              if (response.ok) {
+                console.log('SSE connection opened');
+              } else if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+                // Client error - don't retry
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              }
+            },
+
+            onmessage: (event) => {
+              try {
+                const data = JSON.parse(event.data);
+
+                switch (data.type) {
+                  case 'processing':
+                  case 'progress': {
+                    // Optional: Update UI with progress message
+                    console.log('Progress:', data.content || data.progress?.message);
+                    break;
+                  }
+
+                  case 'response':
+                  case 'chunk': {
+                    // Accumulate content chunks
+                    if (data.content) {
+                      fullContent += data.content;
+                      
+                      // Update the streaming message with accumulated content
+                      set((state) => ({
+                        messages: state.messages.map(msg =>
+                          msg.id === streamingMessageId
+                            ? { ...msg, content: fullContent }
+                            : msg
+                        )
+                      }));
+                    }
+
+                    // Store metadata if provided
+                    if (data.metadata) {
+                      streamMetadata = { ...streamMetadata, ...data.metadata };
+                    }
+                    break;
+                  }
+
+                  case 'complete': {
+                    streamCompleted = true;
+                    clearTimeout(timeoutId);
+                    abortController.abort(); // Close connection
+
+                    // Finalize the message with all metadata
+                    set((state) => ({
+                      messages: state.messages.map(msg =>
+                        msg.id === streamingMessageId
+                          ? {
+                              ...msg,
+                              content: fullContent,
+                              confidence: data.confidence || streamMetadata.confidence,
+                              metadata: {
+                                ...streamMetadata,
+                                streaming: false,
+                                intent: data.intent || streamMetadata.intent,
+                                requires_approval: data.requires_approval,
+                                decision_id: data.decision_id,
+                                ai_analysis: data.ai_analysis
+                              }
+                            }
+                          : msg
+                      ),
+                      isLoading: false,
+                      pendingAction: null
+                    }));
+
+                    // Handle approval requests
+                    if (data.requires_approval && data.decision_id) {
+                      const finalMessage = get().messages.find(m => m.id === streamingMessageId);
+                      if (finalMessage) {
+                        set((state) => ({
+                          ...state,
+                          pendingDecision: {
+                            id: data.decision_id,
+                            message: finalMessage,
+                            timestamp: new Date().toISOString()
+                          }
+                        }));
+                      }
+                    }
+
+                    // Handle action requirements
+                    if (data.requires_action && data.action_data) {
+                      set({
+                        pendingAction: {
+                          type: data.action_data.type,
+                          data: data.action_data,
+                          messageId: streamingMessageId
+                        }
+                      });
+                    }
+                    break;
+                  }
+
+                  case 'error': {
+                    streamCompleted = true;
+                    clearTimeout(timeoutId);
+                    abortController.abort();
+
+                    // Remove streaming message and show error
+                    set((state) => ({
+                      messages: state.messages.filter(msg => msg.id !== streamingMessageId),
+                      isLoading: false
+                    }));
+
+                    const errorMessage: ChatMessage = {
+                      id: `error-${Date.now()}`,
+                      content: data.error || "I'm having trouble processing your request. Please try again.",
+                      type: 'assistant',
+                      timestamp: new Date(userTimestamp.getTime() + 200).toISOString(),
+                      mode: currentMode
+                    };
+
+                    get().addMessage(errorMessage);
+                    break;
+                  }
+                }
+              } catch (error) {
+                console.error('Failed to parse SSE data:', error);
+              }
+            },
+
+            onerror: (error) => {
+              console.error('SSE connection error:', error);
+              
+              if (!streamCompleted) {
+                streamCompleted = true;
+                clearTimeout(timeoutId);
+                abortController.abort();
+
+                // Remove streaming message
+                set((state) => ({
+                  messages: state.messages.filter(msg => msg.id !== streamingMessageId),
+                  isLoading: false
+                }));
+
+                const errorMessage: ChatMessage = {
+                  id: `error-${Date.now()}`,
+                  content: "I'm having trouble connecting right now. Please try again in a moment.",
+                  type: 'assistant',
+                  timestamp: new Date(userTimestamp.getTime() + 200).toISOString(),
+                  mode: currentMode
+                };
+
+                get().addMessage(errorMessage);
+              }
+              
+              // Don't retry on error
+              throw error;
+            },
+
+            openWhenHidden: true,
+          });
 
         } catch (error) {
           console.error('Failed to send message:', error);
