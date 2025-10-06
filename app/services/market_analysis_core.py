@@ -200,7 +200,7 @@ class DynamicExchangeManager(LoggerMixin):
         self.circuit_breakers = {}
         self._sessions: Dict[str, aiohttp.ClientSession] = {}
         self._session_locks: Dict[int, asyncio.Lock] = {}
-        self._request_timeout = aiohttp.ClientTimeout(total=5)
+        self._request_timeout = aiohttp.ClientTimeout(total=20)  # Increased from 5s to 20s for crypto exchange APIs
 
         # Initialize rate limiters for each exchange
         for exchange in self.exchange_configs:
@@ -246,9 +246,12 @@ class DynamicExchangeManager(LoggerMixin):
         endpoint: str,
         params: Optional[Dict] = None
     ) -> Dict[str, Any]:
-        """Fetch data from specific exchange with rate limiting."""
+        """Fetch data from specific exchange with rate limiting enforcement."""
         config = self.exchange_configs[exchange]
         url = config["base_url"] + endpoint
+
+        # RATE LIMIT ENFORCEMENT: Check and wait if needed
+        await self._enforce_rate_limit(exchange)
 
         session = await self._get_session(exchange)
         try:
@@ -260,6 +263,48 @@ class DynamicExchangeManager(LoggerMixin):
             raise
         except Exception:
             raise
+    
+    async def _enforce_rate_limit(self, exchange: str) -> None:
+        """
+        Enforce rate limits for exchange API calls.
+        Thread-safe implementation that checks current request count against limits
+        and sleeps if the window is exceeded.
+        """
+        if exchange not in self.rate_limiters:
+            return
+        
+        lock = await self._get_lock()
+        async with lock:
+            limiter = self.rate_limiters[exchange]
+            current_time = time.time()
+            window_duration = 60.0  # 1 minute window
+            
+            # Check if we need to reset the window
+            if current_time - limiter["window_start"] >= window_duration:
+                limiter["window_start"] = current_time
+                limiter["requests"] = 0
+            
+            # Check if we've exceeded the rate limit
+            if limiter["requests"] >= limiter["max_requests"]:
+                # Calculate how long to wait until window resets
+                time_since_window_start = current_time - limiter["window_start"]
+                wait_time = window_duration - time_since_window_start
+                
+                if wait_time > 0:
+                    self.logger.warning(
+                        "Rate limit reached, waiting for window reset",
+                        exchange=exchange,
+                        requests=limiter["requests"],
+                        max_requests=limiter["max_requests"],
+                        wait_time=wait_time
+                    )
+                    await asyncio.sleep(wait_time)
+                    # Reset window after waiting
+                    limiter["window_start"] = time.time()
+                    limiter["requests"] = 0
+            
+            # Increment request count
+            limiter["requests"] += 1
     
     async def get_exchange_health(self) -> Dict[str, Any]:
         """Get health status of all exchanges."""
@@ -314,7 +359,7 @@ class MarketAnalysisService(LoggerMixin):
             "market_overview": 60,
         }
         self._max_symbol_concurrency = 20  # Increased from 6 for better parallel processing
-        self._per_exchange_timeout = 10  # Increased from 5 to handle slower exchanges
+        self._per_exchange_timeout = 20  # Increased from 10s to 20s for crypto exchange APIs during high volatility
         self._symbol_semaphores: Dict[int, asyncio.Semaphore] = {}
         self._price_cache: Dict[str, _PriceCacheEntry] = {}
         self._price_lock_map: Dict[str, asyncio.Lock] = {}

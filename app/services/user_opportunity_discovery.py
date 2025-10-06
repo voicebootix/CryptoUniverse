@@ -2882,9 +2882,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 reverse=True,
             )
 
-            # No hard limit - preload all available assets (sorted by volume)
-            # Limit only by practical considerations (top 1000 by volume for performance)
-            max_assets = min(1000, len(symbol_candidates)) if len(symbol_candidates) > 1000 else len(symbol_candidates)
+            # PERFORMANCE OPTIMIZATION: Limit to top 200 assets and process in batches
+            # This reduces API call volume from 1000+ to 200, dramatically improving response time
+            max_assets = min(200, len(symbol_candidates))  # Reduced from 1000 to 200
             selected_assets = symbol_candidates[: max_assets]
 
             preload_pairs: List[Tuple[str, str]] = []
@@ -2896,15 +2896,36 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 preload_pairs.append((exchange_name, base_symbol))
 
             if preload_pairs:
-                await market_analysis_service.preload_exchange_prices(
-                    preload_pairs,
-                    ttl=300,  # 5 minutes - increased from 45s for better cache reuse
-                    concurrency=50,  # Increased from 20 for faster parallel loading
-                )
+                # BATCH PROCESSING: Process assets in batches of 50 to avoid overwhelming exchanges
+                batch_size = 50
+                for i in range(0, len(preload_pairs), batch_size):
+                    batch = preload_pairs[i:i + batch_size]
+                    try:
+                        await market_analysis_service.preload_exchange_prices(
+                            batch,
+                            ttl=60,  # 60 seconds for near-real-time trading data
+                            concurrency=50,  # Increased from 20 for faster parallel loading
+                        )
+                        self.logger.info(
+                            "Preloaded price cache batch",
+                            scan_id=scan_id,
+                            batch_num=i // batch_size + 1,
+                            batch_size=len(batch),
+                            total_batches=(len(preload_pairs) + batch_size - 1) // batch_size,
+                        )
+                    except Exception as batch_exc:
+                        self.logger.warning(
+                            "Price batch preload failed, continuing with next batch",
+                            scan_id=scan_id,
+                            batch_num=i // batch_size + 1,
+                            error=str(batch_exc),
+                        )
+                        continue
+                
                 self.logger.info(
-                    "Preloaded price cache for opportunity scan",
+                    "Completed price cache preload for opportunity scan",
                     scan_id=scan_id,
-                    assets=len(preload_pairs),
+                    total_assets=len(preload_pairs),
                     tier=user_profile.max_asset_tier,
                 )
         except Exception as exc:  # pragma: no cover - defensive logging
