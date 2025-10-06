@@ -2903,7 +2903,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     try:
                         await market_analysis_service.preload_exchange_prices(
                             batch,
-                            ttl=300,  # 5 minutes - increased from 45s for better cache reuse
+                            ttl=60,  # 60 seconds for near-real-time trading data
                             concurrency=50,  # Increased from 20 for faster parallel loading
                         )
                         self.logger.info(
