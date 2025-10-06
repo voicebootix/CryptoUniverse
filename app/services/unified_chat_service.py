@@ -12,8 +12,10 @@ NO MOCKS, NO PLACEHOLDERS - Only real data and services.
 
 import asyncio
 import json
+import copy
 import re
 import uuid
+import time
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Any, AsyncGenerator, Union, Tuple, Iterable
@@ -197,6 +199,9 @@ class UnifiedChatService(LoggerMixin):
         # Redis for state management
         self.redis = None
         self._redis_initialized = False
+        self._opportunity_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+        self._opportunity_cache_ttl = 300  # 5 minutes
+        self._opportunity_progress: Dict[str, Dict[str, Any]] = {}
 
         # Personality system from conversational AI
         self.personalities = self._initialize_personalities()
@@ -1232,6 +1237,286 @@ class UnifiedChatService(LoggerMixin):
                 self.redis = None
             self._redis_initialized = True
         return self.redis
+
+    def _opportunity_cache_key(self, user_id: str) -> str:
+        return f"chat:opportunity_cache:{user_id}"
+
+    async def _get_cached_opportunities(
+        self,
+        user_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Fetch cached opportunity payload for chat responses."""
+
+        cache_entry = self._opportunity_cache.get(user_id)
+        now = time.monotonic()
+        if cache_entry:
+            expires_at, cached_payload = cache_entry
+            if expires_at > now:
+                payload = copy.deepcopy(cached_payload.get("payload"))
+                if isinstance(payload, dict):
+                    self._record_opportunity_progress(user_id, payload)
+                return payload
+            self._opportunity_cache.pop(user_id, None)
+
+        redis = await self._ensure_redis()
+        if not redis:
+            return None
+
+        try:
+            cached_raw = await redis.get(self._opportunity_cache_key(user_id))
+        except Exception as redis_error:
+            self.logger.debug(
+                "Failed to retrieve opportunity cache from redis",
+                error=str(redis_error),
+                user_id=user_id,
+            )
+            return None
+
+        if not cached_raw:
+            return None
+
+        try:
+            cached_data = json.loads(cached_raw)
+        except (TypeError, json.JSONDecodeError):
+            self.logger.debug("Invalid JSON in redis opportunity cache", user_id=user_id)
+            return None
+
+        payload = cached_data.get("payload") if isinstance(cached_data, dict) else None
+        if not isinstance(payload, dict):
+            return None
+
+        ttl_seconds = cached_data.get("ttl", self._opportunity_cache_ttl)
+        self._opportunity_cache[user_id] = (
+            now + max(5, int(ttl_seconds)),
+            {"payload": copy.deepcopy(payload)},
+        )
+        if isinstance(payload, dict):
+            self._record_opportunity_progress(user_id, payload)
+        return payload
+
+    async def _cache_opportunities(
+        self,
+        user_id: str,
+        payload: Dict[str, Any],
+        *,
+        partial: bool,
+    ) -> None:
+        ttl_seconds = 120 if partial else self._opportunity_cache_ttl
+        cache_record = {
+            "payload": copy.deepcopy(payload),
+            "cached_at": datetime.utcnow().isoformat(),
+            "partial": partial,
+            "ttl": ttl_seconds,
+        }
+
+        self._opportunity_cache[user_id] = (
+            time.monotonic() + ttl_seconds,
+            {"payload": copy.deepcopy(payload)},
+        )
+        if isinstance(payload, dict):
+            self._record_opportunity_progress(user_id, payload)
+
+        redis = await self._ensure_redis()
+        if not redis:
+            return
+
+        try:
+            await redis.set(
+                self._opportunity_cache_key(user_id),
+                json.dumps(cache_record, default=self._json_default),
+                ex=ttl_seconds,
+            )
+        except Exception as redis_error:
+            self.logger.debug(
+                "Failed to persist opportunity cache to redis",
+                error=str(redis_error),
+                user_id=user_id,
+            )
+
+    def _get_placeholder_opportunities(
+        self,
+        user_id: str,
+        *,
+        scan_id: Optional[str] = None,
+        message: str = "Scanning your active strategies for new opportunities...",
+    ) -> Dict[str, Any]:
+        placeholder = {
+            "success": True,
+            "user_id": user_id,
+            "scan_id": scan_id or f"placeholder_{uuid.uuid4()}",
+            "opportunities": [],
+            "total_opportunities": 0,
+            "scan_state": "pending",
+            "message": message,
+            "metadata": {
+                "scan_state": "pending",
+                "message": message,
+                "strategies_completed": 0,
+                "total_strategies": 0,
+                "generated_at": datetime.utcnow().isoformat(),
+            },
+            "background_scan": True,
+        }
+        return placeholder
+
+    def _schedule_portfolio_optimization_refresh(
+        self,
+        user_id: str,
+        user_config: Dict[str, Any],
+    ) -> None:
+        async def _run() -> None:
+            try:
+                summary = await self._run_portfolio_optimization(user_id, user_config)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self.logger.debug(
+                    "Background portfolio optimization failed",
+                    error=str(exc),
+                    user_id=user_id,
+                )
+                return
+
+            if not summary:
+                return
+
+            cached = await self._get_cached_opportunities(user_id)
+            payload = cached or self._get_placeholder_opportunities(user_id)
+            payload = copy.deepcopy(payload)
+            payload["portfolio_optimization"] = summary
+            payload["allowed_symbols"] = summary.get("allowed_symbols", [])
+            await self._cache_opportunities(
+                user_id,
+                payload,
+                partial=payload.get("scan_state") in {"pending", "partial"},
+            )
+
+        asyncio.create_task(
+            _run(),
+            name=f"opportunity-optimization-refresh:{user_id}",
+        )
+
+    def _record_opportunity_progress(
+        self,
+        user_id: str,
+        payload: Dict[str, Any],
+    ) -> None:
+        metadata = copy.deepcopy(payload.get("metadata") or {})
+        stage = metadata.get("scan_state") or payload.get("scan_state") or "unknown"
+        opportunities = payload.get("opportunities") or []
+        total = metadata.get("total_strategies") or metadata.get("totalStrategies")
+        completed = metadata.get("strategies_completed") or metadata.get("completed_strategies")
+
+        try:
+            total_int = int(total) if total is not None else None
+        except (TypeError, ValueError):
+            total_int = None
+
+        try:
+            completed_int = int(completed) if completed is not None else None
+        except (TypeError, ValueError):
+            completed_int = None
+
+        percent = 5
+        if stage in {"complete", "cached"}:
+            percent = 100 if opportunities else 90
+        elif stage == "partial" and total_int and total_int > 0 and completed_int is not None:
+            percent = min(95, max(15, int((completed_int / total_int) * 70) + 15))
+        elif stage == "pending":
+            percent = 10
+
+        progress_snapshot = {
+            "scan_state": stage,
+            "message": metadata.get(
+                "message",
+                "Scanning your active strategies for new opportunities...",
+            ),
+            "strategies_completed": completed_int,
+            "total_strategies": total_int,
+            "percent": percent,
+            "metadata": metadata,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+
+        self._opportunity_progress[user_id] = progress_snapshot
+
+    def _build_opportunity_progress_event(
+        self,
+        user_id: str,
+        payload: Optional[Dict[str, Any]],
+        last_signature: Optional[Tuple[Any, ...]],
+    ) -> Optional[Tuple[Dict[str, Any], Tuple[Any, ...]]]:
+        if payload is not None:
+            self._record_opportunity_progress(user_id, payload)
+
+        snapshot = self._opportunity_progress.get(user_id)
+        if not snapshot:
+            return None
+
+        signature = (
+            snapshot.get("scan_state"),
+            snapshot.get("strategies_completed"),
+            snapshot.get("total_strategies"),
+            snapshot.get("percent"),
+        )
+
+        if signature == last_signature:
+            return None
+
+        event = {
+            "type": "progress",
+            "progress": {
+                "stage": snapshot.get("scan_state", "pending"),
+                "message": snapshot.get(
+                    "message",
+                    "Scanning your active strategies for new opportunities...",
+                ),
+                "percent": snapshot.get("percent", 10),
+                "strategies_completed": snapshot.get("strategies_completed"),
+                "total_strategies": snapshot.get("total_strategies"),
+            },
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        return event, signature
+
+    async def _stream_opportunity_discovery_immediate(
+        self,
+        user_id: str,
+        context_task: asyncio.Task,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        poll_timeout = 0.7
+        last_signature: Optional[Tuple[Any, ...]] = None
+
+        while True:
+            done, _ = await asyncio.wait({context_task}, timeout=poll_timeout)
+
+            latest_payload: Optional[Dict[str, Any]] = None
+            try:
+                latest_payload = await self._get_cached_opportunities(user_id)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                self.logger.debug(
+                    "Failed to refresh cached opportunity payload during streaming",
+                    error=str(exc),
+                    user_id=user_id,
+                )
+
+            progress_update = self._build_opportunity_progress_event(
+                user_id,
+                latest_payload,
+                last_signature,
+            )
+
+            if progress_update:
+                event, last_signature = progress_update
+                yield event
+
+            if context_task in done:
+                try:
+                    context_data = context_task.result()
+                except BaseException as exc:  # propagate error sentinel
+                    yield {"__context_error__": exc}
+                else:
+                    yield {"__context__": context_data or {}}
+                break
     
     def _initialize_personalities(self) -> Dict[TradingMode, Dict[str, Any]]:
         """Initialize AI personalities - PRESERVED from conversational AI."""
@@ -2222,135 +2507,77 @@ class UnifiedChatService(LoggerMixin):
             context_data["technical_analysis"] = {"signals": [], "error": "Technical analysis integration pending"}
             
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-            # BULLETPROOF OPPORTUNITY DISCOVERY
-            # Strategy: Always return cached results immediately for fast response
-            # Background scans update cache automatically every 5 minutes
-            
-            self.logger.info("Opportunity discovery requested",
-                           user_id=user_id,
-                           intent=intent)
-            
-            try:
-                # Call discovery service WITHOUT timeout wrapper
-                # Service handles caching internally and returns immediately if cache exists
-                discovery_result = await self.opportunity_discovery.discover_opportunities_for_user(
-                    user_id=user_id,
-                    force_refresh=False,  # Use cache - fast response
-                    include_strategy_recommendations=True
-                )
-                
-                # Validate result structure
-                if not isinstance(discovery_result, dict):
-                    raise ValueError(f"Invalid discovery result type: {type(discovery_result)}")
-                
-                # Check if we got actual opportunities
-                opportunities_list = discovery_result.get("opportunities", [])
-                success = discovery_result.get("success", False)
-                
-                if success and len(opportunities_list) > 0:
-                    # SUCCESS: We have opportunities
-                    context_data["opportunities"] = discovery_result
-                    self.logger.info("Opportunity discovery successful",
-                                   user_id=user_id,
-                                   opportunities_count=len(opportunities_list),
-                                   scan_state=discovery_result.get("scan_state", "unknown"))
-                    
-                elif success and len(opportunities_list) == 0:
-                    # Cache is empty or scan returned 0 opportunities
-                    scan_state = discovery_result.get("scan_state", "unknown")
-
-                    if scan_state == "pending":
-                        metadata = discovery_result.get("metadata", {}) or {}
-                        metadata.setdefault("scan_state", "pending")
-                        metadata.setdefault("message", "Scanning your active strategies for new opportunities...")
-                        metadata.setdefault("generated_at", datetime.utcnow().isoformat())
-                        context_data["opportunities"] = {
-                            "success": True,
-                            "status": "pending",
-                            "message": discovery_result.get(
-                                "message",
-                                "Opportunity scan started. We'll notify you as soon as results are ready.",
-                            ),
-                            "opportunities": [],
-                            "scan_state": "pending",
-                            "metadata": metadata,
-                            "background_scan": discovery_result.get("background_scan", True),
-                        }
-                        self.logger.info(
-                            "Opportunity scan queued",
-                            user_id=user_id,
-                            scan_state=scan_state,
-                        )
-                    elif scan_state == "partial":
-                        # Scan is in progress, return partial results
-                        context_data["opportunities"] = {
-                            "success": True,
-                            "status": "scanning",
-                            "message": "Opportunity scan in progress. Results will appear as strategies complete.",
-                            "opportunities": [],
-                            "scan_state": "partial",
-                            "metadata": discovery_result.get("metadata", {}),
-                        }
-                        self.logger.info("Opportunity scan in progress",
-                                       user_id=user_id,
-                                       scan_state=scan_state)
-                    else:
-                        # No opportunities found (legitimate result)
-                        context_data["opportunities"] = {
-                            "success": True,
-                            "message": "No trading opportunities found at this time. Market conditions may not be favorable.",
-                            "opportunities": [],
-                            "scan_state": scan_state,
-                            "metadata": discovery_result.get("metadata", {})
-                        }
-                        self.logger.warning("No opportunities found",
-                                          user_id=user_id,
-                                          scan_state=scan_state)
-                else:
-                    # Discovery failed
-                    error_msg = discovery_result.get("error", "Unknown error")
-                    context_data["opportunities"] = {
-                        "success": False,
-                        "error": f"Opportunity discovery failed: {error_msg}",
-                        "opportunities": []
-                    }
-                    self.logger.error("Opportunity discovery failed",
-                                    user_id=user_id,
-                                    error=error_msg)
-                    
-            except asyncio.TimeoutError:
-                # This should NOT happen anymore since we removed timeout wrapper
-                # But keep as safety net
-                self.logger.error("Unexpected timeout in opportunity discovery",
-                                user_id=user_id,
-                                exc_info=True)
-                context_data["opportunities"] = {
-                    "success": False,
-                    "error": "Opportunity discovery timed out. Please try again.",
-                    "opportunities": []
-                }
-                
-            except Exception as e:
-                # Catch-all for any unexpected errors
-                self.logger.error("Opportunity discovery exception",
-                                error=str(e),
-                                error_type=type(e).__name__,
-                                user_id=user_id,
-                                exc_info=True)
-                context_data["opportunities"] = {
-                    "success": False,
-                    "error": "Opportunity discovery temporarily unavailable. Please try again in a moment.",
-                    "opportunities": []
-                }
-
-            optimization_summary = await self._run_portfolio_optimization(
-                user_id,
-                user_config,
+            self.logger.info(
+                "Opportunity discovery requested",
+                user_id=user_id,
+                intent=intent,
             )
+
+            discovery_result: Optional[Dict[str, Any]] = await self._get_cached_opportunities(user_id)
+
+            if discovery_result is None:
+                try:
+                    discovery_result = await self.opportunity_discovery.discover_opportunities_for_user(
+                        user_id=user_id,
+                        force_refresh=False,
+                        include_strategy_recommendations=True,
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.error(
+                        "Opportunity discovery timed out while requesting cache",
+                        user_id=user_id,
+                    )
+                    discovery_result = None
+                except Exception as exc:
+                    self.logger.error(
+                        "Opportunity discovery call failed",
+                        error=str(exc),
+                        user_id=user_id,
+                        exc_info=True,
+                    )
+                    discovery_result = {
+                        "success": False,
+                        "error": "Opportunity discovery temporarily unavailable. Please try again in a moment.",
+                        "opportunities": [],
+                    }
+
+                if discovery_result is None:
+                    discovery_result = self._get_placeholder_opportunities(user_id)
+
+                if isinstance(discovery_result, dict):
+                    scan_state = discovery_result.get("scan_state")
+                    opportunities_list = discovery_result.get("opportunities") or []
+                    partial = scan_state in {"pending", "partial"} or not opportunities_list
+                    await self._cache_opportunities(user_id, discovery_result, partial=partial)
+
+            if not isinstance(discovery_result, dict):
+                discovery_result = self._get_placeholder_opportunities(user_id)
+
+            context_data["opportunities"] = discovery_result
+
+            try:
+                optimization_summary = await asyncio.wait_for(
+                    self._run_portfolio_optimization(user_id, user_config),
+                    timeout=1.0,
+                )
+            except asyncio.TimeoutError:
+                self.logger.debug(
+                    "Portfolio optimization exceeded fast-path budget; running in background",
+                    user_id=user_id,
+                )
+                self._schedule_portfolio_optimization_refresh(user_id, user_config)
+                optimization_summary = None
+            except Exception as exc:
+                self.logger.warning(
+                    "Portfolio optimization failed during opportunity context",
+                    error=str(exc),
+                    user_id=user_id,
+                )
+                optimization_summary = None
+
             if optimization_summary:
                 context_data["portfolio_optimization"] = optimization_summary
                 context_data["allowed_symbols"] = optimization_summary.get("allowed_symbols", [])
-
         elif intent == ChatIntent.RISK_ASSESSMENT:
             # Get comprehensive risk metrics
             context_data["risk_metrics"] = await self.portfolio_risk.risk_analysis(user_id)
@@ -2615,22 +2842,24 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                 except BaseException as exc:  # propagate fatal failures downstream
                     context_error = exc
             else:
-                if intent == ChatIntent.OPPORTUNITY_DISCOVERY:
-                    progress_emitted = True
-                    yield {
-                        "type": "progress",
-                        "progress": {
-                            "stage": "initializing_scan",
-                            "message": "Starting your personalized opportunity scan...",
-                            "percent": 5,
-                        },
-                        "timestamp": datetime.utcnow().isoformat(),
-                    }
-
-                try:
-                    context_data = await context_task
-                except BaseException as exc:
-                    context_error = exc
+                if intent == ChatIntent.OPPORTUNITY_DISCOVERY and user_id:
+                    async for update in self._stream_opportunity_discovery_immediate(
+                        user_id,
+                        context_task,
+                    ):
+                        if "__context__" in update:
+                            context_data = update["__context__"]
+                            break
+                        if "__context_error__" in update:
+                            context_error = update["__context_error__"]
+                            break
+                        progress_emitted = True
+                        yield update
+                else:
+                    try:
+                        context_data = await context_task
+                    except BaseException as exc:
+                        context_error = exc
 
         if context_error is not None:
             self.logger.error(
