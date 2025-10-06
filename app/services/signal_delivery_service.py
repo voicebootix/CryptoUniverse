@@ -222,6 +222,21 @@ class SignalDeliveryService:
             )
             return None
 
+        unauthenticated_fields = []
+        if not connection.telegram_chat_id or connection.telegram_chat_id == "pending":
+            unauthenticated_fields.append("chat_id")
+        if not connection.telegram_user_id or connection.telegram_user_id == "pending":
+            unauthenticated_fields.append("user_id")
+
+        if unauthenticated_fields:
+            self.logger.info(
+                "Telegram delivery skipped: unauthenticated connection",
+                user_id=str(user.id),
+                connection_id=str(connection.id),
+                missing_fields=unauthenticated_fields,
+            )
+            return None
+
         message = self._render_message(summary, event_payload, channel)
         response = await telegram_commander_service.send_direct_message(
             chat_id=connection.telegram_chat_id,
@@ -306,8 +321,32 @@ class SignalDeliveryService:
         if signature:
             headers["X-Signature"] = signature
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(webhook_url, content=json.dumps(payload), headers=headers)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    webhook_url,
+                    content=json.dumps(payload),
+                    headers=headers,
+                )
+        except httpx.HTTPError as exc:
+            self.logger.warning(
+                "Signal webhook delivery failed",
+                subscription_id=str(subscription.id),
+                webhook_url=webhook_url,
+                error=str(exc),
+            )
+            return SignalDeliveryLog(
+                event_id=event_id,
+                subscription_id=subscription.id,
+                delivery_channel="api",
+                status="failed",
+                error_message=str(exc),
+                payload=payload,
+                credit_cost=credit_cost,
+                credit_transaction_id=credit_transaction_id,
+                metadata={"status_code": 0},
+            )
+
         status = "delivered" if response.status_code < 400 else "failed"
 
         log_entry = SignalDeliveryLog(

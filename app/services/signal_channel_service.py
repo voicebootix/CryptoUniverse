@@ -348,7 +348,7 @@ class SignalChannelService:
                     "plan": plan.name,
                     "reservation": True,
                 },
-                transaction_type=CreditTransactionType.RESERVATION,
+                transaction_type=CreditTransactionType.USAGE,
             )
         except InsufficientCreditsError as exc:
             raise SignalSubscriptionError(str(exc)) from exc

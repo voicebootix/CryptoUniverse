@@ -13,7 +13,7 @@ import uuid
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from pydantic import BaseModel, field_validator
 from sqlalchemy import and_, or_, func, select, case, desc
 from sqlalchemy.exc import SQLAlchemyError

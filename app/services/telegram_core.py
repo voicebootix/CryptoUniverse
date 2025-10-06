@@ -790,8 +790,6 @@ Use /ai [question] for strategy recommendations! 🤖
     async def _handle_signals_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
         """Handle /signals command for channel management via Telegram."""
 
-        from uuid import UUID
-
         from sqlalchemy import select
 
         from app.core.database import AsyncSessionLocal
@@ -808,34 +806,37 @@ Use /ai [question] for strategy recommendations! 🤖
         action = normalized_args[0] if normalized_args else "list"
         slug = normalized_args[1] if len(normalized_args) > 1 else None
 
-        try:
-            user_uuid = UUID(user_id)
-        except (TypeError, ValueError):
-            await self.telegram_api.send_message(
-                chat_id,
-                "⚠️ Unable to resolve your CryptoUniverse profile. Please relink your account using /start.",
-            )
-            return {"success": False, "error": "invalid_user_identifier"}
-
         async with AsyncSessionLocal() as db:
-            user = await db.get(User, user_uuid)
-            if not user:
-                await self.telegram_api.send_message(
-                    chat_id,
-                    "⚠️ Account not found. Please complete onboarding from the web app before requesting signals.",
-                )
-                return {"success": False, "error": "user_missing"}
-
-            connection_result = await db.execute(
-                select(UserTelegramConnection).where(UserTelegramConnection.user_id == user.id)
+            connection_stmt = select(UserTelegramConnection).where(
+                UserTelegramConnection.telegram_user_id == user_id
             )
-            connection = connection_result.scalar_one_or_none()
+            connection = (await db.execute(connection_stmt)).scalar_one_or_none()
+            if not connection and chat_id:
+                fallback_stmt = select(UserTelegramConnection).where(
+                    UserTelegramConnection.telegram_chat_id == chat_id
+                )
+                connection = (await db.execute(fallback_stmt)).scalar_one_or_none()
             if not connection:
                 await self.telegram_api.send_message(
                     chat_id,
                     "🔗 Your Telegram chat is not linked for delivery. Use /start to pair your account and retry.",
                 )
                 return {"success": False, "error": "connection_missing"}
+
+            if not connection.user_id:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "⚠️ Unable to resolve your CryptoUniverse profile. Please relink your account using /start.",
+                )
+                return {"success": False, "error": "invalid_user_identifier"}
+
+            user = await db.get(User, connection.user_id)
+            if not user:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "⚠️ Account not found. Please complete onboarding from the web app before requesting signals.",
+                )
+                return {"success": False, "error": "user_missing"}
 
             try:
                 if action in {"list", "status", "overview"}:
@@ -963,8 +964,6 @@ Use /ai [question] for strategy recommendations! 🤖
     async def _handle_signal_settings_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
         """Handle /signalsettings command to tune Telegram delivery preferences."""
 
-        from uuid import UUID
-
         from sqlalchemy import select
 
         from app.core.database import AsyncSessionLocal
@@ -985,34 +984,37 @@ Use /ai [question] for strategy recommendations! 🤖
         setting = normalized_args[0].lower()
         value = normalized_args[1] if len(normalized_args) > 1 else None
 
-        try:
-            user_uuid = UUID(user_id)
-        except (TypeError, ValueError):
-            await self.telegram_api.send_message(
-                chat_id,
-                "⚠️ Unable to resolve your CryptoUniverse profile. Please relink your account using /start.",
-            )
-            return {"success": False, "error": "invalid_user_identifier"}
-
         async with AsyncSessionLocal() as db:
-            user = await db.get(User, user_uuid)
-            if not user:
-                await self.telegram_api.send_message(
-                    chat_id,
-                    "⚠️ Account not found. Complete onboarding from the web app before updating settings.",
-                )
-                return {"success": False, "error": "user_missing"}
-
-            connection_result = await db.execute(
-                select(UserTelegramConnection).where(UserTelegramConnection.user_id == user.id)
+            connection_stmt = select(UserTelegramConnection).where(
+                UserTelegramConnection.telegram_user_id == user_id
             )
-            connection = connection_result.scalar_one_or_none()
+            connection = (await db.execute(connection_stmt)).scalar_one_or_none()
+            if not connection and chat_id:
+                fallback_stmt = select(UserTelegramConnection).where(
+                    UserTelegramConnection.telegram_chat_id == chat_id
+                )
+                connection = (await db.execute(fallback_stmt)).scalar_one_or_none()
             if not connection:
                 await self.telegram_api.send_message(
                     chat_id,
                     "🔗 Your Telegram chat is not linked for delivery. Use /start to pair your account and retry.",
                 )
                 return {"success": False, "error": "connection_missing"}
+
+            if not connection.user_id:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "⚠️ Unable to resolve your CryptoUniverse profile. Please relink your account using /start.",
+                )
+                return {"success": False, "error": "invalid_user_identifier"}
+
+            user = await db.get(User, connection.user_id)
+            if not user:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "⚠️ Account not found. Complete onboarding from the web app before updating settings.",
+                )
+                return {"success": False, "error": "user_missing"}
 
             preferences = dict(connection.signal_preferences or {})
 

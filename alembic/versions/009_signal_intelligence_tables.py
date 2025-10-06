@@ -20,9 +20,23 @@ DELIVERIES_TABLE = "signal_delivery_logs"
 
 def upgrade() -> None:
     """Create core signal intelligence tables."""
-    # Clean up legacy tables if this migration is applied over older branch state.
-    for legacy in ("signal_dispatch_logs", "signal_group_subscriptions", "signal_groups"):
-        op.execute(f"DROP TABLE IF EXISTS {legacy} CASCADE")
+    # Ensure legacy tables are empty before proceeding so we don't destroy data accidentally.
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    legacy_tables = (
+        "signal_dispatch_logs",
+        "signal_group_subscriptions",
+        "signal_groups",
+    )
+
+    for legacy in legacy_tables:
+        if legacy in inspector.get_table_names():
+            count = bind.execute(sa.text(f"SELECT COUNT(*) FROM {legacy}")).scalar()  # type: ignore[arg-type]
+            if count:
+                raise RuntimeError(
+                    "Legacy signal table contains rows. Aborting migration to avoid data loss: "
+                    f"{legacy} has {count} rows."
+                )
 
     op.create_table(
         CHANNELS_TABLE,

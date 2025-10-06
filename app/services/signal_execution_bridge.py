@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.signal import SignalDeliveryLog
+from app.models.signal import SignalDeliveryLog, SignalEvent
 from app.models.user import User
 from app.services.master_controller import MasterSystemController
 from app.services.system_monitoring import system_monitoring_service
@@ -30,6 +30,7 @@ class SignalExecutionBridge:
         delivery_log: SignalDeliveryLog,
         actor: str,
     ) -> SignalDeliveryLog:
+        event = await self._ensure_event_context(db, delivery_log)
         delivery_log.acknowledged_at = datetime.utcnow()
         metadata = dict(delivery_log.metadata or {})
         acknowledgements = metadata.setdefault("acknowledgements", [])
@@ -43,7 +44,9 @@ class SignalExecutionBridge:
         system_monitoring_service.metrics_collector.record_metric(
             "signal_acknowledgements",
             1.0,
-            {"channel": delivery_log.event.channel.slug if delivery_log.event else "unknown"},
+            {
+                "channel": event.channel.slug if event and event.channel else "unknown",
+            },
         )
 
         return delivery_log
@@ -62,7 +65,7 @@ class SignalExecutionBridge:
                 "execution_reference": delivery_log.execution_reference,
             }
 
-        event = delivery_log.event
+        event = await self._ensure_event_context(db, delivery_log)
         if not event:
             raise ValueError("Delivery log is not associated with a signal event")
 
@@ -97,6 +100,17 @@ class SignalExecutionBridge:
         )
 
         return result
+
+    async def _ensure_event_context(
+        self, db: AsyncSession, delivery_log: SignalDeliveryLog
+    ) -> Optional[SignalEvent]:
+        """Ensure the associated event and channel are loaded for the delivery log."""
+
+        await db.refresh(delivery_log, attribute_names=["event"])
+        event = delivery_log.event
+        if event is not None:
+            await db.refresh(event, attribute_names=["channel"])
+        return event
 
 
 signal_execution_bridge = SignalExecutionBridge()
