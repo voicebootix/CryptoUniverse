@@ -506,7 +506,7 @@ export const useChatStore = create<ChatState>()(
         try {
           const { apiClient } = await import('@/lib/api/client');
 
-          const response = await apiClient.post('/chat/decision/approve', {
+          const response = await apiClient.post('/chat/action/confirm', {
             decision_id: decisionId,
             approved: approved,
             modifications: {}

@@ -2243,8 +2243,30 @@ class UnifiedChatService(LoggerMixin):
                 elif success and len(opportunities_list) == 0:
                     # Cache is empty or scan returned 0 opportunities
                     scan_state = discovery_result.get("scan_state", "unknown")
-                    
-                    if scan_state == "partial":
+
+                    if scan_state == "pending":
+                        metadata = discovery_result.get("metadata", {}) or {}
+                        metadata.setdefault("scan_state", "pending")
+                        metadata.setdefault("message", "Scanning your active strategies for new opportunities...")
+                        metadata.setdefault("generated_at", datetime.utcnow().isoformat())
+                        context_data["opportunities"] = {
+                            "success": True,
+                            "status": "pending",
+                            "message": discovery_result.get(
+                                "message",
+                                "Opportunity scan started. We'll notify you as soon as results are ready.",
+                            ),
+                            "opportunities": [],
+                            "scan_state": "pending",
+                            "metadata": metadata,
+                            "background_scan": discovery_result.get("background_scan", True),
+                        }
+                        self.logger.info(
+                            "Opportunity scan queued",
+                            user_id=user_id,
+                            scan_state=scan_state,
+                        )
+                    elif scan_state == "partial":
                         # Scan is in progress, return partial results
                         context_data["opportunities"] = {
                             "success": True,
@@ -2252,7 +2274,7 @@ class UnifiedChatService(LoggerMixin):
                             "message": "Opportunity scan in progress. Results will appear as strategies complete.",
                             "opportunities": [],
                             "scan_state": "partial",
-                            "metadata": discovery_result.get("metadata", {})
+                            "metadata": discovery_result.get("metadata", {}),
                         }
                         self.logger.info("Opportunity scan in progress",
                                        user_id=user_id,
@@ -2568,28 +2590,55 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
         
         # Emit progress for opportunity discovery
         if intent == ChatIntent.OPPORTUNITY_DISCOVERY:
+            opportunities = context_data.get("opportunities", {}) or {}
+            metadata = opportunities.get("metadata", {}) or {}
+            scan_state = metadata.get("scan_state") or context_data.get("scan_state")
+
+            stage_message = metadata.get(
+                "message",
+                "Scanning your active strategies for opportunities...",
+            )
+
+            percent_complete = 30
+            if scan_state == "pending":
+                percent_complete = 10
+            elif scan_state == "partial":
+                completed = metadata.get("strategies_completed") or metadata.get("completed_strategies")
+                total = metadata.get("total_strategies") or metadata.get("totalStrategies")
+                try:
+                    completed = int(completed)
+                    total = int(total)
+                    if total > 0:
+                        percent_complete = min(80, max(15, int((completed / total) * 70) + 10))
+                except (TypeError, ValueError):
+                    percent_complete = 30
+
             yield {
                 "type": "progress",
                 "progress": {
                     "stage": "scanning_strategies",
-                    "message": "Scanning your active strategies for opportunities...",
-                    "percent": 30
+                    "message": stage_message,
+                    "percent": percent_complete,
                 },
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
-            
-            # Check if we have opportunities in context
-            opportunities = context_data.get("opportunities", {})
+
             opp_count = len(opportunities.get("opportunities", []))
-            
+            if opp_count:
+                followup_message = f"Found {opp_count} opportunities. Generating analysis..."
+                followup_percent = min(percent_complete + 25, 95)
+            else:
+                followup_message = "Waiting for the first opportunities to finish scoring..."
+                followup_percent = min(percent_complete + 15, 60)
+
             yield {
                 "type": "progress",
                 "progress": {
-                    "stage": "opportunities_found",
-                    "message": f"Found {opp_count} opportunities. Generating analysis...",
-                    "percent": 70
+                    "stage": "opportunities_update",
+                    "message": followup_message,
+                    "percent": followup_percent,
                 },
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
         
         personality = self.personalities[session.trading_mode]

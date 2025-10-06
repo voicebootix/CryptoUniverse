@@ -110,7 +110,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self.opportunity_cache = {}
         self._scan_tasks: Dict[str, asyncio.Task] = {}
         self._scan_cache_lock = asyncio.Lock()
-        self._scan_cache_ttl = 1800  # 30 minutes - increased from 10 to reduce expensive scans
+        self._scan_cache_ttl = 300  # 5 minutes to align with fast-refresh chat expectations
         self._partial_cache_ttl = 300  # 5 minutes - increased from 2 for better partial result reuse
         self._scan_response_budget = 150.0  # 150 seconds - allow all 14 strategies to complete (portfolio optimization takes ~80s)
 
@@ -444,59 +444,95 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             return copy.deepcopy(cached_entry.payload)
 
         task = self._scan_tasks.get(user_id)
-        if not task or task.done():
+        if task and task.done():
+            self._scan_tasks.pop(user_id, None)
+            task = None
+
+        scan_id: Optional[str] = getattr(task, "scan_id", None)
+
+        if not task:
+            scan_id = f"user_discovery_{user_id}_{int(time.time())}"
             task = asyncio.create_task(
                 self._execute_opportunity_discovery(
                     user_id=user_id,
                     force_refresh=force_refresh,
                     include_strategy_recommendations=include_strategy_recommendations,
-                )
+                    existing_scan_id=scan_id,
+                ),
+                name=f"opportunity-discovery:{scan_id}",
             )
+            setattr(task, "scan_id", scan_id)
             self._scan_tasks[user_id] = task
             self._schedule_scan_cleanup(user_id, task)
 
         if cached_entry and not force_refresh:
-            return copy.deepcopy(cached_entry.payload)
-
-        try:
-            result = await asyncio.wait_for(
-                asyncio.shield(task),
-                timeout=self._scan_response_budget,
+            payload = copy.deepcopy(cached_entry.payload)
+            metadata = payload.setdefault("metadata", {})
+            metadata.setdefault(
+                "message",
+                "Returning cached opportunity results while a fresh scan completes in the background.",
             )
-            return copy.deepcopy(result)
-        except asyncio.TimeoutError:
-            fallback_entry = await self._get_cached_scan_entry(user_id)
-            if fallback_entry:
-                payload = copy.deepcopy(fallback_entry.payload)
-                metadata = payload.setdefault("metadata", {})
-                metadata.setdefault(
-                    "message",
-                    "Returning cached opportunity results while a fresh scan completes in the background.",
-                )
-                metadata.setdefault(
-                    "scan_state",
-                    "partial" if fallback_entry.partial else "cached",
-                )
-                metadata["generated_at"] = metadata.get("generated_at", datetime.utcnow().isoformat())
-                return payload
+            metadata.setdefault(
+                "scan_state",
+                "partial" if cached_entry.partial else "cached",
+            )
+            metadata.setdefault("generated_at", datetime.utcnow().isoformat())
+            return payload
 
-            fallback_scan_id = f"fallback_{user_id}_{int(time.time())}"
-            fallback_result = await self._provide_fallback_opportunities(user_id, fallback_scan_id)
-            return {
-                "success": False,
-                "scan_id": fallback_scan_id,
-                "user_id": user_id,
-                "opportunities": fallback_result.get("opportunities", []),
-                "total_opportunities": len(fallback_result.get("opportunities", [])),
-                "message": "A fresh opportunity scan is still running. Returning fallback guidance while processing completes.",
-                "fallback_used": True,
-            }
+        # For force refresh requests allow a brief wait for fresh data
+        if force_refresh:
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=5.0,
+                )
+                return copy.deepcopy(result)
+            except asyncio.TimeoutError:
+                pass
+
+        if not scan_id:
+            scan_id = getattr(task, "scan_id", f"user_discovery_{user_id}_{int(time.time())}")
+
+        placeholder_payload = {
+            "success": True,
+            "scan_id": scan_id,
+            "user_id": user_id,
+            "opportunities": [],
+            "total_opportunities": 0,
+            "message": "Opportunity scan started. We'll notify you as soon as results are ready.",
+            "scan_state": "pending",
+            "metadata": {
+                "scan_state": "pending",
+                "message": "Scanning your active strategies for new opportunities...",
+                "strategies_completed": 0,
+                "total_strategies": 0,
+                "generated_at": datetime.utcnow().isoformat(),
+            },
+            "background_scan": True,
+        }
+
+        await self._update_cached_scan_result(
+            user_id,
+            placeholder_payload,
+            partial=True,
+        )
+
+        self.logger.info(
+            "Returning pending opportunity scan placeholder",
+            user_id=user_id,
+            scan_id=scan_id,
+            force_refresh=force_refresh,
+        )
+
+        return copy.deepcopy(placeholder_payload)
 
     async def _execute_opportunity_discovery(
         self,
         user_id: str,
         force_refresh: bool = False,
-        include_strategy_recommendations: bool = True
+        include_strategy_recommendations: bool = True,
+        *,
+        existing_scan_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         MAIN ENTRY POINT: Discover all opportunities for user based on their strategy portfolio.
@@ -505,7 +541,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         """
         
         discovery_start_time = time.time()
-        scan_id = f"user_discovery_{user_id}_{int(time.time())}"
+        scan_id = existing_scan_id or f"user_discovery_{user_id}_{int(time.time())}"
         
         # ENTERPRISE PERFORMANCE METRICS
         metrics = {
