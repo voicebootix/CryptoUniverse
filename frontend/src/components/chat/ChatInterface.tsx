@@ -305,6 +305,11 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         conversation_mode: 'live_trading'
       });
       
+      // Add token for authentication (EventSource doesn't support custom headers)
+      if (token && token.trim().length > 0) {
+        params.append('token', token);
+      }
+      
       const url = `${baseURL}/unified-chat/stream?${params.toString()}`;
       
       // Create EventSource for SSE
