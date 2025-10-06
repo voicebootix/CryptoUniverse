@@ -226,10 +226,18 @@ export const useChatStore = create<ChatState>()(
             signal: abortController.signal,
             
             onopen: async (response) => {
-              if (response.ok) {
-                console.log('SSE connection opened');
+              console.log('[SSE] Connection opening, status:', response.status);
+              
+              if (response.ok && response.headers.get('content-type')?.includes('text/event-stream')) {
+                console.log('[SSE] Connection opened successfully');
+                return; // Connection is good, proceed
               } else if (response.status >= 400 && response.status < 500 && response.status !== 429) {
                 // Client error - don't retry
+                console.error('[SSE] Client error:', response.status, response.statusText);
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+              } else if (!response.ok) {
+                // Server error - will retry
+                console.error('[SSE] Server error:', response.status);
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
               }
             },
