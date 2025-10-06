@@ -3257,8 +3257,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         )
                         return None
 
-                # Cache is fresh for 10 minutes for non-zero results, 2 minutes for zero results
-                max_age = timedelta(minutes=10) if total_opportunities > 0 else timedelta(seconds=metadata.get("zero_ttl_seconds", 120))
+                # Cache is fresh for 5 minutes for non-zero results, 2 minutes for zero results
+                max_age = timedelta(minutes=5) if total_opportunities > 0 else timedelta(seconds=metadata.get("zero_ttl_seconds", 120))
                 if datetime.utcnow() - cache_time < max_age:
                     return payload
 
@@ -3303,7 +3303,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 }
             }
 
-            ttl_seconds = 900 if total_opportunities > 0 else 120
+            ttl_seconds = 300 if total_opportunities > 0 else 120
             await self.redis.set(cache_key, json.dumps(cache_entry), ex=ttl_seconds)
 
             # Update last scan time

@@ -1439,14 +1439,25 @@ class UnifiedChatService(LoggerMixin):
             prefetched_marketplace = requirements_check.get("marketplace_strategies")
             prefetched_user_config = requirements_check.get("user_config")
 
-            context_data = await self._gather_context_data(
-                intent_analysis,
-                user_id,
-                session,
+            context_data: Optional[Dict[str, Any]] = None
+            context_task: Optional[asyncio.Task] = None
+
+            gather_kwargs = dict(
+                intent_analysis=intent_analysis,
+                user_id=user_id,
+                session=session,
                 user_strategies=prefetched_user_strategies,
                 marketplace_strategies=prefetched_marketplace,
                 user_config=prefetched_user_config,
             )
+
+            if stream and intent_analysis.get("intent") == ChatIntent.OPPORTUNITY_DISCOVERY:
+                context_task = asyncio.create_task(
+                    self._gather_context_data(**gather_kwargs),
+                    name=f"gather-context:{session_id}:opportunity",
+                )
+            else:
+                context_data = await self._gather_context_data(**gather_kwargs)
 
             # Step 4: Generate response with appropriate charging strategy
             if stream:
@@ -1455,11 +1466,15 @@ class UnifiedChatService(LoggerMixin):
                     message,
                     intent_analysis,
                     session,
-                    context_data,
+                    context_data=context_data,
+                    context_task=context_task,
                     charge_request=charge_request,
                     user_id=user_id,
                 )
             else:
+                if context_task is not None:
+                    context_data = await context_task
+
                 # Non-streaming flow: charge upfront, generate response, refund on failure
                 charge_context: Optional[Dict[str, Any]] = None
                 if charge_request:
@@ -2555,7 +2570,9 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
         message: str,
         intent_analysis: Dict[str, Any],
         session: ChatSession,
-        context_data: Dict[str, Any],
+        *,
+        context_data: Optional[Dict[str, Any]] = None,
+        context_task: Optional[asyncio.Task] = None,
         charge_request: Optional[Dict[str, Any]] = None,
         user_id: Optional[str] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -2587,7 +2604,58 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
         }
 
         intent = intent_analysis["intent"]
-        
+
+        context_error: Optional[BaseException] = None
+        progress_emitted = False
+
+        if context_data is None and context_task is not None:
+            if context_task.done():
+                try:
+                    context_data = context_task.result()
+                except BaseException as exc:  # propagate fatal failures downstream
+                    context_error = exc
+            else:
+                if intent == ChatIntent.OPPORTUNITY_DISCOVERY:
+                    progress_emitted = True
+                    yield {
+                        "type": "progress",
+                        "progress": {
+                            "stage": "initializing_scan",
+                            "message": "Starting your personalized opportunity scan...",
+                            "percent": 5,
+                        },
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+
+                try:
+                    context_data = await context_task
+                except BaseException as exc:
+                    context_error = exc
+
+        if context_error is not None:
+            self.logger.error(
+                "Streaming context task failed",
+                error=str(context_error),
+                intent=str(intent),
+            )
+            yield {
+                "type": "error",
+                "content": "We ran into an issue preparing the data for your request. Please try again in a moment.",
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            if charge_request and user_id and charge_context:
+                try:
+                    await self._refund_chat_charge(
+                        user_id,
+                        charge_context,
+                        "Context preparation failed before response generation",
+                    )
+                except Exception:
+                    self.logger.warning("Failed to refund chat charge after context failure", intent=str(intent))
+            return
+
+        context_data = context_data or {}
+
         # Emit progress for opportunity discovery
         if intent == ChatIntent.OPPORTUNITY_DISCOVERY:
             opportunities = context_data.get("opportunities", {}) or {}
@@ -2613,15 +2681,17 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                 except (TypeError, ValueError):
                     percent_complete = 30
 
-            yield {
-                "type": "progress",
-                "progress": {
-                    "stage": "scanning_strategies",
-                    "message": stage_message,
-                    "percent": percent_complete,
-                },
-                "timestamp": datetime.utcnow().isoformat(),
-            }
+            if not progress_emitted or percent_complete > 5:
+                yield {
+                    "type": "progress",
+                    "progress": {
+                        "stage": "scanning_strategies",
+                        "message": stage_message,
+                        "percent": percent_complete,
+                    },
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+                progress_emitted = True
 
             opp_count = len(opportunities.get("opportunities", []))
             if opp_count:
