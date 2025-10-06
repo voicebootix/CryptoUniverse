@@ -295,7 +295,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
       // Use Server-Sent Events (SSE) for streaming response
       console.log('📡 Using SSE streaming for real-time response');
       
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('auth_token');
       const baseURL = apiClient.defaults.baseURL || '';
       
       // Build SSE URL
