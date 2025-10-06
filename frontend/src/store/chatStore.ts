@@ -153,101 +153,212 @@ export const useChatStore = create<ChatState>()(
             }
           }
 
-          // Get latest messages including the just-added user message for AI context
-          const latestMessages = get().messages;
+          // Get token for SSE authentication
+          const token = localStorage.getItem('auth_token');
+          if (!token) {
+            throw new Error('No authentication token found');
+          }
 
-          // Send message through enhanced chat endpoint (now uses unified AI manager)
-          const response = await apiClient.post('/chat/message', {
+          // Build SSE URL with query parameters
+          const baseURL = apiClient.defaults.baseURL || '';
+          const params = new URLSearchParams({
             message: content,
-            session_id: currentSessionId,
-            mode: currentMode,
-            context: {
-              previous_messages: latestMessages.slice(-5), // Last 5 messages including user message
-              current_tab: window.location.pathname,
-              platform: 'web',
-              conversation_continuity: true
-            }
+            session_id: currentSessionId || '',
+            conversation_mode: currentMode || 'live_trading',
+            token: token  // SSE doesn't support headers, so pass token as query param
           });
 
-          const intent = response.data.intent;
-          const requiresAction = response.data.requires_action;
-          const actionData = response.data.action_data;
-          const metadata = response.data.metadata || {};
+          const url = `${baseURL}/unified-chat/stream?${params.toString()}`;
 
-          if (response.data.success) {
-            // Clamp AI timestamp to ensure it's at least userTimestamp + 100ms (handles server clock skew)
-            const serverTimestamp = new Date(response.data.timestamp || 0).getTime();
-            const minAiTimestamp = userTimestamp.getTime() + 100;
-            const aiTimestamp = new Date(Math.max(serverTimestamp, minAiTimestamp));
+          // Create placeholder message for streaming content
+          const streamingMessageId = `streaming-${Date.now()}`;
+          const streamingMessage: ChatMessage = {
+            id: streamingMessageId,
+            content: '',
+            type: 'assistant',
+            timestamp: new Date(userTimestamp.getTime() + 100).toISOString(),
+            mode: currentMode,
+            metadata: { streaming: true }
+          };
 
-            const assistantMessage: ChatMessage = {
-              id: response.data.message_id || `ai-${Date.now() + 1}`,
-              content: response.data.content,
-              type: 'assistant',
-              timestamp: aiTimestamp.toISOString(),
-              mode: currentMode,
-              confidence: response.data.confidence, // Move confidence to top level for UI access
-              metadata: {
-                ...metadata,
-                intent,
-                requires_approval: response.data.requires_approval,
-                decision_id: response.data.decision_id,
-                ai_analysis: response.data.ai_analysis
+          set((state) => ({
+            messages: [...state.messages, streamingMessage].sort((a, b) =>
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+            )
+          }));
+
+          // Create EventSource for SSE
+          const eventSource = new EventSource(url);
+          let fullContent = '';
+          let streamMetadata: any = {};
+          let streamCompleted = false;
+
+          // Handle incoming SSE messages
+          eventSource.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+
+              switch (data.type) {
+                case 'processing':
+                case 'progress':
+                  // Optional: Update UI with progress message
+                  // For now, we just log it
+                  console.log('Progress:', data.content || data.progress?.message);
+                  break;
+
+                case 'response':
+                case 'chunk':
+                  // Accumulate content chunks
+                  if (data.content) {
+                    fullContent += data.content;
+                    
+                    // Update the streaming message with accumulated content
+                    set((state) => ({
+                      messages: state.messages.map(msg =>
+                        msg.id === streamingMessageId
+                          ? { ...msg, content: fullContent }
+                          : msg
+                      )
+                    }));
+                  }
+
+                  // Store metadata if provided
+                  if (data.metadata) {
+                    streamMetadata = { ...streamMetadata, ...data.metadata };
+                  }
+                  break;
+
+                case 'complete':
+                  streamCompleted = true;
+                  eventSource.close();
+
+                  // Finalize the message with all metadata
+                  set((state) => ({
+                    messages: state.messages.map(msg =>
+                      msg.id === streamingMessageId
+                        ? {
+                            ...msg,
+                            content: fullContent,
+                            confidence: data.confidence || streamMetadata.confidence,
+                            metadata: {
+                              ...streamMetadata,
+                              streaming: false,
+                              intent: data.intent || streamMetadata.intent,
+                              requires_approval: data.requires_approval,
+                              decision_id: data.decision_id,
+                              ai_analysis: data.ai_analysis
+                            }
+                          }
+                        : msg
+                    ),
+                    isLoading: false,
+                    pendingAction: null
+                  }));
+
+                  // Handle approval requests
+                  if (data.requires_approval && data.decision_id) {
+                    const finalMessage = get().messages.find(m => m.id === streamingMessageId);
+                    if (finalMessage) {
+                      set((state) => ({
+                        ...state,
+                        pendingDecision: {
+                          id: data.decision_id,
+                          message: finalMessage,
+                          timestamp: new Date().toISOString()
+                        }
+                      }));
+                    }
+                  }
+
+                  // Handle action requirements
+                  if (data.requires_action && data.action_data) {
+                    set({
+                      pendingAction: {
+                        type: data.action_data.type,
+                        data: data.action_data,
+                        messageId: streamingMessageId
+                      }
+                    });
+                  }
+                  break;
+
+                case 'error':
+                  streamCompleted = true;
+                  eventSource.close();
+
+                  // Remove streaming message and show error
+                  set((state) => ({
+                    messages: state.messages.filter(msg => msg.id !== streamingMessageId),
+                    isLoading: false
+                  }));
+
+                  const errorMessage: ChatMessage = {
+                    id: `error-${Date.now()}`,
+                    content: data.error || "I'm having trouble processing your request. Please try again.",
+                    type: 'assistant',
+                    timestamp: new Date(userTimestamp.getTime() + 200).toISOString(),
+                    mode: currentMode
+                  };
+
+                  get().addMessage(errorMessage);
+                  break;
               }
-            };
-
-            // Use addMessage to handle unread count and timestamp ordering
-            get().addMessage(assistantMessage);
-            set({ isLoading: false, pendingAction: null });
-
-            // Handle approval requests
-            if (response.data.requires_approval && response.data.decision_id) {
-              // Store decision ID for potential approval
-              set((state) => ({
-                ...state,
-                pendingDecision: {
-                  id: response.data.decision_id,
-                  message: assistantMessage,
-                  timestamp: new Date().toISOString()
-                }
-              }));
+            } catch (error) {
+              console.error('Failed to parse SSE data:', error);
             }
-          } else if (requiresAction && actionData) {
-            const serverTimestamp = new Date(response.data.timestamp || 0).getTime();
-            const minAiTimestamp = userTimestamp.getTime() + 100;
-            const aiTimestamp = new Date(Math.max(serverTimestamp, minAiTimestamp));
+          };
 
-            const assistantMessage: ChatMessage = {
-              id: response.data.message_id || `ai-${Date.now() + 1}`,
-              content: response.data.content,
-              type: 'assistant',
-              timestamp: aiTimestamp.toISOString(),
-              mode: currentMode,
-              confidence: response.data.confidence,
-              metadata: {
-                ...metadata,
-                intent,
-                requires_action: true,
-                action_data: actionData
-              }
-            };
+          // Handle connection errors
+          eventSource.onerror = (error) => {
+            console.error('SSE connection error:', error);
+            
+            if (!streamCompleted) {
+              eventSource.close();
 
-            get().addMessage(assistantMessage);
-            set({
-              isLoading: false,
-              pendingAction: {
-                type: actionData.type,
-                data: actionData,
-                messageId: assistantMessage.id
-              }
-            });
-          } else {
-            throw new Error('Failed to get AI response');
-          }
-          
+              // Remove streaming message
+              set((state) => ({
+                messages: state.messages.filter(msg => msg.id !== streamingMessageId),
+                isLoading: false
+              }));
+
+              const errorMessage: ChatMessage = {
+                id: `error-${Date.now()}`,
+                content: "I'm having trouble connecting right now. Please try again in a moment.",
+                type: 'assistant',
+                timestamp: new Date(userTimestamp.getTime() + 200).toISOString(),
+                mode: currentMode
+              };
+
+              get().addMessage(errorMessage);
+            }
+          };
+
+          // Set timeout for SSE connection (3 minutes)
+          setTimeout(() => {
+            if (!streamCompleted) {
+              eventSource.close();
+
+              // Remove streaming message
+              set((state) => ({
+                messages: state.messages.filter(msg => msg.id !== streamingMessageId),
+                isLoading: false
+              }));
+
+              const timeoutMessage: ChatMessage = {
+                id: `timeout-${Date.now()}`,
+                content: "The request took too long. Please try again.",
+                type: 'assistant',
+                timestamp: new Date(userTimestamp.getTime() + 200).toISOString(),
+                mode: currentMode
+              };
+
+              get().addMessage(timeoutMessage);
+            }
+          }, 180000); // 3 minutes
+
         } catch (error) {
           console.error('Failed to send message:', error);
-          
+
           const errorMessage: ChatMessage = {
             id: `error-${Date.now()}`,
             content: "I'm having trouble connecting right now. Please try again in a moment.",
