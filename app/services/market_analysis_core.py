@@ -200,7 +200,7 @@ class DynamicExchangeManager(LoggerMixin):
         self.circuit_breakers = {}
         self._sessions: Dict[str, aiohttp.ClientSession] = {}
         self._session_locks: Dict[int, asyncio.Lock] = {}
-        self._request_timeout = aiohttp.ClientTimeout(total=5)
+        self._request_timeout = aiohttp.ClientTimeout(total=20)  # Increased from 5s to 20s for crypto exchange APIs
 
         # Initialize rate limiters for each exchange
         for exchange in self.exchange_configs:
@@ -314,7 +314,7 @@ class MarketAnalysisService(LoggerMixin):
             "market_overview": 60,
         }
         self._max_symbol_concurrency = 20  # Increased from 6 for better parallel processing
-        self._per_exchange_timeout = 10  # Increased from 5 to handle slower exchanges
+        self._per_exchange_timeout = 20  # Increased from 10s to 20s for crypto exchange APIs during high volatility
         self._symbol_semaphores: Dict[int, asyncio.Semaphore] = {}
         self._price_cache: Dict[str, _PriceCacheEntry] = {}
         self._price_lock_map: Dict[str, asyncio.Lock] = {}
