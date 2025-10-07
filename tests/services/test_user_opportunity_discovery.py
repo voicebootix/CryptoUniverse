@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 import os
 import sys
+from typing import Optional
 from unittest.mock import AsyncMock
 
 import pytest
@@ -389,7 +390,13 @@ async def test_discover_opportunities_returns_partial_then_final(monkeypatch):
     service._scan_response_budget = 0.01
     user_id = "user-partial"
 
-    async def fake_execute(user_id: str, force_refresh: bool = False, include_strategy_recommendations: bool = True):
+    async def fake_execute(
+        user_id: str,
+        force_refresh: bool = False,
+        include_strategy_recommendations: bool = True,
+        *,
+        existing_scan_id: Optional[str] = None,
+    ):
         await asyncio.sleep(0.005)
         partial_payload = {
             "success": True,
@@ -408,10 +415,15 @@ async def test_discover_opportunities_returns_partial_then_final(monkeypatch):
 
     monkeypatch.setattr(service, "_execute_opportunity_discovery", fake_execute)
 
+    initial_result = await service.discover_opportunities_for_user(user_id)
+    assert initial_result["metadata"]["scan_state"] == "pending"
+
+    await asyncio.sleep(0.02)
+
     partial_result = await service.discover_opportunities_for_user(user_id)
     assert partial_result["metadata"]["scan_state"] == "partial"
 
-    await asyncio.sleep(0.08)
+    await asyncio.sleep(0.06)
 
     final_result = await service.discover_opportunities_for_user(user_id)
     assert final_result["metadata"]["scan_state"] == "complete"
