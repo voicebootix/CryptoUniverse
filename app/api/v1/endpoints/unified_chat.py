@@ -47,6 +47,20 @@ class UnifiedChatRequest(BaseModel):
     context: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional context")
 
 
+class UnifiedChatStreamRequest(BaseModel):
+    """Request body for streaming chat responses."""
+
+    message: str = Field(..., description="User's message")
+    session_id: Optional[str] = Field(
+        None,
+        description="Session ID for conversation continuity",
+    )
+    conversation_mode: Optional[str] = Field(
+        "live_trading",
+        description="Mode: live_trading, paper_trading, learning, analysis",
+    )
+
+
 class UnifiedChatResponse(BaseModel):
     """Unified chat response model."""
     success: bool
@@ -220,75 +234,104 @@ async def send_message(
 
 
 # Streaming Chat Endpoint
-@router.get("/stream")
-async def stream_message(
-    message: str = Query(..., description="The user's message"),
-    session_id: Optional[str] = Query(None, description="Session ID for conversation continuity"),
-    conversation_mode: str = Query("live_trading", description="Conversation mode"),
-    current_user: User = Depends(get_current_user_sse)
-):
-    """
-    Stream a chat response for real-time conversation experience.
-    
-    Returns Server-Sent Events (SSE) for streaming responses.
-    Provides natural conversation flow with <100ms latency between chunks.
-    """
+async def _build_streaming_response(
+    *,
+    message: str,
+    session_id: Optional[str],
+    conversation_mode: str,
+    current_user: User,
+) -> StreamingResponse:
+    """Shared implementation for SSE streaming endpoints."""
+
     try:
-        # Validate conversation mode
         try:
             validated_mode = ConversationMode(conversation_mode.lower())
         except ValueError:
             validated_mode = ConversationMode.LIVE_TRADING
-        
+
         async def generate():
             """Generate SSE stream."""
             try:
-                # Generate session ID if not provided
                 actual_session_id = session_id or str(uuid.uuid4())
-                
-                # Await process_message to get the async generator
+
                 generator = await unified_chat_service.process_message(
                     message=message,
                     user_id=str(current_user.id),
                     session_id=actual_session_id,
                     interface=InterfaceType.WEB_CHAT,
                     conversation_mode=validated_mode,
-                    stream=True
+                    stream=True,
                 )
-                
-                # Now iterate over the async generator
+
                 async for chunk in generator:
-                    # Format as SSE
                     data = json.dumps(chunk)
                     yield f"data: {data}\n\n"
-                
-                # Send completion event
+
                 yield f"data: {json.dumps({'type': 'complete'})}\n\n"
-                
+
             except Exception as e:
-                error_data = json.dumps({
-                    "type": "error",
-                    "error": str(e),
-                    "timestamp": datetime.utcnow().isoformat()
-                })
+                error_data = json.dumps(
+                    {
+                        "type": "error",
+                        "error": str(e),
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                )
                 yield f"data: {error_data}\n\n"
-        
+
         return StreamingResponse(
             generate(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"  # Disable Nginx buffering
-            }
+                "X-Accel-Buffering": "no",  # Disable Nginx buffering
+            },
         )
-        
-    except Exception as e:
+
+    except Exception as e:  # pragma: no cover - defensive guard
         logger.exception("Streaming chat failed", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail=str(e),
         )
+
+
+@router.get("/stream")
+async def stream_message(
+    message: str = Query(..., description="The user's message"),
+    session_id: Optional[str] = Query(None, description="Session ID for conversation continuity"),
+    conversation_mode: str = Query("live_trading", description="Conversation mode"),
+    current_user: User = Depends(get_current_user_sse),
+):
+    """
+    Stream a chat response for real-time conversation experience.
+
+    Returns Server-Sent Events (SSE) for streaming responses.
+    Provides natural conversation flow with <100ms latency between chunks.
+    """
+
+    return await _build_streaming_response(
+        message=message,
+        session_id=session_id,
+        conversation_mode=conversation_mode,
+        current_user=current_user,
+    )
+
+
+@router.post("/stream")
+async def stream_message_post(
+    request: UnifiedChatStreamRequest,
+    current_user: User = Depends(get_current_user_sse),
+):
+    """POST variant for SSE streaming to support clients that cannot issue GET requests."""
+
+    return await _build_streaming_response(
+        message=request.message,
+        session_id=request.session_id,
+        conversation_mode=request.conversation_mode or "live_trading",
+        current_user=current_user,
+    )
 
 
 # Chat History
