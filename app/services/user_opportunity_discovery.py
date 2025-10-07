@@ -181,16 +181,24 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
     def _schedule_scan_cleanup(self, user_id: str, task: asyncio.Task) -> None:
         def _cleanup(done: asyncio.Task) -> None:
-            self._scan_tasks.pop(user_id, None)
-            if done.cancelled():
-                return
-            exc = done.exception()
-            if exc:
-                self.logger.warning(
-                    "Opportunity discovery task finished with error",
-                    user_id=user_id,
-                    error=str(exc),
-                )
+            async def _cleanup_async() -> None:
+                async with self._scan_tasks_lock:
+                    current_task = self._scan_tasks.get(user_id)
+                    if current_task is task:
+                        self._scan_tasks.pop(user_id, None)
+
+                if done.cancelled():
+                    return
+
+                exc = done.exception()
+                if exc:
+                    self.logger.warning(
+                        "Opportunity discovery task finished with error",
+                        user_id=user_id,
+                        error=str(exc),
+                    )
+
+            asyncio.create_task(_cleanup_async())
 
         task.add_done_callback(_cleanup)
 
