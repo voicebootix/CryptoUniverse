@@ -202,6 +202,10 @@ class UnifiedChatService(LoggerMixin):
         self._opportunity_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
         self._opportunity_cache_ttl = 300  # 5 minutes
         self._opportunity_progress: Dict[str, Dict[str, Any]] = {}
+        self._opportunity_background_tasks: Dict[str, asyncio.Task] = {}
+        self._opportunity_background_lock = asyncio.Lock()
+        self._opportunity_refresh_poll_interval = 2.0
+        self._opportunity_refresh_max_wait = 90.0
 
         # Personality system from conversational AI
         self.personalities = self._initialize_personalities()
@@ -1332,6 +1336,80 @@ class UnifiedChatService(LoggerMixin):
                 error=str(redis_error),
                 user_id=user_id,
             )
+
+    async def _start_opportunity_discovery_refresh(
+        self,
+        user_id: str,
+        *,
+        force_refresh: bool = False,
+    ) -> None:
+        """Ensure a background opportunity discovery refresh is running."""
+
+        async with self._opportunity_background_lock:
+            existing = self._opportunity_background_tasks.get(user_id)
+            if existing and not existing.done():
+                return
+
+            loop = asyncio.get_running_loop()
+
+            async def _run() -> None:
+                current_force_refresh = force_refresh
+                deadline = loop.time() + self._opportunity_refresh_max_wait
+
+                try:
+                    while True:
+                        try:
+                            result = await self.opportunity_discovery.discover_opportunities_for_user(
+                                user_id=user_id,
+                                force_refresh=current_force_refresh,
+                                include_strategy_recommendations=True,
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:  # pragma: no cover - defensive logging
+                            self.logger.warning(
+                                "Background opportunity discovery refresh failed",
+                                error=str(exc),
+                                user_id=user_id,
+                            )
+                            return
+
+                        current_force_refresh = False
+
+                        partial = False
+                        if isinstance(result, dict):
+                            metadata = result.get("metadata") or {}
+                            scan_state = metadata.get("scan_state") or result.get("scan_state")
+                            opportunities = result.get("opportunities") or []
+                            partial = scan_state in {"pending", "partial"} or not opportunities
+                            await self._cache_opportunities(
+                                user_id,
+                                result,
+                                partial=partial,
+                            )
+
+                        if not partial:
+                            return
+
+                        if loop.time() >= deadline:
+                            self.logger.info(
+                                "Background opportunity discovery refresh reached max wait",
+                                user_id=user_id,
+                            )
+                            return
+
+                        await asyncio.sleep(self._opportunity_refresh_poll_interval)
+                finally:
+                    async with self._opportunity_background_lock:
+                        task_ref = self._opportunity_background_tasks.get(user_id)
+                        if task_ref is asyncio.current_task():
+                            self._opportunity_background_tasks.pop(user_id, None)
+
+            task = asyncio.create_task(
+                _run(),
+                name=f"chat-opportunity-refresh:{user_id}",
+            )
+            self._opportunity_background_tasks[user_id] = task
 
     def _get_placeholder_opportunities(
         self,
@@ -2514,44 +2592,31 @@ class UnifiedChatService(LoggerMixin):
             )
 
             discovery_result: Optional[Dict[str, Any]] = await self._get_cached_opportunities(user_id)
+            if discovery_result is not None and not isinstance(discovery_result, dict):
+                discovery_result = None
 
             if discovery_result is None:
-                try:
-                    discovery_result = await self.opportunity_discovery.discover_opportunities_for_user(
-                        user_id=user_id,
-                        force_refresh=False,
-                        include_strategy_recommendations=True,
-                    )
-                except asyncio.TimeoutError:
-                    self.logger.error(
-                        "Opportunity discovery timed out while requesting cache",
-                        user_id=user_id,
-                    )
-                    discovery_result = None
-                except Exception as exc:
-                    self.logger.error(
-                        "Opportunity discovery call failed",
-                        error=str(exc),
-                        user_id=user_id,
-                        exc_info=True,
-                    )
-                    discovery_result = {
-                        "success": False,
-                        "error": "Opportunity discovery temporarily unavailable. Please try again in a moment.",
-                        "opportunities": [],
-                    }
-
-                if discovery_result is None:
-                    discovery_result = self._get_placeholder_opportunities(user_id)
-
-                if isinstance(discovery_result, dict):
-                    scan_state = discovery_result.get("scan_state")
-                    opportunities_list = discovery_result.get("opportunities") or []
-                    partial = scan_state in {"pending", "partial"} or not opportunities_list
-                    await self._cache_opportunities(user_id, discovery_result, partial=partial)
-
-            if not isinstance(discovery_result, dict):
                 discovery_result = self._get_placeholder_opportunities(user_id)
+                await self._cache_opportunities(
+                    user_id,
+                    discovery_result,
+                    partial=True,
+                )
+                await self._start_opportunity_discovery_refresh(user_id)
+            else:
+                metadata = discovery_result.get("metadata") or {}
+                scan_state = metadata.get("scan_state") or discovery_result.get("scan_state")
+                opportunities_list = discovery_result.get("opportunities") or []
+                partial = scan_state in {"pending", "partial"} or not opportunities_list
+
+                if partial:
+                    await self._start_opportunity_discovery_refresh(user_id)
+                else:
+                    await self._cache_opportunities(
+                        user_id,
+                        discovery_result,
+                        partial=False,
+                    )
 
             context_data["opportunities"] = discovery_result
 

@@ -20,12 +20,6 @@ async def test_gather_opportunity_context_uses_placeholder_and_caches(monkeypatc
     service._redis_initialized = True
     service.redis = None
 
-    placeholder = service._get_placeholder_opportunities("user-test", scan_id="scan-123")
-
-    async def fake_discover(user_id: str, **kwargs):
-        await asyncio.sleep(0)
-        return placeholder
-
     async def slow_optimization(user_id: str, user_config: Dict[str, str]):
         try:
             await asyncio.sleep(5)
@@ -33,10 +27,15 @@ async def test_gather_opportunity_context_uses_placeholder_and_caches(monkeypatc
             raise
 
     scheduled = False
+    refresh_started = False
 
     def record_schedule(user_id: str, user_config: Dict[str, str]) -> None:
         nonlocal scheduled
         scheduled = True
+
+    async def record_refresh(user_id: str, *, force_refresh: bool = False) -> None:
+        nonlocal refresh_started
+        refresh_started = True
 
     session = ChatSession(
         session_id="session-1",
@@ -50,11 +49,9 @@ async def test_gather_opportunity_context_uses_placeholder_and_caches(monkeypatc
         messages=[],
     )
 
-    monkeypatch.setattr(service, "opportunity_discovery", type("_S", (), {
-        "discover_opportunities_for_user": staticmethod(fake_discover)
-    })())
     monkeypatch.setattr(service, "_run_portfolio_optimization", slow_optimization)
     monkeypatch.setattr(service, "_schedule_portfolio_optimization_refresh", record_schedule)
+    monkeypatch.setattr(service, "_start_opportunity_discovery_refresh", record_refresh)
 
     start = asyncio.get_running_loop().time()
     context = await service._gather_context_data(
@@ -68,6 +65,7 @@ async def test_gather_opportunity_context_uses_placeholder_and_caches(monkeypatc
     assert elapsed < 1.2, "gather_context should return immediately with placeholder"
     assert context["opportunities"]["scan_state"] == "pending"
     assert scheduled is True
+    assert refresh_started is True
 
 
 @pytest.mark.asyncio
