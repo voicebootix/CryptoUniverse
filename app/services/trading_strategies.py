@@ -33,7 +33,7 @@ import json
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 import uuid
 import numpy as np
 import pandas as pd
@@ -88,6 +88,17 @@ def _normalize_base_symbol(symbol: str) -> str:
             return normalized[: -len(suffix)]
 
     return normalized
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Coerce the supplied value to ``float`` while tolerating nulls and blanks."""
+
+    try:
+        if value in {None, "", b""}:
+            raise TypeError("missing value")
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 # Platform AI strategy definitions
@@ -288,11 +299,16 @@ class DerivativesEngine(LoggerMixin):
     - Greeks calculation and risk management
     """
     
-    def __init__(self, trade_executor: TradeExecutionService):
+    def __init__(
+        self,
+        trade_executor: TradeExecutionService,
+        price_fetcher: Optional[Callable[[str, str], Awaitable[Dict[str, Any]]]] = None,
+    ):
         self.trade_executor = trade_executor
         self.futures_config = ExchangeConfigurationsFutures()
         self.options_chains = {}
         self.greeks_cache = {}
+        self._price_fetcher = price_fetcher
     
     async def futures_trade(
         self,
@@ -317,7 +333,7 @@ class DerivativesEngine(LoggerMixin):
             
             # Calculate position size with leverage
             position_size = await self._calculate_leveraged_position_size(
-                parameters, exchange, user_id
+                parameters, exchange, user_id, symbol
             )
             
             # Set leverage on exchange
@@ -500,10 +516,11 @@ class DerivativesEngine(LoggerMixin):
         return symbol in config.get("supported_pairs", [])
     
     async def _calculate_leveraged_position_size(
-        self, 
+        self,
         parameters: StrategyParameters,
         exchange: str,
-        user_id: str
+        user_id: str,
+        symbol: str,
     ) -> float:
         """Calculate position size considering leverage and risk management."""
         # Get account balance (would be real API call)
@@ -516,23 +533,27 @@ class DerivativesEngine(LoggerMixin):
         # Get REAL current price for ANY asset - NO HARDCODED VALUES
         try:
             price_data = await self._get_symbol_price(exchange, symbol)
-            current_price = float(price_data.get("price", 0)) if price_data else 0
-            
-            if current_price <= 0:
-                return {
-                    "success": False,
-                    "error": f"Unable to get real price for {symbol}",
-                    "function": "leverage_position"
-                }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": f"Price lookup failed for {symbol}: {str(e)}",
-                "function": "leverage_position"
-            }
-            
-        quantity = position_value / current_price
-        
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.warning(
+                "Price lookup failed for leverage position",
+                symbol=symbol,
+                exchange=exchange,
+                error=str(exc),
+            )
+            return 0.0
+
+        current_price = _safe_float(price_data.get("price")) if price_data else 0.0
+
+        if current_price <= 0:
+            self.logger.warning(
+                "Unable to resolve positive price for leverage position",
+                symbol=symbol,
+                exchange=exchange,
+            )
+            return 0.0
+
+        quantity = position_value / current_price if current_price else 0.0
+
         return round(quantity, 6)
     
     async def _set_leverage(self, symbol: str, leverage: float, exchange: str):
@@ -552,7 +573,29 @@ class DerivativesEngine(LoggerMixin):
         # In production, would place OCO orders for risk management
         self.logger.info(f"Setting risk management for {symbol}")
         return True
-    
+
+    async def _get_symbol_price(self, exchange: str, symbol: str) -> Dict[str, Any]:
+        """Resolve symbol pricing for derivatives calculations with graceful fallbacks."""
+
+        if self._price_fetcher:
+            return await self._price_fetcher(exchange, symbol)
+
+        try:
+            from app.services.unified_price_service import PriceSource, unified_price_service
+
+            normalized = symbol.replace("-", "/")
+            price = await unified_price_service.get_usd_price(normalized, source=PriceSource.AUTO)
+            if price is None:
+                base = _normalize_base_symbol(symbol)
+                price = await unified_price_service.get_usd_price(base, source=PriceSource.AUTO)
+
+            if price is not None:
+                return {"symbol": symbol, "price": price}
+        except Exception as exc:  # pragma: no cover - diagnostic logging only
+            self.logger.debug("Unified price service unavailable for derivatives", error=str(exc))
+
+        return {}
+
     async def _get_options_chain(self, symbol: str, expiry_date: str) -> Dict[str, Any]:
         """Get options chain for symbol and expiry - REAL OPTIONS DATA."""
         try:
@@ -631,7 +674,7 @@ class DerivativesEngine(LoggerMixin):
         # Get REAL current price for Greeks calculation
         try:
             price_data = await self._get_symbol_price("auto", option_contract.get("symbol", "BTC"))
-            s = float(price_data.get("price", 0)) if price_data else 0
+            s = _safe_float(price_data.get("price")) if price_data else 0
             
             if s <= 0:
                 return {"error": "Unable to get real price for Greeks calculation"}
@@ -793,10 +836,16 @@ class SpotAlgorithms(LoggerMixin):
     - Breakout detection with volume confirmation
     """
     
-    def __init__(self, trade_executor: TradeExecutionService, market_analyzer: MarketAnalysisService):
+    def __init__(
+        self,
+        trade_executor: TradeExecutionService,
+        market_analyzer: MarketAnalysisService,
+        price_fetcher: Optional[Callable[[str, str], Awaitable[Dict[str, Any]]]] = None,
+    ):
         self.trade_executor = trade_executor
         self.market_analyzer = market_analyzer
         self.strategy_cache = {}
+        self._price_fetcher = price_fetcher
     
     async def spot_momentum_strategy(
         self,
@@ -1008,7 +1057,30 @@ class SpotAlgorithms(LoggerMixin):
                     "timestamp": datetime.utcnow().isoformat()
                 }
             
-            symbol_data = sr_analysis["data"].get(symbol, {})
+            analysis_root = sr_analysis.get("support_resistance_analysis") or {}
+            detailed_analysis = analysis_root.get("detailed_analysis") or {}
+            legacy_data = sr_analysis.get("data") or {}
+
+            normalized_symbol = symbol.upper()
+            normalized_compact = normalized_symbol.replace("/", "").replace("-", "")
+
+            def _match_symbol(source: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+                for key, value in source.items():
+                    key_upper = str(key).upper()
+                    compact = key_upper.replace("/", "").replace("-", "")
+                    if key_upper == normalized_symbol or compact == normalized_compact:
+                        return value
+                return None
+
+            symbol_data = (
+                detailed_analysis.get(normalized_symbol)
+                or detailed_analysis.get(normalized_compact)
+                or _match_symbol(detailed_analysis)
+                or legacy_data.get(normalized_symbol)
+                or legacy_data.get(normalized_compact)
+                or _match_symbol(legacy_data)
+                or {}
+            )
             # Get REAL current price - NO FALLBACKS
             try:
                 price_data = await self._get_symbol_price("auto", symbol)
@@ -1026,8 +1098,39 @@ class SpotAlgorithms(LoggerMixin):
                     "error": f"Price lookup failed: {str(e)}",
                     "timestamp": datetime.utcnow().isoformat()
                 }
-            resistance_levels = symbol_data.get("resistance_levels", [])
-            support_levels = symbol_data.get("support_levels", [])
+            def _normalize_levels(levels: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                normalized_levels: List[Dict[str, Any]] = []
+                for level in levels or []:
+                    raw_price = level.get("price", level.get("level"))
+                    price = _safe_float(raw_price)
+                    if price <= 0:
+                        continue
+
+                    raw_strength = level.get("strength", 1)
+                    if isinstance(raw_strength, str):
+                        strength_map = {
+                            "very strong": 12,
+                            "strong": 8,
+                            "moderate": 5,
+                            "weak": 3,
+                        }
+                        raw_strength = strength_map.get(raw_strength.lower(), 4)
+
+                    try:
+                        strength = float(raw_strength)
+                    except (TypeError, ValueError):
+                        strength = 4.0
+
+                    normalized_levels.append({
+                        "price": price,
+                        "strength": strength,
+                        **{k: v for k, v in level.items() if k not in {"price", "level", "strength"}},
+                    })
+
+                return normalized_levels
+
+            resistance_levels = _normalize_levels(symbol_data.get("resistance_levels", []))
+            support_levels = _normalize_levels(symbol_data.get("support_levels", []))
             
             # Breakout detection logic
             breakout_signal = await self._detect_breakout(
@@ -1073,6 +1176,31 @@ class SpotAlgorithms(LoggerMixin):
                 "strategy": "breakout",
                 "timestamp": datetime.utcnow().isoformat()
             }
+
+    async def _get_symbol_price(self, exchange: str, symbol: str) -> Dict[str, Any]:
+        """Shared price resolver for spot algorithms."""
+
+        if self._price_fetcher:
+            return await self._price_fetcher(exchange, symbol)
+
+        if hasattr(self.market_analyzer, "_get_symbol_price"):
+            return await self.market_analyzer._get_symbol_price(exchange, symbol)
+
+        try:
+            from app.services.unified_price_service import PriceSource, unified_price_service
+
+            normalized = symbol.replace("-", "/")
+            price = await unified_price_service.get_usd_price(normalized, source=PriceSource.AUTO)
+            if price is None:
+                base = _normalize_base_symbol(symbol)
+                price = await unified_price_service.get_usd_price(base, source=PriceSource.AUTO)
+
+            if price is not None:
+                return {"symbol": symbol, "price": price}
+        except Exception as exc:  # pragma: no cover - diagnostic logging only
+            self.logger.debug("Unified price service unavailable for spot algorithms", error=str(exc))
+
+        return {}
     
     # Helper methods for spot algorithms
     
@@ -1164,8 +1292,12 @@ class TradingStrategiesService(LoggerMixin):
         self.market_analyzer = MarketAnalysisService()
 
         # Initialize strategy engines
-        self.derivatives_engine = DerivativesEngine(self.trade_executor)
-        self.spot_algorithms = SpotAlgorithms(self.trade_executor, self.market_analyzer)
+        self.derivatives_engine = DerivativesEngine(self.trade_executor, self._get_symbol_price)
+        self.spot_algorithms = SpotAlgorithms(
+            self.trade_executor,
+            self.market_analyzer,
+            self._get_symbol_price,
+        )
 
         # Service state
         self.active_strategies = {}
@@ -4138,9 +4270,9 @@ class TradingStrategiesService(LoggerMixin):
                     price_data = await self._get_symbol_price("binance", f"{symbol}USDT")
                 if price_data:
                     universe_data[symbol] = {
-                        "price": float(price_data.get("price", 0)),
-                        "volume_24h": float(price_data.get("volume", 0)),
-                        "change_24h": float(price_data.get("change_24h", 0))
+                        "price": _safe_float(price_data.get("price")),
+                        "volume_24h": _safe_float(price_data.get("volume")),
+                        "change_24h": _safe_float(price_data.get("change_24h")),
                     }
             
             # Calculate relative performance metrics
@@ -4149,7 +4281,8 @@ class TradingStrategiesService(LoggerMixin):
                 if symbol in universe_data:
                     # Mock sophisticated scoring (in reality would use complex models)
                     price_momentum = universe_data[symbol]["change_24h"]
-                    volume_score = min(100, universe_data[symbol]["volume_24h"] / 1000000)  # Volume in millions
+                    base_volume = universe_data[symbol]["volume_24h"]
+                    volume_score = min(100, base_volume / 1_000_000) if base_volume > 0 else 0
                     
                     # Mean reversion score (contrarian)
                     mean_reversion_score = -price_momentum if strategy_type == "mean_reversion" else price_momentum
@@ -4229,7 +4362,7 @@ class TradingStrategiesService(LoggerMixin):
                     "signal": opp["signal"],
                     "allocation_usd": position_size,
                     "weight": 1/max_positions,
-                    "quantity": position_size / opp["current_price"],
+                    "quantity": position_size / opp["current_price"] if opp["current_price"] else 0,
                     "expected_return": opp["score"] * 0.01,  # Convert score to return estimate
                     "risk_contribution": position_size / total_capital
                 }
