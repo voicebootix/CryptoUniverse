@@ -63,6 +63,14 @@ except ImportError:  # pragma: no cover - executed on Python < 3.11
             raise
         finally:
             handle.cancel()
+            if timed_out:
+                try:
+                    await asyncio.sleep(0)
+                except asyncio.CancelledError:
+                    # Clearing the cancellation state mirrors asyncio.timeout's
+                    # behaviour so callers can continue executing after the
+                    # timeout triggers.
+                    pass
 
 
 __all__ = ["async_timeout"]
