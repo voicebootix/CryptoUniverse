@@ -20,7 +20,7 @@ requested delay and translating the resulting ``CancelledError`` into
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import AsyncIterator
 
 
@@ -64,13 +64,11 @@ except ImportError:  # pragma: no cover - executed on Python < 3.11
         finally:
             handle.cancel()
             if timed_out:
-                try:
+                # Clearing the cancellation state mirrors asyncio.timeout's
+                # behaviour so callers can continue executing after the
+                # timeout triggers.
+                with suppress(asyncio.CancelledError):
                     await asyncio.sleep(0)
-                except asyncio.CancelledError:
-                    # Clearing the cancellation state mirrors asyncio.timeout's
-                    # behaviour so callers can continue executing after the
-                    # timeout triggers.
-                    pass
 
 
 __all__ = ["async_timeout"]
