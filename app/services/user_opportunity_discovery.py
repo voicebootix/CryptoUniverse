@@ -867,7 +867,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             # Get user's strategy portfolio
             portfolio_result = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
-            
+
+            if (
+                (not portfolio_result.get("success"))
+                or not portfolio_result.get("active_strategies")
+            ):
+                admin_snapshot = await strategy_marketplace_service.get_admin_portfolio_snapshot(user_id)
+                if admin_snapshot:
+                    portfolio_result = admin_snapshot
+
             if not portfolio_result.get("success"):
                 # Default profile for users with no strategies
                 return UserOpportunityProfile(

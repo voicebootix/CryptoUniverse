@@ -31,8 +31,13 @@ from app.models.user import User
 from app.models.credit import CreditAccount, CreditTransactionType
 from app.models.copy_trading import StrategyPublisher, StrategyPerformance
 from app.services.trading_strategies import trading_strategies_service
-from app.models.strategy_access import UserStrategyAccess
+from app.models.strategy_access import (
+    StrategyAccessType,
+    StrategyType,
+    UserStrategyAccess,
+)
 from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
+from app.utils.asyncio_compat import async_timeout
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -1424,28 +1429,55 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     return {"success": False, "error": "No credit account found"}
                 
                 # Get strategy pricing
+                strategy_snapshot: Dict[str, Any] = {}
+
                 if strategy_id.startswith("ai_"):
                     strategy_func = strategy_id.replace("ai_", "")
                     if strategy_func not in self.ai_strategy_catalog:
                         return {"success": False, "error": "Strategy not found"}
-                    
+
                     config = self.ai_strategy_catalog[strategy_func]
                     # Handle different subscription types
                     if subscription_type in ["monthly", "permanent"]:
                         cost = config["credit_cost_monthly"]
                     else:
                         cost = config["credit_cost_per_execution"]
+
+                    strategy_snapshot = {
+                        "name": config.get("name"),
+                        "category": config.get("category"),
+                        "publisher_name": "CryptoUniverse AI",
+                        "credit_cost_monthly": config.get("credit_cost_monthly"),
+                        "credit_cost_per_execution": config.get("credit_cost_per_execution"),
+                        "risk_level": config.get("risk_level"),
+                        "tier": config.get("tier"),
+                        "min_capital": config.get("min_capital"),
+                    }
                 else:
                     # Community strategy
                     strategy_stmt = select(TradingStrategy).where(TradingStrategy.id == strategy_id)
                     strategy_result = await db.execute(strategy_stmt)
                     strategy = strategy_result.scalar_one_or_none()
-                    
+
                     if not strategy:
                         return {"success": False, "error": "Strategy not found"}
-                    
+
                     cost = self._calculate_strategy_pricing(strategy)
-                
+
+                    strategy_snapshot = {
+                        "name": getattr(strategy, "name", None),
+                        "category": getattr(strategy, "strategy_type", None).value
+                        if getattr(strategy, "strategy_type", None)
+                        else None,
+                        "publisher_name": getattr(strategy, "publisher_name", None),
+                        "credit_cost_monthly": cost,
+                        "credit_cost_per_execution": getattr(
+                            strategy, "credit_cost_per_execution", None
+                        ),
+                        "risk_level": getattr(strategy, "risk_level", None),
+                        "tier": getattr(strategy, "tier", None),
+                    }
+
                 # Check if user has enough credits (skip check for free strategies)
                 if cost > 0 and credit_account.available_credits < cost:
                     return {
@@ -1480,7 +1512,14 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                         return {"success": False, "error": "Insufficient credits"}
                 
                 # Add to user's active strategies
-                await self._add_to_user_strategy_portfolio(user_id, strategy_id, db)
+                await self._add_to_user_strategy_portfolio(
+                    user_id,
+                    strategy_id,
+                    db,
+                    subscription_type=subscription_type,
+                    cost=cost,
+                    strategy_snapshot={k: v for k, v in strategy_snapshot.items() if v is not None},
+                )
                 
                 await db.commit()
                 
@@ -1502,49 +1541,143 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             self.logger.error("Strategy purchase failed", error=str(e))
             return {"success": False, "error": str(e)}
     
-    async def _add_to_user_strategy_portfolio(self, user_id: str, strategy_id: str, db: AsyncSession):
-        """Add strategy to user's active strategy portfolio with enhanced error handling."""
+    async def _add_to_user_strategy_portfolio(
+        self,
+        user_id: str,
+        strategy_id: str,
+        db: AsyncSession,
+        *,
+        subscription_type: str,
+        cost: int,
+        strategy_snapshot: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Persist strategy access and mirror it in Redis when available."""
+
+        from app.services.unified_strategy_service import unified_strategy_service
+
+        # Determine strategy metadata for access record creation.
+        strategy_type = (
+            StrategyType.AI_STRATEGY
+            if strategy_id.startswith("ai_")
+            else StrategyType.COMMUNITY_STRATEGY
+        )
+
+        catalog_snapshot: Dict[str, Any] = {}
+        if strategy_type is StrategyType.AI_STRATEGY:
+            catalog_key = strategy_id.replace("ai_", "", 1)
+            catalog_entry = self.ai_strategy_catalog.get(catalog_key, {})
+            catalog_snapshot = {
+                "name": catalog_entry.get("name"),
+                "category": catalog_entry.get("category"),
+                "tier": catalog_entry.get("tier"),
+                "credit_cost_monthly": catalog_entry.get("credit_cost_monthly"),
+                "credit_cost_per_execution": catalog_entry.get("credit_cost_per_execution"),
+                "risk_level": catalog_entry.get("risk_level"),
+                "min_capital": catalog_entry.get("min_capital"),
+            }
+
+        access_type = (
+            StrategyAccessType.WELCOME
+            if cost == 0 and subscription_type in {"permanent", "welcome"}
+            else StrategyAccessType.PURCHASED
+        )
+
+        metadata: Dict[str, Any] = {
+            "subscription_type": subscription_type,
+            "granted_by": "strategy_marketplace",
+            "strategy_kind": strategy_type.value,
+            "monthly_cost": cost,
+        }
+        for snapshot in (catalog_snapshot, strategy_snapshot or {}):
+            for key, value in snapshot.items():
+                if value is not None:
+                    metadata[key] = value
+        if "publisher_name" not in metadata and strategy_type is StrategyType.AI_STRATEGY:
+            metadata["publisher_name"] = "CryptoUniverse AI"
+
         try:
-            # Store in Redis for quick access
-            from app.core.redis import get_redis_client
-            redis = await get_redis_client()
-            
-            if not redis:
-                self.logger.error("❌ Redis unavailable during strategy provisioning", 
-                                user_id=user_id, strategy_id=strategy_id)
-                raise Exception("Redis unavailable - strategy cannot be provisioned")
-            
-            # Add to user's active strategies set with safe operation
-            result = await self._safe_redis_operation(redis.sadd, f"user_strategies:{user_id}", strategy_id)
-            if result is None:
-                raise Exception("Failed to add strategy to Redis - Redis operation failed")
-            
-            # Verify the strategy was added
-            strategies = await self._safe_redis_operation(redis.smembers, f"user_strategies:{user_id}")
-            if strategies is None:
-                strategies = set()
-            strategy_added = any(
-                (s.decode() if isinstance(s, bytes) else s) == strategy_id 
-                for s in strategies
+            await unified_strategy_service.grant_strategy_access(
+                user_id=str(user_id),
+                strategy_id=strategy_id,
+                strategy_type=strategy_type,
+                access_type=access_type,
+                subscription_type=subscription_type,
+                credits_paid=max(cost, 0),
+                metadata=metadata,
+                db=db,
             )
-            
-            if not strategy_added:
-                raise Exception(f"Strategy {strategy_id} was not successfully added to Redis")
-            
-            # Set expiry for monthly subscriptions (but not for permanent free strategies)
-            free_strategies = ["ai_risk_management", "ai_portfolio_optimization", "ai_spot_momentum_strategy"]
-            if strategy_id not in free_strategies:
-                await redis.expire(f"user_strategies:{user_id}", 30 * 24 * 3600)  # 30 days for paid strategies only
-            
-            self.logger.info("✅ Strategy added to user portfolio successfully", 
-                           user_id=user_id, 
-                           strategy_id=strategy_id,
-                           total_strategies=len(strategies),
-                           is_free_strategy=strategy_id in free_strategies)
-                
-        except Exception as e:
-            self.logger.error("Failed to add strategy to portfolio", user_id=user_id, strategy_id=strategy_id, error=str(e))
-            raise  # Re-raise to ensure purchase_strategy_access knows it failed
+        except Exception as db_error:  # pragma: no cover - defensive
+            self.logger.error(
+                "Failed to persist strategy access record",
+                user_id=user_id,
+                strategy_id=strategy_id,
+                error=str(db_error),
+            )
+            raise
+
+        redis_error: Optional[str] = None
+        redis_snapshot_count: Optional[int] = None
+
+        try:
+            from app.core.redis import get_redis_client
+
+            redis = await get_redis_client()
+        except Exception as redis_exc:  # pragma: no cover - environment specific
+            redis = None
+            redis_error = str(redis_exc)
+            self.logger.warning(
+                "Redis unavailable during strategy provisioning",
+                user_id=user_id,
+                strategy_id=strategy_id,
+                error=str(redis_exc),
+            )
+
+        if redis:
+            key = f"user_strategies:{user_id}"
+            result = await self._safe_redis_operation(redis.sadd, key, strategy_id)
+            if result is None:
+                redis_error = "sadd_failed"
+            else:
+                strategies = await self._safe_redis_operation(redis.smembers, key) or set()
+                decoded = [
+                    s.decode() if isinstance(s, (bytes, bytearray)) else s
+                    for s in strategies
+                ]
+                redis_snapshot_count = len(decoded)
+                if strategy_id not in decoded:
+                    redis_error = "verification_failed"
+                else:
+                    free_strategies = {
+                        "ai_risk_management",
+                        "ai_portfolio_optimization",
+                        "ai_spot_momentum_strategy",
+                    }
+                    if strategy_id not in free_strategies:
+                        await self._safe_redis_operation(
+                            redis.expire,
+                            key,
+                            30 * 24 * 3600,
+                        )
+
+        log_kwargs = {
+            "user_id": user_id,
+            "strategy_id": strategy_id,
+            "subscription_type": subscription_type,
+            "cost": cost,
+            "redis_snapshot": redis_snapshot_count,
+        }
+
+        if redis_error:
+            self.logger.info(
+                "Strategy access stored without Redis cache",
+                redis_error=redis_error,
+                **log_kwargs,
+            )
+        else:
+            self.logger.info(
+                "✅ Strategy added to user portfolio successfully",
+                **log_kwargs,
+            )
     
     async def get_user_strategy_portfolio(self, user_id: str) -> Dict[str, Any]:
         """Get user's purchased/active strategies with enterprise reliability."""
@@ -1552,7 +1685,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         
         # Add method-level timeout for entire operation (increased for Redis reliability)
         try:
-            async with asyncio.timeout(60.0):  # 60 second timeout for entire method
+            async with async_timeout(60.0):  # 60 second timeout for entire method
                 return await self._get_user_strategy_portfolio_impl(user_id)
         except asyncio.TimeoutError:
             self.logger.error("❌ Portfolio fetch timeout", user_id=user_id)
@@ -1640,78 +1773,124 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             self.logger.error("Admin fast path failed", error=str(e))
             raise e
 
+    async def _resolve_admin_portfolio(
+        self,
+        user_id: str,
+        db: Optional[AsyncSession] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return admin fast path portfolio when the user has admin privileges."""
+
+        try:
+            if db is None:
+                async with get_database_session() as session:
+                    return await self._resolve_admin_portfolio(user_id, session)
+
+            from app.models.user import UserRole
+
+            try:
+                parsed_user_id = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+            except ValueError:
+                self.logger.warning(
+                    "Invalid user_id format for admin check", user_id=user_id
+                )
+                parsed_user_id = user_id
+
+            admin_check = await db.execute(
+                select(User.role).where(User.id == parsed_user_id)
+            )
+            user_role = admin_check.scalar_one_or_none()
+
+            self.logger.info(
+                "Admin role check result",
+                user_id=user_id,
+                user_role=user_role,
+                admin_enum=getattr(UserRole, "ADMIN", None),
+            )
+
+            if user_role == getattr(UserRole, "ADMIN", None):
+                self.logger.info("🔧 Using admin fast path for portfolio", user_id=user_id)
+                return await self._get_admin_portfolio_fast_path(user_id, db)
+
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.warning(
+                "Admin portfolio resolution failed",
+                user_id=user_id,
+                error=str(exc),
+            )
+
+        return None
+
+    async def get_admin_portfolio_snapshot(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Public helper so other services can reuse the admin fast path."""
+
+        return await self._resolve_admin_portfolio(user_id)
+
     async def _get_user_strategy_portfolio_impl(self, user_id: str) -> Dict[str, Any]:
         """Actual implementation with enterprise resource management."""
 
         # ADMIN BYPASS: For admin users, check if we should use fast database path
-        try:
-            from app.core.database import get_database_session
-            from app.models.user import User, UserRole
-            from sqlalchemy import select
-
-            async with get_database_session() as db:
-                # Check if this is an admin user (convert string UUID to proper UUID)
-                import uuid
-                try:
-                    user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
-                except ValueError:
-                    self.logger.warning("Invalid user_id format for admin check", user_id=user_id)
-                    user_uuid = user_id  # Use as-is if conversion fails
-
-                admin_check = await db.execute(
-                    select(User.role).where(User.id == user_uuid)
-                )
-                user_role = admin_check.scalar_one_or_none()
-
-                self.logger.info("Admin role check result", user_id=user_id, user_role=user_role, admin_enum=UserRole.ADMIN)
-
-                if user_role == UserRole.ADMIN:
-                    self.logger.info("🔧 Using admin fast path for portfolio", user_id=user_id)
-                    return await self._get_admin_portfolio_fast_path(user_id, db)
-                else:
-                    self.logger.info("Not admin user, using Redis path", user_id=user_id, user_role=user_role)
-        except Exception as e:
-            self.logger.warning("Admin check failed, using normal path", error=str(e))
-
-        redis = None
+        admin_portfolio = await self._resolve_admin_portfolio(user_id)
+        if admin_portfolio is not None:
+            return admin_portfolio
 
         try:
-            # Get Redis with timeout for connection
-            from app.core.redis import get_redis_client
-            redis = await asyncio.wait_for(get_redis_client(), timeout=10.0)
-            
-            if not redis:
-                self.logger.warning("Redis unavailable for strategy portfolio retrieval")
-                return {"success": False, "error": "Redis unavailable"}
-            
-            # Get user's active strategies with comprehensive debugging
+            redis = None
+            raw_strategies: List[Any] = []
+            active_strategies: List[str] = []
             redis_key = f"user_strategies:{user_id}"
-            self.logger.info("🔍 REDIS STRATEGY LOOKUP",
-                           user_id=user_id,
-                           redis_key=redis_key,
-                           redis_available=bool(redis))
-            
-            # Get strategies with timeout to prevent hanging (increased for reliability)
-            active_strategies = await asyncio.wait_for(
-                self._safe_redis_operation(redis.smembers, redis_key),
-                timeout=45.0
-            )
-            if active_strategies is None:
-                active_strategies = set()  # Fallback to empty set if Redis fails
-            raw_strategies = list(active_strategies)  # Store raw for debugging
 
-            # Handle both bytes and string responses from Redis
-            active_strategies = [s.decode() if isinstance(s, bytes) else s for s in active_strategies]
+            try:
+                from app.core.redis import get_redis_client
 
-            self.logger.info(
-                "🔍 REDIS STRATEGY RESULT",
-                user_id=user_id,
-                redis_key=redis_key,
-                raw_count=len(raw_strategies),
-                decoded_count=len(active_strategies),
-                strategies=active_strategies,
-                raw_data=raw_strategies[:5],
-            )  # Show first 5 raw items
+                redis = await asyncio.wait_for(get_redis_client(), timeout=10.0)
+                if not redis:
+                    self.logger.warning(
+                        "Redis unavailable for strategy portfolio retrieval",
+                        user_id=user_id,
+                        redis_available=False,
+                    )
+            except Exception as redis_exc:
+                redis = None
+                self.logger.warning(
+                    "Redis lookup failed for strategy portfolio",
+                    user_id=user_id,
+                    error=str(redis_exc),
+                )
+
+            if redis:
+                self.logger.info(
+                    "🔍 REDIS STRATEGY LOOKUP",
+                    user_id=user_id,
+                    redis_key=redis_key,
+                    redis_available=True,
+                )
+
+                active_strategy_result = await asyncio.wait_for(
+                    self._safe_redis_operation(redis.smembers, redis_key),
+                    timeout=45.0,
+                )
+                if active_strategy_result is None:
+                    active_strategy_result = set()
+                raw_strategies = list(active_strategy_result)
+                active_strategies = [
+                    s.decode() if isinstance(s, bytes) else s
+                    for s in active_strategy_result
+                ]
+
+                self.logger.info(
+                    "🔍 REDIS STRATEGY RESULT",
+                    user_id=user_id,
+                    redis_key=redis_key,
+                    raw_count=len(raw_strategies),
+                    decoded_count=len(active_strategies),
+                    strategies=active_strategies,
+                    raw_data=raw_strategies[:5],
+                )
+            else:
+                self.logger.info(
+                    "Continuing portfolio load without Redis cache",
+                    user_id=user_id,
+                )
 
             # Cross-check Redis portfolio against authoritative database records
             try:
