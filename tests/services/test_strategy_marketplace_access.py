@@ -1,4 +1,3 @@
-import os
 import sys
 import uuid
 from contextlib import asynccontextmanager
@@ -11,23 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-os.environ.setdefault("SECRET_KEY", "test-secret")
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_marketplace_access.db")
-
 pytest.importorskip("aiosqlite")
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
-
-from app.core import redis as redis_module
-from app.models.credit import CreditAccount
-from app.models.strategy_access import (
-    StrategyAccessType,
-    StrategyType,
-    UserStrategyAccess,
-)
-from app.models.user import User, UserRole
-from app.services import strategy_marketplace_service as marketplace_module
-from app.services.strategy_marketplace_service import StrategyMarketplaceService
 
 
 if not hasattr(SQLiteTypeCompiler, "visit_UUID"):
@@ -46,6 +31,39 @@ if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
 @pytest_asyncio.fixture()
 async def marketplace_env(tmp_path, monkeypatch):
     db_path = tmp_path / "marketplace_access.db"
+    monkeypatch.setenv("SECRET_KEY", "test-secret")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
+
+    global redis_module
+    global marketplace_module
+    global StrategyMarketplaceService
+    global CreditAccount
+    global UserStrategyAccess
+    global StrategyAccessType
+    global StrategyType
+    global User
+    global UserRole
+
+    from app.core import redis as redis_module  # type: ignore[assignment]
+    from app.models.credit import CreditAccount as CreditAccountModel
+    from app.models.strategy_access import (
+        StrategyAccessType as StrategyAccessTypeEnum,
+        StrategyType as StrategyTypeEnum,
+        UserStrategyAccess as UserStrategyAccessModel,
+    )
+    from app.models.user import User as UserModel, UserRole as UserRoleEnum
+    from app.services import strategy_marketplace_service as marketplace_module  # type: ignore[assignment]
+    from app.services.strategy_marketplace_service import (
+        StrategyMarketplaceService as StrategyMarketplaceServiceCls,
+    )
+
+    CreditAccount = CreditAccountModel
+    UserStrategyAccess = UserStrategyAccessModel
+    StrategyAccessType = StrategyAccessTypeEnum
+    StrategyType = StrategyTypeEnum
+    User = UserModel
+    UserRole = UserRoleEnum
+    StrategyMarketplaceService = StrategyMarketplaceServiceCls
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", future=True)
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -140,6 +158,10 @@ async def test_purchase_strategy_access_persists_without_redis(marketplace_env):
     access = entries[0]
     assert access.strategy_id == "ai_spot_momentum_strategy"
     assert access.access_type == StrategyAccessType.WELCOME
+    metadata = access.metadata_json or {}
+    assert metadata.get("name") == "AI Momentum Trading"
+    assert metadata.get("publisher_name") == "CryptoUniverse AI"
+    assert metadata.get("credit_cost_monthly") == 0
 
 
 @pytest.mark.asyncio()

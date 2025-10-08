@@ -1429,28 +1429,55 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     return {"success": False, "error": "No credit account found"}
                 
                 # Get strategy pricing
+                strategy_snapshot: Dict[str, Any] = {}
+
                 if strategy_id.startswith("ai_"):
                     strategy_func = strategy_id.replace("ai_", "")
                     if strategy_func not in self.ai_strategy_catalog:
                         return {"success": False, "error": "Strategy not found"}
-                    
+
                     config = self.ai_strategy_catalog[strategy_func]
                     # Handle different subscription types
                     if subscription_type in ["monthly", "permanent"]:
                         cost = config["credit_cost_monthly"]
                     else:
                         cost = config["credit_cost_per_execution"]
+
+                    strategy_snapshot = {
+                        "name": config.get("name"),
+                        "category": config.get("category"),
+                        "publisher_name": "CryptoUniverse AI",
+                        "credit_cost_monthly": config.get("credit_cost_monthly"),
+                        "credit_cost_per_execution": config.get("credit_cost_per_execution"),
+                        "risk_level": config.get("risk_level"),
+                        "tier": config.get("tier"),
+                        "min_capital": config.get("min_capital"),
+                    }
                 else:
                     # Community strategy
                     strategy_stmt = select(TradingStrategy).where(TradingStrategy.id == strategy_id)
                     strategy_result = await db.execute(strategy_stmt)
                     strategy = strategy_result.scalar_one_or_none()
-                    
+
                     if not strategy:
                         return {"success": False, "error": "Strategy not found"}
-                    
+
                     cost = self._calculate_strategy_pricing(strategy)
-                
+
+                    strategy_snapshot = {
+                        "name": getattr(strategy, "name", None),
+                        "category": getattr(strategy, "strategy_type", None).value
+                        if getattr(strategy, "strategy_type", None)
+                        else None,
+                        "publisher_name": getattr(strategy, "publisher_name", None),
+                        "credit_cost_monthly": cost,
+                        "credit_cost_per_execution": getattr(
+                            strategy, "credit_cost_per_execution", None
+                        ),
+                        "risk_level": getattr(strategy, "risk_level", None),
+                        "tier": getattr(strategy, "tier", None),
+                    }
+
                 # Check if user has enough credits (skip check for free strategies)
                 if cost > 0 and credit_account.available_credits < cost:
                     return {
@@ -1491,6 +1518,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                     db,
                     subscription_type=subscription_type,
                     cost=cost,
+                    strategy_snapshot={k: v for k, v in strategy_snapshot.items() if v is not None},
                 )
                 
                 await db.commit()
@@ -1521,6 +1549,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         *,
         subscription_type: str,
         cost: int,
+        strategy_snapshot: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Persist strategy access and mirror it in Redis when available."""
 
@@ -1542,6 +1571,9 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                 "category": catalog_entry.get("category"),
                 "tier": catalog_entry.get("tier"),
                 "credit_cost_monthly": catalog_entry.get("credit_cost_monthly"),
+                "credit_cost_per_execution": catalog_entry.get("credit_cost_per_execution"),
+                "risk_level": catalog_entry.get("risk_level"),
+                "min_capital": catalog_entry.get("min_capital"),
             }
 
         access_type = (
@@ -1550,13 +1582,18 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             else StrategyAccessType.PURCHASED
         )
 
-        metadata = {
+        metadata: Dict[str, Any] = {
             "subscription_type": subscription_type,
             "granted_by": "strategy_marketplace",
             "strategy_kind": strategy_type.value,
+            "monthly_cost": cost,
         }
-        if catalog_snapshot:
-            metadata["catalog_snapshot"] = catalog_snapshot
+        for snapshot in (catalog_snapshot, strategy_snapshot or {}):
+            for key, value in snapshot.items():
+                if value is not None:
+                    metadata[key] = value
+        if "publisher_name" not in metadata and strategy_type is StrategyType.AI_STRATEGY:
+            metadata["publisher_name"] = "CryptoUniverse AI"
 
         try:
             await unified_strategy_service.grant_strategy_access(
