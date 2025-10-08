@@ -33,6 +33,7 @@ from app.models.copy_trading import StrategyPublisher, StrategyPerformance
 from app.services.trading_strategies import trading_strategies_service
 from app.models.strategy_access import UserStrategyAccess
 from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
+from app.utils.asyncio_compat import async_timeout
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -1552,7 +1553,7 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         
         # Add method-level timeout for entire operation (increased for Redis reliability)
         try:
-            async with asyncio.timeout(60.0):  # 60 second timeout for entire method
+            async with async_timeout(60.0):  # 60 second timeout for entire method
                 return await self._get_user_strategy_portfolio_impl(user_id)
         except asyncio.TimeoutError:
             self.logger.error("❌ Portfolio fetch timeout", user_id=user_id)

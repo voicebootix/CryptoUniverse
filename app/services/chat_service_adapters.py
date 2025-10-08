@@ -19,6 +19,7 @@ from app.services.trading_strategies import TradingStrategiesService
 from app.services.portfolio_risk_core import PortfolioRiskService
 from app.services.ai_consensus_core import AIConsensusService
 from app.services.master_controller import MasterSystemController
+from app.utils.asyncio_compat import async_timeout
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -513,12 +514,11 @@ class ChatServiceAdapters:
         """Get comprehensive user strategies summary for chat responses."""
         try:
             # Import here to avoid circular imports
-            import asyncio
             from app.core.database import get_database
             from app.services.strategy_marketplace_service import strategy_marketplace_service
 
             # Get user strategy portfolio with timeout protection
-            async with asyncio.timeout(15.0):  # 15 second timeout
+            async with async_timeout(15.0):  # 15 second timeout
                 portfolio_data = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
 
             if not portfolio_data.get('success', False):
