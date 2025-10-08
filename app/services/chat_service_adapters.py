@@ -10,7 +10,10 @@ import asyncio
 import json
 from datetime import datetime
 from typing import Dict, List, Optional, Any
+
 import structlog
+
+from app.utils.asyncio_compat import async_timeout
 
 from app.core.config import get_settings
 from app.services.market_analysis_core import MarketAnalysisService
@@ -518,7 +521,7 @@ class ChatServiceAdapters:
             from app.services.strategy_marketplace_service import strategy_marketplace_service
 
             # Get user strategy portfolio with timeout protection
-            async with asyncio.timeout(15.0):  # 15 second timeout
+            async with async_timeout(15.0):  # 15 second timeout
                 portfolio_data = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
 
             if not portfolio_data.get('success', False):
