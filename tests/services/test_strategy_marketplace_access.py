@@ -94,6 +94,27 @@ async def _create_user_with_account(session) -> uuid.UUID:
     return user.id
 
 
+async def _create_admin_with_account(session) -> uuid.UUID:
+    admin = User(
+        email=f"admin-{uuid.uuid4()}@example.com",
+        hashed_password="hashed",
+        role=UserRole.ADMIN,
+    )
+    session.add(admin)
+    await session.flush()
+
+    account = CreditAccount(
+        user_id=admin.id,
+        total_credits=500,
+        available_credits=500,
+    )
+    session.add(account)
+    await session.commit()
+    await session.refresh(admin)
+
+    return admin.id
+
+
 @pytest.mark.asyncio()
 async def test_purchase_strategy_access_persists_without_redis(marketplace_env):
     service, SessionLocal = marketplace_env
@@ -147,3 +168,18 @@ async def test_portfolio_fetch_uses_database_when_redis_missing(marketplace_env)
     strategies = portfolio.get("active_strategies", [])
     assert strategies
     assert any(s.get("strategy_id") == "ai_spot_momentum_strategy" for s in strategies)
+
+
+@pytest.mark.asyncio()
+async def test_admin_portfolio_snapshot_returns_strategies(marketplace_env):
+    service, SessionLocal = marketplace_env
+
+    async with SessionLocal() as session:
+        admin_id = await _create_admin_with_account(session)
+
+    snapshot = await service.get_admin_portfolio_snapshot(str(admin_id))
+
+    assert snapshot is not None
+    assert snapshot.get("success") is True
+    assert snapshot.get("total_strategies", 0) > 0
+    assert snapshot.get("active_strategies")

@@ -1736,38 +1736,65 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             self.logger.error("Admin fast path failed", error=str(e))
             raise e
 
+    async def _resolve_admin_portfolio(
+        self,
+        user_id: str,
+        db: Optional[AsyncSession] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Return admin fast path portfolio when the user has admin privileges."""
+
+        try:
+            if db is None:
+                async with get_database_session() as session:
+                    return await self._resolve_admin_portfolio(user_id, session)
+
+            from app.models.user import UserRole
+
+            try:
+                parsed_user_id = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+            except ValueError:
+                self.logger.warning(
+                    "Invalid user_id format for admin check", user_id=user_id
+                )
+                parsed_user_id = user_id
+
+            admin_check = await db.execute(
+                select(User.role).where(User.id == parsed_user_id)
+            )
+            user_role = admin_check.scalar_one_or_none()
+
+            self.logger.info(
+                "Admin role check result",
+                user_id=user_id,
+                user_role=user_role,
+                admin_enum=getattr(UserRole, "ADMIN", None),
+            )
+
+            if user_role == getattr(UserRole, "ADMIN", None):
+                self.logger.info("🔧 Using admin fast path for portfolio", user_id=user_id)
+                return await self._get_admin_portfolio_fast_path(user_id, db)
+
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.warning(
+                "Admin portfolio resolution failed",
+                user_id=user_id,
+                error=str(exc),
+            )
+
+        return None
+
+    async def get_admin_portfolio_snapshot(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Public helper so other services can reuse the admin fast path."""
+
+        return await self._resolve_admin_portfolio(user_id)
+
     async def _get_user_strategy_portfolio_impl(self, user_id: str) -> Dict[str, Any]:
         """Actual implementation with enterprise resource management."""
 
         # ADMIN BYPASS: For admin users, check if we should use fast database path
-        try:
-            from app.core.database import get_database_session
-            from app.models.user import User, UserRole
-            from sqlalchemy import select
-
-            async with get_database_session() as db:
-                # Check if this is an admin user (convert string UUID to proper UUID)
-                import uuid
-                try:
-                    user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
-                except ValueError:
-                    self.logger.warning("Invalid user_id format for admin check", user_id=user_id)
-                    user_uuid = user_id  # Use as-is if conversion fails
-
-                admin_check = await db.execute(
-                    select(User.role).where(User.id == user_uuid)
-                )
-                user_role = admin_check.scalar_one_or_none()
-
-                self.logger.info("Admin role check result", user_id=user_id, user_role=user_role, admin_enum=UserRole.ADMIN)
-
-                if user_role == UserRole.ADMIN:
-                    self.logger.info("🔧 Using admin fast path for portfolio", user_id=user_id)
-                    return await self._get_admin_portfolio_fast_path(user_id, db)
-                else:
-                    self.logger.info("Not admin user, using Redis path", user_id=user_id, user_role=user_role)
-        except Exception as e:
-            self.logger.warning("Admin check failed, using normal path", error=str(e))
+        admin_portfolio = await self._resolve_admin_portfolio(user_id)
+        if admin_portfolio is not None:
+            return admin_portfolio
 
         try:
             redis = None
