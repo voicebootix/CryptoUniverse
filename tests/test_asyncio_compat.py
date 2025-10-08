@@ -6,15 +6,16 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.utils.asyncio_compat import async_timeout
+from app.utils.asyncio_compat import _async_timeout_backport, async_timeout
 
 
 @pytest.mark.asyncio
-async def test_async_timeout_clears_cancelled_state() -> None:
+@pytest.mark.parametrize("timeout_cm", [async_timeout, _async_timeout_backport])
+async def test_async_timeout_clears_cancelled_state(timeout_cm) -> None:
     """After a timeout the surrounding task should not stay cancelled."""
 
     with pytest.raises(asyncio.TimeoutError):
-        async with async_timeout(0.01):
+        async with timeout_cm(0.01):
             await asyncio.sleep(0.05)
 
     try:
@@ -24,14 +25,15 @@ async def test_async_timeout_clears_cancelled_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_timeout_propagates_external_cancellation() -> None:
+@pytest.mark.parametrize("timeout_cm", [async_timeout, _async_timeout_backport])
+async def test_async_timeout_propagates_external_cancellation(timeout_cm) -> None:
     """External cancellation should propagate as ``CancelledError``."""
 
     loop = asyncio.get_running_loop()
     entered = loop.create_future()
 
     async def _runner() -> None:
-        async with async_timeout(5):
+        async with timeout_cm(5):
             entered.set_result(True)
             await asyncio.sleep(10)
 
