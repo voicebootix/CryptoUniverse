@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 import json
 import hashlib
+import time
 from decimal import Decimal
 
 import structlog
@@ -116,6 +117,16 @@ class RealMarketDataService(LoggerMixin):
 
             try:
                 exchange_obj = self.exchanges[exch_name]
+
+                if exch_name == 'kraken':
+                    try:
+                        nonce_value = await self._get_kraken_nonce()
+                        exchange_obj.nonce = lambda: nonce_value
+                    except Exception as nonce_error:
+                        self.logger.warning(
+                            "Kraken nonce generation fallback in use",
+                            error=str(nonce_error)
+                        )
 
                 # Fetch real ticker data
                 ticker = await exchange_obj.fetch_ticker(ccxt_symbol)
@@ -519,6 +530,23 @@ class RealMarketDataService(LoggerMixin):
                 )
         except Exception as e:
             self.logger.debug(f"Failed to cache {key}: {str(e)}")
+
+    async def _get_kraken_nonce(self) -> int:
+        """Generate a Kraken API nonce with Redis coordination and time-based fallback."""
+
+        try:
+            redis = await redis_manager.get_client()
+            if redis:
+                nonce_value = await redis.incr("kraken_nonce")
+                if nonce_value:
+                    return int(nonce_value)
+        except Exception as redis_error:
+            self.logger.warning(
+                "Redis unavailable for Kraken nonce",
+                error=str(redis_error)
+            )
+
+        return int(time.time() * 1000)
 
     async def close(self):
         """Clean up exchange connections."""

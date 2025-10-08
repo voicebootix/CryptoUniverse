@@ -493,7 +493,66 @@ class DerivativesEngine(LoggerMixin):
             }
     
     # Helper methods for derivatives trading
-    
+
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            if value is None:
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    async def _get_symbol_price(self, exchange: str, symbol: str) -> Dict[str, Any]:
+        """Fetch the latest price data for a symbol with resilient fallbacks."""
+
+        normalized_exchange = (exchange or "").strip().lower() or "binance"
+        normalized_symbol = str(symbol or "").strip()
+
+        if not normalized_symbol:
+            return {}
+
+        try:
+            primary_price = await market_analysis_service.get_exchange_price(
+                normalized_exchange,
+                normalized_symbol,
+            )
+            if isinstance(primary_price, dict) and primary_price:
+                return {
+                    "price": self._safe_float(primary_price.get("price")),
+                    "volume": self._safe_float(
+                        primary_price.get("volume") or primary_price.get("volume_24h"),
+                        0.0,
+                    ),
+                    "change_24h": self._safe_float(primary_price.get("change_24h"), 0.0),
+                }
+        except Exception as exc:
+            self.logger.debug(
+                "Primary price lookup failed for derivatives engine",
+                exchange=normalized_exchange,
+                symbol=normalized_symbol,
+                error=str(exc),
+            )
+
+        try:
+            snapshot = await market_data_feeds.get_market_snapshot(normalized_symbol)
+            if snapshot.get("success"):
+                data = snapshot.get("data") or {}
+                return {
+                    "price": self._safe_float(data.get("price")),
+                    "volume": self._safe_float(data.get("volume_24h"), 0.0),
+                    "change_24h": self._safe_float(data.get("change_24h"), 0.0),
+                }
+        except Exception as exc:
+            self.logger.debug(
+                "Fallback price lookup failed for derivatives engine",
+                exchange=normalized_exchange,
+                symbol=normalized_symbol,
+                error=str(exc),
+            )
+
+        return {}
+
     async def _validate_futures_symbol(self, symbol: str, exchange: str) -> bool:
         """Validate if symbol is available for futures trading."""
         config = self.futures_config.BINANCE_FUTURES if exchange == "binance" else {}
@@ -1008,7 +1067,8 @@ class SpotAlgorithms(LoggerMixin):
                     "timestamp": datetime.utcnow().isoformat()
                 }
             
-            symbol_data = sr_analysis["data"].get(symbol, {})
+            sr_data = sr_analysis.get("data", {}) if isinstance(sr_analysis, dict) else {}
+            symbol_data = sr_data.get(symbol, {})
             # Get REAL current price - NO FALLBACKS
             try:
                 price_data = await self._get_symbol_price("auto", symbol)
@@ -2032,6 +2092,20 @@ class TradingStrategiesService(LoggerMixin):
                     ],
                     "timestamp": datetime.utcnow().isoformat()
                 }
+
+        except (TypeError, ValueError, KeyError, AttributeError) as e:
+            self.logger.warning(
+                "Recoverable strategy execution failure",
+                function=function,
+                error=str(e)
+            )
+            strategy_result = {
+                "success": False,
+                "error": str(e),
+                "function": function,
+                "fallback": True,
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
         except Exception as e:
             self.logger.error("Strategy execution failed", error=str(e), exc_info=True)
@@ -4137,10 +4211,31 @@ class TradingStrategiesService(LoggerMixin):
                 if not price_data and reference_exchange != "binance":
                     price_data = await self._get_symbol_price("binance", f"{symbol}USDT")
                 if price_data:
+                    price_value = price_data.get("price", 0)
+                    volume_value = price_data.get("volume", price_data.get("volume_24h", 0))
+                    change_raw = price_data.get("change_24h")
+                    if change_raw is None:
+                        change_24h = 0
+                    else:
+                        try:
+                            change_24h = float(change_raw)
+                        except (TypeError, ValueError):
+                            change_24h = 0
+
+                    try:
+                        price_float = float(price_value or 0)
+                    except (TypeError, ValueError):
+                        price_float = 0.0
+
+                    try:
+                        volume_float = float(volume_value or 0)
+                    except (TypeError, ValueError):
+                        volume_float = 0.0
+
                     universe_data[symbol] = {
-                        "price": float(price_data.get("price", 0)),
-                        "volume_24h": float(price_data.get("volume", 0)),
-                        "change_24h": float(price_data.get("change_24h", 0))
+                        "price": price_float,
+                        "volume_24h": volume_float,
+                        "change_24h": change_24h
                     }
             
             # Calculate relative performance metrics
