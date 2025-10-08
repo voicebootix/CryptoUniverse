@@ -9,6 +9,8 @@ import os
 import sys
 from datetime import datetime
 
+from app.utils.asyncio_compat import async_timeout
+
 # Add app to path
 sys.path.insert(0, '/app')
 
@@ -35,7 +37,7 @@ async def initialize_database():
             
             # First test basic connectivity with a longer timeout
             try:
-                async with asyncio.timeout(120):  # 2 minute timeout for connection test
+                async with async_timeout(120):  # 2 minute timeout for connection test
                     async with engine.connect() as conn:
                         result = await conn.execute(text("SELECT 1"))
                         print("✅ Database connectivity verified")
@@ -52,7 +54,7 @@ async def initialize_database():
             
             # Create all tables with explicit timeout
             try:
-                async with asyncio.timeout(90):  # 90 second timeout for table creation
+                async with async_timeout(90):  # 90 second timeout for table creation
                     async with engine.begin() as conn:
                         await conn.run_sync(Base.metadata.create_all)
                 print("✅ Database tables created")

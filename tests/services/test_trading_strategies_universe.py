@@ -139,3 +139,31 @@ async def test_statistical_arbitrage_dynamic_universe(monkeypatch):
     assert analysis["universe"] == ["ETH", "AVAX"], analysis
     assert analysis["universe_analysis"]["exchanges_scanned"] == ["kraken", "binance"]
     assert analysis["opportunities"], "expected stat-arb opportunities to be generated"
+
+
+@pytest.mark.asyncio
+async def test_statistical_arbitrage_handles_none_market_fields(monkeypatch):
+    exchange_mock = AsyncMock(return_value=["binance"])
+    symbol_mock = AsyncMock(return_value=["BTCUSDT"])
+    monkeypatch.setattr(trading_module.exchange_universe_service, "get_user_exchanges", exchange_mock)
+    monkeypatch.setattr(trading_module.exchange_universe_service, "get_symbol_universe", symbol_mock)
+
+    async def fake_price(exchange: str, symbol: str):
+        return {"price": None, "volume": None, "change_24h": None}
+
+    price_mock = AsyncMock(side_effect=fake_price)
+    monkeypatch.setattr(trading_strategies_service, "_get_symbol_price", price_mock)
+
+    result = await trading_strategies_service.statistical_arbitrage(
+        universe="BTC",
+        parameters={"max_universe": 1},
+        user_id="user-handle",
+    )
+
+    assert result["success"] is True
+    analysis = result["statistical_arbitrage_analysis"]
+    assert analysis["universe"] == ["BTC"]
+    assert analysis["universe_analysis"]["analyzed_symbols"] == 1
+    assert all(
+        _safe_value >= 0 for _safe_value in analysis["universe_analysis"]["performance_scores"]["BTC"].values()
+    )

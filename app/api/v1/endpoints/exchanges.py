@@ -7,9 +7,12 @@ for the AI money manager platform with encrypted storage and security.
 
 import asyncio
 import base64
+import json
+import os
 import threading
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 import structlog
@@ -83,9 +86,13 @@ class KrakenNonceManager:
         self._last_time_sync = 0
         self._redis = None
         self._fallback_nonce = 0
+        self._fallback_nonce_loaded = False
         self._node_id = None
         self._lock = None  # Will be initialized as asyncio.Lock in async context
         self._nonce_key = "kraken:global_nonce"
+        self._fallback_state_path = Path(
+            os.environ.get("KRAKEN_NONCE_STATE_PATH", "/tmp/kraken_nonce_state.json")
+        )
         self._health_metrics = {
             "total_nonces_generated": 0,
             "redis_failures": 0,
@@ -113,6 +120,9 @@ class KrakenNonceManager:
         # Initialize asyncio.Lock if not already done
         if self._lock is None:
             self._lock = asyncio.Lock()
+
+        if not self._fallback_nonce_loaded:
+            await self._load_persisted_fallback_nonce()
     
     async def _sync_server_time(self) -> bool:
         """ENTERPRISE: Distributed server time sync with Redis caching."""
@@ -250,11 +260,12 @@ class KrakenNonceManager:
                 # Ensure it's always greater than previous fallback
                 if fallback_nonce <= self._fallback_nonce:
                     fallback_nonce = self._fallback_nonce + 1
-                    
+
                 self._fallback_nonce = fallback_nonce
-                
+                await self._persist_fallback_nonce(fallback_nonce)
+
                 self.logger.info(
-                    "Enterprise fallback nonce generated", 
+                    "Enterprise fallback nonce generated",
                     nonce=fallback_nonce,
                     base_time_ms=base_time_ms,
                     node_hash=node_hash,
@@ -283,6 +294,32 @@ class KrakenNonceManager:
             "node_id": self._node_id,
             "uptime_seconds": time.time() - (self._health_metrics.get("last_health_check", time.time()))
         }
+
+    async def _load_persisted_fallback_nonce(self) -> None:
+        """Load the persisted fallback nonce from disk to survive restarts."""
+
+        if self._fallback_nonce_loaded:
+            return
+
+        try:
+            if self._fallback_state_path.is_file():
+                raw = json.loads(self._fallback_state_path.read_text())
+                nonce = int(raw.get("nonce", 0))
+                if nonce > self._fallback_nonce:
+                    self._fallback_nonce = nonce
+        except Exception as exc:  # pragma: no cover - best effort logging
+            self.logger.warning("Failed to load persisted Kraken nonce", error=str(exc))
+        finally:
+            self._fallback_nonce_loaded = True
+
+    async def _persist_fallback_nonce(self, nonce: int) -> None:
+        """Persist the fallback nonce to disk so new processes maintain monotonicity."""
+
+        try:
+            self._fallback_state_path.parent.mkdir(parents=True, exist_ok=True)
+            self._fallback_state_path.write_text(json.dumps({"nonce": int(nonce)}))
+        except Exception as exc:  # pragma: no cover - best effort logging
+            self.logger.warning("Failed to persist Kraken nonce", error=str(exc))
 
 # Global nonce manager instance
 kraken_nonce_manager = KrakenNonceManager()

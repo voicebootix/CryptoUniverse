@@ -10,7 +10,9 @@ import asyncio
 import json
 from datetime import datetime
 from typing import Dict, List, Optional, Any
+
 import structlog
+
 
 from app.core.config import get_settings
 from app.services.market_analysis_core import MarketAnalysisService
