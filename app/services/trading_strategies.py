@@ -494,65 +494,6 @@ class DerivativesEngine(LoggerMixin):
     
     # Helper methods for derivatives trading
 
-    @staticmethod
-    def _safe_float(value: Any, default: float = 0.0) -> float:
-        try:
-            if value is None:
-                return default
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    async def _get_symbol_price(self, exchange: str, symbol: str) -> Dict[str, Any]:
-        """Fetch the latest price data for a symbol with resilient fallbacks."""
-
-        normalized_exchange = (exchange or "").strip().lower() or "binance"
-        normalized_symbol = str(symbol or "").strip()
-
-        if not normalized_symbol:
-            return {}
-
-        try:
-            primary_price = await market_analysis_service.get_exchange_price(
-                normalized_exchange,
-                normalized_symbol,
-            )
-            if isinstance(primary_price, dict) and primary_price:
-                return {
-                    "price": self._safe_float(primary_price.get("price")),
-                    "volume": self._safe_float(
-                        primary_price.get("volume") or primary_price.get("volume_24h"),
-                        0.0,
-                    ),
-                    "change_24h": self._safe_float(primary_price.get("change_24h"), 0.0),
-                }
-        except Exception as exc:
-            self.logger.debug(
-                "Primary price lookup failed for derivatives engine",
-                exchange=normalized_exchange,
-                symbol=normalized_symbol,
-                error=str(exc),
-            )
-
-        try:
-            snapshot = await market_data_feeds.get_market_snapshot(normalized_symbol)
-            if snapshot.get("success"):
-                data = snapshot.get("data") or {}
-                return {
-                    "price": self._safe_float(data.get("price")),
-                    "volume": self._safe_float(data.get("volume_24h"), 0.0),
-                    "change_24h": self._safe_float(data.get("change_24h"), 0.0),
-                }
-        except Exception as exc:
-            self.logger.debug(
-                "Fallback price lookup failed for derivatives engine",
-                exchange=normalized_exchange,
-                symbol=normalized_symbol,
-                error=str(exc),
-            )
-
-        return {}
-
     async def _validate_futures_symbol(self, symbol: str, exchange: str) -> bool:
         """Validate if symbol is available for futures trading."""
         config = self.futures_config.BINANCE_FUTURES if exchange == "binance" else {}
@@ -6308,6 +6249,8 @@ class TradingStrategiesService(LoggerMixin):
                     "change_24h": _safe_number(price_payload.get("change_24h"), 0.0),
                     "timestamp": price_payload.get("timestamp", datetime.utcnow().isoformat()),
                 }
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             self.logger.warning(
                 "Primary price fetch failed",
@@ -6331,6 +6274,8 @@ class TradingStrategiesService(LoggerMixin):
                         "change_24h": _safe_number(data.get("change_24h"), 0.0),
                         "timestamp": data.get("timestamp", datetime.utcnow().isoformat()),
                     }
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             self.logger.warning(
                 "Market snapshot fallback failed",

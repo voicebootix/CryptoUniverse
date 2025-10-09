@@ -15,7 +15,7 @@ import ccxt.async_support as ccxt
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Callable
 import json
 import hashlib
 import time
@@ -119,10 +119,28 @@ class RealMarketDataService(LoggerMixin):
                 exchange_obj = self.exchanges[exch_name]
 
                 if exch_name == 'kraken':
+                    def _build_monotonic_nonce(initial_seed: int) -> Callable[[], int]:
+                        last_value = max(int(initial_seed), int(time.time() * 1000))
+
+                        def _next_nonce() -> int:
+                            nonlocal last_value
+                            current = int(time.time() * 1000)
+                            if current <= last_value:
+                                last_value += 1
+                            else:
+                                last_value = current
+                            return last_value
+
+                        return _next_nonce
+
                     try:
-                        nonce_value = await self._get_kraken_nonce()
-                        exchange_obj.nonce = lambda: nonce_value
+                        seed = await self._get_kraken_nonce()
+                        exchange_obj.nonce = _build_monotonic_nonce(int(seed))
+                    except asyncio.CancelledError:
+                        raise
                     except Exception as nonce_error:
+                        fallback_seed = int(time.time() * 1000)
+                        exchange_obj.nonce = _build_monotonic_nonce(fallback_seed)
                         self.logger.warning(
                             "Kraken nonce generation fallback in use",
                             error=str(nonce_error)
