@@ -493,7 +493,7 @@ class DerivativesEngine(LoggerMixin):
             }
     
     # Helper methods for derivatives trading
-    
+
     async def _validate_futures_symbol(self, symbol: str, exchange: str) -> bool:
         """Validate if symbol is available for futures trading."""
         config = self.futures_config.BINANCE_FUTURES if exchange == "binance" else {}
@@ -1008,7 +1008,8 @@ class SpotAlgorithms(LoggerMixin):
                     "timestamp": datetime.utcnow().isoformat()
                 }
             
-            symbol_data = sr_analysis["data"].get(symbol, {})
+            sr_data = sr_analysis.get("data", {}) if isinstance(sr_analysis, dict) else {}
+            symbol_data = sr_data.get(symbol, {})
             # Get REAL current price - NO FALLBACKS
             try:
                 price_data = await self._get_symbol_price("auto", symbol)
@@ -2032,6 +2033,20 @@ class TradingStrategiesService(LoggerMixin):
                     ],
                     "timestamp": datetime.utcnow().isoformat()
                 }
+
+        except (TypeError, ValueError, KeyError, AttributeError) as e:
+            self.logger.warning(
+                "Recoverable strategy execution failure",
+                function=function,
+                error=str(e)
+            )
+            strategy_result = {
+                "success": False,
+                "error": str(e),
+                "function": function,
+                "fallback": True,
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
         except Exception as e:
             self.logger.error("Strategy execution failed", error=str(e), exc_info=True)
@@ -4137,10 +4152,31 @@ class TradingStrategiesService(LoggerMixin):
                 if not price_data and reference_exchange != "binance":
                     price_data = await self._get_symbol_price("binance", f"{symbol}USDT")
                 if price_data:
+                    price_value = price_data.get("price", 0)
+                    volume_value = price_data.get("volume", price_data.get("volume_24h", 0))
+                    change_raw = price_data.get("change_24h")
+                    if change_raw is None:
+                        change_24h = 0
+                    else:
+                        try:
+                            change_24h = float(change_raw)
+                        except (TypeError, ValueError):
+                            change_24h = 0
+
+                    try:
+                        price_float = float(price_value or 0)
+                    except (TypeError, ValueError):
+                        price_float = 0.0
+
+                    try:
+                        volume_float = float(volume_value or 0)
+                    except (TypeError, ValueError):
+                        volume_float = 0.0
+
                     universe_data[symbol] = {
-                        "price": float(price_data.get("price", 0)),
-                        "volume_24h": float(price_data.get("volume", 0)),
-                        "change_24h": float(price_data.get("change_24h", 0))
+                        "price": price_float,
+                        "volume_24h": volume_float,
+                        "change_24h": change_24h
                     }
             
             # Calculate relative performance metrics
@@ -6188,20 +6224,33 @@ class TradingStrategiesService(LoggerMixin):
                     # No recognized suffix found, default to USDT pair
                     normalized_symbol = f"{normalized_symbol}/USDT"
 
+        def _safe_number(value: Any, default: float = 0.0) -> float:
+            try:
+                if value is None:
+                    return default
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
         try:
             price_payload = await market_analysis_service.get_exchange_price(
                 target_exchange,
                 normalized_symbol,
             )
-            if price_payload and price_payload.get("price"):
+            if isinstance(price_payload, dict) and price_payload.get("price") is not None:
                 return {
                     "success": True,
-                    "price": float(price_payload["price"]),
+                    "price": _safe_number(price_payload.get("price"), 0.0),
                     "symbol": normalized_symbol,
-                    "volume": price_payload.get("volume"),
-                    "change_24h": price_payload.get("change_24h"),
+                    "volume": _safe_number(
+                        price_payload.get("volume") or price_payload.get("volume_24h"),
+                        0.0,
+                    ),
+                    "change_24h": _safe_number(price_payload.get("change_24h"), 0.0),
                     "timestamp": price_payload.get("timestamp", datetime.utcnow().isoformat()),
                 }
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             self.logger.warning(
                 "Primary price fetch failed",
@@ -6216,15 +6265,17 @@ class TradingStrategiesService(LoggerMixin):
             if snapshot.get("success"):
                 data = snapshot.get("data", {})
                 price = data.get("price")
-                if price:
+                if price is not None:
                     return {
                         "success": True,
-                        "price": float(price),
+                        "price": _safe_number(price, 0.0),
                         "symbol": normalized_symbol,
-                        "volume": data.get("volume_24h"),
-                        "change_24h": data.get("change_24h"),
+                        "volume": _safe_number(data.get("volume_24h"), 0.0),
+                        "change_24h": _safe_number(data.get("change_24h"), 0.0),
                         "timestamp": data.get("timestamp", datetime.utcnow().isoformat()),
                     }
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             self.logger.warning(
                 "Market snapshot fallback failed",
