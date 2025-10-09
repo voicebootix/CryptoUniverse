@@ -6283,18 +6283,29 @@ class TradingStrategiesService(LoggerMixin):
                     # No recognized suffix found, default to USDT pair
                     normalized_symbol = f"{normalized_symbol}/USDT"
 
+        def _safe_number(value: Any, default: float = 0.0) -> float:
+            try:
+                if value is None:
+                    return default
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
         try:
             price_payload = await market_analysis_service.get_exchange_price(
                 target_exchange,
                 normalized_symbol,
             )
-            if price_payload and price_payload.get("price"):
+            if isinstance(price_payload, dict) and price_payload.get("price") is not None:
                 return {
                     "success": True,
-                    "price": float(price_payload["price"]),
+                    "price": _safe_number(price_payload.get("price"), 0.0),
                     "symbol": normalized_symbol,
-                    "volume": price_payload.get("volume"),
-                    "change_24h": price_payload.get("change_24h"),
+                    "volume": _safe_number(
+                        price_payload.get("volume") or price_payload.get("volume_24h"),
+                        0.0,
+                    ),
+                    "change_24h": _safe_number(price_payload.get("change_24h"), 0.0),
                     "timestamp": price_payload.get("timestamp", datetime.utcnow().isoformat()),
                 }
         except Exception as exc:
@@ -6311,13 +6322,13 @@ class TradingStrategiesService(LoggerMixin):
             if snapshot.get("success"):
                 data = snapshot.get("data", {})
                 price = data.get("price")
-                if price:
+                if price is not None:
                     return {
                         "success": True,
-                        "price": float(price),
+                        "price": _safe_number(price, 0.0),
                         "symbol": normalized_symbol,
-                        "volume": data.get("volume_24h"),
-                        "change_24h": data.get("change_24h"),
+                        "volume": _safe_number(data.get("volume_24h"), 0.0),
+                        "change_24h": _safe_number(data.get("change_24h"), 0.0),
                         "timestamp": data.get("timestamp", datetime.utcnow().isoformat()),
                     }
         except Exception as exc:

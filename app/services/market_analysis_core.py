@@ -1530,8 +1530,8 @@ class MarketAnalysisService(LoggerMixin):
                 )
                 if data:
                     return {
-                        "price": float(data.get("price", 0)),
-                        "volume": float(data.get("volume", 0)),
+                        "price": self._safe_float(data.get("price"), 0.0) or 0.0,
+                        "volume": self._safe_float(data.get("volume"), 0.0) or 0.0,
                         "timestamp": datetime.utcnow().isoformat(),
                     }
 
@@ -1546,9 +1546,9 @@ class MarketAnalysisService(LoggerMixin):
                 if listings:
                     ticker = listings[0]
                     return {
-                        "price": float(ticker.get("lastPrice", 0)),
-                        "volume": float(ticker.get("volume24h", 0)),
-                        "change_24h": float(ticker.get("price24hPcnt", 0)) * 100,
+                        "price": self._safe_float(ticker.get("lastPrice"), 0.0) or 0.0,
+                        "volume": self._safe_float(ticker.get("volume24h"), 0.0) or 0.0,
+                        "change_24h": (self._safe_float(ticker.get("price24hPcnt"), 0.0) or 0.0) * 100,
                         "timestamp": datetime.utcnow().isoformat(),
                     }
 
@@ -1562,9 +1562,9 @@ class MarketAnalysisService(LoggerMixin):
                 if isinstance(data, dict) and data.get("data"):
                     ticker = data["data"][0]
                     return {
-                        "price": float(ticker.get("last", 0)),
-                        "volume": float(ticker.get("vol24h", 0)),
-                        "change_24h": float(ticker.get("chgPct", 0)) * 100,
+                        "price": self._safe_float(ticker.get("last"), 0.0) or 0.0,
+                        "volume": self._safe_float(ticker.get("vol24h"), 0.0) or 0.0,
+                        "change_24h": (self._safe_float(ticker.get("chgPct"), 0.0) or 0.0) * 100,
                         "timestamp": datetime.utcnow().isoformat(),
                     }
 
@@ -1578,9 +1578,9 @@ class MarketAnalysisService(LoggerMixin):
                 ticker = data.get("data") if isinstance(data, dict) else None
                 if ticker:
                     return {
-                        "price": float(ticker.get("close", 0)),
-                        "volume": float(ticker.get("baseVol", 0)),
-                        "change_24h": float(ticker.get("chgRate", 0)) * 100,
+                        "price": self._safe_float(ticker.get("close"), 0.0) or 0.0,
+                        "volume": self._safe_float(ticker.get("baseVol"), 0.0) or 0.0,
+                        "change_24h": (self._safe_float(ticker.get("chgRate"), 0.0) or 0.0) * 100,
                         "timestamp": datetime.utcnow().isoformat(),
                     }
 
@@ -1594,9 +1594,9 @@ class MarketAnalysisService(LoggerMixin):
                 if isinstance(data, list) and data:
                     ticker = data[0]
                     return {
-                        "price": float(ticker.get("last", 0)),
-                        "volume": float(ticker.get("base_volume", 0)),
-                        "change_24h": float(ticker.get("change_percentage", 0)),
+                        "price": self._safe_float(ticker.get("last"), 0.0) or 0.0,
+                        "volume": self._safe_float(ticker.get("base_volume"), 0.0) or 0.0,
+                        "change_24h": self._safe_float(ticker.get("change_percentage"), 0.0) or 0.0,
                         "timestamp": datetime.utcnow().isoformat(),
                     }
 
