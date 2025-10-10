@@ -41,6 +41,9 @@ from app.models.user import User
 from app.services.portfolio_risk_core import portfolio_risk_service
 from sqlalchemy import select
 
+
+PORTFOLIO_FETCH_TIMEOUT_SECONDS = 45.0
+
 settings = get_settings()
 
 
@@ -379,7 +382,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Note: strategy_marketplace_service has its own 60s timeout internally
             portfolio_result = await asyncio.wait_for(
                 strategy_marketplace_service.get_user_strategy_portfolio(user_id),
-                timeout=45.0
+                timeout=PORTFOLIO_FETCH_TIMEOUT_SECONDS
             )
             
             # Cache successful result
@@ -398,7 +401,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self.logger.error("❌ Portfolio fetch TIMEOUT after 45s",
                             user_id=user_id,
                             error=str(e),
-                            timeout_seconds=45.0)
+                            timeout_seconds=PORTFOLIO_FETCH_TIMEOUT_SECONDS)
             
             # Increment circuit breaker
             self._circuit_breaker['failures'] += 1
