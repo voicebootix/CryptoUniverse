@@ -375,11 +375,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 self._circuit_breaker['failures'] = 0
         
         try:
-            # Fetch with timeout (increased to 15s to allow proper strategy loading)
+            # Fetch with timeout (increased to 45s to allow proper strategy loading)
             # Note: strategy_marketplace_service has its own 60s timeout internally
             portfolio_result = await asyncio.wait_for(
-                strategy_marketplace_service.get_user_strategy_portfolio(user_id), 
-                timeout=15.0
+                strategy_marketplace_service.get_user_strategy_portfolio(user_id),
+                timeout=45.0
             )
             
             # Cache successful result
@@ -395,10 +395,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             return portfolio_result
             
         except asyncio.TimeoutError as e:
-            self.logger.error("❌ Portfolio fetch TIMEOUT after 15s", 
-                            user_id=user_id, 
+            self.logger.error("❌ Portfolio fetch TIMEOUT after 45s",
+                            user_id=user_id,
                             error=str(e),
-                            timeout_seconds=15.0)
+                            timeout_seconds=45.0)
             
             # Increment circuit breaker
             self._circuit_breaker['failures'] += 1
