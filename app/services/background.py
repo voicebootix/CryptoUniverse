@@ -990,18 +990,89 @@ class BackgroundServiceManager(LoggerMixin):
     async def _risk_monitor_service(self):
         """Monitor risk levels and trigger alerts."""
         self.logger.info("Risk monitor service started")
-        
+
+        from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+        from app.services.master_controller import MasterSystemController, EmergencyLevel
+
+        portfolio_service = PortfolioRiskServiceExtended()
+        master_controller = MasterSystemController()
+
         while self.running:
             try:
-                # This would monitor portfolio risks
-                risk_thresholds = self.service_configs["risk_thresholds"]
-                
-                # Check for high-risk users
-                # Trigger emergency stops if needed
+                # Ensure redis connection available for coordination
+                if not self.redis:
+                    try:
+                        self.redis = await get_redis_client()
+                    except Exception as redis_error:
+                        self.logger.warning("Risk monitor redis unavailable", error=str(redis_error))
+
+                monitored_users: Set[str] = set()
+                if self.redis:
+                    async for key in self.redis.scan_iter(match="autonomous_active:*", count=20):
+                        try:
+                            decoded = key.decode()
+                        except AttributeError:
+                            decoded = str(key)
+                        monitored_users.add(decoded.split(":")[-1])
+
+                if not monitored_users:
+                    await asyncio.sleep(self.intervals["risk_monitor"])
+                    continue
+
+                for user_id in monitored_users:
+                    try:
+                        # Skip users already halted
+                        if self.redis:
+                            halt_flag = await self.redis.get(f"emergency_halt:{user_id}")
+                            stop_flag = await self.redis.get(f"emergency_stop:{user_id}")
+                            if halt_flag or stop_flag:
+                                continue
+
+                        portfolio_status = await portfolio_service.get_portfolio_status(user_id)
+                        if not portfolio_status.get("success"):
+                            continue
+
+                        snapshot = master_controller._extract_portfolio_snapshot(portfolio_status)
+                        if portfolio_status.get("risk_metrics"):
+                            snapshot["risk_metrics"] = portfolio_status.get("risk_metrics")
+                        if portfolio_status.get("performance_data"):
+                            snapshot["performance_data"] = portfolio_status.get("performance_data")
+
+                        emergency_level = await master_controller.check_emergency_conditions(snapshot)
+                        if emergency_level == EmergencyLevel.NORMAL:
+                            if self.redis:
+                                await self.redis.delete(f"emergency_last_level:{user_id}")
+                            continue
+
+                        last_level_value = None
+                        if self.redis:
+                            last_level_bytes = await self.redis.get(f"emergency_last_level:{user_id}")
+                            if isinstance(last_level_bytes, bytes):
+                                last_level_value = last_level_bytes.decode()
+                            else:
+                                last_level_value = last_level_bytes
+                        if last_level_value == emergency_level.value:
+                            continue
+
+                        await master_controller.execute_emergency_protocol(
+                            user_id=user_id,
+                            level=emergency_level,
+                            portfolio_snapshot=snapshot,
+                        )
+
+                        if self.redis:
+                            await self.redis.set(f"emergency_last_level:{user_id}", emergency_level.value, ex=1800)
+
+                        self.logger.warning(
+                            "Emergency level triggered from background monitor",
+                            user_id=user_id,
+                            level=emergency_level.value,
+                        )
+
                 
             except Exception as e:
                 self.logger.error("Risk monitor error", error=str(e))
-            
+
             await asyncio.sleep(self.intervals["risk_monitor"])
     
     async def _rate_limit_cleanup_service(self):
