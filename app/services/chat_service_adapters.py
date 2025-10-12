@@ -518,9 +518,10 @@ class ChatServiceAdapters:
             import asyncio
             from app.core.database import get_database
             from app.services.strategy_marketplace_service import strategy_marketplace_service
+            from app.utils.asyncio_compat import async_timeout
 
             # Get user strategy portfolio with timeout protection
-            async with asyncio.timeout(15.0):  # 15 second timeout
+            async with async_timeout(15.0):  # 15 second timeout
                 portfolio_data = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
 
             if not portfolio_data.get('success', False):
