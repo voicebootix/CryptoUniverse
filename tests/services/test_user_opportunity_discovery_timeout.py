@@ -19,7 +19,7 @@ from app.services import user_opportunity_discovery as discovery_module
 async def test_portfolio_fetch_waits_for_extended_timeout(monkeypatch):
     """The production regression was caused by a 15s timeout.
 
-    Verify the service now passes the 45s configuration all the way into
+    Verify the service now passes the 65s configuration all the way into
     asyncio.wait_for so the marketplace call can run long enough for the
     14-strategy portfolios that previously timed out."""
 
@@ -49,5 +49,5 @@ async def test_portfolio_fetch_waits_for_extended_timeout(monkeypatch):
     assert result["active_strategies"], "expected the stubbed portfolio to pass through"
     assert (
         captured["timeout"] == discovery_module.PORTFOLIO_FETCH_TIMEOUT_SECONDS
-    ), "the marketplace fetch should wait for the full 45 seconds"
+    ), "the marketplace fetch should wait for the full 65 seconds"
 

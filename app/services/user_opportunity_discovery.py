@@ -44,9 +44,11 @@ from sqlalchemy import select
 
 # Allow the opportunity discovery service to wait long enough for the
 # strategy marketplace service (which can take up to a minute) to respond.
-# This value was raised from 15s -> 45s per the production timeout incident
-# report so user portfolios are consistently loaded before scans begin.
-PORTFOLIO_FETCH_TIMEOUT_SECONDS: float = 45.0
+# This value was raised from 15s -> 65s so our wait is slightly longer than
+# the marketplace service's 60s internal timeout, preventing premature
+# cancellations while still bounding the request time for circuit breaker
+# logic.
+PORTFOLIO_FETCH_TIMEOUT_SECONDS: float = 65.0
 
 settings = get_settings()
 
@@ -382,7 +384,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 self._circuit_breaker['failures'] = 0
         
         try:
-            # Fetch with timeout (increased to 45s to allow proper strategy loading)
+            # Fetch with timeout (increased to 65s to allow proper strategy loading)
             # Note: strategy_marketplace_service has its own 60s timeout internally
             portfolio_result = await asyncio.wait_for(
                 strategy_marketplace_service.get_user_strategy_portfolio(user_id),
@@ -401,11 +403,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self.logger.debug("✅ Portfolio fetched and cached", user_id=user_id)
             return portfolio_result
             
-        except asyncio.TimeoutError as e:
-            self.logger.error("❌ Portfolio fetch TIMEOUT after 45s",
-                            user_id=user_id,
-                            error=str(e),
-                            timeout_seconds=PORTFOLIO_FETCH_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            self.logger.exception(
+                f"❌ Portfolio fetch TIMEOUT after {PORTFOLIO_FETCH_TIMEOUT_SECONDS}s",
+                user_id=user_id,
+                timeout_seconds=PORTFOLIO_FETCH_TIMEOUT_SECONDS,
+            )
             
             # Increment circuit breaker
             self._circuit_breaker['failures'] += 1
