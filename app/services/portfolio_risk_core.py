@@ -2057,7 +2057,7 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
         """Get comprehensive portfolio status for a user using real exchange data."""
         try:
             self.logger.info(f"Getting portfolio status for user {user_id}")
-            
+
             # Get real exchange balances from database
             from app.core.database import AsyncSessionLocal
             from app.models.exchange import ExchangeBalance, ExchangeAccount
@@ -2084,19 +2084,22 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                 
                 total_value_usd = 0.0
                 available_balance_usd = 0.0
+                margin_used_usd = 0.0
                 positions = []
-                
+
                 for balance in balances:
                     usd_value = float(balance.usd_value or 0)
                     total_value_usd += usd_value
-                    
+
                     # Calculate available balance in USD (proportional to total balance)
                     if balance.total_balance and balance.total_balance > 0:
                         available_ratio = float(balance.available_balance) / float(balance.total_balance)
                         available_balance_usd += usd_value * available_ratio
                     else:
                         available_balance_usd += usd_value
-                    
+
+                    margin_used_usd += float(getattr(balance, "margin_used", 0) or 0)
+
                     positions.append({
                         "symbol": balance.symbol,
                         "name": balance.symbol,  # Could enhance with full name lookup
@@ -2111,28 +2114,74 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                 # Calculate P&L metrics using real data
                 daily_pnl, daily_pnl_pct = await self.calculate_daily_pnl(user_id, total_value_usd)
                 total_pnl, total_pnl_pct = await self.calculate_total_pnl(user_id, positions)
-                
-                portfolio_data = {
-                    "portfolio": {
-                        "total_value_usd": total_value_usd,
-                        "available_balance": available_balance_usd,
-                        "positions": positions,
-                        "daily_pnl": daily_pnl,
-                        "daily_pnl_pct": daily_pnl_pct,
-                        "total_pnl": total_pnl,
-                        "total_pnl_pct": total_pnl_pct,
-                        "margin_used": 0.0,  # Would need margin account data
-                        "margin_available": available_balance_usd,
-                        "risk_score": 25.0,  # Conservative default
-                        "active_orders": 0  # Would need open orders data
-                    }
+
+                # Derive core portfolio metrics used by emergency logic
+                margin_available_usd = max(total_value_usd - margin_used_usd, 0.0) if total_value_usd else available_balance_usd
+                margin_usage_pct = (margin_used_usd / (margin_used_usd + margin_available_usd) * 100) if (margin_used_usd + margin_available_usd) > 0 else 0.0
+                initial_daily_value_usd = total_value_usd - daily_pnl
+
+                # Compute extended risk metrics once to avoid recalculating downstream
+                risk_metrics = await self.calculate_portfolio_volatility_risk(user_id, balances)
+
+                performance_result = await self.portfolio_performance_analysis(
+                    user_id=user_id,
+                    timeframe="daily",
+                    current_portfolio_value=total_value_usd,
+                    daily_pnl=daily_pnl,
+                    daily_pnl_pct=daily_pnl_pct,
+                    total_pnl=total_pnl,
+                    total_pnl_pct=total_pnl_pct,
+                )
+                performance_data = performance_result.get("performance_analysis", {}) if performance_result.get("success") else {}
+
+                portfolio_metrics = {
+                    "total_value_usd": total_value_usd,
+                    "available_balance_usd": available_balance_usd,
+                    "positions": positions,
+                    "daily_pnl_usd": daily_pnl,
+                    "daily_pnl_percentage": daily_pnl_pct,
+                    "total_pnl_usd": total_pnl,
+                    "total_pnl_percentage": total_pnl_pct,
+                    "margin_used_usd": margin_used_usd,
+                    "margin_available_usd": margin_available_usd,
+                    "margin_usage_percentage": margin_usage_pct,
+                    "initial_daily_value_usd": initial_daily_value_usd,
+                    "risk_score": risk_metrics.get("overall_risk_score"),
+                    "active_orders": 0,
+                    "average_leverage": performance_data.get("average_leverage", 1.0),
+                    "cash_reserve_pct": (available_balance_usd / total_value_usd * 100) if total_value_usd > 0 else 0.0,
                 }
-                
+
+                portfolio_snapshot = {
+                    "portfolio_metrics": portfolio_metrics,
+                    "risk_metrics": risk_metrics,
+                    "performance_data": performance_data,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+
+                # Maintain backwards compatibility with legacy callers expecting "portfolio"
+                legacy_portfolio = {
+                    "total_value_usd": total_value_usd,
+                    "available_balance": available_balance_usd,
+                    "positions": positions,
+                    "daily_pnl": daily_pnl,
+                    "daily_pnl_pct": daily_pnl_pct,
+                    "total_pnl": total_pnl,
+                    "total_pnl_pct": total_pnl_pct,
+                    "margin_used": margin_used_usd,
+                    "margin_available": margin_available_usd,
+                    "risk_score": risk_metrics.get("overall_risk_score", 0),
+                    "active_orders": 0,
+                }
+
                 return {
                     "success": True,
-                    **portfolio_data
+                    "portfolio": legacy_portfolio,
+                    "portfolio_snapshot": portfolio_snapshot,
+                    "risk_metrics": risk_metrics,
+                    "performance_data": performance_data,
                 }
-                
+
         except Exception as e:
             self.logger.error(f"Failed to get portfolio status for user {user_id}", error=str(e))
             return {
@@ -2151,6 +2200,159 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                     "risk_score": 0.0,
                     "active_orders": 0
                 }
+            }
+
+    async def portfolio_performance_analysis(
+        self,
+        user_id: str,
+        timeframe: str = "daily",
+        current_portfolio_value: Optional[float] = None,
+        daily_pnl: Optional[float] = None,
+        daily_pnl_pct: Optional[float] = None,
+        total_pnl: Optional[float] = None,
+        total_pnl_pct: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Enterprise portfolio performance analytics used for emergency detection."""
+
+        try:
+            from app.core.database import AsyncSessionLocal
+            from app.models.trading import Trade, Portfolio
+            from sqlalchemy import select, and_
+
+            timeframe = (timeframe or "daily").lower()
+            now = datetime.utcnow()
+            if timeframe == "weekly":
+                start_window = now - timedelta(days=7)
+            elif timeframe == "monthly":
+                start_window = now - timedelta(days=30)
+            else:
+                start_window = now - timedelta(days=1)
+
+            async with AsyncSessionLocal() as db:
+                trade_stmt = (
+                    select(
+                        Trade.profit_realized_usd,
+                        Trade.executed_at,
+                        Trade.status,
+                        Trade.is_simulation,
+                    )
+                    .where(
+                        and_(
+                            Trade.user_id == user_id,
+                            Trade.executed_at.isnot(None),
+                            Trade.executed_at >= start_window,
+                        )
+                    )
+                    .order_by(Trade.executed_at.desc())
+                )
+                trade_result = await db.execute(trade_stmt)
+                trades = trade_result.fetchall()
+
+                realized_pnls: List[float] = [
+                    float(row.profit_realized_usd or 0) for row in reversed(trades)
+                ]
+
+                # Determine the current loss streak by walking the most recent trades
+                consecutive_losses = 0
+                for trade_row in trades:
+                    profit = float(trade_row.profit_realized_usd or 0)
+                    if profit < 0:
+                        consecutive_losses += 1
+                        continue
+                    break
+
+                # Determine the maximum loss streak across the window chronologically
+                max_consecutive_losses = 0
+                running_streak = 0
+                for profit in realized_pnls:
+                    if profit < 0:
+                        running_streak += 1
+                        max_consecutive_losses = max(max_consecutive_losses, running_streak)
+                    elif profit > 0:
+                        running_streak = 0
+                    else:
+                        running_streak = 0
+
+                total_realized_pnl = sum(realized_pnls)
+                winning_trades = len([p for p in realized_pnls if p > 0])
+                losing_trades = len([p for p in realized_pnls if p < 0])
+                total_trades = len(realized_pnls)
+                win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
+
+                largest_loss = min(realized_pnls) if realized_pnls else 0.0
+                largest_gain = max(realized_pnls) if realized_pnls else 0.0
+                average_trade_pnl = (total_realized_pnl / total_trades) if total_trades > 0 else 0.0
+
+                # Portfolio drawdown analysis using historical snapshots
+                portfolio_stmt = (
+                    select(Portfolio.total_value_usd, Portfolio.created_at)
+                    .where(
+                        and_(
+                            Portfolio.user_id == user_id,
+                            Portfolio.created_at >= start_window,
+                        )
+                    )
+                    .order_by(Portfolio.created_at.asc())
+                )
+                portfolio_result = await db.execute(portfolio_stmt)
+                portfolio_points = portfolio_result.fetchall()
+
+                peak_value = 0.0
+                max_drawdown_pct = 0.0
+                current_drawdown_pct = 0.0
+                if portfolio_points:
+                    for value, _ in portfolio_points:
+                        value_float = float(value or 0)
+                        if value_float > peak_value:
+                            peak_value = value_float
+                        if peak_value > 0:
+                            drawdown_pct = (peak_value - value_float) / peak_value * 100
+                            max_drawdown_pct = max(max_drawdown_pct, drawdown_pct)
+                    latest_value = float(portfolio_points[-1][0] or 0)
+                    if peak_value > 0:
+                        current_drawdown_pct = (peak_value - latest_value) / peak_value * 100
+
+                current_value = current_portfolio_value if current_portfolio_value is not None else (float(portfolio_points[-1][0]) if portfolio_points else 0.0)
+                inferred_leverage = 1.0
+                if current_value and total_trades > 0 and current_value > 0:
+                    mean_pnl = total_realized_pnl / total_trades
+                    pnl_variance = sum((p - mean_pnl) ** 2 for p in realized_pnls) / total_trades if total_trades > 0 else 0.0
+                    pnl_std = pnl_variance ** 0.5
+                    baseline = max(current_value * 0.01, 1e-9)
+                    inferred_leverage = max(1.0, min(10.0, 1.0 + pnl_std / baseline))
+
+                performance_analysis = {
+                    "timeframe": timeframe,
+                    "trades_analyzed": total_trades,
+                    "realized_pnl_usd": total_realized_pnl,
+                    "win_rate_percentage": win_rate,
+                    "winning_trades": winning_trades,
+                    "losing_trades": losing_trades,
+                    "largest_loss_usd": largest_loss,
+                    "largest_gain_usd": largest_gain,
+                    "average_trade_pnl_usd": average_trade_pnl,
+                    "consecutive_losses": consecutive_losses,
+                    "max_consecutive_losses": max_consecutive_losses,
+                    "daily_pnl_usd": daily_pnl if daily_pnl is not None else total_realized_pnl,
+                    "daily_pnl_percentage": daily_pnl_pct if daily_pnl_pct is not None else 0.0,
+                    "total_pnl_usd": total_pnl if total_pnl is not None else total_realized_pnl,
+                    "total_pnl_percentage": total_pnl_pct if total_pnl_pct is not None else 0.0,
+                    "current_drawdown_percentage": current_drawdown_pct,
+                    "max_drawdown_percentage": max_drawdown_pct,
+                    "average_leverage": inferred_leverage,
+                }
+
+                return {
+                    "success": True,
+                    "performance_analysis": performance_analysis,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+
+        except Exception as e:
+            self.logger.error("Portfolio performance analysis failed", user_id=user_id, error=str(e), exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
             }
     
     async def calculate_daily_pnl(self, user_id: str, current_portfolio_value: float) -> tuple[float, float]:
