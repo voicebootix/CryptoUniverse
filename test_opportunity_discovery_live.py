@@ -1,22 +1,44 @@
 #!/usr/bin/env python3
 """
 Test opportunity discovery on live deployment
+
+Required Environment Variables:
+- TEST_ADMIN_EMAIL: Admin email for testing
+- TEST_ADMIN_PASSWORD: Admin password for testing
+
+Usage:
+    export TEST_ADMIN_EMAIL="admin@cryptouniverse.com"
+    export TEST_ADMIN_PASSWORD="AdminPass123!"
+    python3 test_opportunity_discovery_live.py
 """
 
+import os
 import requests
 import json
 import time
+import sys
 
 def test_opportunity_discovery_live():
     """Test opportunity discovery on live deployment"""
+    
+    # Check for required environment variables
+    admin_email = os.environ.get("TEST_ADMIN_EMAIL")
+    admin_password = os.environ.get("TEST_ADMIN_PASSWORD")
+    
+    if not admin_email or not admin_password:
+        print("❌ Missing required environment variables!")
+        print("Please set the following environment variables:")
+        print("  export TEST_ADMIN_EMAIL='admin@cryptouniverse.com'")
+        print("  export TEST_ADMIN_PASSWORD='AdminPass123!'")
+        sys.exit(1)
     
     base_url = "https://cryptouniverse.onrender.com/api/v1"
     
     # Login
     print("🔐 Logging in...")
     login_data = {
-        "email": "admin@cryptouniverse.com", 
-        "password": "AdminPass123!"
+        "email": admin_email, 
+        "password": admin_password
     }
     
     response = requests.post(f"{base_url}/auth/login", json=login_data, timeout=30)
