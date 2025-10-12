@@ -17,6 +17,8 @@ import requests
 import json
 import time
 import sys
+import logging
+import traceback
 
 def test_opportunity_discovery_live():
     """Test opportunity discovery on live deployment"""
@@ -74,8 +76,19 @@ def test_opportunity_discovery_live():
         else:
             print(f"   Error: {portfolio_response.text[:200]}")
             
+    except requests.exceptions.Timeout:
+        print(f"   ❌ Request timeout - portfolio endpoint took too long to respond")
+    except requests.exceptions.ConnectionError as e:
+        print(f"   ❌ Connection error - could not reach portfolio endpoint: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"   ❌ Request failed: {e}")
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"   ❌ Response parsing error: {e}")
+        print(f"   Raw response: {portfolio_response.text[:200] if 'portfolio_response' in locals() else 'N/A'}")
     except Exception as e:
-        print(f"   Exception: {e}")
+        print(f"   ❌ Unexpected error in portfolio test: {e}")
+        print(f"   Traceback: {traceback.format_exc()}")
+        raise
     
     # Test 2: Test opportunity discovery endpoint directly
     print(f"\n2️⃣ Testing opportunity discovery endpoint...")
@@ -136,8 +149,19 @@ def test_opportunity_discovery_live():
                         print(f"      {strategy_id}: {opportunities_found} opportunities, success={success}, error={error}")
         else:
             print(f"   Error: {discover_response.text}")
+    except requests.exceptions.Timeout:
+        print(f"   ❌ Request timeout - opportunity discovery endpoint took too long to respond")
+    except requests.exceptions.ConnectionError as e:
+        print(f"   ❌ Connection error - could not reach opportunity discovery endpoint: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"   ❌ Request failed: {e}")
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"   ❌ Response parsing error: {e}")
+        print(f"   Raw response: {discover_response.text[:200] if 'discover_response' in locals() else 'N/A'}")
     except Exception as e:
-        print(f"   Exception: {e}")
+        print(f"   ❌ Unexpected error in opportunity discovery test: {e}")
+        print(f"   Traceback: {traceback.format_exc()}")
+        raise
     
     # Test 3: Test chat opportunity discovery
     print(f"\n3️⃣ Testing chat opportunity discovery...")
@@ -186,8 +210,19 @@ def test_opportunity_discovery_live():
                 print(f"   ❌ Chat found no opportunities")
         else:
             print(f"   Error: {chat_response.text}")
+    except requests.exceptions.Timeout:
+        print(f"   ❌ Request timeout - chat endpoint took too long to respond")
+    except requests.exceptions.ConnectionError as e:
+        print(f"   ❌ Connection error - could not reach chat endpoint: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"   ❌ Request failed: {e}")
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"   ❌ Response parsing error: {e}")
+        print(f"   Raw response: {chat_response.text[:200] if 'chat_response' in locals() else 'N/A'}")
     except Exception as e:
-        print(f"   Exception: {e}")
+        print(f"   ❌ Unexpected error in chat test: {e}")
+        print(f"   Traceback: {traceback.format_exc()}")
+        raise
     
     # Test 4: Check admin strategy access
     print(f"\n4️⃣ Testing admin strategy access...")
@@ -207,8 +242,19 @@ def test_opportunity_discovery_live():
             print(f"   Active strategies: {admin_data.get('active_strategies', 0)}")
         else:
             print(f"   Error: {admin_status_response.text}")
+    except requests.exceptions.Timeout:
+        print(f"   ❌ Request timeout - admin status endpoint took too long to respond")
+    except requests.exceptions.ConnectionError as e:
+        print(f"   ❌ Connection error - could not reach admin status endpoint: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"   ❌ Request failed: {e}")
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"   ❌ Response parsing error: {e}")
+        print(f"   Raw response: {admin_status_response.text[:200] if 'admin_status_response' in locals() else 'N/A'}")
     except Exception as e:
-        print(f"   Exception: {e}")
+        print(f"   ❌ Unexpected error in admin status test: {e}")
+        print(f"   Traceback: {traceback.format_exc()}")
+        raise
     
     print(f"\n{'='*60}")
     print("📊 ANALYSIS SUMMARY:")
