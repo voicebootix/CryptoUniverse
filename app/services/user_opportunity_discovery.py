@@ -42,7 +42,11 @@ from app.services.portfolio_risk_core import portfolio_risk_service
 from sqlalchemy import select
 
 
-PORTFOLIO_FETCH_TIMEOUT_SECONDS = 45.0
+# Allow the opportunity discovery service to wait long enough for the
+# strategy marketplace service (which can take up to a minute) to respond.
+# This value was raised from 15s -> 45s per the production timeout incident
+# report so user portfolios are consistently loaded before scans begin.
+PORTFOLIO_FETCH_TIMEOUT_SECONDS: float = 45.0
 
 settings = get_settings()
 
