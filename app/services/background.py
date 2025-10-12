@@ -1068,6 +1068,12 @@ class BackgroundServiceManager(LoggerMixin):
                             user_id=user_id,
                             level=emergency_level.value,
                         )
+                    except Exception:
+                        self.logger.exception(
+                            "Failed to evaluate portfolio risk in background monitor",
+                            extra={"user_id": user_id},
+                        )
+                        continue
 
                 
             except Exception as e:

@@ -2248,32 +2248,30 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                 trade_result = await db.execute(trade_stmt)
                 trades = trade_result.fetchall()
 
-                realized_pnls: List[float] = []
+                realized_pnls: List[float] = [
+                    float(row.profit_realized_usd or 0) for row in reversed(trades)
+                ]
+
+                # Determine the current loss streak by walking the most recent trades
                 consecutive_losses = 0
-                max_consecutive_losses = 0
-                current_streak = 0
-                streak_is_loss = False
-
-                for row in reversed(trades):
-                    profit = float(row.profit_realized_usd or 0)
-                    realized_pnls.append(profit)
-
                 for trade_row in trades:
                     profit = float(trade_row.profit_realized_usd or 0)
                     if profit < 0:
                         consecutive_losses += 1
-                        current_streak = current_streak + 1 if streak_is_loss else 1
-                        streak_is_loss = True
+                        continue
+                    break
+
+                # Determine the maximum loss streak across the window chronologically
+                max_consecutive_losses = 0
+                running_streak = 0
+                for profit in realized_pnls:
+                    if profit < 0:
+                        running_streak += 1
+                        max_consecutive_losses = max(max_consecutive_losses, running_streak)
                     elif profit > 0:
-                        consecutive_losses = 0
-                        if streak_is_loss:
-                            max_consecutive_losses = max(max_consecutive_losses, current_streak)
-                        streak_is_loss = False
-                        current_streak = 1
+                        running_streak = 0
                     else:
-                        streak_is_loss = False
-                        current_streak = 0
-                    max_consecutive_losses = max(max_consecutive_losses, consecutive_losses, current_streak if streak_is_loss else 0)
+                        running_streak = 0
 
                 total_realized_pnl = sum(realized_pnls)
                 winning_trades = len([p for p in realized_pnls if p > 0])
