@@ -15,6 +15,7 @@ from app.core.logging import LoggerMixin
 from app.core.config import get_settings
 from app.core.redis_manager import get_redis_manager
 from app.core.redis import get_redis_client
+from app.services.state_coordinator import resilient_state_coordinator
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from app.models.user import User
@@ -990,18 +991,131 @@ class BackgroundServiceManager(LoggerMixin):
     async def _risk_monitor_service(self):
         """Monitor risk levels and trigger alerts."""
         self.logger.info("Risk monitor service started")
-        
+
+        from app.services.portfolio_risk_core import PortfolioRiskServiceExtended
+        from app.services.master_controller import MasterSystemController, EmergencyLevel
+
+        portfolio_service = PortfolioRiskServiceExtended()
+        master_controller = MasterSystemController()
+
         while self.running:
             try:
-                # This would monitor portfolio risks
-                risk_thresholds = self.service_configs["risk_thresholds"]
-                
-                # Check for high-risk users
-                # Trigger emergency stops if needed
+                # Ensure redis connection available for coordination
+                if not self.redis:
+                    try:
+                        self.redis = await get_redis_client()
+                    except Exception as redis_error:
+                        self.logger.warning("Risk monitor redis unavailable", error=str(redis_error))
+
+                monitored_users: Set[str] = set()
+                if self.redis:
+                    try:
+                        async for key in self.redis.scan_iter(match="autonomous_active:*", count=20):
+                            try:
+                                decoded = key.decode()
+                            except AttributeError:
+                                decoded = str(key)
+                            monitored_users.add(decoded.split(":")[-1])
+                    except Exception as redis_error:
+                        self.logger.warning("Risk monitor redis scan failed", error=str(redis_error))
+                        self.redis = None
+
+                if not monitored_users:
+                    fallback_users = await resilient_state_coordinator.list_keys("autonomous_active")
+                    monitored_users.update(fallback_users)
+
+                if not monitored_users:
+                    await asyncio.sleep(self.intervals["risk_monitor"])
+                    continue
+
+                for user_id in monitored_users:
+                    try:
+                        # Skip users already halted
+                        halt_flag = None
+                        stop_flag = None
+                        if self.redis:
+                            try:
+                                halt_flag = await self.redis.get(f"emergency_halt:{user_id}")
+                                stop_flag = await self.redis.get(f"emergency_stop:{user_id}")
+                            except Exception as redis_error:
+                                self.logger.warning("Risk monitor redis get failed", error=str(redis_error))
+                                self.redis = None
+                                halt_flag = None
+                                stop_flag = None
+                        if not halt_flag and not stop_flag:
+                            fallback_flag = await resilient_state_coordinator.any_active(
+                                [("emergency_halt", user_id), ("emergency_stop", user_id)]
+                            )
+                            if fallback_flag:
+                                continue
+                        else:
+                            continue
+
+                        portfolio_status = await portfolio_service.get_portfolio_status(user_id)
+                        if not portfolio_status.get("success"):
+                            continue
+
+                        snapshot = master_controller._extract_portfolio_snapshot(portfolio_status)
+                        if portfolio_status.get("risk_metrics"):
+                            snapshot["risk_metrics"] = portfolio_status.get("risk_metrics")
+                        if portfolio_status.get("performance_data"):
+                            snapshot["performance_data"] = portfolio_status.get("performance_data")
+
+                        emergency_level = await master_controller.check_emergency_conditions(snapshot)
+                        if emergency_level == EmergencyLevel.NORMAL:
+                            if self.redis:
+                                await self.redis.delete(f"emergency_last_level:{user_id}")
+                            continue
+
+                        last_level_value = None
+                        if self.redis:
+                            try:
+                                last_level_bytes = await self.redis.get(f"emergency_last_level:{user_id}")
+                                if isinstance(last_level_bytes, bytes):
+                                    last_level_value = last_level_bytes.decode()
+                                else:
+                                    last_level_value = last_level_bytes
+                            except Exception as redis_error:
+                                self.logger.warning("Risk monitor redis read failed for last level", error=str(redis_error))
+                                self.redis = None
+                                last_level_value = None
+                        if last_level_value is None:
+                            last_level_value = await resilient_state_coordinator.get_value("emergency_last_level", user_id)
+                        if last_level_value == emergency_level.value:
+                            continue
+
+                        await master_controller.execute_emergency_protocol(
+                            user_id=user_id,
+                            level=emergency_level,
+                            portfolio_snapshot=snapshot,
+                        )
+
+                        if self.redis:
+                            try:
+                                await self.redis.set(f"emergency_last_level:{user_id}", emergency_level.value, ex=1800)
+                            except Exception as redis_error:
+                                self.logger.warning("Risk monitor redis write failed", error=str(redis_error))
+                                self.redis = None
+                        await resilient_state_coordinator.cache_value(
+                            "emergency_last_level", user_id, emergency_level.value, ttl=1800
+                        )
+
+                        self.logger.warning(
+                            "Emergency level triggered from background monitor",
+                            user_id=user_id,
+                            level=emergency_level.value,
+                        )
+                    except Exception:
+                        self.logger.exception(
+                            "Failed to evaluate portfolio risk in background monitor",
+                            extra={"user_id": user_id},
+                        )
+                        continue
+
                 
             except Exception as e:
                 self.logger.error("Risk monitor error", error=str(e))
-            
+
             await asyncio.sleep(self.intervals["risk_monitor"])
     
     async def _rate_limit_cleanup_service(self):

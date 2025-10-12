@@ -21,7 +21,8 @@ import asyncio
 import json
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
+from collections import deque
 from dataclasses import dataclass
 from enum import Enum
 import uuid
@@ -33,6 +34,7 @@ from app.core.logging import LoggerMixin
 from app.core.redis import get_redis_client
 from app.services.websocket import manager
 from app.services.emergency_manager import emergency_manager, EmergencyLevel
+from app.services.state_coordinator import resilient_state_coordinator
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -101,6 +103,17 @@ class MasterSystemController(LoggerMixin):
         self.redis = None  # Will be initialized lazily
         self._redis_initialized = False
         self._autonomous_configs = {}  # In-memory storage for autonomous configs when Redis unavailable
+        self._market_analysis = None
+        self._market_volatility_cache: Dict[str, Any] = {
+            "value": 0.0,
+            "expires_at": datetime.utcnow(),
+            "key": "",
+        }
+        self._detection_failures: deque[float] = deque()
+        self._detection_circuit_open_until: Optional[datetime] = None
+        self._detection_failure_window = timedelta(minutes=5)
+        self._detection_failure_threshold = 3
+        self._detection_circuit_duration = timedelta(minutes=2)
         
         # Trading mode configurations with AI model weights and autonomous frequency
         self.mode_configs = {
@@ -179,6 +192,11 @@ class MasterSystemController(LoggerMixin):
                 self._redis_initialized = True
                 if self.redis:
                     self.logger.info("Redis client initialized for Master Controller")
+                    try:
+                        # Keep the local fallback cache in sync with a healthy Redis connection
+                        await resilient_state_coordinator.cache_value("system", "redis_available", True, ttl=120)
+                    except Exception:
+                        pass
                 else:
                     self.logger.warning("Redis unavailable - operating in degraded mode")
             except Exception as e:
@@ -186,6 +204,114 @@ class MasterSystemController(LoggerMixin):
                 self.redis = None
                 self._redis_initialized = True
         return self.redis
+
+    def _is_detection_circuit_open(self) -> bool:
+        if self._detection_circuit_open_until and datetime.utcnow() < self._detection_circuit_open_until:
+            return True
+        if self._detection_circuit_open_until and datetime.utcnow() >= self._detection_circuit_open_until:
+            self._detection_circuit_open_until = None
+        return False
+
+    def _record_detection_failure(self, reason: str) -> None:
+        now = datetime.utcnow()
+        self._detection_failures.append(now.timestamp())
+        # Remove failures outside of the rolling window
+        window_seconds = self._detection_failure_window.total_seconds()
+        while self._detection_failures and (now.timestamp() - self._detection_failures[0]) > window_seconds:
+            self._detection_failures.popleft()
+
+        if len(self._detection_failures) >= self._detection_failure_threshold:
+            self._detection_circuit_open_until = now + self._detection_circuit_duration
+            self._detection_failures.clear()
+            self.logger.error(
+                "Emergency detection circuit opened due to repeated failures",
+                reason=reason,
+                cooldown_seconds=self._detection_circuit_duration.total_seconds(),
+            )
+
+    def _reset_detection_circuit(self) -> None:
+        self._detection_failures.clear()
+        self._detection_circuit_open_until = None
+
+    async def _get_market_analysis_service(self):
+        if self._market_analysis is None:
+            try:
+                from app.services.market_analysis_core import MarketAnalysisService
+
+                self._market_analysis = MarketAnalysisService()
+            except Exception as exc:
+                self.logger.error("Failed to initialize market analysis service", error=str(exc))
+                self._record_detection_failure("market_analysis_init")
+                return None
+        return self._market_analysis
+
+    async def _evaluate_market_volatility(self, symbols: List[str]) -> float:
+        """Fetch market volatility for the supplied symbols with caching."""
+
+        key = ",".join(sorted(symbols)) if symbols else "BTC,ETH"
+        now = datetime.utcnow()
+        cached_key = self._market_volatility_cache.get("key")
+        expires_at = self._market_volatility_cache.get("expires_at")
+        if cached_key == key and isinstance(expires_at, datetime) and now < expires_at:
+            return float(self._market_volatility_cache.get("value", 0.0))
+
+        service = await self._get_market_analysis_service()
+        if not service:
+            return float(self._market_volatility_cache.get("value", 0.0))
+
+        try:
+            result = await service.volatility_analysis(key)
+            if not result or not result.get("success"):
+                raise RuntimeError(result.get("error") if isinstance(result, dict) else "volatility_analysis_failed")
+
+            analysis = result.get("volatility_analysis", {})
+            individual = analysis.get("individual_analysis", {})
+            if not individual:
+                raise RuntimeError("empty_volatility_analysis")
+
+            aggregate_scores = []
+            for data in individual.values():
+                if not isinstance(data, dict):
+                    continue
+                overall = data.get("overall_volatility")
+                if overall is None and data.get("timeframes"):
+                    tf_values = [tf.get("current_volatility", 0) for tf in data.get("timeframes", {}).values()]
+                    if tf_values:
+                        overall = sum(tf_values) / len(tf_values)
+                if overall is not None:
+                    try:
+                        aggregate_scores.append(float(overall))
+                    except (TypeError, ValueError):
+                        continue
+
+            if not aggregate_scores:
+                raise RuntimeError("no_volatility_scores")
+
+            market_volatility = float(sum(aggregate_scores) / len(aggregate_scores))
+            self._market_volatility_cache = {
+                "value": market_volatility,
+                "expires_at": now + timedelta(minutes=2),
+                "key": key,
+            }
+            return market_volatility
+        except Exception as exc:
+            self.logger.warning("Market volatility evaluation failed", error=str(exc), symbols=key)
+            self._record_detection_failure("volatility_fetch")
+            return float(self._market_volatility_cache.get("value", 0.0))
+
+    def _extract_symbols_for_volatility(self, portfolio_metrics: Dict[str, Any]) -> List[str]:
+        symbols: Set[str] = set()
+        positions = portfolio_metrics.get("positions") if isinstance(portfolio_metrics, dict) else None
+        if isinstance(positions, list):
+            for position in positions:
+                if not isinstance(position, dict):
+                    continue
+                symbol = position.get("symbol") or position.get("asset") or position.get("ticker")
+                if symbol:
+                    symbols.add(str(symbol).upper())
+        if not symbols:
+            symbols.update({"BTC", "ETH"})
+        return list(symbols)
         
         # Timezone strategies
         self.timezone_strategies = {
@@ -266,7 +392,7 @@ class MasterSystemController(LoggerMixin):
     def get_current_timezone_strategy(self) -> Dict[str, Any]:
         """Get current timezone strategy based on UTC hour."""
         utc_hour = datetime.utcnow().hour
-        
+
         for strategy_name, config in self.timezone_strategies.items():
             start_hour, end_hour = config["hours"]
             if start_hour <= utc_hour < end_hour:
@@ -282,39 +408,133 @@ class MasterSystemController(LoggerMixin):
             "preferred_strategies": ["spot_momentum_strategy", "spot_mean_reversion"],
             "description": "Balanced default strategy"
         }
+
+    def _extract_portfolio_snapshot(self, portfolio_payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize portfolio payload into snapshot structure used for emergency checks."""
+
+        def _to_float(value: Any, default: float = 0.0) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        if not portfolio_payload:
+            return {"portfolio_metrics": {}, "risk_metrics": {}, "performance_data": {}}
+
+        snapshot = portfolio_payload.get("portfolio_snapshot")
+        if snapshot:
+            return snapshot
+
+        legacy_portfolio = portfolio_payload.get("portfolio", portfolio_payload)
+        positions = legacy_portfolio.get("positions", [])
+        total_value = _to_float(legacy_portfolio.get("total_value_usd"))
+        available_balance = _to_float(legacy_portfolio.get("available_balance"))
+        margin_used = _to_float(legacy_portfolio.get("margin_used"))
+        margin_available = _to_float(legacy_portfolio.get("margin_available"), max(total_value - margin_used, 0.0))
+        margin_usage_pct = (margin_used / (margin_used + margin_available) * 100) if (margin_used + margin_available) > 0 else 0.0
+        daily_pnl = _to_float(legacy_portfolio.get("daily_pnl"))
+        daily_pnl_pct = _to_float(legacy_portfolio.get("daily_pnl_pct"))
+        total_pnl = _to_float(legacy_portfolio.get("total_pnl"))
+        total_pnl_pct = _to_float(legacy_portfolio.get("total_pnl_pct"))
+
+        risk_metrics = portfolio_payload.get("risk_metrics", {})
+        performance_data = portfolio_payload.get("performance_data", {})
+        if not performance_data:
+            performance_data = {
+                "daily_pnl_usd": daily_pnl,
+                "daily_pnl_percentage": daily_pnl_pct,
+                "total_pnl_usd": total_pnl,
+                "total_pnl_percentage": total_pnl_pct,
+            }
+
+        portfolio_metrics = {
+            "total_value_usd": total_value,
+            "available_balance_usd": available_balance,
+            "positions": positions,
+            "daily_pnl_usd": daily_pnl,
+            "daily_pnl_percentage": daily_pnl_pct,
+            "total_pnl_usd": total_pnl,
+            "total_pnl_percentage": total_pnl_pct,
+            "margin_used_usd": margin_used,
+            "margin_available_usd": margin_available,
+            "margin_usage_percentage": margin_usage_pct,
+            "initial_daily_value_usd": total_value - daily_pnl,
+            "average_leverage": performance_data.get("average_leverage", 1.0),
+            "cash_reserve_pct": (available_balance / total_value * 100) if total_value > 0 else 0.0,
+        }
+
+        return {
+            "portfolio_metrics": portfolio_metrics,
+            "risk_metrics": risk_metrics,
+            "performance_data": performance_data,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
     
     async def check_emergency_conditions(self, portfolio_data: Dict[str, Any]) -> EmergencyLevel:
         """Check for emergency conditions using real portfolio metrics."""
-        
+
+        if self._is_detection_circuit_open():
+            self.logger.warning(
+                "Emergency detection circuit breaker open - skipping evaluation",
+                cooldown_seconds=(self._detection_circuit_open_until - datetime.utcnow()).total_seconds()
+                if self._detection_circuit_open_until
+                else None,
+            )
+            return EmergencyLevel.NORMAL
+
+        def _to_float(value: Any, default: float = 0.0) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
         # Extract REAL portfolio metrics from actual data
         portfolio_metrics = portfolio_data.get("portfolio_metrics", {})
         risk_metrics = portfolio_data.get("risk_metrics", {})
         performance_data = portfolio_data.get("performance_data", {})
-        
+
+        if not portfolio_metrics:
+            self._record_detection_failure("missing_portfolio_metrics")
+            return EmergencyLevel.NORMAL
+
+        if not portfolio_metrics and portfolio_data:
+            # Legacy structure fallback
+            portfolio_metrics = self._extract_portfolio_snapshot({"portfolio": portfolio_data}).get("portfolio_metrics", {})
+
+        symbols_for_volatility = self._extract_symbols_for_volatility(portfolio_metrics)
+        market_volatility = await self._evaluate_market_volatility(symbols_for_volatility)
+        risk_metrics = risk_metrics or {}
+        risk_metrics["market_volatility_score"] = market_volatility * 100  # express as percentage
+        portfolio_data["risk_metrics"] = risk_metrics
+
         # Real daily P&L calculation
-        daily_pnl_pct = performance_data.get("daily_pnl_percentage", 0)
+        daily_pnl_pct = _to_float(performance_data.get("daily_pnl_percentage"))
         if not daily_pnl_pct and portfolio_metrics.get("total_value_usd"):
             # Calculate from position changes if not directly available
-            current_value = float(portfolio_metrics.get("total_value_usd", 0))
-            initial_value = float(portfolio_metrics.get("initial_daily_value_usd", current_value))
+            current_value = _to_float(portfolio_metrics.get("total_value_usd", 0))
+            initial_value = _to_float(portfolio_metrics.get("initial_daily_value_usd", current_value))
             daily_pnl_pct = ((current_value - initial_value) / initial_value) * 100 if initial_value > 0 else 0
-        
+
         # Real consecutive losses from trading history
-        consecutive_losses = performance_data.get("consecutive_losses", 0)
-        
+        consecutive_losses = int(performance_data.get("consecutive_losses", 0) or 0)
+
         # Real margin usage from exchange positions
-        margin_usage_pct = portfolio_metrics.get("margin_usage_percentage", 0)
+        margin_usage_pct = _to_float(portfolio_metrics.get("margin_usage_percentage", 0))
         if not margin_usage_pct and portfolio_metrics.get("margin_used_usd"):
             # Calculate margin usage if not directly available
-            margin_used = float(portfolio_metrics.get("margin_used_usd", 0))
-            margin_available = float(portfolio_metrics.get("margin_available_usd", 1))
+            margin_used = _to_float(portfolio_metrics.get("margin_used_usd", 0))
+            margin_available = _to_float(portfolio_metrics.get("margin_available_usd", 1))
             margin_usage_pct = (margin_used / (margin_used + margin_available)) * 100 if (margin_used + margin_available) > 0 else 0
-        
+
         # Additional real risk metrics
-        current_drawdown = risk_metrics.get("current_drawdown_percentage", 0)
-        portfolio_volatility = risk_metrics.get("portfolio_volatility", 0)
-        leverage_ratio = portfolio_metrics.get("average_leverage", 1.0)
-        
+        current_drawdown = _to_float(performance_data.get("current_drawdown_percentage", risk_metrics.get("current_drawdown_percentage", 0)))
+        portfolio_volatility = _to_float(risk_metrics.get("portfolio_volatility", 0))
+        leverage_ratio = _to_float(portfolio_metrics.get("average_leverage", 1.0), 1.0)
+
+        extreme_market_volatility = market_volatility >= 0.10
+        high_market_volatility = market_volatility >= 0.06
+        elevated_market_volatility = market_volatility >= 0.04
+
         # LEVEL 3: EMERGENCY (Immediate intervention required)
         emergency_conditions = [
             daily_pnl_pct < -7.0,  # Lost more than 7% in a day
@@ -322,9 +542,13 @@ class MasterSystemController(LoggerMixin):
             current_drawdown > 15.0,  # Drawdown exceeds 15%
             leverage_ratio > 8.0 and daily_pnl_pct < -3.0,  # High leverage + losses
         ]
+        if extreme_market_volatility and daily_pnl_pct < -2.5:
+            emergency_conditions.append(True)
+        if extreme_market_volatility and leverage_ratio > 6.0:
+            emergency_conditions.append(True)
         if any(emergency_conditions):
-            self.logger.critical("EMERGENCY CONDITIONS DETECTED", 
-                               daily_pnl=daily_pnl_pct, 
+            self.logger.critical("EMERGENCY CONDITIONS DETECTED",
+                               daily_pnl=daily_pnl_pct,
                                margin_usage=margin_usage_pct,
                                drawdown=current_drawdown,
                                leverage=leverage_ratio)
@@ -338,9 +562,13 @@ class MasterSystemController(LoggerMixin):
             current_drawdown > 10.0,  # Significant drawdown
             leverage_ratio > 6.0 and daily_pnl_pct < -2.0,  # High leverage + moderate losses
         ]
+        if high_market_volatility and daily_pnl_pct < -2.0:
+            critical_conditions.append(True)
+        if high_market_volatility and leverage_ratio > 5.0:
+            critical_conditions.append(True)
         if any(critical_conditions):
-            self.logger.error("CRITICAL CONDITIONS DETECTED", 
-                            daily_pnl=daily_pnl_pct, 
+            self.logger.error("CRITICAL CONDITIONS DETECTED",
+                            daily_pnl=daily_pnl_pct,
                             consecutive_losses=consecutive_losses,
                             margin_usage=margin_usage_pct)
             return EmergencyLevel.CRITICAL
@@ -354,20 +582,28 @@ class MasterSystemController(LoggerMixin):
             leverage_ratio > 4.0 and daily_pnl_pct < -1.0,  # Moderate leverage + small losses
             portfolio_volatility > 25.0,  # Portfolio very volatile
         ]
+        if elevated_market_volatility and leverage_ratio > 3.5:
+            warning_conditions.append(True)
+        if elevated_market_volatility and margin_usage_pct > 60:
+            warning_conditions.append(True)
         if any(warning_conditions):
-            self.logger.warning("WARNING CONDITIONS DETECTED", 
+            self.logger.warning("WARNING CONDITIONS DETECTED",
                               daily_pnl=daily_pnl_pct,
                               volatility=portfolio_volatility)
+            self._reset_detection_circuit()
             return EmergencyLevel.WARNING
-        
+
+        self._reset_detection_circuit()
         return EmergencyLevel.NORMAL
     
     async def execute_emergency_protocol(
         self,
-        level: EmergencyLevel
+        user_id: str,
+        level: EmergencyLevel,
+        portfolio_snapshot: Dict[str, Any]
     ) -> TradingMode:
         """Execute emergency protocol and return recommended mode."""
-        
+
         # Import services here to avoid circular imports
         try:
             from app.services.telegram_commander import telegram_commander_service
@@ -375,6 +611,35 @@ class MasterSystemController(LoggerMixin):
         except:
             telegram_service = None
         
+        # Execute the full emergency manager workflow
+        try:
+            await emergency_manager.execute_emergency_protocol(
+                user_id=user_id,
+                emergency_level=level,
+                portfolio_data=portfolio_snapshot.get("portfolio_metrics", {}),
+                trigger_reason="autonomous_emergency_detection",
+            )
+        except Exception as emergency_error:
+            self.logger.error(
+                "Emergency manager execution failed",
+                user_id=user_id,
+                level=level.value,
+                error=str(emergency_error),
+            )
+
+        # Persist emergency state for other services
+        redis = await self._ensure_redis()
+        if level in {EmergencyLevel.CRITICAL, EmergencyLevel.EMERGENCY}:
+            if redis:
+                try:
+                    await redis.set(f"emergency_stop:{user_id}", level.value, ex=3600)
+                    await redis.set(f"emergency_halt:{user_id}", level.value, ex=3600)
+                except Exception as redis_error:
+                    self.logger.warning("Redis write failed for emergency protocol", error=str(redis_error))
+                    self.redis = None
+            await resilient_state_coordinator.cache_value("emergency_stop", user_id, level.value, ttl=3600)
+            await resilient_state_coordinator.cache_value("emergency_halt", user_id, level.value, ttl=3600)
+
         if level == EmergencyLevel.EMERGENCY:
             # Emergency: Close all positions except arbitrage
             if telegram_service:
@@ -385,7 +650,7 @@ class MasterSystemController(LoggerMixin):
                     priority="critical"
                 )
             return TradingMode.CONSERVATIVE
-            
+
         elif level == EmergencyLevel.CRITICAL:
             # Critical: Switch to conservative, halt risky strategies
             if telegram_service:
@@ -411,7 +676,7 @@ class MasterSystemController(LoggerMixin):
             current_index = mode_hierarchy.index(self.current_mode)
             if current_index > 0:
                 return mode_hierarchy[current_index - 1]
-        
+
         return self.current_mode
     
     async def validate_real_trade_execution(
@@ -579,28 +844,20 @@ class MasterSystemController(LoggerMixin):
             emergency_level = EmergencyLevel.NORMAL
             
             if portfolio_result.get("success"):
-                portfolio_data = portfolio_result.get("portfolio", {})
-                
-                # Enhance portfolio data with your sophisticated risk analysis
-                risk_assessment = await portfolio_risk_service.risk_analysis(
-                    user_id=user_id,
-                    analysis_type="comprehensive"
-                )
-                if risk_assessment.get("success"):
-                    portfolio_data["risk_metrics"] = risk_assessment.get("risk_analysis", {})
-                
-                # Get performance metrics using your advanced analytics
-                performance_data = await portfolio_risk_service.portfolio_performance_analysis(
-                    user_id=user_id,
-                    timeframe="daily"
-                )
-                if performance_data.get("success"):
-                    portfolio_data["performance_data"] = performance_data.get("performance_analysis", {})
-                
-                emergency_level = await self.check_emergency_conditions(portfolio_data)
-                
+                portfolio_snapshot = self._extract_portfolio_snapshot(portfolio_result)
+                if portfolio_result.get("risk_metrics"):
+                    portfolio_snapshot["risk_metrics"] = portfolio_result.get("risk_metrics")
+                if portfolio_result.get("performance_data"):
+                    portfolio_snapshot["performance_data"] = portfolio_result.get("performance_data")
+
+                emergency_level = await self.check_emergency_conditions(portfolio_snapshot)
+
                 if emergency_level != EmergencyLevel.NORMAL:
-                    self.current_mode = await self.execute_emergency_protocol(emergency_level)
+                    self.current_mode = await self.execute_emergency_protocol(
+                        user_id=user_id,
+                        level=emergency_level,
+                        portfolio_snapshot=portfolio_snapshot,
+                    )
             
             phases_executed.append({
                 "phase": "emergency_check",
@@ -1450,22 +1707,27 @@ class MasterSystemController(LoggerMixin):
         try:
             # Generate session ID
             session_id = f"auto_{user_id}_{int(time.time())}"
-            
+
             # Store user config (check Redis availability)
+            config_payload = {
+                "session_id": session_id,
+                "mode": mode,
+                "started_at": datetime.utcnow().isoformat(),
+                "max_daily_loss_pct": config.get("max_daily_loss_pct", 5.0),
+                "max_position_size_pct": config.get("max_position_size_pct", 10.0),
+                "allowed_symbols": json.dumps(config.get("allowed_symbols", ["BTC", "ETH", "SOL"])),
+                "excluded_symbols": json.dumps(config.get("excluded_symbols", [])),
+                "trading_hours": json.dumps(config.get("trading_hours", {"start": "00:00", "end": "23:59"})),
+            }
             if self.redis:
-                await self.redis.hset(
-                    f"autonomous_config:{user_id}",
-                    mapping={
-                        "session_id": session_id,
-                        "mode": mode,
-                        "started_at": datetime.utcnow().isoformat(),
-                        "max_daily_loss_pct": config.get("max_daily_loss_pct", 5.0),
-                        "max_position_size_pct": config.get("max_position_size_pct", 10.0),
-                        "allowed_symbols": json.dumps(config.get("allowed_symbols", ["BTC", "ETH", "SOL"])),
-                        "excluded_symbols": json.dumps(config.get("excluded_symbols", [])),
-                        "trading_hours": json.dumps(config.get("trading_hours", {"start": "00:00", "end": "23:59"}))
-                    }
-                )
+                try:
+                    await self.redis.hset(
+                        f"autonomous_config:{user_id}",
+                        mapping=config_payload,
+                    )
+                except Exception as redis_error:
+                    self.logger.warning("Redis write failed for autonomous config", error=str(redis_error))
+                    self.redis = None
             else:
                 self.logger.warning("Redis unavailable - storing autonomous config in memory")
                 # Store in memory as fallback
@@ -1475,11 +1737,19 @@ class MasterSystemController(LoggerMixin):
                     "started_at": datetime.utcnow().isoformat(),
                     "config": config
                 }
-            
+
+            await resilient_state_coordinator.cache_hash("autonomous_config", user_id, config_payload, ttl=86400)
+
             # Mark as active
             if self.redis:
-                await self.redis.set(f"autonomous_active:{user_id}", "true", ex=86400)
-            
+                try:
+                    await self.redis.set(f"autonomous_active:{user_id}", "true", ex=86400)
+                except Exception as redis_error:
+                    self.logger.warning("Redis write failed for autonomous active flag", error=str(redis_error))
+                    self.redis = None
+
+            await resilient_state_coordinator.cache_value("autonomous_active", user_id, True, ttl=86400)
+
             # Estimate trades based on mode
             trade_estimates = {
                 "conservative": 5,
@@ -1505,8 +1775,20 @@ class MasterSystemController(LoggerMixin):
         
         try:
             # Get current config
-            config = await self.redis.hgetall(f"autonomous_config:{user_id}") if self.redis else {}
-            
+            config = {}
+            if self.redis:
+                try:
+                    config = await self.redis.hgetall(f"autonomous_config:{user_id}")
+                except Exception as redis_error:
+                    self.logger.warning("Redis read failed for autonomous config", error=str(redis_error))
+                    self.redis = None
+
+            if not config:
+                # Fall back to cached configuration
+                config = await resilient_state_coordinator.get_hash("autonomous_config", user_id)
+                if not config and user_id in self._autonomous_configs:
+                    config = self._autonomous_configs.get(user_id, {})
+
             if config:
                 session_duration = 0
                 if config.get("started_at"):
@@ -1514,13 +1796,20 @@ class MasterSystemController(LoggerMixin):
                     session_duration = (datetime.utcnow() - start_time).total_seconds()
                 
                 # Remove autonomous state
-                await self.redis.delete(f"autonomous_config:{user_id}")
-                await self.redis.delete(f"autonomous_active:{user_id}")
-                
+                if self.redis:
+                    try:
+                        await self.redis.delete(f"autonomous_config:{user_id}")
+                        await self.redis.delete(f"autonomous_active:{user_id}")
+                    except Exception as redis_error:
+                        self.logger.warning("Redis delete failed for autonomous teardown", error=str(redis_error))
+                        self.redis = None
+                await resilient_state_coordinator.clear_hash("autonomous_config", user_id)
+                await resilient_state_coordinator.clear_value("autonomous_active", user_id)
+
                 # Get trading stats (mock for now)
                 trades_executed = 0
                 total_pnl = 0.0
-                
+
                 return {
                     "success": True,
                     "session_duration": session_duration,
@@ -1529,6 +1818,8 @@ class MasterSystemController(LoggerMixin):
                     "message": "Autonomous trading stopped successfully"
                 }
             else:
+                await resilient_state_coordinator.clear_hash("autonomous_config", user_id)
+                await resilient_state_coordinator.clear_value("autonomous_active", user_id)
                 return {
                     "success": True,
                     "message": "No active autonomous session found"
@@ -1543,24 +1834,43 @@ class MasterSystemController(LoggerMixin):
         try:
             # ENTERPRISE REDIS RESILIENCE
             redis_client = await self._ensure_redis()
-            if not redis_client:
-                # Graceful degradation when Redis is unavailable
-                return {
-                    "success": True,
-                    "user_id": user_id,
-                    "mode": "standalone",
-                    "autonomous_active": False,
-                    "system_health": "unknown",
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "warning": "Operating in degraded mode (Redis unavailable)"
-                }
-            
-            # Check if autonomous mode is active
-            autonomous_active = await redis_client.get(f"autonomous_active:{user_id}")
-            autonomous_config = await redis_client.hgetall(f"autonomous_config:{user_id}") if autonomous_active else {}
-            
+            autonomous_active = None
+            autonomous_config: Dict[str, Any] = {}
+
+            if redis_client:
+                try:
+                    autonomous_active = await redis_client.get(f"autonomous_active:{user_id}")
+                except Exception as redis_error:
+                    self.logger.warning("Redis read failed for autonomous flag", error=str(redis_error))
+                    autonomous_active = None
+
+                if autonomous_active:
+                    try:
+                        autonomous_config = await redis_client.hgetall(f"autonomous_config:{user_id}")
+                    except Exception as redis_error:
+                        self.logger.warning("Redis read failed for autonomous config", error=str(redis_error))
+                        autonomous_config = {}
+
+            if not autonomous_active:
+                cached_flag = await resilient_state_coordinator.get_value("autonomous_active", user_id)
+                autonomous_active = cached_flag if cached_flag is not None else False
+                if not autonomous_config:
+                    autonomous_config = await resilient_state_coordinator.get_hash("autonomous_config", user_id)
+            else:
+                # Normalize redis value to bool/string representation
+                if isinstance(autonomous_active, bytes):
+                    autonomous_active = autonomous_active.decode()
+                if isinstance(autonomous_active, str):
+                    autonomous_active = autonomous_active.lower() not in {"", "0", "false", "none"}
+
             # Get system health
-            system_health = await redis_client.get("system_health")
+            system_health = None
+            if redis_client:
+                try:
+                    system_health = await redis_client.get("system_health")
+                except Exception as redis_error:
+                    self.logger.warning("Redis read failed for system health", error=str(redis_error))
+                    system_health = None
             health_status = "normal"
             if system_health:
                 try:
@@ -1626,14 +1936,29 @@ class MasterSystemController(LoggerMixin):
         """Get global system status for admin."""
         try:
             # Count active autonomous sessions
-            autonomous_keys = await self.redis.keys("autonomous_active:*")
-            active_sessions = len(autonomous_keys)
-            
+            active_sessions = 0
+            if self.redis:
+                try:
+                    autonomous_keys = await self.redis.keys("autonomous_active:*")
+                    active_sessions = len(autonomous_keys)
+                except Exception as redis_error:
+                    self.logger.warning("Redis read failed for autonomous session count", error=str(redis_error))
+                    self.redis = None
+            if active_sessions == 0:
+                fallback_sessions = await resilient_state_coordinator.list_keys("autonomous_active")
+                active_sessions = len(fallback_sessions)
+
             # Get system health
-            system_health = await self.redis.get("system_health")
+            system_health = None
+            if self.redis:
+                try:
+                    system_health = await self.redis.get("system_health")
+                except Exception as redis_error:
+                    self.logger.warning("Redis read failed for system health", error=str(redis_error))
+                    system_health = None
             health_status = "normal"
             error_rate = 0.0
-            
+
             if system_health:
                 try:
                     import json
@@ -1676,10 +2001,16 @@ class MasterSystemController(LoggerMixin):
         try:
             # Stop autonomous mode
             await self.stop_autonomous_mode(user_id)
-            
+
             # Mark emergency state
-            await self.redis.set(f"emergency_stop:{user_id}", "true", ex=3600)
-            
+            if self.redis:
+                try:
+                    await self.redis.set(f"emergency_stop:{user_id}", "true", ex=3600)
+                except Exception as redis_error:
+                    self.logger.warning("Redis write failed for emergency stop flag", error=str(redis_error))
+                    self.redis = None
+            await resilient_state_coordinator.cache_value("emergency_stop", user_id, True, ttl=3600)
+
             return {
                 "success": True,
                 "user_id": user_id,
@@ -1697,20 +2028,38 @@ class MasterSystemController(LoggerMixin):
         
         try:
             # Get all active autonomous sessions
-            autonomous_keys = await self.redis.keys("autonomous_active:*")
             affected_users = []
             stopped_sessions = 0
-            
-            for key in autonomous_keys:
-                user_id = key.decode().split(":")[-1]
+
+            redis_keys = []
+            if self.redis:
+                try:
+                    redis_keys = await self.redis.keys("autonomous_active:*")
+                except Exception as redis_error:
+                    self.logger.warning("Redis read failed for autonomous stop broadcast", error=str(redis_error))
+                    self.redis = None
+
+            if redis_keys:
+                user_ids = [key.decode().split(":")[-1] if isinstance(key, (bytes, bytearray)) else str(key).split(":")[-1] for key in redis_keys]
+            else:
+                fallback_users = await resilient_state_coordinator.list_keys("autonomous_active")
+                user_ids = fallback_users
+
+            for user_id in user_ids:
                 result = await self.emergency_stop(user_id)
                 if result.get("success"):
                     affected_users.append(user_id)
                     stopped_sessions += 1
-            
+
             # Set global emergency state
-            await self.redis.set("global_emergency_stop", "true", ex=3600)
-            
+            if self.redis:
+                try:
+                    await self.redis.set("global_emergency_stop", "true", ex=3600)
+                except Exception as redis_error:
+                    self.logger.warning("Redis write failed for global emergency flag", error=str(redis_error))
+                    self.redis = None
+            await resilient_state_coordinator.cache_value("global", "global_emergency_stop", True, ttl=3600)
+
             return {
                 "success": True,
                 "affected_users": len(affected_users),
@@ -1751,30 +2100,78 @@ class MasterSystemController(LoggerMixin):
         try:
             # ENTERPRISE REDIS RESILIENCE
             redis_client = await self._ensure_redis()
+            global_stop = False
+            if redis_client:
+                try:
+                    global_stop_flag = await redis_client.get("global_emergency_stop")
+                    global_stop = bool(global_stop_flag)
+                except Exception as redis_error:
+                    self.logger.warning("Redis read failed for global emergency stop", error=str(redis_error))
+                    redis_client = None
             if not redis_client:
-                self.logger.warning("Global autonomous cycle skipped - Redis unavailable")
+                fallback_stop = await resilient_state_coordinator.get_value("global", "global_emergency_stop")
+                global_stop = bool(fallback_stop)
+
+            if global_stop:
+                self.logger.warning("Global emergency stop active - skipping autonomous cycle")
                 return
-            
-            # Get all active autonomous sessions
-            autonomous_keys = await redis_client.keys("autonomous_active:*")
-            
-            self.logger.info(f"🤖 Running autonomous cycle for {len(autonomous_keys)} users")
-            
-            # PERFORMANCE OPTIMIZATION: Skip expensive operations if no users are active
-            if len(autonomous_keys) == 0:
+
+            user_ids: List[str] = []
+            if redis_client:
+                try:
+                    autonomous_keys = await redis_client.keys("autonomous_active:*")
+                    user_ids = [
+                        key.decode().split(":")[-1] if isinstance(key, (bytes, bytearray)) else str(key).split(":")[-1]
+                        for key in autonomous_keys
+                    ]
+                except Exception as redis_error:
+                    self.logger.warning("Redis read failed for autonomous cycle keys", error=str(redis_error))
+                    redis_client = None
+
+            if not user_ids:
+                user_ids = await resilient_state_coordinator.list_keys("autonomous_active")
+
+            self.logger.info(f"🤖 Running autonomous cycle for {len(user_ids)} users")
+
+            if len(user_ids) == 0:
                 self.logger.debug("No active autonomous users - skipping cycle")
                 return
-            
-            for key in autonomous_keys:
-                user_id = key.decode().split(":")[-1]
-                
+
+            for user_id in user_ids:
+
                 # Check if emergency stop is active
-                emergency = await self.redis.get(f"emergency_stop:{user_id}")
-                if emergency:
+                emergency_stop = None
+                emergency_halt = None
+                if self.redis:
+                    try:
+                        emergency_stop = await self.redis.get(f"emergency_stop:{user_id}")
+                        emergency_halt = await self.redis.get(f"emergency_halt:{user_id}")
+                    except Exception as redis_error:
+                        self.logger.warning("Redis read failed for emergency flags", error=str(redis_error))
+                        self.redis = None
+                        emergency_stop = None
+                        emergency_halt = None
+
+                if not emergency_stop and not emergency_halt:
+                    fallback_flag = await resilient_state_coordinator.any_active(
+                        [("emergency_stop", user_id), ("emergency_halt", user_id)]
+                    )
+                    if fallback_flag:
+                        continue
+                else:
                     continue
-                
+
                 # Get user config
-                config = await self.redis.hgetall(f"autonomous_config:{user_id}") if self.redis else {}
+                config = {}
+                if self.redis:
+                    try:
+                        config = await self.redis.hgetall(f"autonomous_config:{user_id}")
+                    except Exception as redis_error:
+                        self.logger.warning("Redis read failed for autonomous config", error=str(redis_error))
+                        self.redis = None
+                        config = {}
+                if not config:
+                    config = await resilient_state_coordinator.get_hash("autonomous_config", user_id)
                 if not config:
                     continue
             
@@ -1802,9 +2199,24 @@ class MasterSystemController(LoggerMixin):
                     self.logger.warning(f"Skipping cycle for user {user_id} - portfolio unavailable")
                     continue
                 
-                portfolio_data = portfolio_status.get("portfolio", {})
-                if portfolio_data.get("total_value_usd", 0) < 100:  # Minimum $100 to trade
+                portfolio_snapshot = self._extract_portfolio_snapshot(portfolio_status)
+                total_value = float(portfolio_snapshot.get("portfolio_metrics", {}).get("total_value_usd", 0) or 0)
+                if total_value < 100:  # Minimum $100 to trade
                     self.logger.debug(f"Skipping cycle for user {user_id} - insufficient balance")
+                    continue
+
+                emergency_level = await self.check_emergency_conditions(portfolio_snapshot)
+                if emergency_level != EmergencyLevel.NORMAL:
+                    await self.execute_emergency_protocol(
+                        user_id=user_id,
+                        level=emergency_level,
+                        portfolio_snapshot=portfolio_snapshot,
+                    )
+                    self.logger.warning(
+                        "Autonomous cycle halted due to emergency",
+                        user_id=user_id,
+                        emergency_level=emergency_level.value,
+                    )
                     continue
                 
                 # Run enhanced trading cycle for this user

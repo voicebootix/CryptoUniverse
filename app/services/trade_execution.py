@@ -24,7 +24,8 @@ import structlog
 
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal, get_database
-from app.core.redis import redis_manager
+from app.core.redis import get_redis_client, redis_manager
+from app.services.state_coordinator import resilient_state_coordinator
 from app.core.logging import LoggerMixin, trade_logger
 from app.models.trading import Trade, Position, Order, TradingStrategy
 from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance, ExchangeStatus, ApiKeyStatus
@@ -730,6 +731,51 @@ class TradeExecutionService(LoggerMixin):
             trade_request = dict(trade_request)
             if strategy_id:
                 trade_request["strategy_id"] = strategy_id
+
+            # Respect emergency halts before any further processing
+            emergency_reason = None
+            try:
+                redis_client = await get_redis_client()
+            except Exception as redis_error:
+                redis_client = None
+                self.logger.warning("Redis unavailable for emergency check", error=str(redis_error))
+
+            if redis_client:
+                keys_to_check = [
+                    "global_emergency_stop",
+                    f"emergency_halt:{user_id}",
+                    f"emergency_stop:{user_id}",
+                ]
+                for key in keys_to_check:
+                    value = await redis_client.get(key)
+                    if value:
+                        emergency_reason = key
+                        break
+
+            if not emergency_reason:
+                fallback_hit = await resilient_state_coordinator.any_active(
+                    [
+                        ("global", "global_emergency_stop"),
+                        ("emergency_halt", user_id),
+                        ("emergency_stop", user_id),
+                    ]
+                )
+                if fallback_hit:
+                    emergency_reason = f"{fallback_hit[0]}:{fallback_hit[1]}"
+
+            if emergency_reason:
+                self.logger.warning(
+                    "Trade execution blocked due to emergency state",
+                    user_id=user_id,
+                    strategy_id=strategy_id,
+                    emergency_key=emergency_reason,
+                )
+                return {
+                    "success": False,
+                    "error": "Emergency stop active - trading halted",
+                    "reason": emergency_reason,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
 
             # Validate and resolve symbol
             symbol_validation = await self.symbol_validator.validate_and_resolve_symbol(
