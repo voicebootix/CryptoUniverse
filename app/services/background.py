@@ -1063,8 +1063,24 @@ class BackgroundServiceManager(LoggerMixin):
 
                         emergency_level = await master_controller.check_emergency_conditions(snapshot)
                         if emergency_level == EmergencyLevel.NORMAL:
+                            # Clear all emergency keys from Redis
                             if self.redis:
-                                await self.redis.delete(f"emergency_last_level:{user_id}")
+                                try:
+                                    await self.redis.delete(f"emergency_last_level:{user_id}")
+                                    await self.redis.delete(f"emergency_halt:{user_id}")
+                                    await self.redis.delete(f"emergency_stop:{user_id}")
+                                except Exception as redis_error:
+                                    self.logger.warning("Risk monitor redis delete failed for emergency keys", error=str(redis_error))
+                                    self.redis = None
+
+                            # Clear all emergency keys from resilient_state_coordinator
+                            try:
+                                await resilient_state_coordinator.cache_value("emergency_last_level", user_id, None, ttl=0)
+                                await resilient_state_coordinator.cache_value("emergency_halt", user_id, None, ttl=0)
+                                await resilient_state_coordinator.cache_value("emergency_stop", user_id, None, ttl=0)
+                            except Exception as coordinator_error:
+                                self.logger.warning("Failed to clear emergency keys from state coordinator", error=str(coordinator_error))
+
                             continue
 
                         last_level_value = None

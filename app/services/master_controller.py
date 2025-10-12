@@ -109,6 +109,7 @@ class MasterSystemController(LoggerMixin):
             "expires_at": datetime.utcnow(),
             "key": "",
         }
+        self._market_volatility_lock = asyncio.Lock()  # Synchronize cache access
         self._detection_failures: deque[float] = deque()
         self._detection_circuit_open_until: Optional[datetime] = None
         self._detection_failure_window = timedelta(minutes=5)
@@ -250,54 +251,59 @@ class MasterSystemController(LoggerMixin):
 
         key = ",".join(sorted(symbols)) if symbols else "BTC,ETH"
         now = datetime.utcnow()
-        cached_key = self._market_volatility_cache.get("key")
-        expires_at = self._market_volatility_cache.get("expires_at")
-        if cached_key == key and isinstance(expires_at, datetime) and now < expires_at:
-            return float(self._market_volatility_cache.get("value", 0.0))
 
-        service = await self._get_market_analysis_service()
-        if not service:
-            return float(self._market_volatility_cache.get("value", 0.0))
+        # Synchronize cache access to prevent races
+        async with self._market_volatility_lock:
+            # Check cache inside lock
+            cached_key = self._market_volatility_cache.get("key")
+            expires_at = self._market_volatility_cache.get("expires_at")
+            if cached_key == key and isinstance(expires_at, datetime) and now < expires_at:
+                return float(self._market_volatility_cache.get("value", 0.0))
 
-        try:
-            result = await service.volatility_analysis(key)
-            if not result or not result.get("success"):
-                raise RuntimeError(result.get("error") if isinstance(result, dict) else "volatility_analysis_failed")
+            service = await self._get_market_analysis_service()
+            if not service:
+                return float(self._market_volatility_cache.get("value", 0.0))
 
-            analysis = result.get("volatility_analysis", {})
-            individual = analysis.get("individual_analysis", {})
-            if not individual:
-                raise RuntimeError("empty_volatility_analysis")
+            try:
+                result = await service.volatility_analysis(key)
+                if not result or not result.get("success"):
+                    raise RuntimeError(result.get("error") if isinstance(result, dict) else "volatility_analysis_failed")
 
-            aggregate_scores = []
-            for data in individual.values():
-                if not isinstance(data, dict):
-                    continue
-                overall = data.get("overall_volatility")
-                if overall is None and data.get("timeframes"):
-                    tf_values = [tf.get("current_volatility", 0) for tf in data.get("timeframes", {}).values()]
-                    if tf_values:
-                        overall = sum(tf_values) / len(tf_values)
-                if overall is not None:
-                    try:
-                        aggregate_scores.append(float(overall))
-                    except (TypeError, ValueError):
+                analysis = result.get("volatility_analysis", {})
+                individual = analysis.get("individual_analysis", {})
+                if not individual:
+                    raise RuntimeError("empty_volatility_analysis")
+
+                aggregate_scores = []
+                for data in individual.values():
+                    if not isinstance(data, dict):
                         continue
+                    overall = data.get("overall_volatility")
+                    if overall is None and data.get("timeframes"):
+                        tf_values = [tf.get("current_volatility", 0) for tf in data.get("timeframes", {}).values()]
+                        if tf_values:
+                            overall = sum(tf_values) / len(tf_values)
+                    if overall is not None:
+                        try:
+                            aggregate_scores.append(float(overall))
+                        except (TypeError, ValueError):
+                            continue
 
-            if not aggregate_scores:
-                raise RuntimeError("no_volatility_scores")
+                if not aggregate_scores:
+                    raise RuntimeError("no_volatility_scores")
 
-            market_volatility = float(sum(aggregate_scores) / len(aggregate_scores))
-            self._market_volatility_cache = {
-                "value": market_volatility,
-                "expires_at": now + timedelta(minutes=2),
-                "key": key,
-            }
-            return market_volatility
-        except Exception as exc:
-            self.logger.warning("Market volatility evaluation failed", error=str(exc), symbols=key)
-            self._record_detection_failure("volatility_fetch")
-            return float(self._market_volatility_cache.get("value", 0.0))
+                market_volatility = float(sum(aggregate_scores) / len(aggregate_scores))
+                # Update cache before releasing lock
+                self._market_volatility_cache = {
+                    "value": market_volatility,
+                    "expires_at": now + timedelta(minutes=2),
+                    "key": key,
+                }
+                return market_volatility
+            except Exception as exc:
+                self.logger.warning("Market volatility evaluation failed", error=str(exc), symbols=key)
+                self._record_detection_failure("volatility_fetch")
+                return float(self._market_volatility_cache.get("value", 0.0))
 
     def _extract_symbols_for_volatility(self, portfolio_metrics: Dict[str, Any]) -> List[str]:
         symbols: Set[str] = set()
@@ -493,13 +499,15 @@ class MasterSystemController(LoggerMixin):
         risk_metrics = portfolio_data.get("risk_metrics", {})
         performance_data = portfolio_data.get("performance_data", {})
 
-        if not portfolio_metrics:
-            self._record_detection_failure("missing_portfolio_metrics")
-            return EmergencyLevel.NORMAL
-
+        # Try legacy structure fallback before failing
         if not portfolio_metrics and portfolio_data:
             # Legacy structure fallback
             portfolio_metrics = self._extract_portfolio_snapshot({"portfolio": portfolio_data}).get("portfolio_metrics", {})
+
+        # Now check if we still have no metrics after attempting fallback
+        if not portfolio_metrics:
+            self._record_detection_failure("missing_portfolio_metrics")
+            return EmergencyLevel.NORMAL
 
         symbols_for_volatility = self._extract_symbols_for_volatility(portfolio_metrics)
         market_volatility = await self._evaluate_market_volatility(symbols_for_volatility)
@@ -611,12 +619,12 @@ class MasterSystemController(LoggerMixin):
         except:
             telegram_service = None
         
-        # Execute the full emergency manager workflow
+        # Execute the full emergency manager workflow with complete snapshot
         try:
             await emergency_manager.execute_emergency_protocol(
                 user_id=user_id,
                 emergency_level=level,
-                portfolio_data=portfolio_snapshot.get("portfolio_metrics", {}),
+                portfolio_data=portfolio_snapshot,  # Pass full snapshot with metrics, positions, risk data
                 trigger_reason="autonomous_emergency_detection",
             )
         except Exception as emergency_error:

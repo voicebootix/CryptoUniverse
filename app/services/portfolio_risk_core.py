@@ -2216,7 +2216,7 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
 
         try:
             from app.core.database import AsyncSessionLocal
-            from app.models.trading import Trade, Portfolio
+            from app.models.trading import Trade, Portfolio, PortfolioSnapshot, TradeStatus
             from sqlalchemy import select, and_
 
             timeframe = (timeframe or "daily").lower()
@@ -2229,6 +2229,7 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                 start_window = now - timedelta(days=1)
 
             async with AsyncSessionLocal() as db:
+                # Filter trades to exclude simulations and only include completed trades
                 trade_stmt = (
                     select(
                         Trade.profit_realized_usd,
@@ -2241,6 +2242,8 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                             Trade.user_id == user_id,
                             Trade.executed_at.isnot(None),
                             Trade.executed_at >= start_window,
+                            Trade.is_simulation.is_(False),  # Exclude simulations
+                            Trade.status == TradeStatus.COMPLETED,  # Only completed trades
                         )
                     )
                     .order_by(Trade.executed_at.desc())
@@ -2284,33 +2287,45 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                 average_trade_pnl = (total_realized_pnl / total_trades) if total_trades > 0 else 0.0
 
                 # Portfolio drawdown analysis using historical snapshots
-                portfolio_stmt = (
-                    select(Portfolio.total_value_usd, Portfolio.created_at)
-                    .where(
-                        and_(
-                            Portfolio.user_id == user_id,
-                            Portfolio.created_at >= start_window,
-                        )
-                    )
-                    .order_by(Portfolio.created_at.asc())
-                )
-                portfolio_result = await db.execute(portfolio_stmt)
-                portfolio_points = portfolio_result.fetchall()
+                # First, get the user's portfolio_id
+                portfolio_id_stmt = select(Portfolio.id).where(Portfolio.user_id == user_id)
+                portfolio_id_result = await db.execute(portfolio_id_stmt)
+                portfolio_id = portfolio_id_result.scalar_one_or_none()
 
                 peak_value = 0.0
                 max_drawdown_pct = 0.0
                 current_drawdown_pct = 0.0
-                if portfolio_points:
-                    for value, _ in portfolio_points:
-                        value_float = float(value or 0)
-                        if value_float > peak_value:
-                            peak_value = value_float
+
+                if portfolio_id:
+                    # Query PortfolioSnapshot by snapshot_date instead of Portfolio.created_at
+                    snapshot_stmt = (
+                        select(PortfolioSnapshot.total_value_usd, PortfolioSnapshot.snapshot_date)
+                        .where(
+                            and_(
+                                PortfolioSnapshot.portfolio_id == portfolio_id,
+                                PortfolioSnapshot.snapshot_date >= start_window,
+                            )
+                        )
+                        .order_by(PortfolioSnapshot.snapshot_date.asc())
+                    )
+                    snapshot_result = await db.execute(snapshot_stmt)
+                    portfolio_points = snapshot_result.fetchall()
+
+                    if portfolio_points:
+                        for value, _ in portfolio_points:
+                            value_float = float(value or 0)
+                            if value_float > peak_value:
+                                peak_value = value_float
+                            if peak_value > 0:
+                                drawdown_pct = (peak_value - value_float) / peak_value * 100
+                                max_drawdown_pct = max(max_drawdown_pct, drawdown_pct)
+                        latest_value = float(portfolio_points[-1][0] or 0)
                         if peak_value > 0:
-                            drawdown_pct = (peak_value - value_float) / peak_value * 100
-                            max_drawdown_pct = max(max_drawdown_pct, drawdown_pct)
-                    latest_value = float(portfolio_points[-1][0] or 0)
-                    if peak_value > 0:
-                        current_drawdown_pct = (peak_value - latest_value) / peak_value * 100
+                            current_drawdown_pct = (peak_value - latest_value) / peak_value * 100
+
+                    # Fallback: if no snapshots exist, use current portfolio value
+                    if not portfolio_points and current_portfolio_value:
+                        portfolio_points = [(current_portfolio_value, now)]
 
                 current_value = current_portfolio_value if current_portfolio_value is not None else (float(portfolio_points[-1][0]) if portfolio_points else 0.0)
                 inferred_leverage = 1.0
