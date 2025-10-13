@@ -1,6 +1,8 @@
+import asyncio
 from pathlib import Path
 import os
 import sys
+from typing import Optional
 from unittest.mock import AsyncMock
 
 import pytest
@@ -379,3 +381,87 @@ async def test_portfolio_optimization_profit_scales_with_capital(monkeypatch, ca
 
     capital_assumptions = opportunity.metadata["capital_assumptions"]
     assert capital_assumptions["deployable_capital_usd"] == pytest.approx(capital)
+
+
+
+@pytest.mark.asyncio
+async def test_discover_opportunities_returns_partial_then_final(monkeypatch):
+    service = UserOpportunityDiscoveryService()
+    service._scan_response_budget = 0.01
+    user_id = "user-partial"
+
+    async def fake_execute(
+        user_id: str,
+        force_refresh: bool = False,
+        include_strategy_recommendations: bool = True,
+        *,
+        existing_scan_id: Optional[str] = None,
+    ):
+        await asyncio.sleep(0.005)
+        partial_payload = {
+            "success": True,
+            "opportunities": [],
+            "metadata": {"scan_state": "partial"},
+        }
+        await service._update_cached_scan_result(user_id, partial_payload, partial=True)
+        await asyncio.sleep(0.05)
+        final_payload = {
+            "success": True,
+            "opportunities": ["complete"],
+            "metadata": {"scan_state": "complete"},
+        }
+        await service._update_cached_scan_result(user_id, final_payload, partial=False)
+        return final_payload
+
+    monkeypatch.setattr(service, "_execute_opportunity_discovery", fake_execute)
+
+    initial_result = await service.discover_opportunities_for_user(user_id)
+    assert initial_result["metadata"]["scan_state"] == "pending"
+
+    await asyncio.sleep(0.02)
+
+    partial_result = await service.discover_opportunities_for_user(user_id)
+    assert partial_result["metadata"]["scan_state"] == "partial"
+
+    await asyncio.sleep(0.06)
+
+    final_result = await service.discover_opportunities_for_user(user_id)
+    assert final_result["metadata"]["scan_state"] == "complete"
+    assert final_result["opportunities"] == ["complete"]
+
+
+@pytest.mark.asyncio
+async def test_admin_snapshot_used_when_portfolio_empty(monkeypatch):
+    service = UserOpportunityDiscoveryService()
+
+    primary_mock = AsyncMock(return_value={"success": True, "active_strategies": []})
+    admin_portfolio = {
+        "success": True,
+        "active_strategies": [
+            {
+                "strategy_id": "ai_spot_momentum_strategy",
+                "credit_cost_monthly": 45,
+            }
+        ],
+        "total_monthly_cost": 45,
+        "total_strategies": 1,
+    }
+    admin_mock = AsyncMock(return_value=admin_portfolio)
+
+    monkeypatch.setattr(
+        discovery_module.strategy_marketplace_service,
+        "get_user_strategy_portfolio",
+        primary_mock,
+    )
+    monkeypatch.setattr(
+        discovery_module.strategy_marketplace_service,
+        "get_admin_portfolio_snapshot",
+        admin_mock,
+    )
+
+    profile = await service._build_user_opportunity_profile("admin-user")
+
+    assert profile.active_strategy_count == 1
+    assert profile.total_monthly_strategy_cost == 45
+    admin_mock.assert_awaited_once()
+    primary_mock.assert_awaited_once()

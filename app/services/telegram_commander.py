@@ -152,31 +152,11 @@ class TelegramConfig:
     WELCOME_MESSAGE = """
 🚀 **CryptoUniverse AI Money Manager**
 
-Welcome to your personal crypto trading assistant! I can help you with:
+I'm Alex, your senior portfolio manager on duty. Ask me for your portfolio balance, today's best opportunities,
+or a deep dive on any position and I'll tailor the answer to your risk profile. When you're ready, I can also
+stage or execute trades directly from here.
 
-📊 **Portfolio Management**
-- Real-time portfolio analysis
-- Risk assessment and optimization
-- Position sizing recommendations
-
-💹 **Trading Operations**
-- Market analysis and opportunities
-- Trade execution across exchanges
-- Strategy recommendations
-
-🤖 **AI Consensus**
-- Multi-AI decision making
-- Confidence-based recommendations
-- Risk-adjusted insights
-
-**Commands:**
-/portfolio - View portfolio summary
-/market - Get market analysis
-/risk - Risk assessment
-/trades - Recent trades
-/help - Full command list
-
-Ready to manage your crypto wealth! 💎
+Need a refresher? Try `/portfolio`, `/opportunities`, or just say "How are we positioned?" to get started.
     """
     
     ERROR_MESSAGES = {

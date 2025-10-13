@@ -14,7 +14,7 @@ import json
 import re
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
 import uuid
 import hmac
 import hashlib
@@ -35,6 +35,35 @@ from app.services.trade_execution import trade_execution_service
 from app.services.trading_strategies import trading_strategies_service
 from app.services.ai_consensus import ai_consensus_service
 from app.services.portfolio_risk_core import portfolio_risk_service
+if TYPE_CHECKING:  # pragma: no cover - typing aid to avoid circular imports
+    from app.services.unified_ai_manager import InterfaceType as UnifiedInterfaceType
+
+
+_unified_ai_manager_ref = None
+_unified_interface_type_ref = None
+
+
+def _get_unified_persona_pipeline():
+    """Lazily resolve unified AI manager references without circular imports."""
+
+    global _unified_ai_manager_ref, _unified_interface_type_ref
+
+    if _unified_ai_manager_ref is None or _unified_interface_type_ref is None:
+        from app.services.unified_ai_manager import (
+            unified_ai_manager as _manager,
+            InterfaceType as _interface_type,
+        )
+
+        _unified_ai_manager_ref = _manager
+        _unified_interface_type_ref = _interface_type
+
+    return _unified_ai_manager_ref, _unified_interface_type_ref
+
+
+def get_unified_persona_pipeline():
+    """Public accessor for the cached unified persona pipeline references."""
+
+    return _get_unified_persona_pipeline()
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -463,44 +492,40 @@ class MessageRouter(LoggerMixin):
             # Keep only last 10 messages for context
             context = context[-10:]
             
-            # Build AI request
-            ai_request = {
-                "query": text,
-                "context": {
-                    "conversation_history": context,
-                    "user_id": user_id,
-                    "chat_id": chat_id,
-                    "system_context": "crypto_trading_assistant"
-                }
+            unified_context = {
+                "conversation_history": context,
+                "previous_intents": [
+                    msg.get("intent")
+                    for msg in context
+                    if isinstance(msg, dict) and msg.get("intent")
+                ],
+                "chat_id": chat_id,
             }
-            
-            # Get AI response
-            from app.services.ai_consensus import ai_consensus_service
-            ai_response = await ai_consensus_service.analyze_opportunity(
-                json.dumps(ai_request),
-                confidence_threshold=75.0,
-                ai_models="cost_optimized",
-                user_id=user_id
+
+            unified_manager, interface_type = _get_unified_persona_pipeline()
+
+            unified_response = await unified_manager.process_user_request(
+                user_id=user_id,
+                request=text,
+                interface=interface_type.TELEGRAM,
+                context=unified_context,
             )
-            
-            if ai_response.get("success"):
-                response_text = self._format_ai_response(ai_response)
-            else:
-                response_text = "🤖 I'm having trouble processing your request right now. Please try again or use a specific command."
-            
-            # Send response
+
+            response_text = self._render_unified_response(unified_response)
+
             await self.telegram_api.send_message(chat_id, response_text)
-            
-            # Update conversation context
+
+            metadata = unified_response.get("metadata", {}) if isinstance(unified_response, dict) else {}
             context.append({
-                "role": "assistant", 
+                "role": "assistant",
                 "content": response_text,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
+                "intent": metadata.get("intent"),
             })
             self.conversation_contexts[user_id] = context
-            
-            return {"success": True, "response": "AI conversation handled"}
-            
+
+            return {"success": True, "response": "AI conversation handled", "metadata": metadata}
+
         except Exception as e:
             self.logger.error("Fallback natural language processing failed", error=str(e))
             return {"success": False, "error": str(e)}
@@ -522,12 +547,12 @@ class MessageRouter(LoggerMixin):
     
     def _format_ai_response(self, ai_response: Dict[str, Any]) -> str:
         """Format AI consensus response for Telegram."""
-        
+
         opportunity_analysis = ai_response.get("opportunity_analysis", {})
-        
+
         if not opportunity_analysis:
             return "🤖 Analysis complete, but no specific insights to share."
-        
+
         response_parts = ["🤖 **AI Money Manager Analysis:**\n"]
         
         # Add recommendation if available
@@ -558,8 +583,77 @@ class MessageRouter(LoggerMixin):
         models_used = cost_summary.get("models_used", 0)
         if models_used > 0:
             response_parts.append(f"\n🤖 **Models consulted:** {models_used}")
-        
+
         return "\n".join(response_parts)
+
+    @staticmethod
+    def _sanitize_persona_text(text: str) -> str:
+        if not text:
+            return ""
+
+        sanitized_lines: List[str] = []
+        for raw_line in text.splitlines():
+            stripped = raw_line.strip()
+            stripped = re.sub(r"^[\u2022•\-\*]+\s*", "", stripped)
+            stripped = stripped.replace("•", "")
+            if stripped:
+                sanitized_lines.append(stripped)
+
+        sanitized = " ".join(sanitized_lines).strip()
+        return sanitized or text.strip()
+
+    def _render_unified_response(self, unified_response: Dict[str, Any]) -> str:
+        """Translate unified AI manager responses into Telegram-friendly text."""
+
+        if not isinstance(unified_response, dict):
+            return self._sanitize_persona_text(
+                "I completed the request, but I don't have extra details to share yet."
+            )
+
+        if not unified_response.get("success"):
+            fallback_message = (
+                unified_response.get("content")
+                or unified_response.get("error")
+                or "I'm still syncing data—give me another moment."
+            )
+            return self._sanitize_persona_text(str(fallback_message))
+
+        action = unified_response.get("action")
+        content = unified_response.get("content")
+
+        if action == "executed":
+            execution_result = unified_response.get("result", {})
+            if isinstance(execution_result, dict) and execution_result.get("success"):
+                return self._sanitize_persona_text(
+                    "Orders placed successfully. I'll keep monitoring performance and report back."
+                )
+            error_message = execution_result.get("error") if isinstance(execution_result, dict) else None
+            return self._sanitize_persona_text(
+                f"I attempted the execution but hit an issue: {error_message or 'please review the execution log.'}"
+            )
+
+        if isinstance(content, str) and content.strip():
+            return self._sanitize_persona_text(content)
+
+        if isinstance(content, dict):
+            narrative_chunks: List[str] = []
+            for key, value in content.items():
+                if value is None:
+                    continue
+                if isinstance(value, (dict, list)):
+                    try:
+                        value_repr = json.dumps(value, separators=(",", ":"))
+                    except TypeError:
+                        value_repr = str(value)
+                else:
+                    value_repr = str(value)
+                human_key = key.replace("_", " ")
+                narrative_chunks.append(f"{human_key.capitalize()}: {value_repr}")
+            if narrative_chunks:
+                return self._sanitize_persona_text(" ".join(narrative_chunks))
+
+        fallback = unified_response.get("ai_analysis") or "Analysis complete."
+        return self._sanitize_persona_text(str(fallback))
     
     async def _update_user_session(self, user_id: str, chat_id: str, user_data: Dict[str, Any]):
         """Update user session information."""

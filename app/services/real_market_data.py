@@ -15,9 +15,10 @@ import ccxt.async_support as ccxt
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Callable
 import json
 import hashlib
+import time
 from decimal import Decimal
 
 import structlog
@@ -116,6 +117,34 @@ class RealMarketDataService(LoggerMixin):
 
             try:
                 exchange_obj = self.exchanges[exch_name]
+
+                if exch_name == 'kraken':
+                    def _build_monotonic_nonce(initial_seed: int) -> Callable[[], int]:
+                        last_value = max(int(initial_seed), int(time.time() * 1000))
+
+                        def _next_nonce() -> int:
+                            nonlocal last_value
+                            current = int(time.time() * 1000)
+                            if current <= last_value:
+                                last_value += 1
+                            else:
+                                last_value = current
+                            return last_value
+
+                        return _next_nonce
+
+                    try:
+                        seed = await self._get_kraken_nonce()
+                        exchange_obj.nonce = _build_monotonic_nonce(int(seed))
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as nonce_error:
+                        fallback_seed = int(time.time() * 1000)
+                        exchange_obj.nonce = _build_monotonic_nonce(fallback_seed)
+                        self.logger.warning(
+                            "Kraken nonce generation fallback in use",
+                            error=str(nonce_error)
+                        )
 
                 # Fetch real ticker data
                 ticker = await exchange_obj.fetch_ticker(ccxt_symbol)
@@ -519,6 +548,23 @@ class RealMarketDataService(LoggerMixin):
                 )
         except Exception as e:
             self.logger.debug(f"Failed to cache {key}: {str(e)}")
+
+    async def _get_kraken_nonce(self) -> int:
+        """Generate a Kraken API nonce with Redis coordination and time-based fallback."""
+
+        try:
+            redis = await redis_manager.get_client()
+            if redis:
+                nonce_value = await redis.incr("kraken_nonce")
+                if nonce_value:
+                    return int(nonce_value)
+        except Exception as redis_error:
+            self.logger.warning(
+                "Redis unavailable for Kraken nonce",
+                error=str(redis_error)
+            )
+
+        return int(time.time() * 1000)
 
     async def close(self):
         """Clean up exchange connections."""

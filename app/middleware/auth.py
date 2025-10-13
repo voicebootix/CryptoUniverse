@@ -116,6 +116,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 "/health",
                 "/api/v1/trading/ws",  # WebSocket endpoint
                 "/api/v1/telegram/webhook",  # Telegram webhook endpoint
+                "/api/v1/unified-chat/stream",  # SSE streaming endpoint (uses query param auth)
                 "/vite.svg",  # Static assets
                 "/login"  # Login page
             ])):

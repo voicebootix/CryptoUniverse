@@ -102,16 +102,23 @@ class UserOnboardingResponse(BaseModel):
     next_steps: List[str]
 
 
-@router.post("/discover", response_model=OpportunityDiscoveryResponse)
+@router.post("/discover")
 async def discover_opportunities(
     request: OpportunityDiscoveryRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user)
 ):
     """
-    ENTERPRISE Opportunity Discovery - Main endpoint.
+    ENTERPRISE Opportunity Discovery - Async Job Pattern.
     
-    Discovers trading opportunities based on user's purchased strategies
-    and enterprise asset discovery across thousands of assets.
+    Initiates a background scan of trading opportunities.
+    Returns immediately with scan_id for polling.
+    
+    This follows enterprise best practices for long-running operations:
+    - No timeout issues (scan runs in background)
+    - Real-time progress updates via polling
+    - Scalable to any number of strategies
+    - Better UX with progress indicators
     """
     
     # Enforce rate limiting per user
@@ -130,157 +137,216 @@ async def discover_opportunities(
         )
     
     try:
-        logger.info("🔍 ENTERPRISE Opportunity Discovery API called",
+        logger.info("🔍 ENTERPRISE Opportunity Discovery API called (async mode)",
                    user_id=str(current_user.id),
                    force_refresh=request.force_refresh)
         
         # Initialize discovery service
         await user_opportunity_discovery.async_init()
         
-        # Run opportunity discovery
-        discovery_result = await user_opportunity_discovery.discover_opportunities_for_user(
-            user_id=str(current_user.id),
-            force_refresh=request.force_refresh,
-            include_strategy_recommendations=request.include_strategy_recommendations
-        )
+        # Generate scan ID
+        scan_id = f"scan_{current_user.id}_{int(datetime.utcnow().timestamp())}"
         
-        if not discovery_result.get("success"):
-            # Return error but with structured response, including validated fallback opportunities
-            raw_fallback_opportunities = discovery_result.get("fallback_opportunities", [])
-            
-            # Validate fallback opportunities using the same validation as success path
-            validated_fallback_opportunities = []
-            fallback_validation_errors = []
-            
-            for i, opp in enumerate(raw_fallback_opportunities):
-                try:
-                    validated_fallback_opportunities.append(OpportunityResponse(**opp))
-                except ValidationError as e:
-                    logger.warning("Skipping malformed fallback opportunity data",
-                                 opportunity_index=i,
-                                 validation_error=str(e),
-                                 opportunity_data=opp,
-                                 user_id=str(current_user.id))
-                    fallback_validation_errors.append({
-                        "index": i,
-                        "error": str(e),
-                        "data": opp
-                    })
-            
-            # Log summary if we had fallback validation errors
-            if fallback_validation_errors:
-                logger.warning("Fallback opportunity validation summary",
-                             total_fallback_opportunities=len(raw_fallback_opportunities),
-                             valid_fallback_opportunities=len(validated_fallback_opportunities),
-                             validation_errors_count=len(fallback_validation_errors),
-                             user_id=str(current_user.id))
-            
-            return OpportunityDiscoveryResponse(
-                success=False,
-                scan_id=discovery_result.get("scan_id", "error"),
-                user_id=str(current_user.id),
-                opportunities=validated_fallback_opportunities,
-                total_opportunities=len(validated_fallback_opportunities),
-                user_profile={},
-                strategy_performance={},
-                asset_discovery={},
-                strategy_recommendations=[],
-                execution_time_ms=discovery_result.get("execution_time_ms", 0),
-                last_updated=datetime.utcnow().isoformat(),
-                error=discovery_result.get("error", "Unknown error"),
-                fallback_used=discovery_result.get("fallback_used", False)
-            )
+        # Check if there's already a scan running
+        existing_task = user_opportunity_discovery._scan_tasks.get(str(current_user.id))
+        if existing_task and not existing_task.done() and not request.force_refresh:
+            # Return existing scan info
+            cached_entry = await user_opportunity_discovery._get_cached_scan_entry(str(current_user.id))
+            if cached_entry:
+                return {
+                    "success": True,
+                    "scan_id": cached_entry.payload.get("scan_id", scan_id),
+                    "status": "scanning",
+                    "message": "A scan is already in progress for this user",
+                    "estimated_completion_seconds": 120,
+                    "poll_url": f"/api/v1/opportunities/status/{scan_id}",
+                    "progress": {
+                        "strategies_completed": cached_entry.payload.get("metadata", {}).get("strategies_completed", 0),
+                        "total_strategies": cached_entry.payload.get("metadata", {}).get("total_strategies", 14)
+                    }
+                }
         
-        # Apply filters if specified
-        opportunities = discovery_result.get("opportunities", [])
-        
-        if request.filter_by_risk_level:
-            opportunities = [
-                opp for opp in opportunities 
-                if opp.get("risk_level") == request.filter_by_risk_level
-            ]
-        
-        if request.min_profit_potential is not None:
-            opportunities = [
-                opp for opp in opportunities
-                if opp.get("profit_potential_usd", 0) >= request.min_profit_potential
-            ]
-        
-        if request.max_required_capital is not None:
-            opportunities = [
-                opp for opp in opportunities
-                if opp.get("required_capital_usd", float('inf')) <= request.max_required_capital
-            ]
-        
-        if request.preferred_timeframes:
-            opportunities = [
-                opp for opp in opportunities
-                if any(timeframe in opp.get("estimated_timeframe", "") 
-                      for timeframe in request.preferred_timeframes)
-            ]
-        
-        if request.opportunity_type:
-            opportunities = [
-                opp for opp in opportunities
-                if opp.get("opportunity_type") in request.opportunity_type
-            ]
-        
-        # Convert to response format with validation error handling
-        opportunity_responses = []
-        validation_errors = []
-        
-        for i, opp in enumerate(opportunities):
+        # Start background scan (don't await!)
+        async def run_discovery_background():
             try:
-                opportunity_responses.append(OpportunityResponse(**opp))
-            except ValidationError as e:
-                logger.warning("Skipping malformed opportunity data",
-                             opportunity_index=i,
-                             validation_error=str(e),
-                             opportunity_data=opp,
-                             user_id=str(current_user.id))
-                validation_errors.append({
-                    "index": i,
-                    "error": str(e),
-                    "data": opp
-                })
+                await user_opportunity_discovery.discover_opportunities_for_user(
+                    user_id=str(current_user.id),
+                    force_refresh=request.force_refresh,
+                    include_strategy_recommendations=request.include_strategy_recommendations
+                )
+            except Exception as e:
+                logger.error("Background opportunity discovery failed",
+                           user_id=str(current_user.id),
+                           error=str(e),
+                           exc_info=True)
         
-        # Log summary if we had validation errors
-        if validation_errors:
-            logger.warning("Opportunity validation summary",
-                         total_opportunities=len(opportunities),
-                         valid_opportunities=len(opportunity_responses),
-                         validation_errors_count=len(validation_errors),
-                         user_id=str(current_user.id))
+        # Schedule background task
+        background_tasks.add_task(run_discovery_background)
         
-        return OpportunityDiscoveryResponse(
-            success=True,
-            scan_id=discovery_result["scan_id"],
-            user_id=discovery_result["user_id"],
-            opportunities=opportunity_responses,
-            total_opportunities=len(opportunity_responses),
-            signal_analysis=discovery_result.get("signal_analysis"),
-            threshold_transparency=discovery_result.get("threshold_transparency"),
-            user_profile=discovery_result.get("user_profile", {}),
-            strategy_performance=discovery_result.get("strategy_performance", {}),
-            asset_discovery=discovery_result.get("asset_discovery", {}),
-            strategy_recommendations=discovery_result.get("strategy_recommendations", []),
-            execution_time_ms=discovery_result.get("execution_time_ms", 0),
-            last_updated=discovery_result.get("last_updated", datetime.utcnow().isoformat())
-        )
+        # Return immediately with scan info
+        return {
+            "success": True,
+            "scan_id": scan_id,
+            "status": "initiated",
+            "message": "Opportunity scan initiated successfully",
+            "estimated_completion_seconds": 120,
+            "poll_url": f"/api/v1/opportunities/status/{scan_id}",
+            "results_url": f"/api/v1/opportunities/results/{scan_id}",
+            "polling_interval_seconds": 3,
+            "instructions": "Poll the status endpoint every 3 seconds to check progress"
+        }
         
     except Exception as e:
-        logger.error("Opportunity discovery API failed",
+        logger.error("Failed to initiate opportunity discovery",
                     error=str(e),
                     user_id=str(current_user.id),
                     exc_info=True)
         
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Opportunity discovery failed: {str(e)}"
+            detail=f"Failed to initiate opportunity discovery: {str(e)}"
         )
 
 
-@router.get("/status")
+@router.get("/status/{scan_id}")
+async def get_scan_status(
+    scan_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get the status of an ongoing opportunity discovery scan.
+    
+    Returns:
+    - status: "not_found" | "scanning" | "complete" | "failed"
+    - progress: {strategies_completed, total_strategies, opportunities_found_so_far}
+    - partial_results: First 10 opportunities (if available)
+    """
+    try:
+        # Get cached scan entry
+        cached_entry = await user_opportunity_discovery._get_cached_scan_entry(str(current_user.id))
+        
+        if not cached_entry:
+            return {
+                "success": False,
+                "status": "not_found",
+                "message": "No scan found for this user. Please initiate a new scan."
+            }
+        
+        # Check if scan is still in progress
+        if cached_entry.partial:
+            metadata = cached_entry.payload.get("metadata", {})
+            opportunities = cached_entry.payload.get("opportunities", [])
+            
+            return {
+                "success": True,
+                "status": "scanning",
+                "scan_id": cached_entry.payload.get("scan_id", scan_id),
+                "message": "Scan in progress",
+                "progress": {
+                    "strategies_completed": metadata.get("strategies_completed", 0),
+                    "total_strategies": metadata.get("total_strategies", 14),
+                    "opportunities_found_so_far": len(opportunities),
+                    "percentage": int((metadata.get("strategies_completed", 0) / max(1, metadata.get("total_strategies", 14))) * 100)
+                },
+                "partial_results": opportunities[:10],  # First 10 opportunities
+                "estimated_time_remaining_seconds": max(0, 120 - metadata.get("elapsed_seconds", 0))
+            }
+        
+        # Scan is complete
+        return {
+            "success": True,
+            "status": "complete",
+            "scan_id": cached_entry.payload.get("scan_id", scan_id),
+            "message": "Scan completed successfully",
+            "total_opportunities": len(cached_entry.payload.get("opportunities", [])),
+            "results_url": f"/api/v1/opportunities/results/{scan_id}"
+        }
+        
+    except Exception as e:
+        logger.error("Failed to get scan status",
+                    error=str(e),
+                    user_id=str(current_user.id),
+                    scan_id=scan_id,
+                    exc_info=True)
+        
+        return {
+            "success": False,
+            "status": "failed",
+            "message": f"Failed to get scan status: {str(e)}"
+        }
+
+
+@router.get("/results/{scan_id}", response_model=OpportunityDiscoveryResponse)
+async def get_scan_results(
+    scan_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get the complete results of a finished opportunity discovery scan.
+    
+    Returns full opportunity list with all metadata.
+    Raises 404 if scan is not complete yet.
+    """
+    try:
+        # Get cached scan entry
+        cached_entry = await user_opportunity_discovery._get_cached_scan_entry(str(current_user.id))
+        
+        if not cached_entry:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No scan results found. Please initiate a new scan."
+            )
+        
+        if cached_entry.partial:
+            raise HTTPException(
+                status_code=status.HTTP_202_ACCEPTED,
+                detail="Scan is still in progress. Please poll the status endpoint."
+            )
+        
+        # Convert opportunities to response format
+        opportunities = cached_entry.payload.get("opportunities", [])
+        opportunity_responses = []
+        
+        for opp in opportunities:
+            try:
+                opportunity_responses.append(OpportunityResponse(**opp))
+            except ValidationError as e:
+                logger.warning("Skipping malformed opportunity in results",
+                             validation_error=str(e),
+                             user_id=str(current_user.id))
+        
+        return OpportunityDiscoveryResponse(
+            success=True,
+            scan_id=cached_entry.payload.get("scan_id", scan_id),
+            user_id=str(current_user.id),
+            opportunities=opportunity_responses,
+            total_opportunities=len(opportunity_responses),
+            signal_analysis=cached_entry.payload.get("signal_analysis"),
+            threshold_transparency=cached_entry.payload.get("threshold_transparency"),
+            user_profile=cached_entry.payload.get("user_profile", {}),
+            strategy_performance=cached_entry.payload.get("strategy_performance", {}),
+            asset_discovery=cached_entry.payload.get("asset_discovery", {}),
+            strategy_recommendations=cached_entry.payload.get("strategy_recommendations", []),
+            execution_time_ms=cached_entry.payload.get("execution_time_ms", 0),
+            last_updated=cached_entry.payload.get("last_updated", datetime.utcnow().isoformat())
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get scan results",
+                    error=str(e),
+                    user_id=str(current_user.id),
+                    scan_id=scan_id,
+                    exc_info=True)
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve scan results: {str(e)}"
+        )
+
+
+@router.get("/user-status")
 async def get_discovery_status(
     current_user: User = Depends(get_current_user)
 ):

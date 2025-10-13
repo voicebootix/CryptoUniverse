@@ -393,7 +393,14 @@ class ChatServiceAdaptersFixed:
             opportunities = []
             
             # Extract opportunities from technical analysis
-            tech_data = tech_analysis.get("data", {})  # Fixed: use "data" not "analysis"
+            tech_data = (
+                tech_analysis.get("analysis")
+                or tech_analysis.get("technical_analysis")
+                or tech_analysis.get("data")
+                or {}
+            )
+            if not isinstance(tech_data, dict):
+                tech_data = {}
             logger.info("Technical analysis data received", symbols=list(tech_data.keys()), data_count=len(tech_data))
             
             for symbol, analysis in tech_data.items():

@@ -33,6 +33,7 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { apiClient } from '@/lib/api/client';
+import type { AxiosError } from 'axios';
 
 interface ChatMessage {
   id: string;
@@ -58,7 +59,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
+  
   // Memoized sorted messages to prevent state mutation during render
   const sortedMessages = useMemo(() => {
     return [...messages].sort((a, b) => {
@@ -80,16 +81,88 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fallbackTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingMessageRef = useRef<string | null>(null);
+  const pendingRequestIdRef = useRef<string | null>(null);
   const { toast } = useToast();
 
   // Auto-scroll to bottom when new messages arrive
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, []);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    if (isLoading) {
+      scrollToBottom();
+    }
+  }, [isLoading, scrollToBottom]);
+
+  const clearFallbackTimer = useCallback(() => {
+    if (fallbackTimerRef.current) {
+      clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearFallbackTimer();
+    };
+  }, [clearFallbackTimer]);
+
+  const finalizePendingRequest = useCallback(() => {
+    pendingMessageRef.current = null;
+    pendingRequestIdRef.current = null;
+    clearFallbackTimer();
+    setIsLoading(false);
+  }, [clearFallbackTimer]);
+
+  const buildErrorMessage = useCallback((error: unknown): string => {
+    if (typeof error === 'string') {
+      return error;
+    }
+
+    if (error && typeof error === 'object') {
+      const axiosError = error as AxiosError<any>;
+      const detail = axiosError.response?.data?.detail;
+
+      if (typeof detail === 'string' && detail.trim().length > 0) {
+        return detail;
+      }
+
+      if (detail && typeof detail === 'object' && 'message' in detail) {
+        const message = (detail as { message?: string }).message;
+        if (message) {
+          return message;
+        }
+      }
+
+      if (axiosError.response?.data?.message) {
+        return axiosError.response.data.message;
+      }
+
+      if ('message' in error && typeof (error as { message?: string }).message === 'string') {
+        return (error as { message: string }).message;
+      }
+    }
+
+    return 'The AI assistant could not complete that request. Please try again in a moment or contact support if the issue persists.';
+  }, []);
+
+  const pushSystemMessage = useCallback((content: string) => {
+    const systemMessage: ChatMessage = {
+      id: `system-${Date.now()}`,
+      content,
+      type: 'system',
+      timestamp: new Date().toISOString(),
+    };
+
+    setMessages(prev => [...prev, systemMessage]);
+  }, []);
 
   // Initialize chat session
   useEffect(() => {
@@ -163,9 +236,9 @@ Just chat with me naturally! How can I help you manage your crypto investments t
             confidence: data.confidence,
             metadata: data.metadata
           };
-          
+
           setMessages(prev => [...prev, newMessage]);
-          setIsLoading(false);
+          finalizePendingRequest();
         } else if (data.type === 'connection_established') {
           // Chat connection established
         }
@@ -183,20 +256,26 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     setIsConnected(connectionStatus === 'Open');
   }, [connectionStatus]);
 
-  const sendMessage = async () => {
-    console.log('🚀 SEND MESSAGE CALLED!', { inputValue, isLoading, sessionId });
-    if (!inputValue.trim() || isLoading || !sessionId) {
-      console.log('❌ SEND MESSAGE BLOCKED:', { 
-        noInput: !inputValue.trim(), 
-        isLoading, 
-        noSession: !sessionId 
+  // State for streaming progress
+  const [streamProgress, setStreamProgress] = useState<string | null>(null);
+  const [currentStreamingMessageId, setCurrentStreamingMessageId] = useState<string | null>(null);
+  const abortStreamRef = useRef<(() => void) | null>(null);
+
+  const sendMessage = useCallback(async () => {
+    const messageToSend = inputValue.trim();
+    console.log('🚀 SEND MESSAGE CALLED!', { messageToSend, isLoading, sessionId });
+    if (!messageToSend || isLoading || !sessionId) {
+      console.log('❌ SEND MESSAGE BLOCKED:', {
+        noInput: !messageToSend,
+        isLoading,
+        noSession: !sessionId
       });
       return;
     }
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
-      content: inputValue,
+      content: messageToSend,
       type: 'user',
       timestamp: new Date().toISOString()
     };
@@ -204,83 +283,206 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
+    setStreamProgress('Connecting...');
+
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const streamingMessageId = `streaming-${requestId}`;
+    setCurrentStreamingMessageId(streamingMessageId);
+    pendingMessageRef.current = messageToSend;
+    pendingRequestIdRef.current = requestId;
 
     try {
-      console.log('💬 Sending message:', { isConnected, hasWsMessage: !!sendWsMessage, inputValue });
-      if (isConnected && sendWsMessage) {
-        console.log('📤 Sending via WebSocket');
-        // Send via WebSocket for real-time response
-        sendWsMessage({
-          type: 'chat_message',
-          message: inputValue,
-          session_id: sessionId
-        });
-        
-        // Set timeout to fall back to REST API if no WebSocket response
-        setTimeout(() => {
-          if (isLoading) {
-            console.log('⏰ WebSocket timeout, falling back to REST API');
-            // Fallback to REST API
-            apiClient.post('/chat/message', {
-              message: inputValue,
-              session_id: sessionId
-            }).then(response => {
-              if (response.data.success) {
-                const assistantMessage: ChatMessage = {
-                  id: response.data.message_id,
-                  content: response.data.content,
-                  type: 'assistant',
-                  timestamp: response.data.timestamp,
-                  intent: response.data.intent,
-                  confidence: response.data.confidence,
-                  metadata: response.data.metadata
-                };
-                setMessages(prev => [...prev, assistantMessage]);
-              }
-              setIsLoading(false);
-            }).catch(() => {
-              setIsLoading(false);
-            });
-          }
-        }, 10000); // 10 second timeout
-      } else {
-        console.log('📡 Using REST API (WebSocket not connected)');
-        // Fallback to REST API
-        const response = await apiClient.post('/chat/message', {
-          message: inputValue,
-          session_id: sessionId
-        });
-
-        if (response.data.success) {
-          const assistantMessage: ChatMessage = {
-            id: response.data.message_id,
-            content: response.data.content,
-            type: 'assistant',
-            timestamp: response.data.timestamp,
-            intent: response.data.intent,
-            confidence: response.data.confidence,
-            metadata: response.data.metadata
-          };
-          
-          setMessages(prev => [...prev, assistantMessage]);
-        } else {
-          throw new Error('Failed to send message');
-        }
-        
-        setIsLoading(false);
+      // Use Server-Sent Events (SSE) for streaming response
+      console.log('📡 Using SSE streaming for real-time response');
+      
+      const token = localStorage.getItem('auth_token');
+      const baseURL = apiClient.defaults.baseURL || '';
+      
+      // Build SSE URL
+      const params = new URLSearchParams({
+        message: messageToSend,
+        session_id: sessionId,
+        conversation_mode: 'live_trading'
+      });
+      
+      // Add token for authentication (EventSource doesn't support custom headers)
+      if (token && token.trim().length > 0) {
+        params.append('token', token);
       }
+      
+      const url = `${baseURL}/unified-chat/stream?${params.toString()}`;
+      
+      // Create EventSource for SSE
+      const eventSource = new EventSource(url);
+      
+      let fullContent = '';
+      let streamCompleted = false;
+      
+      // Create placeholder message for streaming content
+      const streamingMessage: ChatMessage = {
+        id: streamingMessageId,
+        content: '',
+        type: 'assistant',
+        timestamp: new Date().toISOString(),
+        metadata: { streaming: true }
+      };
+      setMessages(prev => [...prev, streamingMessage]);
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          switch (data.type) {
+            case 'processing':
+              setStreamProgress(data.content || 'Processing...');
+              break;
+              
+            case 'progress':
+              if (data.progress) {
+                setStreamProgress(data.progress.message || 'Processing...');
+              }
+              break;
+              
+            case 'response':
+            case 'chunk':
+              if (data.content) {
+                fullContent += data.content;
+                // Update the streaming message with accumulated content
+                setMessages(prev => 
+                  prev.map(msg => 
+                    msg.id === streamingMessageId
+                      ? { ...msg, content: fullContent }
+                      : msg
+                  )
+                );
+              }
+              break;
+              
+            case 'complete':
+              streamCompleted = true;
+              eventSource.close();
+              setIsLoading(false);
+              setStreamProgress(null);
+              setCurrentStreamingMessageId(null);
+              pendingMessageRef.current = null;
+              pendingRequestIdRef.current = null;
+              
+              // Finalize the message
+              setMessages(prev => 
+                prev.map(msg => 
+                  msg.id === streamingMessageId
+                    ? { ...msg, metadata: { ...msg.metadata, streaming: false } }
+                    : msg
+                )
+              );
+              break;
+              
+            case 'error':
+              streamCompleted = true;
+              eventSource.close();
+              setIsLoading(false);
+              setStreamProgress(null);
+              setCurrentStreamingMessageId(null);
+              
+              // Remove streaming message and show error
+              setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
+              
+              const errorMessage = data.error || 'An error occurred while processing your request.';
+              pushSystemMessage(errorMessage);
+              toast({
+                title: 'Error',
+                description: errorMessage,
+                variant: 'destructive',
+              });
+              break;
+          }
+        } catch (error) {
+          console.error('Failed to parse SSE data:', error);
+        }
+      };
+      
+      eventSource.onerror = (error) => {
+        if (streamCompleted) return;
+        
+        console.error('SSE connection error:', error);
+        eventSource.close();
+        setIsLoading(false);
+        setStreamProgress(null);
+        setCurrentStreamingMessageId(null);
+        
+        // Remove streaming message
+        setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
+        
+        // Fallback to regular API
+        console.log('⏰ SSE failed, falling back to regular API');
+        
+        apiClient.post('/unified-chat/message', {
+          message: messageToSend,
+          session_id: sessionId,
+          conversation_mode: 'live_trading',
+          stream: false
+        })
+        .then(response => {
+          if (response.data.success) {
+            const assistantMessage: ChatMessage = {
+              id: response.data.message_id,
+              content: response.data.content,
+              type: 'assistant',
+              timestamp: response.data.timestamp,
+              intent: response.data.intent,
+              confidence: response.data.confidence,
+              metadata: response.data.metadata
+            };
+            setMessages(prev => [...prev, assistantMessage]);
+          }
+        })
+        .catch(fallbackError => {
+          const friendlyMessage = buildErrorMessage(fallbackError);
+          pushSystemMessage(friendlyMessage);
+          toast({
+            title: 'Message Failed',
+            description: friendlyMessage,
+            variant: 'destructive',
+          });
+        })
+        .finally(() => {
+          pendingMessageRef.current = null;
+          pendingRequestIdRef.current = null;
+        });
+      };
+      
+      // Store abort function
+      abortStreamRef.current = () => {
+        eventSource.close();
+        setIsLoading(false);
+        setStreamProgress(null);
+        setCurrentStreamingMessageId(null);
+      };
+      
     } catch (error) {
-      // Failed to send message - show error to user
+      const friendlyMessage = buildErrorMessage(error);
+      pushSystemMessage(friendlyMessage);
       toast({
         title: 'Message Failed',
-        description: 'Unable to send message. Please check your connection.',
+        description: friendlyMessage,
         variant: 'destructive',
       });
       setIsLoading(false);
+      setStreamProgress(null);
+      setCurrentStreamingMessageId(null);
+      pendingMessageRef.current = null;
+      pendingRequestIdRef.current = null;
     }
-  };
+  }, [
+    buildErrorMessage,
+    inputValue,
+    isLoading,
+    pushSystemMessage,
+    sessionId,
+    toast,
+  ]);
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -520,14 +722,16 @@ Just chat with me naturally! How can I help you manage your crypto investments t
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
                   <Loader className="h-4 w-4 animate-spin text-primary" />
                 </div>
-                <div className="bg-muted rounded-lg px-4 py-3">
+                <div className="bg-muted rounded-lg px-4 py-3 min-w-[200px]">
                   <div className="flex items-center gap-2">
                     <div className="flex space-x-1">
                       <div className="w-2 h-2 bg-primary/60 rounded-full animate-bounce"></div>
                       <div className="w-2 h-2 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
                       <div className="w-2 h-2 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                     </div>
-                    <span className="text-sm text-muted-foreground">AI is thinking...</span>
+                    <span className="text-sm text-muted-foreground">
+                      {streamProgress || 'AI is thinking...'}
+                    </span>
                   </div>
                 </div>
               </motion.div>
@@ -547,7 +751,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
                 ref={inputRef}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={handleKeyPress}
+                onKeyDown={handleKeyDown}
                 placeholder="Ask me about your portfolio, trading, or market opportunities..."
                 disabled={isLoading}
                 className="pr-12"
@@ -570,9 +774,15 @@ Just chat with me naturally! How can I help you manage your crypto investments t
               className="gap-2"
             >
               {isLoading ? (
-                <Loader className="h-4 w-4 animate-spin" />
+                <>
+                  <Loader className="h-4 w-4 animate-spin" />
+                  <span className="text-sm">Sending…</span>
+                </>
               ) : (
-                <Send className="h-4 w-4" />
+                <>
+                  <Send className="h-4 w-4" />
+                  <span className="text-sm">Send</span>
+                </>
               )}
             </Button>
           </div>

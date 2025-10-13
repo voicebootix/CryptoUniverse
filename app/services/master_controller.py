@@ -266,7 +266,7 @@ class MasterSystemController(LoggerMixin):
     def get_current_timezone_strategy(self) -> Dict[str, Any]:
         """Get current timezone strategy based on UTC hour."""
         utc_hour = datetime.utcnow().hour
-        
+
         for strategy_name, config in self.timezone_strategies.items():
             start_hour, end_hour = config["hours"]
             if start_hour <= utc_hour < end_hour:
@@ -282,38 +282,109 @@ class MasterSystemController(LoggerMixin):
             "preferred_strategies": ["spot_momentum_strategy", "spot_mean_reversion"],
             "description": "Balanced default strategy"
         }
+
+    def _extract_portfolio_snapshot(self, portfolio_payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize portfolio payload into snapshot structure used for emergency checks."""
+
+        def _to_float(value: Any, default: float = 0.0) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        if not portfolio_payload:
+            return {"portfolio_metrics": {}, "risk_metrics": {}, "performance_data": {}}
+
+        snapshot = portfolio_payload.get("portfolio_snapshot")
+        if snapshot:
+            return snapshot
+
+        legacy_portfolio = portfolio_payload.get("portfolio", portfolio_payload)
+        positions = legacy_portfolio.get("positions", [])
+        total_value = _to_float(legacy_portfolio.get("total_value_usd"))
+        available_balance = _to_float(legacy_portfolio.get("available_balance"))
+        margin_used = _to_float(legacy_portfolio.get("margin_used"))
+        margin_available = _to_float(legacy_portfolio.get("margin_available"), max(total_value - margin_used, 0.0))
+        margin_usage_pct = (margin_used / (margin_used + margin_available) * 100) if (margin_used + margin_available) > 0 else 0.0
+        daily_pnl = _to_float(legacy_portfolio.get("daily_pnl"))
+        daily_pnl_pct = _to_float(legacy_portfolio.get("daily_pnl_pct"))
+        total_pnl = _to_float(legacy_portfolio.get("total_pnl"))
+        total_pnl_pct = _to_float(legacy_portfolio.get("total_pnl_pct"))
+
+        risk_metrics = portfolio_payload.get("risk_metrics", {})
+        performance_data = portfolio_payload.get("performance_data", {})
+        if not performance_data:
+            performance_data = {
+                "daily_pnl_usd": daily_pnl,
+                "daily_pnl_percentage": daily_pnl_pct,
+                "total_pnl_usd": total_pnl,
+                "total_pnl_percentage": total_pnl_pct,
+            }
+
+        portfolio_metrics = {
+            "total_value_usd": total_value,
+            "available_balance_usd": available_balance,
+            "positions": positions,
+            "daily_pnl_usd": daily_pnl,
+            "daily_pnl_percentage": daily_pnl_pct,
+            "total_pnl_usd": total_pnl,
+            "total_pnl_percentage": total_pnl_pct,
+            "margin_used_usd": margin_used,
+            "margin_available_usd": margin_available,
+            "margin_usage_percentage": margin_usage_pct,
+            "initial_daily_value_usd": total_value - daily_pnl,
+            "average_leverage": performance_data.get("average_leverage", 1.0),
+            "cash_reserve_pct": (available_balance / total_value * 100) if total_value > 0 else 0.0,
+        }
+
+        return {
+            "portfolio_metrics": portfolio_metrics,
+            "risk_metrics": risk_metrics,
+            "performance_data": performance_data,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
     
     async def check_emergency_conditions(self, portfolio_data: Dict[str, Any]) -> EmergencyLevel:
         """Check for emergency conditions using real portfolio metrics."""
-        
+
+        def _to_float(value: Any, default: float = 0.0) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
         # Extract REAL portfolio metrics from actual data
         portfolio_metrics = portfolio_data.get("portfolio_metrics", {})
         risk_metrics = portfolio_data.get("risk_metrics", {})
         performance_data = portfolio_data.get("performance_data", {})
-        
+
+        if not portfolio_metrics and portfolio_data:
+            # Legacy structure fallback
+            portfolio_metrics = self._extract_portfolio_snapshot({"portfolio": portfolio_data}).get("portfolio_metrics", {})
+
         # Real daily P&L calculation
-        daily_pnl_pct = performance_data.get("daily_pnl_percentage", 0)
+        daily_pnl_pct = _to_float(performance_data.get("daily_pnl_percentage"))
         if not daily_pnl_pct and portfolio_metrics.get("total_value_usd"):
             # Calculate from position changes if not directly available
-            current_value = float(portfolio_metrics.get("total_value_usd", 0))
-            initial_value = float(portfolio_metrics.get("initial_daily_value_usd", current_value))
+            current_value = _to_float(portfolio_metrics.get("total_value_usd", 0))
+            initial_value = _to_float(portfolio_metrics.get("initial_daily_value_usd", current_value))
             daily_pnl_pct = ((current_value - initial_value) / initial_value) * 100 if initial_value > 0 else 0
-        
+
         # Real consecutive losses from trading history
-        consecutive_losses = performance_data.get("consecutive_losses", 0)
-        
+        consecutive_losses = int(performance_data.get("consecutive_losses", 0) or 0)
+
         # Real margin usage from exchange positions
-        margin_usage_pct = portfolio_metrics.get("margin_usage_percentage", 0)
+        margin_usage_pct = _to_float(portfolio_metrics.get("margin_usage_percentage", 0))
         if not margin_usage_pct and portfolio_metrics.get("margin_used_usd"):
             # Calculate margin usage if not directly available
-            margin_used = float(portfolio_metrics.get("margin_used_usd", 0))
-            margin_available = float(portfolio_metrics.get("margin_available_usd", 1))
+            margin_used = _to_float(portfolio_metrics.get("margin_used_usd", 0))
+            margin_available = _to_float(portfolio_metrics.get("margin_available_usd", 1))
             margin_usage_pct = (margin_used / (margin_used + margin_available)) * 100 if (margin_used + margin_available) > 0 else 0
-        
+
         # Additional real risk metrics
-        current_drawdown = risk_metrics.get("current_drawdown_percentage", 0)
-        portfolio_volatility = risk_metrics.get("portfolio_volatility", 0)
-        leverage_ratio = portfolio_metrics.get("average_leverage", 1.0)
+        current_drawdown = _to_float(performance_data.get("current_drawdown_percentage", risk_metrics.get("current_drawdown_percentage", 0)))
+        portfolio_volatility = _to_float(risk_metrics.get("portfolio_volatility", 0))
+        leverage_ratio = _to_float(portfolio_metrics.get("average_leverage", 1.0), 1.0)
         
         # LEVEL 3: EMERGENCY (Immediate intervention required)
         emergency_conditions = [
@@ -364,10 +435,12 @@ class MasterSystemController(LoggerMixin):
     
     async def execute_emergency_protocol(
         self,
-        level: EmergencyLevel
+        user_id: str,
+        level: EmergencyLevel,
+        portfolio_snapshot: Dict[str, Any]
     ) -> TradingMode:
         """Execute emergency protocol and return recommended mode."""
-        
+
         # Import services here to avoid circular imports
         try:
             from app.services.telegram_commander import telegram_commander_service
@@ -375,6 +448,28 @@ class MasterSystemController(LoggerMixin):
         except:
             telegram_service = None
         
+        # Execute the full emergency manager workflow
+        try:
+            await emergency_manager.execute_emergency_protocol(
+                user_id=user_id,
+                emergency_level=level,
+                portfolio_data=portfolio_snapshot.get("portfolio_metrics", {}),
+                trigger_reason="autonomous_emergency_detection",
+            )
+        except Exception as emergency_error:
+            self.logger.error(
+                "Emergency manager execution failed",
+                user_id=user_id,
+                level=level.value,
+                error=str(emergency_error),
+            )
+
+        # Persist emergency state for other services
+        redis = await self._ensure_redis()
+        if redis and level in {EmergencyLevel.CRITICAL, EmergencyLevel.EMERGENCY}:
+            await redis.set(f"emergency_stop:{user_id}", level.value, ex=3600)
+            await redis.set(f"emergency_halt:{user_id}", level.value, ex=3600)
+
         if level == EmergencyLevel.EMERGENCY:
             # Emergency: Close all positions except arbitrage
             if telegram_service:
@@ -385,7 +480,7 @@ class MasterSystemController(LoggerMixin):
                     priority="critical"
                 )
             return TradingMode.CONSERVATIVE
-            
+
         elif level == EmergencyLevel.CRITICAL:
             # Critical: Switch to conservative, halt risky strategies
             if telegram_service:
@@ -411,7 +506,7 @@ class MasterSystemController(LoggerMixin):
             current_index = mode_hierarchy.index(self.current_mode)
             if current_index > 0:
                 return mode_hierarchy[current_index - 1]
-        
+
         return self.current_mode
     
     async def validate_real_trade_execution(
@@ -579,28 +674,20 @@ class MasterSystemController(LoggerMixin):
             emergency_level = EmergencyLevel.NORMAL
             
             if portfolio_result.get("success"):
-                portfolio_data = portfolio_result.get("portfolio", {})
-                
-                # Enhance portfolio data with your sophisticated risk analysis
-                risk_assessment = await portfolio_risk_service.risk_analysis(
-                    user_id=user_id,
-                    analysis_type="comprehensive"
-                )
-                if risk_assessment.get("success"):
-                    portfolio_data["risk_metrics"] = risk_assessment.get("risk_analysis", {})
-                
-                # Get performance metrics using your advanced analytics
-                performance_data = await portfolio_risk_service.portfolio_performance_analysis(
-                    user_id=user_id,
-                    timeframe="daily"
-                )
-                if performance_data.get("success"):
-                    portfolio_data["performance_data"] = performance_data.get("performance_analysis", {})
-                
-                emergency_level = await self.check_emergency_conditions(portfolio_data)
-                
+                portfolio_snapshot = self._extract_portfolio_snapshot(portfolio_result)
+                if portfolio_result.get("risk_metrics"):
+                    portfolio_snapshot["risk_metrics"] = portfolio_result.get("risk_metrics")
+                if portfolio_result.get("performance_data"):
+                    portfolio_snapshot["performance_data"] = portfolio_result.get("performance_data")
+
+                emergency_level = await self.check_emergency_conditions(portfolio_snapshot)
+
                 if emergency_level != EmergencyLevel.NORMAL:
-                    self.current_mode = await self.execute_emergency_protocol(emergency_level)
+                    self.current_mode = await self.execute_emergency_protocol(
+                        user_id=user_id,
+                        level=emergency_level,
+                        portfolio_snapshot=portfolio_snapshot,
+                    )
             
             phases_executed.append({
                 "phase": "emergency_check",
@@ -1755,6 +1842,11 @@ class MasterSystemController(LoggerMixin):
                 self.logger.warning("Global autonomous cycle skipped - Redis unavailable")
                 return
             
+            # Check for global emergency stop
+            if await redis_client.get("global_emergency_stop"):
+                self.logger.warning("Global emergency stop active - skipping autonomous cycle")
+                return
+
             # Get all active autonomous sessions
             autonomous_keys = await redis_client.keys("autonomous_active:*")
             
@@ -1769,8 +1861,9 @@ class MasterSystemController(LoggerMixin):
                 user_id = key.decode().split(":")[-1]
                 
                 # Check if emergency stop is active
-                emergency = await self.redis.get(f"emergency_stop:{user_id}")
-                if emergency:
+                emergency_stop = await self.redis.get(f"emergency_stop:{user_id}")
+                emergency_halt = await self.redis.get(f"emergency_halt:{user_id}") if self.redis else None
+                if emergency_stop or emergency_halt:
                     continue
                 
                 # Get user config
@@ -1802,9 +1895,24 @@ class MasterSystemController(LoggerMixin):
                     self.logger.warning(f"Skipping cycle for user {user_id} - portfolio unavailable")
                     continue
                 
-                portfolio_data = portfolio_status.get("portfolio", {})
-                if portfolio_data.get("total_value_usd", 0) < 100:  # Minimum $100 to trade
+                portfolio_snapshot = self._extract_portfolio_snapshot(portfolio_status)
+                total_value = float(portfolio_snapshot.get("portfolio_metrics", {}).get("total_value_usd", 0) or 0)
+                if total_value < 100:  # Minimum $100 to trade
                     self.logger.debug(f"Skipping cycle for user {user_id} - insufficient balance")
+                    continue
+
+                emergency_level = await self.check_emergency_conditions(portfolio_snapshot)
+                if emergency_level != EmergencyLevel.NORMAL:
+                    await self.execute_emergency_protocol(
+                        user_id=user_id,
+                        level=emergency_level,
+                        portfolio_snapshot=portfolio_snapshot,
+                    )
+                    self.logger.warning(
+                        "Autonomous cycle halted due to emergency",
+                        user_id=user_id,
+                        emergency_level=emergency_level.value,
+                    )
                     continue
                 
                 # Run enhanced trading cycle for this user

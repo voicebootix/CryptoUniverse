@@ -10,7 +10,7 @@ import structlog
 from app.core.config import get_settings
 from app.services.unified_ai_manager import unified_ai_manager
 from app.services.ai_chat_engine import enhanced_chat_engine as chat_engine
-from app.services.telegram_core import TelegramCommanderService
+from app.services.telegram_core import telegram_commander_service
 from app.services.master_controller import MasterSystemController
 
 settings = get_settings()
@@ -32,7 +32,7 @@ async def initialize_unified_ai_system():
         
         # 3. Connect Telegram to unified manager
         try:
-            telegram_core = TelegramCommanderService()
+            telegram_core = telegram_commander_service
             telegram_core.unified_manager = unified_ai_manager
             logger.info("✅ Telegram connected to unified AI manager")
         except Exception as e:

@@ -599,17 +599,32 @@ class UserOnboardingService(LoggerMixin):
                 credit_result = await db.execute(credit_stmt)
                 credit_account = credit_result.scalar_one_or_none()
                 
-                if credit_account and credit_account.total_earned_credits > 0:
-                    # Check if user has free strategies
-                    portfolio_result = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
-                    
-                    return {
-                        "onboarded": True,
-                        "has_credit_account": True,
-                        "total_earned_credits": float(credit_account.total_earned_credits),
-                        "active_strategies": portfolio_result.get("total_strategies", 0) if portfolio_result.get("success") else 0,
-                        "needs_onboarding": False
-                    }
+                if credit_account:
+                    # "total_earned_credits" does not exist on the production credit account model.
+                    # Older code paths expected it to mirror total credits earned via bonuses/purchases.
+                    # Fall back to the fields that actually exist so we don't raise AttributeError here.
+                    raw_total_earned = getattr(credit_account, "total_earned_credits", None)
+
+                    if raw_total_earned is None:
+                        # Prefer available credits (includes welcome bonus) and fall back to total credits.
+                        available_credits = float(credit_account.available_credits or 0)
+                        total_credits = float(credit_account.total_credits or 0)
+                        raw_total_earned = max(available_credits, total_credits)
+
+                    # Treat any positive balance as an onboarding signal so free strategies can unlock.
+                    if raw_total_earned > 0:
+                        # Check if user has free strategies
+                        portfolio_result = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+
+                        return {
+                            "onboarded": True,
+                            "has_credit_account": True,
+                            "total_earned_credits": float(raw_total_earned),
+                            "active_strategies": portfolio_result.get("total_strategies", 0)
+                            if portfolio_result.get("success")
+                            else 0,
+                            "needs_onboarding": False,
+                        }
                 else:
                     return {
                         "onboarded": False,

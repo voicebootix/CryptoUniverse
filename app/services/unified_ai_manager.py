@@ -12,7 +12,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Union
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from enum import Enum
 import uuid
 
@@ -27,7 +27,7 @@ from app.services.ai_consensus_core import AIConsensusService
 from app.services.trade_execution import TradeExecutionService
 from app.services.ai_chat_engine import enhanced_chat_engine as chat_engine, ChatIntent
 from app.services.chat_service_adapters_fixed import chat_adapters_fixed as chat_adapters
-from app.services.telegram_core import TelegramCommanderService
+from app.services.telegram_core import TelegramCommanderService, telegram_commander_service
 from app.services.websocket import manager
 from app.services.chat_memory import ChatMemoryService
 
@@ -35,6 +35,13 @@ from app.services.chat_memory import ChatMemoryService
 from app.services.market_analysis_core import MarketAnalysisService
 from app.services.portfolio_risk_core import PortfolioRiskService
 from app.services.trading_strategies import TradingStrategiesService
+from app.services.strategy_marketplace_service import strategy_marketplace_service
+from app.services.conversation import (
+    conversation_state_hydrator,
+    unified_response_builder,
+    conversation_telemetry,
+    ConversationStateSnapshot,
+)
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -75,6 +82,17 @@ class AIDecision:
     context: Dict[str, Any]
 
 
+@dataclass
+class IntentResolution:
+    """Intent classification result with confidence and alternates."""
+
+    intent: str
+    confidence: float
+    candidates: Dict[str, float]
+    raw_intent: Optional[str] = None
+    reason: Optional[str] = None
+
+
 class UnifiedAIManager(LoggerMixin):
     """
     THE UNIFIED AI MONEY MANAGER - Central Brain for All Operations
@@ -89,13 +107,13 @@ class UnifiedAIManager(LoggerMixin):
     - Autonomous mode (fully automated)
     """
     
-    def __init__(self):
+    def __init__(self, telegram_service: Optional[TelegramCommanderService] = None):
         # Core services
         self.master_controller = MasterSystemController()
         self.ai_consensus = AIConsensusService()
         self.trade_executor = TradeExecutionService()
         self.adapters = chat_adapters
-        self.telegram_core = TelegramCommanderService()
+        self.telegram_core = telegram_service or telegram_commander_service
         
         # Enhanced memory service for conversation continuity
         self.memory_service = ChatMemoryService()
@@ -108,11 +126,16 @@ class UnifiedAIManager(LoggerMixin):
         # Redis for state management - initialize properly for async usage
         self.redis = None
         self._redis_initialized = False
-        
+
         # Decision tracking
         self.active_decisions: Dict[str, AIDecision] = {}
         self.user_preferences: Dict[str, Dict[str, Any]] = {}
-        
+
+        # Shared conversational tooling
+        self.state_hydrator = conversation_state_hydrator
+        self.response_builder = unified_response_builder
+        self.telemetry = conversation_telemetry
+
         # Initialize unified brain
         self.logger.info("🧠 UNIFIED AI MONEY MANAGER INITIALIZING")
         self._initialize_unified_brain()
@@ -157,13 +180,49 @@ class UnifiedAIManager(LoggerMixin):
         """
         
         try:
+            context = context or {}
+
             # Get user operation mode and preferences
             user_config = await self._get_user_config(user_id)
             operation_mode = OperationMode(user_config.get("operation_mode", "assisted"))
-            
-            # Classify the request intent
-            intent = await self._classify_unified_intent(request, interface, context)
-            
+
+            state_snapshot = await self.state_hydrator.hydrate(
+                user_id,
+                context={"user_config": user_config, **context},
+            )
+
+            intent_resolution = await self._classify_unified_intent(
+                request, interface, context, state_snapshot
+            )
+            intent = intent_resolution.intent
+
+            # Clarify when we are unsure instead of falling back to canned help
+            if intent_resolution.confidence < 0.40:
+                clarification = self.response_builder.clarify(
+                    request=request,
+                    intent_candidates=intent_resolution.candidates,
+                    state=state_snapshot,
+                )
+                await self.telemetry.record(
+                    user_id=user_id,
+                    interface=interface.value,
+                    intent=intent,
+                    request=request,
+                    confidence=intent_resolution.confidence,
+                    resolution=asdict(intent_resolution),
+                    state_summary=state_snapshot.to_dict(),
+                    outcome="clarify",
+                )
+                return {
+                    "success": True,
+                    "decision_id": None,
+                    "action": "clarify",
+                    "content": clarification,
+                    "requires_approval": False,
+                    "confidence": intent_resolution.confidence,
+                    "metadata": {"intent_candidates": intent_resolution.candidates},
+                }
+
             # Create AI decision context
             decision_context = {
                 "user_id": user_id,
@@ -172,27 +231,34 @@ class UnifiedAIManager(LoggerMixin):
                 "operation_mode": operation_mode.value,
                 "intent": intent,
                 "user_config": user_config,
-                "context": context or {},
-                "timestamp": datetime.utcnow().isoformat()
+                "context": context,
+                "timestamp": datetime.utcnow().isoformat(),
+                "state_snapshot": state_snapshot,
+                "intent_resolution": asdict(intent_resolution),
             }
-            
+
             # ENHANCED: Route to actual services first based on intent
-            service_result = await self._route_to_service(intent, request, user_id, context)
-            
+            service_result = await self._route_to_service(
+                intent, request, user_id, context, state_snapshot
+            )
+            decision_context["service_result"] = service_result
+
             # Then use AI consensus to VALIDATE and format the service result
             enhanced_context = {
-                **decision_context,
+                **{k: v for k, v in decision_context.items() if k != "state_snapshot"},
                 "service_result": service_result,
-                "analysis_type": "validation_and_formatting"
+                "analysis_type": "validation_and_formatting",
             }
-            
+
             ai_response = await self.ai_consensus.analyze_opportunity(
-                json.dumps(enhanced_context),
+                json.dumps(enhanced_context, default=str),
                 confidence_threshold=75.0,
-                ai_models="all", 
-                user_id=user_id
+                ai_models="all",
+                user_id=user_id,
             )
-            
+
+            recommendation_payload = ai_response.get("recommendation", {})
+
             # Create AI decision
             decision = AIDecision(
                 decision_id=str(uuid.uuid4()),
@@ -201,18 +267,20 @@ class UnifiedAIManager(LoggerMixin):
                 operation_mode=operation_mode,
                 intent=intent,
                 decision_type=self._get_decision_type(intent),
-                recommendation=ai_response.get("recommendation", {}),
+                recommendation=recommendation_payload,
                 confidence=ai_response.get("confidence", 0.0),
                 risk_assessment=ai_response.get("risk_assessment", {}),
                 requires_approval=self._requires_approval(operation_mode, intent, ai_response),
                 auto_execute=self._should_auto_execute(operation_mode, intent, ai_response),
                 timestamp=datetime.utcnow(),
-                context=decision_context
+                context=decision_context,
             )
             
+            decision.context["ai_response"] = ai_response
+
             # Store decision
             self.active_decisions[decision.decision_id] = decision
-            
+
             # Execute or return for approval based on operation mode
             if decision.auto_execute and not decision.requires_approval:
                 # Autonomous execution
@@ -228,6 +296,17 @@ class UnifiedAIManager(LoggerMixin):
                         error=execution_result.get("error")
                     )
 
+                await self.telemetry.record(
+                    user_id=user_id,
+                    interface=interface.value,
+                    intent=intent,
+                    request=request,
+                    confidence=decision.confidence,
+                    resolution=asdict(intent_resolution),
+                    state_summary=state_snapshot.to_dict(),
+                    outcome="executed" if execution_result.get("success") else "execution_failed",
+                )
+
                 return {
                     "success": True,
                     "decision_id": decision.decision_id,
@@ -239,6 +318,18 @@ class UnifiedAIManager(LoggerMixin):
             else:
                 # Return for user approval or information
                 formatted_response = await self._format_ai_response(decision, interface)
+
+                await self.telemetry.record(
+                    user_id=user_id,
+                    interface=interface.value,
+                    intent=intent,
+                    request=request,
+                    confidence=decision.confidence,
+                    resolution=asdict(intent_resolution),
+                    state_summary=state_snapshot.to_dict(),
+                    outcome="response",
+                )
+
                 return {
                     "success": True,
                     "decision_id": decision.decision_id,
@@ -915,46 +1006,115 @@ class UnifiedAIManager(LoggerMixin):
                 # Redis write failed, keep in-memory version
                 self.logger.debug(f"Failed to write user config to Redis, keeping in-memory fallback", error=str(e))
     
-    async def _classify_unified_intent(self, request: str, interface: InterfaceType, context: Optional[Dict]) -> str:
-        """Classify intent across all interfaces consistently."""
-        
-        # Use existing chat engine intent classification
-        if hasattr(chat_engine, '_classify_intent'):
-            chat_intent = await chat_engine._classify_intent(request)
-            return chat_intent.value
-        
-        # Fallback classification
-        request_lower = request.lower()
-        
-        if any(word in request_lower for word in ['emergency', 'stop', 'halt', 'panic']):
-            return "emergency_command"
-        elif any(word in request_lower for word in ['buy', 'sell', 'trade', 'execute']):
-            return "trade_execution"
-        elif any(word in request_lower for word in ['portfolio', 'balance', 'holdings']):
-            return "portfolio_analysis"
-        elif any(word in request_lower for word in ['rebalance', 'optimize', 'allocation']):
-            return "rebalancing"
-        elif any(word in request_lower for word in ['risk', 'safety', 'protection']):
-            return "risk_assessment"
-        elif any(word in request_lower for word in ['opportunity', 'find', 'discover']):
-            return "opportunity_discovery"
-        elif any(word in request_lower for word in ['autonomous', 'auto', 'automatic']):
-            return "autonomous_control"
-        else:
-            return "general_query"
+    async def _classify_unified_intent(
+        self,
+        request: str,
+        interface: InterfaceType,
+        context: Optional[Dict],
+        state: Optional[ConversationStateSnapshot] = None,
+    ) -> IntentResolution:
+        """Classify intent across all interfaces with confidence scoring."""
+
+        request_lower = (request or "").lower().strip()
+        candidates: Dict[str, float] = {}
+        raw_intent = None
+
+        # Use existing chat engine intent classification when available
+        if hasattr(chat_engine, "_classify_intent"):
+            try:
+                chat_context = context or {}
+                chat_result = await chat_engine._classify_intent(request, chat_context)  # type: ignore[arg-type]
+            except TypeError:
+                chat_result = await chat_engine._classify_intent(request)
+            raw_intent = getattr(chat_result, "value", str(chat_result))
+
+        keyword_map = {
+            "greeting": ["hi", "hello", "hey", "gm", "good morning", "good evening"],
+            "help": ["help", "what can you do", "how can you help", "commands"],
+            "portfolio_analysis": ["portfolio", "balance", "holdings", "positions", "allocation", "exposure", "value"],
+            "strategy_management": ["strategy", "strategies", "automation", "algo", "bot", "playbook"],
+            "credit_inquiry": ["credit", "credits", "profit potential", "limit", "upgrade", "tier"],
+            "opportunity_discovery": ["opportunity", "opportunities", "signals", "setups", "ideas", "trade idea", "show me opportunities"],
+            "risk_assessment": ["risk", "drawdown", "hedge", "volatility", "stress"],
+            "market_analysis": ["market", "price", "outlook", "btc", "eth", "macro", "analysis"],
+            "trade_execution": ["buy", "sell", "trade", "execute", "allocate", "enter", "exit"],
+            "rebalancing": ["rebalance", "rebalancing", "redistribute", "realign"],
+        }
+
+        for intent_name, keywords in keyword_map.items():
+            match_count = sum(1 for keyword in keywords if keyword in request_lower)
+            if match_count:
+                base_score = 0.60 + 0.1 * (match_count - 1)
+                candidates[intent_name] = min(0.95, base_score)
+
+        if raw_intent:
+            normalized_raw = raw_intent.lower()
+            raw_mapping = {
+                "opportunity_discovery": "opportunity_discovery",
+                "strategy_discussion": "strategy_management",
+                "strategy_recommendation": "strategy_management",
+                "credit_inquiry": "credit_inquiry",
+                "credit_management": "credit_inquiry",
+                "portfolio_analysis": "portfolio_analysis",
+                "market_analysis": "market_analysis",
+                "trade_execution": "trade_execution",
+                "risk_assessment": "risk_assessment",
+                "rebalancing": "rebalancing",
+                "help": "help",
+                "greeting": "greeting",
+            }
+            mapped = raw_mapping.get(normalized_raw, normalized_raw)
+            candidates[mapped] = max(candidates.get(mapped, 0.0), 0.7)
+
+        recent_intents: List[str] = []
+        if context:
+            recent_intents.extend(context.get("previous_intents", []))
+            history = context.get("recent_messages", [])
+            for msg in history:
+                if isinstance(msg, dict) and msg.get("intent"):
+                    recent_intents.append(str(msg["intent"]))
+
+        for prev_intent in recent_intents[-3:]:
+            if prev_intent in candidates:
+                candidates[prev_intent] = max(candidates.get(prev_intent, 0.0), 0.5)
+
+        if not candidates:
+            candidates = {"general_query": 0.35}
+
+        # Emergency overrides
+        if any(word in request_lower for word in ["emergency", "stop", "halt", "panic"]):
+            candidates["emergency_command"] = 0.95
+
+        intent = max(candidates.items(), key=lambda item: item[1])[0]
+        confidence = min(0.99, candidates[intent])
+
+        return IntentResolution(
+            intent=intent,
+            confidence=confidence,
+            candidates=candidates,
+            raw_intent=raw_intent,
+            reason="keyword_match",
+        )
     
     def _get_decision_type(self, intent: str) -> str:
         """Get decision type from intent."""
         mapping = {
             "trade_execution": "trade",
             "portfolio_analysis": "analysis",
+            "market_analysis": "analysis",
             "rebalancing": "rebalance",
             "risk_assessment": "risk_action",
             "opportunity_discovery": "opportunity",
+            "strategy_management": "strategy",
+            "strategy_recommendation": "strategy",
+            "credit_inquiry": "credit",
             "autonomous_control": "mode_change",
-            "emergency_command": "emergency"
+            "emergency_command": "emergency",
+            "general_query": "information",
+            "help": "information",
+            "greeting": "information",
         }
-        return mapping.get(intent, "general")
+        return mapping.get(intent, "information")
     
     def _requires_approval(self, mode: OperationMode, intent: str, ai_response: Dict) -> bool:
         """Determine if decision requires user approval."""
@@ -1107,49 +1267,47 @@ class UnifiedAIManager(LoggerMixin):
     
     async def _format_ai_response(self, decision: AIDecision, interface: InterfaceType) -> Dict[str, Any]:
         """Format AI response based on interface type."""
-        
+
         try:
-            base_content = decision.recommendation.get("analysis", "")
-            
-            if interface == InterfaceType.TELEGRAM:
-                # Telegram formatting (shorter, emoji-rich)
-                content = f"🤖 **AI Analysis**\n\n{base_content[:500]}..."
-                if decision.requires_approval:
-                    content += "\n\nReply 'yes' to execute or 'no' to cancel."
-                    
-            elif interface == InterfaceType.WEB_CHAT:
-                # Web chat formatting (detailed, interactive)
-                content = base_content
-                if decision.requires_approval:
-                    content += "\n\nWould you like me to proceed with this recommendation?"
-                    
-            elif interface == InterfaceType.WEB_UI:
-                # Web UI formatting (structured data)
-                content = {
-                    "analysis": base_content,
-                    "recommendation": decision.recommendation,
-                    "confidence": decision.confidence,
-                    "risk_assessment": decision.risk_assessment
-                }
-                
-            else:
-                content = base_content
-            
-            return {
-                "content": content,
-                "metadata": {
-                    "decision_id": decision.decision_id,
-                    "requires_approval": decision.requires_approval,
-                    "confidence": decision.confidence,
-                    "interface": interface.value,
-                    "intent": decision.intent,
-                    "decision_type": decision.decision_type,
-                    "recommendation": decision.recommendation,
-                    "risk_assessment": decision.risk_assessment,
-                    "timestamp": decision.timestamp.isoformat(),
-                }
+            state_snapshot = decision.context.get("state_snapshot")
+            if not isinstance(state_snapshot, ConversationStateSnapshot):
+                state_snapshot = await self.state_hydrator.hydrate(
+                    decision.user_id,
+                    context=decision.context.get("context") if isinstance(decision.context, dict) else None,
+                )
+
+            service_result = decision.context.get("service_result")
+            if not isinstance(service_result, dict):
+                service_result = {}
+
+            recommendation = decision.recommendation if isinstance(decision.recommendation, dict) else {}
+            ai_response = decision.context.get("ai_response") or {}
+
+            render = self.response_builder.build(
+                intent=decision.intent,
+                request=decision.context.get("request", ""),
+                recommendation=recommendation,
+                service_result=service_result,
+                state=state_snapshot,
+                ai_analysis=ai_response.get("analysis"),
+                interface=interface.value,
+                requires_approval=decision.requires_approval,
+            )
+
+            metadata = {
+                **render.metadata,
+                "decision_id": decision.decision_id,
+                "requires_approval": decision.requires_approval,
+                "confidence": decision.confidence,
+                "interface": interface.value,
+                "intent": decision.intent,
+                "decision_type": decision.decision_type,
+                "risk_assessment": decision.risk_assessment,
+                "timestamp": decision.timestamp.isoformat(),
             }
-            
+
+            return {"content": render.content, "metadata": metadata}
+
         except Exception as e:
             self.logger.error("Response formatting failed", error=str(e))
             return {
@@ -1159,20 +1317,37 @@ class UnifiedAIManager(LoggerMixin):
     
     def _format_for_telegram(self, result: Dict[str, Any]) -> str:
         """Format response specifically for Telegram."""
-        
+
         content = result.get("content", "")
-        confidence = result.get("confidence", 0.0)
-        
-        # Add confidence indicator
-        confidence_emoji = "🟢" if confidence >= 0.9 else "🟡" if confidence >= 0.7 else "🔴"
-        
-        telegram_response = f"{confidence_emoji} **Confidence: {confidence:.1%}**\n\n{content}"
-        
-        # Truncate if too long for Telegram
-        if len(telegram_response) > 4000:
-            telegram_response = telegram_response[:3900] + "\n\n... (truncated)"
-        
-        return telegram_response
+        confidence = result.get("confidence")
+        requires_approval = result.get("requires_approval")
+
+        segments: List[str] = []
+
+        if isinstance(confidence, (int, float)) and confidence > 0:
+            confidence_emoji = "🟢" if confidence >= 0.9 else "🟡" if confidence >= 0.7 else "🔴"
+            segments.append(f"{confidence_emoji} Confidence {confidence * 100:.0f}%")
+
+        if isinstance(content, dict):
+            formatted_content = "\n".join(
+                f"{key.replace('_', ' ').title()}: {value}"
+                for key, value in content.items()
+            )
+        else:
+            formatted_content = str(content).strip()
+
+        if formatted_content:
+            segments.append(formatted_content)
+
+        if requires_approval:
+            segments.append("Ready for me to execute or would you like any tweaks?")
+
+        response = "\n\n".join(segments) if segments else "I processed the request, but there was no additional detail to share."
+
+        if len(response) > 4000:
+            response = response[:3900] + "\n\n... (truncated)"
+
+        return response
     
     async def _notify_all_interfaces(self, user_id: str, notification: Dict[str, Any]):
         """Notify all connected interfaces about important events."""
@@ -1523,12 +1698,19 @@ class UnifiedAIManager(LoggerMixin):
             self.logger.error("Web response enhancement failed", error=str(e))
             return result
     
-    async def _route_to_service(self, intent: str, request: str, user_id: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def _route_to_service(
+        self,
+        intent: str,
+        request: str,
+        user_id: str,
+        context: Optional[Dict[str, Any]] = None,
+        state: Optional[ConversationStateSnapshot] = None,
+    ) -> Dict[str, Any]:
         """Route request to appropriate service based on intent - REAL SERVICE CALLS."""
-        
+
         try:
             self.logger.info(f"Routing intent '{intent}' to actual service for user {user_id}")
-            
+
             if "opportunity" in intent.lower() or "discover" in intent.lower():
                 # Route to market analysis for opportunity discovery
                 result = await self.market_analysis.market_inefficiency_scanner(
@@ -1538,12 +1720,27 @@ class UnifiedAIManager(LoggerMixin):
                     user_id=user_id
                 )
                 return {"service": "market_analysis", "method": "opportunity_discovery", "result": result}
-                
+
             elif "portfolio" in intent.lower():
                 # Route to portfolio risk service
                 result = await self.portfolio_risk.get_portfolio_status(user_id)
                 return {"service": "portfolio_risk", "method": "portfolio_analysis", "result": result}
-                
+
+            elif "strategy" in intent.lower():
+                result = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+                return {"service": "strategy_marketplace", "method": "strategy_summary", "result": result}
+
+            elif "credit" in intent.lower():
+                credit_state = state.credit if state else None
+                credit_summary = {
+                    "available_credits": getattr(credit_state, "available_credits", None),
+                    "total_credits": getattr(credit_state, "total_credits", None),
+                    "profit_potential_usd": getattr(credit_state, "profit_potential_usd", None),
+                    "credit_to_usd_ratio": getattr(credit_state, "credit_to_usd_ratio", None),
+                    "tier": getattr(credit_state, "tier", "standard"),
+                }
+                return {"service": "credits", "method": "account_summary", "result": credit_summary}
+
             elif "market" in intent.lower() or "analysis" in intent.lower():
                 # Route to market analysis service
                 result = await self.market_analysis.complete_market_assessment(
@@ -1552,12 +1749,26 @@ class UnifiedAIManager(LoggerMixin):
                     user_id=user_id
                 )
                 return {"service": "market_analysis", "method": "market_assessment", "result": result}
-                
+
             elif "trade" in intent.lower() or "buy" in intent.lower() or "sell" in intent.lower():
                 # Route to trading strategies service
                 result = await self.trading_strategies.get_active_strategy(user_id)
                 return {"service": "trading_strategies", "method": "trade_analysis", "result": result}
-                
+
+            elif "rebalance" in intent.lower():
+                result = await self.portfolio_risk.analyze_rebalancing_strategies(
+                    user_id,
+                    risk_profile=(state.risk_profile if state else "medium"),
+                )
+                return {"service": "portfolio_risk", "method": "rebalancing", "result": result}
+
+            elif "risk" in intent.lower():
+                result = await self.portfolio_risk.get_portfolio_status(user_id)
+                return {"service": "portfolio_risk", "method": "risk_assessment", "result": result}
+
+            elif intent.lower() in {"help", "greeting"}:
+                return {"service": "system", "method": "assistant_overview", "result": {"message": "lightweight"}}
+
             else:
                 # Fallback for general queries - no service routing needed
                 return {"service": "none", "method": "general", "result": {"message": "General query - no specific service routing required"}}
@@ -1566,22 +1777,6 @@ class UnifiedAIManager(LoggerMixin):
             self.logger.error(f"Service routing failed for intent '{intent}': {e}")
             return {"service": "error", "method": "fallback", "result": {"error": str(e), "message": "Service routing failed, falling back to AI consensus"}}
 
-    def _get_decision_type(self, intent: str) -> str:
-        """Map intent to decision type."""
-        
-        intent_mapping = {
-            "trade": "trade_execution",
-            "portfolio": "portfolio_management", 
-            "analysis": "market_analysis",
-            "risk": "risk_assessment",
-            "rebalance": "portfolio_rebalance",
-            "autonomous": "mode_change",
-            "emergency": "emergency",
-            "general": "information"
-        }
-        
-        return intent_mapping.get(intent, "general")
-    
     def _requires_approval(
         self, 
         operation_mode: OperationMode, 
