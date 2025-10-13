@@ -1,0 +1,78 @@
+{
+  "Spot Mean Reversion": {
+    "success": false,
+    "error": "HTTPSConnectionPool(host='cryptouniverse.onrender.com', port=443): Read timed out. (read timeout=60)"
+  },
+  "Spot Breakout": {
+    "success": false,
+    "error": "HTTP 400"
+  },
+  "Pairs Trading": {
+    "success": false,
+    "error": "HTTP 400"
+  },
+  "Statistical Arbitrage": {
+    "success": false,
+    "error": "HTTPSConnectionPool(host='cryptouniverse.onrender.com', port=443): Read timed out. (read timeout=60)"
+  },
+  "Market Making": {
+    "success": true,
+    "error": null,
+    "result_type": "<class 'dict'>",
+    "result_keys": [
+      "success",
+      "timestamp",
+      "market_making_analysis",
+      "execution_time_seconds",
+      "methodology_summary",
+      "regulatory_disclosures",
+      "educational_resources",
+      "compliance_category"
+    ],
+    "result_length": null
+  },
+  "Futures Trading": {
+    "success": false,
+    "error": "HTTP 400"
+  },
+  "Options Trading": {
+    "success": false,
+    "error": "HTTP 400"
+  },
+  "Funding Arbitrage": {
+    "success": true,
+    "error": null,
+    "result_type": "<class 'dict'>",
+    "result_keys": [
+      "success",
+      "timestamp",
+      "funding_arbitrage_analysis",
+      "execution_time_seconds",
+      "methodology_summary",
+      "regulatory_disclosures",
+      "educational_resources",
+      "compliance_category"
+    ],
+    "result_length": null
+  },
+  "Complex Strategy": {
+    "success": true,
+    "error": null,
+    "result_type": "<class 'dict'>",
+    "result_keys": [
+      "success",
+      "strategy",
+      "legs_executed",
+      "max_profit",
+      "max_loss",
+      "breakeven_points",
+      "timestamp",
+      "execution_time_seconds",
+      "methodology_summary",
+      "regulatory_disclosures",
+      "educational_resources",
+      "compliance_category"
+    ],
+    "result_length": null
+  }
+}
