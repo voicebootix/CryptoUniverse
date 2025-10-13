@@ -1362,7 +1362,8 @@ Current settings are optimized for safety and comprehensive analysis. 🛡️
             return {"success": False, "error": "missing_args"}
 
         channel_slug = args[0]
-        symbols_str = args[1]
+        # Capture all symbols from args[1:], handling space-separated and comma-separated formats
+        symbols_str = ' '.join(args[1:])
         symbols = [s.strip().upper() for s in symbols_str.replace(',', ' ').split() if s.strip()]
 
         if not symbols:
