@@ -115,7 +115,7 @@ class SignalDeliveryService:
                 medium=medium,
                 subscription=subscription,
                 user=user,
-                event_payload=evaluation.pipeline_result,
+                event_payload=event.opportunity_payload,
                 summary=event.summary,
                 channel=channel,
                 event_id=event.id,
@@ -388,21 +388,26 @@ class SignalDeliveryService:
         return result.scalar_one_or_none()
 
     def _render_message(self, summary: str, payload: Dict[str, Any], channel: SignalChannel) -> str:
-        validation = payload.get("phases", {}).get("phase_4", {})
-        confidence = validation.get("consensus_confidence")
-        phase_2 = payload.get("phases", {}).get("phase_2", {})
-        symbol = phase_2.get("symbol", "-")
-        action = phase_2.get("action", "HOLD")
-        price_hint = phase_2.get("entry_price") or phase_2.get("price")
+        """Build Telegram message from opportunity payload (flat structure)."""
+        symbol = payload.get("symbol", "-")
+        action = payload.get("action", "HOLD")
+        entry_price = payload.get("entry_price")
+        stop_loss = payload.get("stop_loss")
+        take_profit = payload.get("take_profit")
+
         parts = [
             f"📡 *{channel.name}*",
             summary,
             f"Action: {action} {symbol}",
         ]
-        if price_hint:
-            parts.append(f"Entry: {price_hint}")
-        if confidence is not None:
-            parts.append(f"Confidence: {confidence}%")
+
+        if entry_price:
+            parts.append(f"Entry: ${entry_price:.2f}")
+        if stop_loss:
+            parts.append(f"Stop Loss: ${stop_loss:.2f}")
+        if take_profit:
+            parts.append(f"Take Profit: ${take_profit:.2f}")
+
         parts.append("Respond with /execute to run via autopilot or acknowledge to log completion.")
         return "\n".join(parts)
 
