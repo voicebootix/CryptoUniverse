@@ -2292,6 +2292,8 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                 portfolio_id_result = await db.execute(portfolio_id_stmt)
                 portfolio_id = portfolio_id_result.scalar_one_or_none()
 
+                # Initialize portfolio_points before conditional to avoid UnboundLocalError
+                portfolio_points = []
                 peak_value = 0.0
                 max_drawdown_pct = 0.0
                 current_drawdown_pct = 0.0

@@ -1075,9 +1075,9 @@ class BackgroundServiceManager(LoggerMixin):
 
                             # Clear all emergency keys from resilient_state_coordinator
                             try:
-                                await resilient_state_coordinator.cache_value("emergency_last_level", user_id, None, ttl=0)
-                                await resilient_state_coordinator.cache_value("emergency_halt", user_id, None, ttl=0)
-                                await resilient_state_coordinator.cache_value("emergency_stop", user_id, None, ttl=0)
+                                await resilient_state_coordinator.clear_value("emergency_last_level", user_id)
+                                await resilient_state_coordinator.clear_value("emergency_halt", user_id)
+                                await resilient_state_coordinator.clear_value("emergency_stop", user_id)
                             except Exception as coordinator_error:
                                 self.logger.warning("Failed to clear emergency keys from state coordinator", error=str(coordinator_error))
 
