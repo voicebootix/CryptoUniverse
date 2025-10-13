@@ -1155,15 +1155,25 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
         self.logger.info("Executing mean reversion strategy", symbol=symbol)
         
         try:
-            # Get price and volatility analysis
-            price_data = await self.market_analyzer.realtime_price_tracking(
-                symbol, user_id=user_id
-            )
+            # Get price and volatility analysis with timeout
+            try:
+                price_data = await asyncio.wait_for(
+                    self.market_analyzer.realtime_price_tracking(symbol, user_id=user_id),
+                    timeout=8.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Price tracking timeout, using fallback data")
+                price_data = {"success": False, "error": "Price tracking timeout"}
 
-            # Calculate mean reversion indicators
-            reversion_signals = await self._calculate_mean_reversion_signals(
-                symbol, parameters
-            )
+            # Calculate mean reversion indicators with timeout
+            try:
+                reversion_signals = await asyncio.wait_for(
+                    self._calculate_mean_reversion_signals(symbol, parameters),
+                    timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Mean reversion calculation timeout")
+                reversion_signals = {"success": False, "error": "Calculation timeout"}
 
             if not reversion_signals.get("success", True):
                 return {
@@ -1240,10 +1250,25 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
         self.logger.info("Executing breakout strategy", symbol=symbol)
         
         try:
-            # Get support/resistance levels
-            sr_analysis = await self.market_analyzer.support_resistance_detection(
-                symbol, parameters.timeframe, user_id=user_id
-            )
+            # Get support/resistance levels with timeout
+            try:
+                sr_analysis = await asyncio.wait_for(
+                    self.market_analyzer.support_resistance_detection(
+                        symbol, parameters.timeframe, user_id=user_id
+                    ),
+                    timeout=8.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Support/resistance analysis timeout, using fallback")
+                sr_analysis = {
+                    "success": True,
+                    "data": {
+                        symbol: {
+                            "resistance_levels": [],
+                            "support_levels": []
+                        }
+                    }
+                }
             
             if not sr_analysis.get("success"):
                 return {
@@ -2731,14 +2756,25 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             except ValueError:
                 strategy_enum = StrategyType.LONG_FUTURES  # Fallback to default
 
-            return await self.derivatives_engine.futures_trade(
-                strategy_enum,
-                symbol,
-                parameters,
-                exchange,
-                user_id,
-                strategy_id=strategy_uuid,
-            )
+            # Add timeout handling
+            try:
+                return await asyncio.wait_for(
+                    self.derivatives_engine.futures_trade(
+                        strategy_enum,
+                        symbol,
+                        parameters,
+                        exchange,
+                        user_id,
+                        strategy_id=strategy_uuid,
+                    ),
+                    timeout=10.0
+                )
+            except asyncio.TimeoutError:
+                return {
+                    "success": False,
+                    "error": "Futures trading timeout",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
         
         elif function == "options_trade":
             # Set default strategy type if not provided
@@ -2773,9 +2809,20 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             # Round to nearest 100 for crypto, nearest 5 for others
             strike_price = round(raw_strike / 100) * 100 if current_price > 1000 else round(raw_strike / 5) * 5
             
-            return await self.derivatives_engine.options_trade(
-                strategy_enum, symbol, parameters, expiry_date, strike_price, user_id
-            )
+            # Add timeout handling
+            try:
+                return await asyncio.wait_for(
+                    self.derivatives_engine.options_trade(
+                        strategy_enum, symbol, parameters, expiry_date, strike_price, user_id
+                    ),
+                    timeout=10.0
+                )
+            except asyncio.TimeoutError:
+                return {
+                    "success": False,
+                    "error": "Options trading timeout",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
 
         elif function == "perpetual_trade":
             default_strategy_type = strategy_type or "long_perpetual"
@@ -2901,9 +2948,17 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             raw_params = raw_parameters or {}
 
             if function == "pairs_trading":
+                # Handle different parameter formats for pairs trading
+                pair_symbols = symbol
+                if raw_params.get("symbol1") and raw_params.get("symbol2"):
+                    pair_symbols = f"{raw_params['symbol1']}-{raw_params['symbol2']}"
+                elif raw_params.get("pair_symbols"):
+                    pair_symbols = raw_params["pair_symbols"]
+                
                 return await self.pairs_trading(
-                    pair_symbols=symbol,
+                    pair_symbols=pair_symbols,
                     strategy_type=strategy_type or "statistical_arbitrage",
+                    parameters=raw_params,
                     user_id=user_id
                 )
 
@@ -3095,8 +3150,17 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 )
                 portfolio_result = {"success": True, "portfolio": provided_snapshot}
             else:
-                portfolio_result = await portfolio_risk_service.get_portfolio(user_id)
-                provided_snapshot = portfolio_result.get("portfolio") if portfolio_result.get("success") else None
+                # Add timeout to prevent hanging
+                try:
+                    portfolio_result = await asyncio.wait_for(
+                        portfolio_risk_service.get_portfolio(user_id),
+                        timeout=10.0
+                    )
+                    provided_snapshot = portfolio_result.get("portfolio") if portfolio_result.get("success") else None
+                except asyncio.TimeoutError:
+                    self.logger.warning("Portfolio service timeout, using fallback data")
+                    portfolio_result = {"success": False, "error": "Portfolio service timeout"}
+                    provided_snapshot = None
 
             current_positions = []
             if provided_snapshot:
@@ -3106,25 +3170,31 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             for strategy in optimization_strategies:
                 try:
                     if provided_snapshot and provided_snapshot.get("positions"):
-                        opt_result = await portfolio_risk_service.optimize_allocation_with_portfolio_data(
-                            user_id=user_id or "system",
-                            portfolio_data=provided_snapshot,
-                            strategy=strategy,
-                            constraints={
-                                "min_position_size": 0.02,
-                                "max_position_size": 0.25,
-                                "max_positions": 15,
-                            },
+                        opt_result = await asyncio.wait_for(
+                            portfolio_risk_service.optimize_allocation_with_portfolio_data(
+                                user_id=user_id or "system",
+                                portfolio_data=provided_snapshot,
+                                strategy=strategy,
+                                constraints={
+                                    "min_position_size": 0.02,
+                                    "max_position_size": 0.25,
+                                    "max_positions": 15,
+                                },
+                            ),
+                            timeout=8.0
                         )
                     else:
-                        opt_result = await portfolio_risk_service.optimize_allocation(
-                            user_id=user_id,
-                            strategy=strategy,
-                            constraints={
-                                "min_position_size": 0.02,  # 2% minimum
-                                "max_position_size": 0.25,  # 25% maximum
-                                "max_positions": 15,
-                            },
+                        opt_result = await asyncio.wait_for(
+                            portfolio_risk_service.optimize_allocation(
+                                user_id=user_id,
+                                strategy=strategy,
+                                constraints={
+                                    "min_position_size": 0.02,  # 2% minimum
+                                    "max_position_size": 0.25,  # 25% maximum
+                                    "max_positions": 15,
+                                },
+                            ),
+                            timeout=8.0
                         )
                     
                     if opt_result.get("success") and opt_result.get("optimization_result"):
