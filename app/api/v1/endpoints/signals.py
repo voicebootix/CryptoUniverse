@@ -44,6 +44,8 @@ from app.services.signal_channel_service import (
     signal_channel_service,
 )
 from app.services.signal_execution_bridge import signal_execution_bridge
+from app.services.signal_performance_service import signal_performance_service
+from app.services.signal_backtesting_service import signal_backtesting_service
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -289,3 +291,284 @@ async def _verify_signature(payload: Dict[str, str], signature: Optional[str]) -
     expected = hmac.new(secret.encode(), serialized, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, signature):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature")
+
+
+# ============================================================================
+# SIGNAL CONFIGURATION ENDPOINTS
+# ============================================================================
+
+@router.post("/channels/{channel_id}/configure")
+async def configure_channel(
+    channel_id: UUID,
+    config: Dict[str, Any],
+    db: AsyncSession = Depends(get_database),
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Configure signal channel settings.
+
+    Body:
+    {
+        "symbols": ["BTC/USDT", "ETH/USDT"],  // Optional: custom symbols
+        "timeframe": "1h",  // Optional: 5m, 15m, 1h, 4h, 1d
+        "autopilot_enabled": true,  // Optional: enable autopilot
+        "max_daily_events": 12,  // Optional: max signals per day
+        "preferred_channels": ["telegram", "chat"]  // Optional: delivery channels
+    }
+    """
+    from app.models.signal import SignalChannel, SignalSubscription
+
+    # Get channel
+    channel = await db.get(SignalChannel, channel_id)
+    if not channel or not channel.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
+
+    # Get subscription
+    sub_stmt = (
+        select(SignalSubscription)
+        .where(SignalSubscription.user_id == current_user.id)
+        .where(SignalSubscription.channel_id == channel_id)
+    )
+    subscription = (await db.execute(sub_stmt)).scalar_one_or_none()
+
+    if not subscription:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You must be subscribed to configure this channel"
+        )
+
+    # Update channel configuration
+    if "symbols" in config or "timeframe" in config:
+        channel_config = channel.configuration or {}
+
+        if "symbols" in config:
+            symbols = config["symbols"]
+            if not isinstance(symbols, list):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="symbols must be a list")
+            channel_config["default_symbols"] = symbols
+
+        if "timeframe" in config:
+            timeframe = config["timeframe"]
+            valid_timeframes = ["5m", "15m", "1h", "4h", "1d"]
+            if timeframe not in valid_timeframes:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid timeframe. Must be one of: {', '.join(valid_timeframes)}"
+                )
+            channel_config["timeframe"] = timeframe
+
+        channel.configuration = channel_config
+
+    # Update subscription settings
+    if "autopilot_enabled" in config:
+        subscription.autopilot_enabled = bool(config["autopilot_enabled"])
+
+    if "max_daily_events" in config:
+        max_events = config["max_daily_events"]
+        if not isinstance(max_events, int) or max_events < 1 or max_events > 50:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="max_daily_events must be between 1 and 50"
+            )
+        subscription.max_daily_events = max_events
+
+    if "preferred_channels" in config:
+        channels = config["preferred_channels"]
+        if not isinstance(channels, list):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="preferred_channels must be a list")
+        subscription.preferred_channels = channels
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "channel_id": str(channel_id),
+        "configuration": channel.configuration,
+        "subscription": {
+            "autopilot_enabled": subscription.autopilot_enabled,
+            "max_daily_events": subscription.max_daily_events,
+            "preferred_channels": subscription.preferred_channels,
+        }
+    }
+
+
+@router.get("/performance")
+async def get_all_performance(
+    days: int = Query(30, ge=1, le=365),
+    db: AsyncSession = Depends(get_database),
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Get performance metrics for all signal channels.
+
+    Returns win rate, profit metrics, and quality scores.
+    """
+    performances = await signal_performance_service.get_all_channel_performance(db, days=days)
+
+    return {
+        "success": True,
+        "timeframe_days": days,
+        "channels": [
+            {
+                "channel_id": str(perf.channel_id),
+                "channel_name": perf.channel_name,
+                "total_signals": perf.total_signals,
+                "completed_signals": perf.completed_signals,
+                "win_count": perf.win_count,
+                "loss_count": perf.loss_count,
+                "pending_count": perf.pending_count,
+                "win_rate": perf.win_rate,
+                "avg_profit_pct": perf.avg_profit_pct,
+                "avg_win_pct": perf.avg_win_pct,
+                "avg_loss_pct": perf.avg_loss_pct,
+                "best_signal_pct": perf.best_signal_pct,
+                "worst_signal_pct": perf.worst_signal_pct,
+                "quality_score": perf.quality_score,
+            }
+            for perf in performances
+        ]
+    }
+
+
+@router.get("/performance/{channel_id}")
+async def get_channel_performance(
+    channel_id: UUID,
+    days: int = Query(30, ge=1, le=365),
+    db: AsyncSession = Depends(get_database),
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Get detailed performance metrics for a specific channel.
+    """
+    try:
+        perf = await signal_performance_service.get_channel_performance(db, channel_id, days=days)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    return {
+        "success": True,
+        "channel_id": str(perf.channel_id),
+        "channel_name": perf.channel_name,
+        "timeframe_days": perf.timeframe_days,
+        "total_signals": perf.total_signals,
+        "completed_signals": perf.completed_signals,
+        "win_count": perf.win_count,
+        "loss_count": perf.loss_count,
+        "pending_count": perf.pending_count,
+        "win_rate": perf.win_rate,
+        "avg_profit_pct": perf.avg_profit_pct,
+        "avg_win_pct": perf.avg_win_pct,
+        "avg_loss_pct": perf.avg_loss_pct,
+        "best_signal_pct": perf.best_signal_pct,
+        "worst_signal_pct": perf.worst_signal_pct,
+        "quality_score": perf.quality_score,
+    }
+
+
+@router.get("/history")
+async def get_signal_history(
+    limit: int = Query(50, ge=1, le=100),
+    db: AsyncSession = Depends(get_database),
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Get signal history for the current user.
+
+    Returns past signals with their outcomes and performance.
+    """
+    history = await signal_performance_service.get_user_signal_history(
+        db, current_user.id, limit=limit
+    )
+
+    return {
+        "success": True,
+        "count": len(history),
+        "signals": history
+    }
+
+
+@router.post("/backtest")
+async def backtest_strategy(
+    request: Dict[str, Any],
+    db: AsyncSession = Depends(get_database),
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Backtest a signal strategy against historical data.
+
+    Body:
+    {
+        "strategy_type": "momentum",  // momentum, breakout, mean_reversion, scalping
+        "symbols": ["BTC/USDT", "ETH/USDT"],
+        "timeframe": "1h",  // Optional: default 1h
+        "days_back": 30,  // Optional: default 30
+        "start_date": "2024-01-01",  // Optional: ISO format
+        "end_date": "2024-12-31"  // Optional: ISO format
+    }
+    """
+    strategy_type = request.get("strategy_type")
+    symbols = request.get("symbols", [])
+    timeframe = request.get("timeframe", "1h")
+    days_back = request.get("days_back", 30)
+    start_date = request.get("start_date")
+    end_date = request.get("end_date")
+
+    if not strategy_type:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="strategy_type is required")
+
+    valid_strategies = ["momentum", "breakout", "mean_reversion", "scalping"]
+    if strategy_type not in valid_strategies:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid strategy_type. Must be one of: {', '.join(valid_strategies)}"
+        )
+
+    if not symbols:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="symbols is required")
+
+    # Run backtest
+    result = await signal_backtesting_service.backtest_strategy(
+        strategy_type=strategy_type,
+        symbols=symbols,
+        timeframe=timeframe,
+        start_date=start_date,
+        end_date=end_date,
+        days_back=days_back,
+    )
+
+    return {
+        "success": True,
+        "backtest": {
+            "strategy_type": result.strategy_type,
+            "symbols": result.symbols,
+            "timeframe": result.timeframe,
+            "start_date": result.start_date,
+            "end_date": result.end_date,
+            "total_trades": result.total_trades,
+            "winning_trades": result.winning_trades,
+            "losing_trades": result.losing_trades,
+            "win_rate": result.win_rate,
+            "total_return_pct": result.total_return_pct,
+            "avg_win_pct": result.avg_win_pct,
+            "avg_loss_pct": result.avg_loss_pct,
+            "best_trade_pct": result.best_trade_pct,
+            "worst_trade_pct": result.worst_trade_pct,
+            "profit_factor": result.profit_factor,
+            "sharpe_ratio": result.sharpe_ratio,
+            "max_drawdown_pct": result.max_drawdown_pct,
+            "trades": [
+                {
+                    "entry_time": trade.entry_time.isoformat(),
+                    "exit_time": trade.exit_time.isoformat(),
+                    "symbol": trade.symbol,
+                    "action": trade.action,
+                    "entry_price": trade.entry_price,
+                    "exit_price": trade.exit_price,
+                    "profit_pct": trade.profit_pct,
+                    "outcome": trade.outcome,
+                    "reason": trade.reason,
+                }
+                for trade in result.trades
+            ]
+        }
+    }

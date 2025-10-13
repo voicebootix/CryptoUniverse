@@ -150,6 +150,12 @@ class SignalEvent(Base):
     created_by_user_id = Column(PG_UUID(as_uuid=True), nullable=True, index=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
 
+    # Performance tracking fields
+    actual_outcome = Column(String(32), nullable=True)  # "win", "loss", "pending", "skipped"
+    actual_profit_pct = Column(Numeric(10, 4), nullable=True)
+    closed_at = Column(DateTime, nullable=True)
+    close_price = Column(Numeric(20, 8), nullable=True)
+
     channel = relationship("SignalChannel", back_populates="events")
     subscription = relationship("SignalSubscription")
     deliveries = relationship(
@@ -161,6 +167,7 @@ class SignalEvent(Base):
     __table_args__ = (
         Index("idx_signal_events_channel_time", "channel_id", "triggered_at"),
         Index("idx_signal_events_subscription", "generated_for_subscription_id"),
+        Index("idx_signal_events_outcome", "actual_outcome"),
     )
 
 
