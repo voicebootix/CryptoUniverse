@@ -1733,7 +1733,7 @@ Current settings are optimized for safety and comprehensive analysis. 🛡️
                 response += f"• Quality Score: {perf.quality_score:.0f}/100\n\n"
 
                 response += f"**Returns:**\n"
-                response += f"• Total Return: {perf.total_return_pct:+.2f}%\n"
+                response += f"• Avg Profit: {perf.avg_profit_pct:+.2f}%\n"
                 response += f"• Avg Win: +{perf.avg_win_pct:.2f}%\n"
                 response += f"• Avg Loss: {perf.avg_loss_pct:.2f}%\n"
                 response += f"• Best Trade: +{perf.best_signal_pct:.2f}%\n"
@@ -1760,7 +1760,7 @@ Current settings are optimized for safety and comprehensive analysis. 🛡️
                     response += f"**{perf.channel_name}**\n"
                     response += f"• Win Rate: {perf.win_rate:.1f}% ({perf.win_count}W/{perf.loss_count}L)\n"
                     response += f"• Quality Score: {perf.quality_score:.0f}/100\n"
-                    response += f"• Return: {perf.total_return_pct:+.2f}%\n\n"
+                    response += f"• Avg Profit: {perf.avg_profit_pct:+.2f}%\n\n"
 
                 response += f"\nUse `/signal_performance <channel-slug>` for details."
 
