@@ -1,0 +1,174 @@
+[
+  {
+    "strategy": "Portfolio Optimization",
+    "status": "SUCCESS",
+    "opportunities_count": 1,
+    "execution_time": 0.000515,
+    "error": null,
+    "sample_opportunity": {
+      "symbol": "BTC",
+      "type": "portfolio_rebalancing",
+      "profit": 1000.0,
+      "confidence": 75.0
+    }
+  },
+  {
+    "strategy": "Risk Management",
+    "status": "SUCCESS",
+    "opportunities_count": 1,
+    "execution_time": 5.7e-05,
+    "error": null,
+    "sample_opportunity": {
+      "symbol": "Portfolio",
+      "type": "risk_mitigation",
+      "profit": 0,
+      "confidence": 80.0
+    }
+  },
+  {
+    "strategy": "Spot Momentum",
+    "status": "SUCCESS",
+    "opportunities_count": 5,
+    "execution_time": 0.00011,
+    "error": null,
+    "sample_opportunity": {
+      "symbol": "BTC",
+      "type": "spot_momentum",
+      "profit": 500.0,
+      "confidence": 85.0
+    }
+  },
+  {
+    "strategy": "Spot Mean Reversion",
+    "status": "SUCCESS",
+    "opportunities_count": 5,
+    "execution_time": 8e-05,
+    "error": null,
+    "sample_opportunity": {
+      "symbol": "BTC",
+      "type": "mean_reversion",
+      "profit": 250.0,
+      "confidence": 78.0
+    }
+  },
+  {
+    "strategy": "Spot Breakout",
+    "status": "SUCCESS",
+    "opportunities_count": 5,
+    "execution_time": 7.2e-05,
+    "error": null,
+    "sample_opportunity": {
+      "symbol": "BTC",
+      "type": "breakout",
+      "profit": 400.0,
+      "confidence": 85.0
+    }
+  },
+  {
+    "strategy": "Scalping",
+    "status": "SUCCESS",
+    "opportunities_count": 3,
+    "execution_time": 6.7e-05,
+    "error": null,
+    "sample_opportunity": {
+      "symbol": "BTC",
+      "type": "scalping",
+      "profit": 50.0,
+      "confidence": 82.0
+    }
+  },
+  {
+    "strategy": "Pairs Trading",
+    "status": "SUCCESS",
+    "opportunities_count": 4,
+    "execution_time": 6.5e-05,
+    "error": null,
+    "sample_opportunity": {
+      "symbol": "BTC-ETH",
+      "type": "pairs_trading",
+      "profit": 300.0,
+      "confidence": 65.0
+    }
+  },
+  {
+    "strategy": "Statistical Arbitrage",
+    "status": "SUCCESS",
+    "opportunities_count": 1,
+    "execution_time": 3e-05,
+    "error": null,
+    "sample_opportunity": {
+      "symbol": "ETH/USDT",
+      "type": "statistical_arbitrage",
+      "profit": 200.0,
+      "confidence": 80.0
+    }
+  },
+  {
+    "strategy": "Market Making",
+    "status": "SUCCESS",
+    "opportunities_count": 3,
+    "execution_time": 4.6e-05,
+    "error": null,
+    "sample_opportunity": {
+      "symbol": "BTC",
+      "type": "market_making",
+      "profit": 75.0,
+      "confidence": 25.0
+    }
+  },
+  {
+    "strategy": "Futures Trading",
+    "status": "SUCCESS",
+    "opportunities_count": 3,
+    "execution_time": 4.7e-05,
+    "error": null,
+    "sample_opportunity": {
+      "symbol": "BTC",
+      "type": "futures_trading",
+      "profit": 800.0,
+      "confidence": 85.0
+    }
+  },
+  {
+    "strategy": "Options Trading",
+    "status": "SUCCESS",
+    "opportunities_count": 3,
+    "execution_time": 4.2e-05,
+    "error": null,
+    "sample_opportunity": {
+      "symbol": "BTC",
+      "type": "options_trading",
+      "profit": 600.0,
+      "confidence": 72.0
+    }
+  },
+  {
+    "strategy": "Funding Arbitrage",
+    "status": "SUCCESS",
+    "opportunities_count": 1,
+    "execution_time": 3.4e-05,
+    "error": null,
+    "sample_opportunity": {
+      "symbol": "BTC/USDT",
+      "type": "funding_arbitrage",
+      "profit": 150.0,
+      "confidence": 75.0
+    }
+  },
+  {
+    "strategy": "Hedge Position",
+    "status": "NO_OPPORTUNITIES",
+    "opportunities_count": 0,
+    "execution_time": 2e-06,
+    "error": "No opportunities generated",
+    "sample_opportunity": null
+  },
+  {
+    "strategy": "Complex Strategy",
+    "status": "NO_OPPORTUNITIES",
+    "opportunities_count": 0,
+    "execution_time": 1e-06,
+    "error": "No opportunities generated",
+    "sample_opportunity": null
+  }
+]
