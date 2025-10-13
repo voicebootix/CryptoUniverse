@@ -143,6 +143,24 @@ class SignalDeliveryService:
             # Add all deliveries to the session
             for delivery_log in deliveries:
                 db.add(delivery_log)
+        else:
+            # ALL deliveries failed - record critical alert
+            system_monitoring_service.metrics_collector.record_metric(
+                "signal_delivery_failed_all",
+                1.0,
+                {
+                    "channel": channel.slug,
+                    "user_id": str(user.id),
+                    "subscription_id": str(subscription.id),
+                },
+            )
+            self.logger.error(
+                "All signal delivery attempts failed",
+                channel=channel.slug,
+                user_id=str(user.id),
+                subscription_id=str(subscription.id),
+                preferred_channels=preferred_channels,
+            )
 
         await db.flush()
 
@@ -257,6 +275,18 @@ class SignalDeliveryService:
         status = "delivered" if response.get("success") else "failed"
         error_message = None if response.get("success") else response.get("error")
 
+        # Monitor delivery failures
+        if status == "failed":
+            system_monitoring_service.metrics_collector.record_metric(
+                "signal_delivery_telegram_failed",
+                1.0,
+                {
+                    "channel": channel.slug,
+                    "user_id": str(user.id),
+                    "error": error_message[:100] if error_message else "unknown",
+                },
+            )
+
         return SignalDeliveryLog(
             event_id=event_id,
             subscription_id=subscription.id,
@@ -345,6 +375,16 @@ class SignalDeliveryService:
                 webhook_url=webhook_url,
                 error=str(exc),
             )
+            # Monitor webhook failures
+            system_monitoring_service.metrics_collector.record_metric(
+                "signal_delivery_webhook_failed",
+                1.0,
+                {
+                    "channel": channel.slug,
+                    "subscription_id": str(subscription.id),
+                    "error_type": type(exc).__name__,
+                },
+            )
             return SignalDeliveryLog(
                 event_id=event_id,
                 subscription_id=subscription.id,
@@ -358,6 +398,18 @@ class SignalDeliveryService:
             )
 
         status = "delivered" if response.status_code < 400 else "failed"
+
+        # Monitor HTTP error responses
+        if status == "failed":
+            system_monitoring_service.metrics_collector.record_metric(
+                "signal_delivery_webhook_failed",
+                1.0,
+                {
+                    "channel": channel.slug,
+                    "subscription_id": str(subscription.id),
+                    "status_code": str(response.status_code),
+                },
+            )
 
         log_entry = SignalDeliveryLog(
             event_id=event_id,

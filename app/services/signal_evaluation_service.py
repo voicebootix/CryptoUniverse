@@ -85,6 +85,23 @@ class SignalEvaluationService:
         filtered_signals = batch_signals.get_by_strategy(channel.required_strategy_ids or [])
 
         if not filtered_signals:
+            # Record empty signal generation for monitoring
+            system_monitoring_service.metrics_collector.record_metric(
+                "signal_generation_empty",
+                1.0,
+                {
+                    "channel": channel.slug,
+                    "timeframe": timeframe,
+                    "strategies": str(channel.required_strategy_ids),
+                },
+            )
+            self.logger.warning(
+                "No signals generated for channel",
+                channel=channel.slug,
+                required_strategies=channel.required_strategy_ids,
+                timeframe=timeframe,
+                symbols=target_symbols,
+            )
             raise SignalEvaluationError(
                 f"No signals generated for channel {channel.slug} with required strategies"
             )

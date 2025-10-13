@@ -40,6 +40,7 @@ from app.services.signal_channel_service import (
 from app.services.signal_execution_bridge import signal_execution_bridge
 from app.services.signal_performance_service import signal_performance_service
 from app.services.signal_backtesting_service import signal_backtesting_service
+from app.services.system_monitoring import system_monitoring_service
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -481,6 +482,63 @@ async def get_signal_history(
         "success": True,
         "count": len(history),
         "signals": history
+    }
+
+
+@router.get("/monitoring")
+async def get_signal_monitoring(
+    duration_minutes: int = Query(60, ge=5, le=1440),
+    current_user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """
+    Get signal generation and delivery monitoring metrics.
+
+    Returns metrics about empty signal generation, delivery failures, and alerts.
+    Admin-only endpoint for operational monitoring.
+    """
+    # Check if user is admin (you may want to add a proper admin check)
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required"
+        )
+
+    # Get signal-specific metrics
+    signal_metrics = {}
+    for metric_name in [
+        "signal_generation_empty",
+        "signal_delivery_failed_all",
+        "signal_delivery_telegram_failed",
+        "signal_delivery_webhook_failed",
+        "signal_delivery_count",
+        "signal_evaluation_confidence",
+    ]:
+        summary = system_monitoring_service.metrics_collector.get_metric_summary(
+            metric_name,
+            duration_minutes=duration_minutes
+        )
+        if "error" not in summary:
+            signal_metrics[metric_name] = summary
+
+    # Get active alerts related to signals
+    all_alerts = system_monitoring_service.get_active_alerts()
+    signal_alerts = [
+        alert for alert in all_alerts
+        if "signal_" in alert["message"].lower()
+    ]
+
+    return {
+        "success": True,
+        "duration_minutes": duration_minutes,
+        "metrics": signal_metrics,
+        "alerts": {
+            "signal_related": signal_alerts,
+            "count": len(signal_alerts),
+        },
+        "thresholds": {
+            k: v for k, v in system_monitoring_service.thresholds.items()
+            if k.startswith("signal_")
+        },
     }
 
 
