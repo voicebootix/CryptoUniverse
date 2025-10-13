@@ -264,11 +264,17 @@ git commit -m "Add enterprise signal generation engine with TA"
 git push
 ```
 
-### 2. No Database Migration Needed
-All models already exist!
+### 2. Database Migrations Required
+Signal tables must be created before deployment:
+```bash
+# Run the signal intelligence migration
+alembic upgrade head
+
+# Migration file: alembic/versions/009_signal_intelligence_tables.py
+```
 
 ### 3. Restart Background Service
-Signals will automatically use new engine
+Signals will automatically use new engine after migrations are applied
 
 ---
 

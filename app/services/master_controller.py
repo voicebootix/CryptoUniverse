@@ -2903,7 +2903,13 @@ class MasterSystemController(LoggerMixin):
             "execution_time_ms": 0,
             "timestamp": datetime.utcnow().isoformat()
         }
-        
+
+        # Initialize placeholders for phase results to avoid UnboundLocalError
+        market_data = {}
+        trade_signal = {}
+        sized_position = {}
+        validation = {}
+
         try:
             # =============================================================================
             # PHASE 1: MARKET ANALYSIS SERVICE - DYNAMIC DISCOVERY & ANALYSIS

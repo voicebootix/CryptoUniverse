@@ -8,12 +8,6 @@ import json
 from typing import Any, Dict, Optional
 from uuid import UUID
 
-import hashlib
-import hmac
-import json
-from typing import Any, Dict, Optional
-from uuid import UUID
-
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -282,8 +276,11 @@ async def _get_delivery(db: AsyncSession, delivery_id: UUID) -> SignalDeliveryLo
 async def _verify_signature(payload: Dict[str, str], signature: Optional[str]) -> None:
     secret = settings.SIGNALS_WEBHOOK_SECRET
     if not secret:
-        # No secret configured, treat as disabled verification.
-        return
+        # Fail closed: webhook secret must be configured
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Webhook secret not configured"
+        )
     if not signature:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing signature")
 
@@ -337,27 +334,26 @@ async def configure_channel(
             detail="You must be subscribed to configure this channel"
         )
 
-    # Update channel configuration
-    if "symbols" in config or "timeframe" in config:
-        channel_config = channel.configuration or {}
+    # Store per-subscription overrides (do not modify channel configuration)
+    sub_metadata = subscription.metadata or {}
 
-        if "symbols" in config:
-            symbols = config["symbols"]
-            if not isinstance(symbols, list):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="symbols must be a list")
-            channel_config["default_symbols"] = symbols
+    if "symbols" in config:
+        symbols = config["symbols"]
+        if not isinstance(symbols, list):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="symbols must be a list")
+        sub_metadata["override_symbols"] = symbols
 
-        if "timeframe" in config:
-            timeframe = config["timeframe"]
-            valid_timeframes = ["5m", "15m", "1h", "4h", "1d"]
-            if timeframe not in valid_timeframes:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid timeframe. Must be one of: {', '.join(valid_timeframes)}"
-                )
-            channel_config["timeframe"] = timeframe
+    if "timeframe" in config:
+        timeframe = config["timeframe"]
+        valid_timeframes = ["5m", "15m", "1h", "4h", "1d"]
+        if timeframe not in valid_timeframes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid timeframe. Must be one of: {', '.join(valid_timeframes)}"
+            )
+        sub_metadata["override_timeframe"] = timeframe
 
-        channel.configuration = channel_config
+    subscription.metadata = sub_metadata
 
     # Update subscription settings
     if "autopilot_enabled" in config:
@@ -383,11 +379,12 @@ async def configure_channel(
     return {
         "success": True,
         "channel_id": str(channel_id),
-        "configuration": channel.configuration,
         "subscription": {
             "autopilot_enabled": subscription.autopilot_enabled,
             "max_daily_events": subscription.max_daily_events,
             "preferred_channels": subscription.preferred_channels,
+            "override_symbols": sub_metadata.get("override_symbols"),
+            "override_timeframe": sub_metadata.get("override_timeframe"),
         }
     }
 

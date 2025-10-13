@@ -12,7 +12,7 @@ import structlog
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.signal import SignalChannel, SignalDeliveryLog, SignalEvent
+from app.models.signal import SignalChannel, SignalDeliveryLog, SignalEvent, SignalSubscription
 from app.services.market_data_coordinator import market_data_coordinator
 
 logger = structlog.get_logger(__name__)
@@ -35,6 +35,7 @@ class SignalPerformance:
     avg_loss_pct: float
     best_signal_pct: float
     worst_signal_pct: float
+    total_return_pct: float
     quality_score: float  # 0-100
     timeframe_days: int
 
@@ -197,6 +198,7 @@ class SignalPerformanceService:
         avg_loss_pct = (sum(losses) / len(losses)) if losses else 0
         best_signal_pct = max(profits) if profits else 0
         worst_signal_pct = min(profits) if profits else 0
+        total_return_pct = sum(profits) if profits else 0.0
 
         # Calculate quality score (0-100)
         quality_score = self._calculate_quality_score(
@@ -220,6 +222,7 @@ class SignalPerformanceService:
             avg_loss_pct=avg_loss_pct,
             best_signal_pct=best_signal_pct,
             worst_signal_pct=worst_signal_pct,
+            total_return_pct=total_return_pct,
             quality_score=quality_score,
             timeframe_days=days,
         )
@@ -297,12 +300,8 @@ class SignalPerformanceService:
             select(SignalDeliveryLog, SignalEvent, SignalChannel)
             .join(SignalEvent, SignalDeliveryLog.event_id == SignalEvent.id)
             .join(SignalChannel, SignalEvent.channel_id == SignalChannel.id)
-            .where(SignalDeliveryLog.subscription_id.in_(
-                select(func.distinct(SignalDeliveryLog.subscription_id))
-                .select_from(SignalDeliveryLog)
-                .join(SignalEvent)
-                .where(SignalEvent.created_by_user_id == user_id)
-            ))
+            .join(SignalSubscription, SignalDeliveryLog.subscription_id == SignalSubscription.id)
+            .where(SignalSubscription.user_id == user_id)
             .order_by(SignalDeliveryLog.delivered_at.desc())
             .limit(limit)
         )

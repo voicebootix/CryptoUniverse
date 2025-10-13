@@ -1397,16 +1397,30 @@ Current settings are optimized for safety and comprehensive analysis. 🛡️
                 )
                 return {"success": False, "error": "channel_not_found"}
 
-            # Update channel configuration
-            config = channel.configuration or {}
-            config["default_symbols"] = symbols
-            channel.configuration = config
+            # Require active subscription and update per-subscription metadata
+            sub_stmt = (
+                select(SignalSubscription)
+                .where(SignalSubscription.user_id == connection.user_id)
+                .where(SignalSubscription.channel_id == channel.id)
+                .where(SignalSubscription.is_active.is_(True))
+            )
+            subscription = (await db.execute(sub_stmt)).scalar_one_or_none()
+            if not subscription:
+                await self.telegram_api.send_message(
+                    chat_id, f"🚫 You're not subscribed to `{channel_slug}`."
+                )
+                return {"success": False, "error": "not_subscribed"}
 
+            metadata = dict(subscription.metadata or {})
+            metadata["custom_symbols"] = symbols
+            subscription.metadata = metadata
             await db.commit()
 
-            response = f"✅ **Symbols updated for {channel.name}**\n\n"
-            response += f"Symbols: {', '.join(symbols)}\n\n"
-            response += "Signals will now focus on these specific assets."
+            response = (
+                f"✅ **Symbols updated for {channel.name}**\n\n"
+                f"Symbols: {', '.join(symbols)}\n\n"
+                "Your deliveries for this channel will focus on these assets."
+            )
 
             await self.telegram_api.send_message(chat_id, response)
             return {"success": True}
@@ -1415,7 +1429,7 @@ Current settings are optimized for safety and comprehensive analysis. 🛡️
         """Handle /signal_timeframe command - Configure timeframe for a channel."""
         from sqlalchemy import select
         from app.core.database import AsyncSessionLocal
-        from app.models.signal import SignalChannel
+        from app.models.signal import SignalChannel, SignalSubscription
         from app.models.telegram_integration import UserTelegramConnection
 
         if len(args) < 2:
@@ -1463,16 +1477,30 @@ Current settings are optimized for safety and comprehensive analysis. 🛡️
                 )
                 return {"success": False, "error": "channel_not_found"}
 
-            # Update channel configuration
-            config = channel.configuration or {}
-            config["timeframe"] = timeframe
-            channel.configuration = config
+            # Require active subscription and update per-subscription metadata
+            sub_stmt = (
+                select(SignalSubscription)
+                .where(SignalSubscription.user_id == connection.user_id)
+                .where(SignalSubscription.channel_id == channel.id)
+                .where(SignalSubscription.is_active.is_(True))
+            )
+            subscription = (await db.execute(sub_stmt)).scalar_one_or_none()
+            if not subscription:
+                await self.telegram_api.send_message(
+                    chat_id, f"🚫 You're not subscribed to `{channel_slug}`."
+                )
+                return {"success": False, "error": "not_subscribed"}
 
+            metadata = dict(subscription.metadata or {})
+            metadata["timeframe_override"] = timeframe
+            subscription.metadata = metadata
             await db.commit()
 
-            response = f"✅ **Timeframe updated for {channel.name}**\n\n"
-            response += f"Timeframe: {timeframe}\n\n"
-            response += "Signals will now use this candle timeframe for analysis."
+            response = (
+                f"✅ **Timeframe updated for {channel.name}**\n\n"
+                f"Timeframe: {timeframe}\n\n"
+                "Your signals for this channel will use this candle timeframe."
+            )
 
             await self.telegram_api.send_message(chat_id, response)
             return {"success": True}
