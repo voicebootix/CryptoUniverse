@@ -104,18 +104,11 @@ class SignalDeliveryService:
         await db.flush()
 
         plan = self.channel_service.get_plan(channel, subscription.billing_plan)
-        cost, transaction_id = await self._debit_per_signal(
-            db,
-            subscription=subscription,
-            channel=channel,
-            plan=plan,
-            event_id=event.id,
-        )
-
         preferred_channels = subscription.preferred_channels or channel.delivery_channels or []
         deliveries: List[SignalDeliveryLog] = []
         charged = False
 
+        # Attempt delivery first without debiting credits
         for medium in preferred_channels:
             delivery_log = await self._deliver_to_medium(
                 db,
@@ -126,13 +119,30 @@ class SignalDeliveryService:
                 summary=event.summary,
                 channel=channel,
                 event_id=event.id,
-                credit_transaction_id=transaction_id,
-                credit_cost=cost if not charged else 0,
+                credit_transaction_id=None,  # Will be set after successful delivery
+                credit_cost=0,  # Will be set after debit
             )
             if delivery_log:
-                db.add(delivery_log)
                 deliveries.append(delivery_log)
-                charged = charged or delivery_log.credit_cost > 0
+
+        # Only debit credits if at least one delivery succeeded
+        if deliveries:
+            cost, transaction_id = await self._debit_per_signal(
+                db,
+                subscription=subscription,
+                channel=channel,
+                plan=plan,
+                event_id=event.id,
+            )
+            # Update the first delivery log with credit information
+            if cost > 0:
+                deliveries[0].credit_cost = cost
+                deliveries[0].credit_transaction_id = transaction_id
+                charged = True
+
+            # Add all deliveries to the session
+            for delivery_log in deliveries:
+                db.add(delivery_log)
 
         await db.flush()
 

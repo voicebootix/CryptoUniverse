@@ -241,16 +241,16 @@ Your hybrid approach is **fully preserved**:
 
 ---
 
-## 🔐 NO BREAKING CHANGES
+## 🔐 MINIMAL BREAKING CHANGES
 
-- ✅ All existing models unchanged
 - ✅ Subscription system unchanged
 - ✅ Billing/credits unchanged
 - ✅ Delivery channels unchanged
 - ✅ Telegram integration unchanged
-- ✅ Database schema unchanged
+- ⚠️ Database schema changed — migrations required (see deployment section)
+- ⚠️ New models added for signal intelligence tables
 
-**Only changed**: How signals are **generated** (better, faster, cheaper)
+**Main change**: How signals are **generated** (better, faster, cheaper) + new DB tables for signal tracking
 
 ---
 
