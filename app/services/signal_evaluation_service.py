@@ -1,17 +1,17 @@
-"""Service executing the five-phase pipeline for signal generation."""
+"""Service using technical analysis engine for signal generation."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.signal import SignalChannel, SignalEvent, SignalSubscription
 from app.models.user import User
-from app.services.master_controller import MasterSystemController
+from app.services.signal_generation_engine import signal_generation_engine, TechnicalSignal
 from app.services.system_monitoring import system_monitoring_service
 
 logger = structlog.get_logger(__name__)
@@ -22,7 +22,7 @@ class EvaluationResult:
     """Lightweight container for returning evaluation output."""
 
     event: SignalEvent
-    pipeline_result: Dict[str, Any]
+    signal: TechnicalSignal
 
 
 class SignalEvaluationError(Exception):
@@ -30,10 +30,15 @@ class SignalEvaluationError(Exception):
 
 
 class SignalEvaluationService:
-    """Wraps the master controller pipeline in analysis-only mode."""
+    """
+    NEW IMPLEMENTATION: Uses dedicated signal generation engine.
 
-    def __init__(self, controller: Optional[MasterSystemController] = None) -> None:
-        self._controller = controller or MasterSystemController()
+    NO LONGER uses execute_5_phase_autonomous_cycle.
+    Generates proper technical analysis signals instead.
+    """
+
+    def __init__(self) -> None:
+        self.engine = signal_generation_engine
         self.logger = logger
 
     async def evaluate(
@@ -45,63 +50,92 @@ class SignalEvaluationService:
         user: Optional[User],
         symbols: Optional[Sequence[str]] = None,
     ) -> EvaluationResult:
-        """Execute the five-phase pipeline and persist the resulting event."""
+        """
+        Generate signal using technical analysis engine.
+
+        This is called by signal_delivery_service for each subscription.
+        But signals are actually batch-generated and cached!
+        """
 
         source = f"signal:{channel.slug}"
         user_id = str(user.id) if user else "system"
 
         self.logger.info(
-            "Running signal evaluation",
+            "Evaluating signal for subscription",
             channel=channel.slug,
             user_id=user_id,
             symbols=list(symbols) if symbols else None,
         )
 
-        pipeline_result = await self._controller.execute_5_phase_autonomous_cycle(
-            user_id=user_id,
-            source=source,
-            symbols=list(symbols) if symbols else None,
-            analysis_only=True,
-            risk_tolerance=channel.risk_profile,
+        # Get configuration
+        config = channel.configuration or {}
+        timeframe = config.get("timeframe", "1h")
+        default_symbols = config.get("default_symbols", [])
+
+        # Determine symbols to use
+        target_symbols = list(symbols) if symbols else default_symbols
+
+        # Generate batch signals (cached for 15 minutes)
+        batch_signals = await self.engine.generate_batch_signals(
+            symbols=target_symbols if target_symbols else None,
+            timeframe=timeframe,
         )
 
-        if not pipeline_result.get("success"):
+        # Filter signals by channel's required strategies
+        filtered_signals = batch_signals.get_by_strategy(channel.required_strategy_ids or [])
+
+        if not filtered_signals:
             raise SignalEvaluationError(
-                f"Pipeline execution failed for channel {channel.slug}: {pipeline_result}"
+                f"No signals generated for channel {channel.slug} with required strategies"
             )
 
-        summary = self._build_summary(pipeline_result, channel)
-        confidence = self._extract_confidence(pipeline_result)
-        risk_band = self._determine_risk_band(pipeline_result, channel)
-        opportunity_payload = self._extract_opportunity_payload(pipeline_result)
+        # Pick best signal (highest confidence)
+        best_signal = sorted(filtered_signals, key=lambda s: s.confidence, reverse=True)[0]
+
+        # Build opportunity payload from technical signal
+        opportunity_payload = {
+            "symbol": best_signal.symbol,
+            "action": best_signal.action,
+            "entry_price": best_signal.entry_price,
+            "stop_loss": best_signal.stop_loss,
+            "take_profit": best_signal.take_profit,
+            "indicators": best_signal.indicators,
+            "reasoning": best_signal.reasoning,
+            "risk_score": best_signal.risk_score,
+            "timeframe": best_signal.timeframe,
+            "strategy_type": best_signal.strategy_type,
+        }
+
+        summary = self._build_summary(best_signal, channel)
 
         event = SignalEvent(
             channel_id=channel.id,
             generated_for_subscription_id=subscription.id if subscription else None,
             summary=summary,
-            confidence=Decimal(str(confidence)),
-            risk_band=risk_band,
+            confidence=Decimal(str(best_signal.confidence)),
+            risk_band=channel.risk_profile,  # Use channel risk profile
             opportunity_payload=opportunity_payload,
-            analysis_snapshot=pipeline_result,
+            analysis_snapshot={
+                "source": "technical_analysis",
+                "engine_version": "1.0.0",
+                "all_signals_count": len(filtered_signals),
+                "timestamp": best_signal.timestamp.isoformat(),
+            },
             metadata={
                 "source": source,
-                "symbols": list(symbols) if symbols else channel.configuration.get("default_symbols", []),
+                "symbols": [best_signal.symbol],
+                "timeframe": timeframe,
+                "strategy_type": best_signal.strategy_type,
             },
             created_by_user_id=user.id if user else None,
         )
         db.add(event)
         await db.flush()
 
-        # Record metrics for observability
-        execution_time = float(pipeline_result.get("execution_time_ms", 0))
-        system_monitoring_service.metrics_collector.record_metric(
-            "signal_evaluation_latency_ms",
-            execution_time,
-            {"channel": channel.slug},
-        )
+        # Record metrics
         system_monitoring_service.metrics_collector.record_metric(
             "signal_evaluation_confidence",
-            confidence,
+            best_signal.confidence,
             {"channel": channel.slug},
         )
 
@@ -109,51 +143,23 @@ class SignalEvaluationService:
             "Signal evaluation complete",
             channel=channel.slug,
             user_id=user_id,
-            confidence=confidence,
-            risk_band=risk_band,
+            confidence=best_signal.confidence,
+            action=best_signal.action,
+            symbol=best_signal.symbol,
         )
 
-        return EvaluationResult(event=event, pipeline_result=pipeline_result)
+        return EvaluationResult(event=event, signal=best_signal)
 
-    def _build_summary(self, pipeline_result: Dict[str, Any], channel: SignalChannel) -> str:
-        phase_2 = pipeline_result.get("phases", {}).get("phase_2", {})
-        phase_3 = pipeline_result.get("phases", {}).get("phase_3", {})
-        symbol = phase_2.get("symbol", "-")
-        action = phase_2.get("action", "HOLD")
-        position_size = phase_3.get("position_size_usd", 0)
+    def _build_summary(self, signal: TechnicalSignal, channel: SignalChannel) -> str:
+        """Build human-readable summary from technical signal."""
+        stop_loss_str = f", SL: ${signal.stop_loss:.2f}" if signal.stop_loss else ""
+        take_profit_str = f", TP: ${signal.take_profit:.2f}" if signal.take_profit else ""
+
         return (
-            f"{channel.name}: {action} {symbol} with position size ${position_size:,.2f}."
-            " Confidence and risk metrics attached."
+            f"{channel.name}: {signal.action} {signal.symbol} @ ${signal.entry_price:.2f}"
+            f"{stop_loss_str}{take_profit_str}. "
+            f"Confidence: {signal.confidence:.1f}%. {signal.reasoning}"
         )
-
-    def _extract_confidence(self, pipeline_result: Dict[str, Any]) -> float:
-        phase_4 = pipeline_result.get("phases", {}).get("phase_4", {})
-        confidence = phase_4.get("consensus_confidence")
-        if confidence is None:
-            confidence = pipeline_result.get("phases", {}).get("phase_2", {}).get("confidence", 0)
-        return float(confidence or 0)
-
-    def _determine_risk_band(
-        self, pipeline_result: Dict[str, Any], channel: SignalChannel
-    ) -> str:
-        risk_metrics = pipeline_result.get("phases", {}).get("phase_3", {})
-        risk_score = risk_metrics.get("risk_score")
-        if risk_score is None:
-            return channel.risk_profile
-        if risk_score < 0.02:
-            return "conservative"
-        if risk_score < 0.05:
-            return "balanced"
-        return "aggressive"
-
-    def _extract_opportunity_payload(self, pipeline_result: Dict[str, Any]) -> Dict[str, Any]:
-        phases = pipeline_result.get("phases", {})
-        return {
-            "market": phases.get("phase_1", {}),
-            "signal": phases.get("phase_2", {}),
-            "position": phases.get("phase_3", {}),
-            "validation": phases.get("phase_4", {}),
-        }
 
 
 signal_evaluation_service = SignalEvaluationService()
