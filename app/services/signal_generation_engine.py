@@ -174,8 +174,8 @@ class SignalGenerationEngine:
                 if signal := self._generate_scalping_signal(symbol, df, indicators, timeframe):
                     batch.scalping.append(signal)
 
-            except Exception as e:
-                self.logger.error("Signal generation failed for symbol", symbol=symbol, error=str(e))
+            except Exception:
+                self.logger.exception("Signal generation failed for symbol %s", symbol)
 
         # Cache the results
         await self._cache_signals(cache_key, batch)
@@ -272,8 +272,8 @@ class SignalGenerationEngine:
 
             return df
 
-        except Exception as e:
-            self.logger.error("Data fetch failed", symbol=symbol, error=str(e))
+        except Exception:
+            self.logger.exception("Data fetch failed for %s", symbol)
             return None
 
     def _calculate_indicators(self, df: pd.DataFrame) -> Dict[str, Any]:
@@ -321,8 +321,8 @@ class SignalGenerationEngine:
             indicators["high_20"] = float(df["high"].tail(20).max())
             indicators["low_20"] = float(df["low"].tail(20).min())
 
-        except Exception as e:
-            self.logger.error("Indicator calculation failed", error=str(e))
+        except Exception:
+            self.logger.exception("Indicator calculation failed")
 
         return indicators
 
@@ -394,8 +394,8 @@ class SignalGenerationEngine:
                     risk_score=0.4,
                 )
 
-        except Exception as e:
-            self.logger.error("Momentum signal generation failed", symbol=symbol, error=str(e))
+        except Exception:
+            self.logger.exception("Momentum signal generation failed for %s", symbol)
 
         return None
 
@@ -464,8 +464,8 @@ class SignalGenerationEngine:
                     risk_score=0.6,
                 )
 
-        except Exception as e:
-            self.logger.error("Breakout signal generation failed", symbol=symbol, error=str(e))
+        except Exception:
+            self.logger.exception("Breakout signal generation failed for %s", symbol)
 
         return None
 
@@ -533,8 +533,8 @@ class SignalGenerationEngine:
                     risk_score=0.5,
                 )
 
-        except Exception as e:
-            self.logger.error("Mean reversion signal generation failed", symbol=symbol, error=str(e))
+        except Exception:
+            self.logger.exception("Mean reversion signal generation failed for %s", symbol)
 
         return None
 
@@ -602,8 +602,8 @@ class SignalGenerationEngine:
                     risk_score=0.3,
                 )
 
-        except Exception as e:
-            self.logger.error("Scalping signal generation failed", symbol=symbol, error=str(e))
+        except Exception:
+            self.logger.exception("Scalping signal generation failed for %s", symbol)
 
         return None
 

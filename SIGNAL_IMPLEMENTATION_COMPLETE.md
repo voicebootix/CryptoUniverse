@@ -35,7 +35,7 @@
 
 ### Signal Generation Flow:
 
-```
+```text
 ┌─────────────────────────────────────┐
 │  Background Service (Every 15 min) │
 │  calls generate_batch_signals()    │
@@ -122,7 +122,7 @@ await redis.set(cache_key, signals, ex=900)
 ## 📱 CURRENT TELEGRAM FLOW
 
 ### User Signs Up:
-```
+```text
 User: /signals
 Bot:  📡 Available Signal Channels:
 
