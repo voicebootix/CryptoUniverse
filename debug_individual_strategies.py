@@ -5,17 +5,31 @@ Debug Individual Strategies - Detailed Error Analysis
 
 import requests
 import json
-import asyncio
 import time
+import os
 
 def debug_individual_strategies():
     """Debug each failing strategy individually with detailed error analysis."""
     print("🔍 DEBUGGING INDIVIDUAL STRATEGIES")
     print("=" * 50)
     
+    # Get credentials from environment variables
+    admin_email = os.getenv("ADMIN_EMAIL")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    api_base_url = os.getenv("API_BASE_URL", "https://cryptouniverse.onrender.com")
+    
+    if not admin_email or not admin_password:
+        raise ValueError("Missing required environment variables: ADMIN_EMAIL and ADMIN_PASSWORD must be set")
+    
     # Login
-    login_data = {"email": "admin@cryptouniverse.com", "password": "AdminPass123!"}
-    response = requests.post("https://cryptouniverse.onrender.com/api/v1/auth/login", json=login_data, timeout=30)
+    login_data = {"email": admin_email, "password": admin_password}
+    login_url = f"{api_base_url.rstrip('/')}/api/v1/auth/login"
+    
+    try:
+        response = requests.post(login_url, json=login_data, timeout=30)
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Network error during login: {e}")
+        return
     
     if response.status_code != 200:
         print(f"❌ Login failed: {response.status_code}")
@@ -192,7 +206,7 @@ def debug_individual_strategies():
         results[strategy["name"]] = strategy_results
     
     # Summary
-    print(f"\n📊 DETAILED DEBUG RESULTS")
+    print("\n📊 DETAILED DEBUG RESULTS")
     print("=" * 50)
     
     for strategy_name, strategy_results in results.items():
@@ -203,15 +217,15 @@ def debug_individual_strategies():
             error = result.get("error", "")
             
             if status == "SUCCESS":
-                print(f"   ✅ {test_name}: {execution_time:.1f}s")
+                print(f"   ✅ {test_name}: {exec_time:.1f}s")
             else:
-                print(f"   ❌ {test_name}: {status} ({execution_time:.1f}s) - {error[:100]}")
+                print(f"   ❌ {test_name}: {status} ({exec_time:.1f}s) - {error[:100]}")
     
     # Save detailed results
     with open('detailed_strategy_debug_results.json', 'w') as f:
         json.dump(results, f, indent=2)
     
-    print(f"\n💾 Detailed results saved to: detailed_strategy_debug_results.json")
+    print("\n💾 Detailed results saved to: detailed_strategy_debug_results.json")
     
     return results
 

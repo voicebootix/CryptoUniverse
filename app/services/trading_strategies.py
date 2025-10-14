@@ -517,13 +517,19 @@ class DerivativesEngine(LoggerMixin, PriceResolverMixin):
             
             if not option_contract:
                 # Create a synthetic contract for testing if none found
+                option_type_str = "CALL" if strategy_type == StrategyType.CALL_OPTION else "PUT"
+                contract_symbol = f"{symbol.replace('USDT', '')}{expiry_date.replace('-', '')}{int(strike_price)}{option_type_str}"
+                
                 option_contract = {
                     "symbol": symbol,
+                    "contract_symbol": contract_symbol,
                     "strike_price": strike_price,
                     "expiry_date": expiry_date,
-                    "option_type": "call" if strategy_type == StrategyType.CALL_OPTION else "put",
+                    "option_type": option_type_str,
                     "underlying_symbol": symbol.replace("USDT", ""),
                     "premium": 100.0,  # Default premium
+                    "ask_price": 100.0,  # Default ask price
+                    "bid_price": 95.0,   # Default bid price
                     "synthetic": True
                 }
                 self.logger.warning("Using synthetic option contract for testing", symbol=symbol, strike=strike_price)
@@ -692,7 +698,12 @@ class DerivativesEngine(LoggerMixin, PriceResolverMixin):
             current_price = float(price_data.get("price", 0)) if price_data else 0
 
             if current_price <= 0:
-                return []
+                return {
+                    "symbol": symbol,
+                    "expiry_date": expiry_date,
+                    "current_price": current_price,
+                    "options": []
+                }
 
             # Generate realistic strike ranges based on real price
             strikes = [current_price * (1 + i * 0.05) for i in range(-5, 6)]

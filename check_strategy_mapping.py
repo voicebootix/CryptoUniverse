@@ -5,30 +5,56 @@ Check Strategy ID Mapping - Compare admin strategies vs scanner mappings
 
 import requests
 import json
+import os
 
 def check_strategy_mapping():
     """Check the mapping between admin strategies and scanner functions."""
     print("🔍 CHECKING STRATEGY ID MAPPING")
     print("=" * 50)
     
+    # Get credentials from environment variables
+    admin_email = os.getenv("ADMIN_EMAIL")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    api_base_url = os.getenv("API_BASE_URL", "https://cryptouniverse.onrender.com")
+    
+    if not admin_email or not admin_password:
+        raise ValueError("Missing required environment variables: ADMIN_EMAIL and ADMIN_PASSWORD must be set")
+    
     # Login
-    login_data = {"email": "admin@cryptouniverse.com", "password": "AdminPass123!"}
-    response = requests.post("https://cryptouniverse.onrender.com/api/v1/auth/login", json=login_data, timeout=30)
+    login_data = {"email": admin_email, "password": admin_password}
+    login_url = f"{api_base_url.rstrip('/')}/api/v1/auth/login"
+    
+    try:
+        response = requests.post(login_url, json=login_data, timeout=30)
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Network error during login: {e}")
+        return
     
     if response.status_code != 200:
         print(f"❌ Login failed: {response.status_code}")
         return
     
-    token = response.json().get('access_token')
+    try:
+        response_data = response.json()
+        if not response_data or 'access_token' not in response_data or not response_data['access_token']:
+            print(f"❌ Invalid login response: missing or empty access_token")
+            return
+        token = response_data['access_token']
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"❌ Failed to parse login response: {e}")
+        return
+    
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     print("✅ Authentication successful")
     
     # Get admin's actual strategies
-    portfolio_response = requests.get(
-        "https://cryptouniverse.onrender.com/api/v1/unified-strategies/portfolio",
-        headers=headers,
-        timeout=60
-    )
+    portfolio_url = f"{api_base_url.rstrip('/')}/api/v1/unified-strategies/portfolio"
+    
+    try:
+        portfolio_response = requests.get(portfolio_url, headers=headers, timeout=60)
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Network error during portfolio fetch: {e}")
+        return
     
     if portfolio_response.status_code != 200:
         print(f"❌ Portfolio fetch failed: {portfolio_response.status_code}")
@@ -121,10 +147,13 @@ def check_strategy_mapping():
         "mapping_rate": mapping_rate
     }
     
-    with open('strategy_mapping_analysis.json', 'w') as f:
-        json.dump(results, f, indent=2)
-    
-    print(f"\n💾 Results saved to: strategy_mapping_analysis.json")
+    try:
+        with open('strategy_mapping_analysis.json', 'w') as f:
+            json.dump(results, f, indent=2)
+        print("\n💾 Results saved to: strategy_mapping_analysis.json")
+    except (OSError, IOError) as e:
+        print(f"❌ Failed to save results: {e}")
+        return
     
     return results
 

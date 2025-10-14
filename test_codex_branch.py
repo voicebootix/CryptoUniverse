@@ -6,21 +6,46 @@ Test Codex Branch - Check what's working and what needs fixing
 import requests
 import json
 import time
+import os
+from typing import Optional
 
 def test_codex_branch():
     """Test the current codex branch to see what's working."""
     print("🔍 TESTING CODEX BRANCH - CURRENT STATUS")
     print("=" * 50)
     
+    # Get credentials from environment variables
+    admin_email = os.getenv("TEST_ADMIN_EMAIL")
+    admin_password = os.getenv("TEST_ADMIN_PASSWORD")
+    api_base_url = os.getenv("API_BASE_URL", "http://localhost:8000")
+    
+    if not admin_email or not admin_password:
+        raise ValueError("Missing required environment variables: TEST_ADMIN_EMAIL and TEST_ADMIN_PASSWORD must be set")
+    
     # Login
-    login_data = {"email": "admin@cryptouniverse.com", "password": "AdminPass123!"}
-    response = requests.post("https://cryptouniverse.onrender.com/api/v1/auth/login", json=login_data, timeout=30)
+    login_data = {"email": admin_email, "password": admin_password}
+    login_url = f"{api_base_url.rstrip('/')}/api/v1/auth/login"
+    
+    try:
+        response = requests.post(login_url, json=login_data, timeout=30)
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Network error during login: {e}")
+        return
     
     if response.status_code != 200:
         print(f"❌ Login failed: {response.status_code}")
         return
     
-    token = response.json().get('access_token')
+    try:
+        response_data = response.json()
+        if not response_data or 'access_token' not in response_data or not response_data['access_token']:
+            print(f"❌ Invalid login response: missing or empty access_token")
+            return
+        token = response_data['access_token']
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"❌ Failed to parse login response: {e}")
+        return
+    
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     print("✅ Authentication successful")
     

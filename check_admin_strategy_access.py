@@ -5,15 +5,30 @@ Check Admin Strategy Access
 
 import requests
 import json
+import os
 
 def check_admin_strategy_access():
     """Check what strategies the admin user actually has access to."""
     print("🔍 CHECKING ADMIN STRATEGY ACCESS")
     print("=" * 50)
     
+    # Get credentials from environment variables
+    admin_email = os.getenv("ADMIN_EMAIL")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    api_base_url = os.getenv("API_BASE_URL", "https://cryptouniverse.onrender.com")
+    
+    if not admin_email or not admin_password:
+        raise ValueError("Missing required environment variables: ADMIN_EMAIL and ADMIN_PASSWORD must be set")
+    
     # Login
-    login_data = {"email": "admin@cryptouniverse.com", "password": "AdminPass123!"}
-    response = requests.post("https://cryptouniverse.onrender.com/api/v1/auth/login", json=login_data, timeout=30)
+    login_data = {"email": admin_email, "password": admin_password}
+    login_url = f"{api_base_url.rstrip('/')}/api/v1/auth/login"
+    
+    try:
+        response = requests.post(login_url, json=login_data, timeout=30)
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Network error during login: {e}")
+        return
     
     if response.status_code != 200:
         print(f"❌ Login failed: {response.status_code}")

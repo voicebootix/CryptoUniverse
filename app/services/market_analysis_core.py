@@ -1913,13 +1913,16 @@ class MarketAnalysisService(LoggerMixin):
                 market_data_feeds.get_real_time_price(symbol),
                 timeout=3.0,
             )
-        except Exception:
+        except (asyncio.TimeoutError, aiohttp.ClientError, ValueError) as e:
+            self.logger.warning(f"Price fetch failed for {symbol}: {e}")
             price_snapshot = {"success": False}
 
         if price_snapshot.get("success"):
-            current_price = float(price_snapshot.get("price", 0) or 0)
-            volume_24h = float(price_snapshot.get("volume_24h", 0) or 0)
-            price_change = float(price_snapshot.get("price_change_24h", 0) or 0)
+            # Handle nested data structure
+            snapshot_data = price_snapshot.get("data", price_snapshot)
+            current_price = float(snapshot_data.get("price", 0) or 0)
+            volume_24h = float(snapshot_data.get("volume_24h", 0) or 0)
+            price_change = float(snapshot_data.get("price_change_24h", 0) or 0)
         else:
             # Use a neutral placeholder so calculations still work.  We prefer a
             # positive value to avoid division errors in downstream logic.

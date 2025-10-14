@@ -4,6 +4,15 @@
 testsprite_tests/.env.test
 __pycache__/
 
+# Test artifacts and generated files
+*_test_results.json
+*_debug_results.json
+*_mapping_analysis.json
+comprehensive_strategy_test_results.json
+detailed_strategy_debug_results.json
+strategy_mapping_analysis.json
+chat_test_results.json
+
 # Backup and conflict files
 *.backup
 *.orig

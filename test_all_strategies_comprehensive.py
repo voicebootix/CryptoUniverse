@@ -7,15 +7,30 @@ import requests
 import json
 import asyncio
 import time
+import os
 
 def test_all_strategies():
     """Test all 14 strategies comprehensively."""
     print("🔍 COMPREHENSIVE STRATEGY TESTING")
     print("=" * 50)
     
+    # Get credentials from environment variables
+    admin_email = os.getenv("ADMIN_EMAIL")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    api_base_url = os.getenv("API_BASE_URL", "https://cryptouniverse.onrender.com")
+    
+    if not admin_email or not admin_password:
+        raise ValueError("Missing required environment variables: ADMIN_EMAIL and ADMIN_PASSWORD must be set")
+    
     # Login
-    login_data = {"email": "admin@cryptouniverse.com", "password": "AdminPass123!"}
-    response = requests.post("https://cryptouniverse.onrender.com/api/v1/auth/login", json=login_data, timeout=30)
+    login_data = {"email": admin_email, "password": admin_password}
+    login_url = f"{api_base_url.rstrip('/')}/api/v1/auth/login"
+    
+    try:
+        response = requests.post(login_url, json=login_data, timeout=30)
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Network error during login: {e}")
+        return
     
     if response.status_code != 200:
         print(f"❌ Login failed: {response.status_code}")
@@ -155,9 +170,9 @@ def test_all_strategies():
         error = result.get("error", "")
         
         if status == "SUCCESS":
-            print(f"   ✅ {function_name}: {execution_time:.1f}s")
+            print(f"   ✅ {function_name}: {exec_time:.1f}s")
         else:
-            print(f"   ❌ {function_name}: {status} ({execution_time:.1f}s) - {error}")
+            print(f"   ❌ {function_name}: {status} ({exec_time:.1f}s) - {error}")
     
     # Save results
     with open('comprehensive_strategy_test_results.json', 'w') as f:

@@ -120,7 +120,7 @@ async def run_diagnostics(
     strategy_matrix: Optional[Mapping[str, Mapping[str, Any]]] = None,
     user_id: str = "strategy-diagnostics",
     base_symbol: str = "BTC/USDT",
-    simulation_mode: bool = False,
+    simulation_mode: bool = True,  # Default to simulation mode for safety
 ) -> List[MutableMapping[str, Any]]:
     """Execute each configured strategy and collect diagnostic metadata."""
 

@@ -535,7 +535,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         # ENTERPRISE PERFORMANCE METRICS
         metrics = {
             'scan_id': scan_id,
-            'start_time': discovery_start_time,
+            'start_time': time.time(),  # Use current time since discovery_start_time is not in scope
             'portfolio_fetch_time': 0,
             'asset_discovery_time': 0,
             'strategy_scan_times': {},
