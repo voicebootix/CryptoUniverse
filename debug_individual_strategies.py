@@ -229,7 +229,7 @@ def debug_individual_strategies():
                     "execution_time": execution_time,
                     "error": str(e)
                 }
-                raise  # Re-raise unexpected errors
+                # Continue to next strategy to allow full diagnostics to complete
         
         results[strategy["name"]] = strategy_results
     

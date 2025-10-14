@@ -1914,7 +1914,7 @@ class MarketAnalysisService(LoggerMixin):
                 timeout=3.0,
             )
         except (asyncio.TimeoutError, aiohttp.ClientError, ValueError) as e:
-            self.logger.warning(f"Price fetch failed for {symbol}: {e}")
+            self.logger.warning("Price fetch failed", symbol=symbol, error=str(e))
             price_snapshot = {"success": False}
 
         if price_snapshot.get("success"):
@@ -1922,13 +1922,14 @@ class MarketAnalysisService(LoggerMixin):
             snapshot_data = price_snapshot.get("data", price_snapshot)
             current_price = float(snapshot_data.get("price", 0) or 0)
             volume_24h = float(snapshot_data.get("volume_24h", 0) or 0)
-            price_change = float(snapshot_data.get("price_change_24h", 0) or 0)
+            # Clamp non-positive prices to avoid downstream division/percentage issues
+            if current_price <= 0:
+                current_price = 1.0
         else:
             # Use a neutral placeholder so calculations still work.  We prefer a
             # positive value to avoid division errors in downstream logic.
             current_price = 1.0
             volume_24h = 0.0
-            price_change = 0.0
 
         # Build a neutral but fully populated technical snapshot so strategy
         # modules never receive empty dictionaries.  This mirrors the shape of
