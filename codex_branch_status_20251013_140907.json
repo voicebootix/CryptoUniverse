@@ -1,0 +1,10 @@
+{
+  "Portfolio Optimization": "TIMEOUT",
+  "Spot Momentum": "FAILED",
+  "Spot Mean Reversion": "TIMEOUT",
+  "Spot Breakout": "FAILED",
+  "Pairs Trading": "FAILED",
+  "Statistical Arbitrage": "TIMEOUT",
+  "Futures Trading": "FAILED",
+  "Options Trading": "FAILED"
+}

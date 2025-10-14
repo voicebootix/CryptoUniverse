@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.core.redis_manager import get_redis_manager
 from app.core.redis import get_redis_client
 from app.core.database import AsyncSessionLocal
+from app.services.state_coordinator import resilient_state_coordinator
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from sqlalchemy import select, and_, distinct, func
@@ -1157,12 +1158,20 @@ class BackgroundServiceManager(LoggerMixin):
 
                 monitored_users: Set[str] = set()
                 if self.redis:
-                    async for key in self.redis.scan_iter(match="autonomous_active:*", count=20):
-                        try:
-                            decoded = key.decode()
-                        except AttributeError:
-                            decoded = str(key)
-                        monitored_users.add(decoded.split(":")[-1])
+                    try:
+                        async for key in self.redis.scan_iter(match="autonomous_active:*", count=20):
+                            try:
+                                decoded = key.decode()
+                            except AttributeError:
+                                decoded = str(key)
+                            monitored_users.add(decoded.split(":")[-1])
+                    except Exception as redis_error:
+                        self.logger.warning("Risk monitor redis scan failed", error=str(redis_error))
+                        self.redis = None
+
+                if not monitored_users:
+                    fallback_users = await resilient_state_coordinator.list_keys("autonomous_active")
+                    monitored_users.update(fallback_users)
 
                 if not monitored_users:
                     await asyncio.sleep(self.intervals["risk_monitor"])
@@ -1171,11 +1180,25 @@ class BackgroundServiceManager(LoggerMixin):
                 for user_id in monitored_users:
                     try:
                         # Skip users already halted
+                        halt_flag = None
+                        stop_flag = None
                         if self.redis:
-                            halt_flag = await self.redis.get(f"emergency_halt:{user_id}")
-                            stop_flag = await self.redis.get(f"emergency_stop:{user_id}")
-                            if halt_flag or stop_flag:
+                            try:
+                                halt_flag = await self.redis.get(f"emergency_halt:{user_id}")
+                                stop_flag = await self.redis.get(f"emergency_stop:{user_id}")
+                            except Exception as redis_error:
+                                self.logger.warning("Risk monitor redis get failed", error=str(redis_error))
+                                self.redis = None
+                                halt_flag = None
+                                stop_flag = None
+                        if not halt_flag and not stop_flag:
+                            fallback_flag = await resilient_state_coordinator.any_active(
+                                [("emergency_halt", user_id), ("emergency_stop", user_id)]
+                            )
+                            if fallback_flag:
                                 continue
+                        else:
+                            continue
 
                         portfolio_status = await portfolio_service.get_portfolio_status(user_id)
                         if not portfolio_status.get("success"):
@@ -1189,17 +1212,40 @@ class BackgroundServiceManager(LoggerMixin):
 
                         emergency_level = await master_controller.check_emergency_conditions(snapshot)
                         if emergency_level == EmergencyLevel.NORMAL:
+                            # Clear all emergency keys from Redis
                             if self.redis:
-                                await self.redis.delete(f"emergency_last_level:{user_id}")
+                                try:
+                                    await self.redis.delete(f"emergency_last_level:{user_id}")
+                                    await self.redis.delete(f"emergency_halt:{user_id}")
+                                    await self.redis.delete(f"emergency_stop:{user_id}")
+                                except Exception as redis_error:
+                                    self.logger.warning("Risk monitor redis delete failed for emergency keys", error=str(redis_error))
+                                    self.redis = None
+
+                            # Clear all emergency keys from resilient_state_coordinator
+                            try:
+                                await resilient_state_coordinator.clear_value("emergency_last_level", user_id)
+                                await resilient_state_coordinator.clear_value("emergency_halt", user_id)
+                                await resilient_state_coordinator.clear_value("emergency_stop", user_id)
+                            except Exception as coordinator_error:
+                                self.logger.warning("Failed to clear emergency keys from state coordinator", error=str(coordinator_error))
+
                             continue
 
                         last_level_value = None
                         if self.redis:
-                            last_level_bytes = await self.redis.get(f"emergency_last_level:{user_id}")
-                            if isinstance(last_level_bytes, bytes):
-                                last_level_value = last_level_bytes.decode()
-                            else:
-                                last_level_value = last_level_bytes
+                            try:
+                                last_level_bytes = await self.redis.get(f"emergency_last_level:{user_id}")
+                                if isinstance(last_level_bytes, bytes):
+                                    last_level_value = last_level_bytes.decode()
+                                else:
+                                    last_level_value = last_level_bytes
+                            except Exception as redis_error:
+                                self.logger.warning("Risk monitor redis read failed for last level", error=str(redis_error))
+                                self.redis = None
+                                last_level_value = None
+                        if last_level_value is None:
+                            last_level_value = await resilient_state_coordinator.get_value("emergency_last_level", user_id)
                         if last_level_value == emergency_level.value:
                             continue
 
@@ -1210,7 +1256,14 @@ class BackgroundServiceManager(LoggerMixin):
                         )
 
                         if self.redis:
-                            await self.redis.set(f"emergency_last_level:{user_id}", emergency_level.value, ex=1800)
+                            try:
+                                await self.redis.set(f"emergency_last_level:{user_id}", emergency_level.value, ex=1800)
+                            except Exception as redis_error:
+                                self.logger.warning("Risk monitor redis write failed", error=str(redis_error))
+                                self.redis = None
+                        await resilient_state_coordinator.cache_value(
+                            "emergency_last_level", user_id, emergency_level.value, ttl=1800
+                        )
 
                         self.logger.warning(
                             "Emergency level triggered from background monitor",

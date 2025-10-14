@@ -519,19 +519,47 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         if not scan_id:
             scan_id = getattr(task, "scan_id", f"user_discovery_{user_id}_{int(time.time())}")
 
+        # Load portfolio first to get accurate strategy count
+        portfolio_result = await self._get_user_portfolio(user_id)
+        
+        if not portfolio_result.get("success") or not portfolio_result.get("active_strategies"):
+            self.logger.warning("❌ NO STRATEGIES FOUND IN PORTFOLIO",
+                              scan_id=scan_id,
+                              user_id=user_id,
+                              portfolio_result=portfolio_result)
+            return await self._handle_no_strategies_user(user_id, scan_id)
+        
+        active_strategies = portfolio_result.get("active_strategies", [])
+        total_strategies = len(active_strategies)
+        
+        # ENTERPRISE PERFORMANCE METRICS
+        metrics = {
+            'scan_id': scan_id,
+            'start_time': time.time(),  # Use current time since discovery_start_time is not in scope
+            'portfolio_fetch_time': 0,
+            'asset_discovery_time': 0,
+            'strategy_scan_times': {},
+            'total_strategies': total_strategies,  # Use the actual count
+            'total_opportunities': 0,
+            'cache_hits': 0,
+            'cache_misses': 0,
+            'timeouts': 0,
+            'errors': []
+        }
+        
         placeholder_payload = {
             "success": True,
             "scan_id": scan_id,
             "user_id": user_id,
             "opportunities": [],
             "total_opportunities": 0,
-            "message": "Opportunity scan started. We'll notify you as soon as results are ready.",
+            "message": f"Opportunity scan started. Analyzing {total_strategies} strategies for opportunities...",
             "scan_state": "pending",
             "metadata": {
                 "scan_state": "pending",
-                "message": "Scanning your active strategies for new opportunities...",
+                "message": f"Scanning your {total_strategies} active strategies for new opportunities...",
                 "strategies_completed": 0,
-                "total_strategies": 0,
+                "total_strategies": total_strategies,
                 "generated_at": datetime.utcnow().isoformat(),
             },
             "background_scan": True,
@@ -569,21 +597,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovery_start_time = time.time()
         scan_id = existing_scan_id or f"user_discovery_{user_id}_{int(time.time())}"
         
-        # ENTERPRISE PERFORMANCE METRICS
-        metrics = {
-            'scan_id': scan_id,
-            'start_time': discovery_start_time,
-            'portfolio_fetch_time': 0,
-            'asset_discovery_time': 0,
-            'strategy_scan_times': {},
-            'total_strategies': 0,
-            'total_opportunities': 0,
-            'cache_hits': 0,
-            'cache_misses': 0,
-            'timeouts': 0,
-            'errors': []
-        }
-        
         self.logger.info("🔍 ENTERPRISE User Opportunity Discovery Starting",
                         scan_id=scan_id,
                         user_id=user_id,
@@ -609,38 +622,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    opportunities_count=len(cached_opportunities.get("opportunities", [])))
                     return cached_opportunities
             
-            # STEP 3: Get user's active strategy portfolio WITH CACHING (Performance Fix)
-            portfolio_start = time.time()
-            portfolio_result = await self._get_user_portfolio_cached(user_id)
-            metrics['portfolio_fetch_time'] = time.time() - portfolio_start
-            
-            # Track cache hits/misses
-            if 'error' in portfolio_result and portfolio_result['error'] == 'temporary_failure':
-                metrics['timeouts'] += 1
-            
-            # Check if cache was hit (response time < 0.1s indicates cache hit)
-            if metrics['portfolio_fetch_time'] < 0.1:
-                metrics['cache_hits'] += 1
-            else:
-                metrics['cache_misses'] += 1
-            
-            # CRITICAL DEBUG: Log detailed portfolio information
-            self.logger.info("🔍 STRATEGY PORTFOLIO DEBUG",
-                           scan_id=scan_id,
-                           user_id=user_id,
-                           portfolio_success=portfolio_result.get("success"),
-                           portfolio_keys=list(portfolio_result.keys()),
-                           active_strategies_count=len(portfolio_result.get("active_strategies", [])),
-                           total_strategies=portfolio_result.get("total_strategies", 0),
-                           active_strategies_list=[s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])],
-                           portfolio_error=portfolio_result.get("error"))
-            
-            if not portfolio_result.get("success") or not portfolio_result.get("active_strategies"):
-                self.logger.warning("❌ NO STRATEGIES FOUND IN PORTFOLIO",
-                                  scan_id=scan_id,
-                                  user_id=user_id,
-                                  portfolio_result=portfolio_result)
-                return await self._handle_no_strategies_user(user_id, scan_id)
+            # STEP 3: Use portfolio data already loaded above
+            # Portfolio is already loaded and validated in the initial response
             
             active_strategies = portfolio_result["active_strategies"]
             
@@ -2771,14 +2754,297 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         return summary
     
     async def _scan_hedge_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
-        """Hedge position strategy scanner - placeholder for real implementation."""
-        # Would call trading_strategies_service.hedge_position()
-        return []
-    
+        """Generate hedge opportunities using the live hedge_position strategy."""
+
+        opportunities: List[OpportunityResult] = []
+
+        async def _load_portfolio_positions() -> List[Dict[str, Any]]:
+            try:
+                snapshot = await portfolio_risk_service.get_portfolio(user_profile.user_id)
+            except Exception as portfolio_error:  # pragma: no cover - defensive logging
+                self.logger.warning(
+                    "Hedge scanner: portfolio lookup failed",
+                    user_id=user_profile.user_id,
+                    scan_id=scan_id,
+                    error=str(portfolio_error),
+                )
+                return []
+
+            if not snapshot.get("success"):
+                return []
+
+            payload = snapshot.get("portfolio", {}) or {}
+            positions = list(payload.get("positions", []) or [])
+            if not positions:
+                balances = payload.get("balances", []) or []
+                for balance in balances:
+                    symbol = balance.get("asset") or balance.get("symbol")
+                    quantity = self._to_float(balance.get("total")) or 0.0
+                    value_usd = self._to_float(balance.get("value_usd")) or 0.0
+                    if not symbol or value_usd <= 0:
+                        continue
+                    positions.append(
+                        {
+                            "symbol": symbol,
+                            "quantity": quantity,
+                            "value_usd": value_usd,
+                            "exchange": balance.get("exchange", "binance"),
+                        }
+                    )
+            return positions
+
+        try:
+            positions = await _load_portfolio_positions()
+
+            candidate_positions: List[Dict[str, Any]] = []
+            for position in positions:
+                raw_symbol = position.get("symbol") or position.get("asset")
+                if not raw_symbol:
+                    continue
+
+                market_value = (
+                    self._to_float(position.get("market_value"))
+                    or self._to_float(position.get("value_usd"))
+                    or 0.0
+                )
+
+                quantity = self._to_float(position.get("quantity")) or 0.0
+                current_price = self._to_float(position.get("current_price"))
+                if not current_price and market_value and quantity:
+                    current_price = market_value / max(quantity, 1e-9)
+
+                if market_value <= 0:
+                    continue
+
+                candidate_positions.append(
+                    {
+                        "symbol": raw_symbol,
+                        "value_usd": market_value,
+                        "quantity": quantity if quantity > 0 else None,
+                        "current_price": current_price,
+                        "exchange": position.get("exchange", "binance"),
+                    }
+                )
+
+            if not candidate_positions:
+                fallback_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=5)
+                for symbol in fallback_symbols:
+                    candidate_positions.append(
+                        {
+                            "symbol": symbol,
+                            "value_usd": 10_000.0,
+                            "quantity": None,
+                            "current_price": None,
+                            "exchange": "binance",
+                        }
+                    )
+
+            candidate_positions.sort(key=lambda item: item.get("value_usd", 0.0), reverse=True)
+            hedge_types = ["direct_hedge", "correlation_hedge", "options_hedge"]
+
+            for position in candidate_positions[:5]:
+                base_symbol = position["symbol"]
+                normalized_symbol = base_symbol if "/" in base_symbol else f"{base_symbol}/USDT"
+                position_value = float(position.get("value_usd") or 0.0)
+                if position_value <= 0:
+                    continue
+
+                quantity = position.get("quantity")
+                if not quantity:
+                    price_reference = position.get("current_price")
+                    if not price_reference:
+                        price_snapshot = await trading_strategies_service._get_symbol_price("auto", normalized_symbol)
+                        price_reference = self._to_float(price_snapshot.get("price")) if isinstance(price_snapshot, dict) else None
+                    if price_reference and price_reference > 0:
+                        quantity = position_value / price_reference
+                    else:
+                        quantity = position_value / 20_000  # Approximate for BTC-scale assets
+
+                for hedge_type in hedge_types:
+                    try:
+                        hedge_parameters = {
+                            "primary_position_size": quantity,
+                            "primary_side": "long" if position_value >= 0 else "short",
+                            "hedge_type": hedge_type,
+                            "hedge_ratio": 0.6,
+                            "correlation_factor": 0.8,
+                        }
+
+                        hedge_result = await trading_strategies_service.execute_strategy(
+                            function="hedge_position",
+                            symbol=normalized_symbol,
+                            parameters=hedge_parameters,
+                            user_id=user_profile.user_id,
+                            simulation_mode=True,
+                        )
+
+                        if not hedge_result.get("success"):
+                            continue
+
+                        recommendations = hedge_result.get("hedge_recommendations", []) or []
+                        if not recommendations:
+                            continue
+
+                        cost_benefit = hedge_result.get("cost_benefit", {}) or {}
+                        for recommendation in recommendations:
+                            risk_reduction_pct = (
+                                self._to_float(recommendation.get("risk_reduction"))
+                                or self._to_float(recommendation.get("hedge_effectiveness"))
+                                or 0.0
+                            )
+
+                            if risk_reduction_pct <= 0:
+                                continue
+
+                            signal_strength = max(min(risk_reduction_pct / 10.0, 10.0), 0.5)
+                            protected_capital = position_value * (risk_reduction_pct / 100.0)
+                            required_capital = (
+                                self._to_float(recommendation.get("cost_estimate"))
+                                or self._to_float(recommendation.get("premium_cost"))
+                                or position_value * 0.02
+                            )
+
+                            opportunity = OpportunityResult(
+                                strategy_id="ai_hedge_position",
+                                strategy_name=f"AI Hedge Strategist - {hedge_type.replace('_', ' ').title()}",
+                                opportunity_type="hedge",
+                                symbol=base_symbol,
+                                exchange=position.get("exchange", "binance"),
+                                profit_potential_usd=float(protected_capital),
+                                confidence_score=float(min(risk_reduction_pct, 100.0)),
+                                risk_level=self._signal_to_risk_level(signal_strength),
+                                required_capital_usd=float(max(required_capital, 0.0)),
+                                estimated_timeframe="immediate",
+                                entry_price=self._to_float(hedge_result.get("primary_position", {}).get("entry_price")) or position.get("current_price"),
+                                exit_price=None,
+                                metadata={
+                                    "hedge_type": hedge_type,
+                                    "recommendation": recommendation,
+                                    "risk_reduction_pct": risk_reduction_pct,
+                                    "position_value_usd": position_value,
+                                    "cost_benefit": cost_benefit,
+                                    "capital_assumptions": {
+                                        "deployable_capital_usd": position_value,
+                                        "components": {"position_value": position_value},
+                                    },
+                                },
+                                discovered_at=datetime.utcnow(),
+                            )
+
+                            opportunities.append(opportunity)
+
+                    except Exception as hedge_error:
+                        self.logger.debug(
+                            "Hedge scanner: strategy execution failed",
+                            user_id=user_profile.user_id,
+                            scan_id=scan_id,
+                            symbol=base_symbol,
+                            hedge_type=hedge_type,
+                            error=str(hedge_error),
+                        )
+
+        except Exception as error:
+            self.logger.exception(
+                "Hedge opportunity scan failed",
+                user_id=user_profile.user_id,
+                scan_id=scan_id,
+                error=str(error),
+            )
+
+        return opportunities
+
     async def _scan_complex_strategy_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
-        """Complex strategy scanner - placeholder for real implementation."""
-        # Would call trading_strategies_service.complex_strategy()
-        return []
+        """Surface complex options strategy structures from the derivatives engine."""
+
+        opportunities: List[OpportunityResult] = []
+
+        try:
+            candidate_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=10)
+            if not candidate_symbols:
+                candidate_symbols = ["BTC", "ETH", "SOL"]
+
+            strategy_types = [
+                "iron_condor",
+                "butterfly",
+                "calendar_spread",
+                "straddle",
+            ]
+
+            for symbol in candidate_symbols[:5]:
+                normalized_symbol = symbol if "/" in symbol else f"{symbol}/USDT"
+
+                for strategy_type in strategy_types:
+                    try:
+                        execution = await trading_strategies_service.execute_strategy(
+                            function="complex_strategy",
+                            strategy_type=strategy_type,
+                            symbol=normalized_symbol,
+                            parameters={"quantity": 1, "expiry_days": 30},
+                            user_id=user_profile.user_id,
+                            simulation_mode=True,
+                        )
+
+                        if not execution.get("success"):
+                            continue
+
+                        max_profit = self._to_float(execution.get("max_profit")) or 0.0
+                        max_loss = self._to_float(execution.get("max_loss")) or 0.0
+                        net_premium = self._to_float(execution.get("net_premium_paid"))
+                        breakevens = execution.get("breakeven_points") or []
+                        current_price = self._to_float(execution.get("current_price"))
+
+                        risk_denominator = max(max_loss, abs(net_premium or 0.0), 1.0)
+                        signal_strength = max(min((max_profit / risk_denominator) * 3.0, 9.5), 2.0)
+
+                        opportunity = OpportunityResult(
+                            strategy_id="ai_complex_strategy",
+                            strategy_name=f"AI Complex Derivatives - {strategy_type.replace('_', ' ').title()}",
+                            opportunity_type="complex_derivative",
+                            symbol=symbol,
+                            exchange="derivatives",
+                            profit_potential_usd=float(max_profit),
+                            confidence_score=float(min(signal_strength * 10, 95.0)),
+                            risk_level=self._signal_to_risk_level(signal_strength),
+                            required_capital_usd=float(max(max_loss, abs(net_premium or 0.0))),
+                            estimated_timeframe="30d",
+                            entry_price=current_price,
+                            exit_price=self._to_float(execution.get("optimal_price")),
+                            metadata={
+                                "strategy_type": strategy_type,
+                                "max_loss": max_loss,
+                                "net_premium": net_premium,
+                                "breakeven_points": breakevens,
+                                "wing_width": execution.get("wing_width"),
+                                "contracts": execution.get("contracts_considered"),
+                                "capital_assumptions": {
+                                    "deployable_capital_usd": float(max(max_loss, abs(net_premium or 0.0)) or 0.0),
+                                    "components": {"option_premium": net_premium},
+                                },
+                            },
+                            discovered_at=datetime.utcnow(),
+                        )
+
+                        opportunities.append(opportunity)
+
+                    except Exception as strategy_error:
+                        self.logger.debug(
+                            "Complex strategy execution failed",
+                            user_id=user_profile.user_id,
+                            scan_id=scan_id,
+                            symbol=symbol,
+                            strategy=strategy_type,
+                            error=str(strategy_error),
+                        )
+
+        except Exception as error:
+            self.logger.exception(
+                "Complex strategy opportunity scan failed",
+                user_id=user_profile.user_id,
+                scan_id=scan_id,
+                error=str(error),
+            )
+
+        return opportunities
     
     # ================================================================================
     # UTILITY METHODS

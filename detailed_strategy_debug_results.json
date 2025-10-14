@@ -1,0 +1,104 @@
+{
+  "Portfolio Optimization": {
+    "Standard Parameters": {
+      "status": "TIMEOUT",
+      "execution_time": 15.129234552383423,
+      "error": "Request timeout"
+    },
+    "Minimal Parameters": {
+      "status": "TIMEOUT",
+      "execution_time": 15.071001291275024,
+      "error": "Request timeout"
+    },
+    "Extended Parameters": {
+      "status": "TIMEOUT",
+      "execution_time": 15.139036655426025,
+      "error": "Request timeout"
+    }
+  },
+  "Spot Mean Reversion": {
+    "Standard Parameters": {
+      "status": "TIMEOUT",
+      "execution_time": 15.123472690582275,
+      "error": "Request timeout"
+    },
+    "Minimal Parameters": {
+      "status": "TIMEOUT",
+      "execution_time": 15.045424461364746,
+      "error": "Request timeout"
+    },
+    "Extended Parameters": {
+      "status": "TIMEOUT",
+      "execution_time": 15.11607575416565,
+      "error": "Request timeout"
+    }
+  },
+  "Spot Breakout": {
+    "Standard Parameters": {
+      "status": "HTTP_400",
+      "execution_time": 10.069061994552612,
+      "error": "{\"error\":\"Strategy execution failed: Price lookup failed: 'SpotAlgorithms' object has no attribute '_get_symbol_price'\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9848983.945}"
+    },
+    "Minimal Parameters": {
+      "status": "HTTP_400",
+      "execution_time": 9.993023872375488,
+      "error": "{\"error\":\"Strategy execution failed: Price lookup failed: 'SpotAlgorithms' object has no attribute '_get_symbol_price'\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9848993.936}"
+    },
+    "Extended Parameters": {
+      "status": "HTTP_400",
+      "execution_time": 10.71624207496643,
+      "error": "{\"error\":\"Strategy execution failed: Price lookup failed: 'SpotAlgorithms' object has no attribute '_get_symbol_price'\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9849004.655}"
+    }
+  },
+  "Pairs Trading": {
+    "Standard Parameters": {
+      "status": "HTTP_400",
+      "execution_time": 9.701414346694946,
+      "error": "{\"error\":\"Strategy execution failed: not enough values to unpack (expected 2, got 1)\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9849014.358}"
+    },
+    "Minimal Parameters": {
+      "status": "HTTP_400",
+      "execution_time": 9.841527462005615,
+      "error": "{\"error\":\"Strategy execution failed: not enough values to unpack (expected 2, got 1)\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9849024.198}"
+    },
+    "Extended Parameters": {
+      "status": "HTTP_400",
+      "execution_time": 10.100024461746216,
+      "error": "{\"error\":\"Strategy execution failed: not enough values to unpack (expected 2, got 1)\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9849034.288}"
+    }
+  },
+  "Futures Trading": {
+    "Standard Parameters": {
+      "status": "HTTP_400",
+      "execution_time": 9.697263717651367,
+      "error": "{\"error\":\"Strategy execution failed: Invalid futures symbol: BTCUSDT\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9849044.01}"
+    },
+    "Minimal Parameters": {
+      "status": "HTTP_400",
+      "execution_time": 9.689436435699463,
+      "error": "{\"error\":\"Strategy execution failed: Invalid futures symbol: BTCUSDT\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9849053.698}"
+    },
+    "Extended Parameters": {
+      "status": "HTTP_400",
+      "execution_time": 9.705543994903564,
+      "error": "{\"error\":\"Strategy execution failed: Invalid futures symbol: BTCUSDT\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9849063.404}"
+    }
+  },
+  "Options Trading": {
+    "Standard Parameters": {
+      "status": "HTTP_400",
+      "execution_time": 9.925740718841553,
+      "error": "{\"error\":\"Strategy execution failed: Option contract not found: BTCUSDT 118300 2025-11-13\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9849073.334}"
+    },
+    "Minimal Parameters": {
+      "status": "HTTP_400",
+      "execution_time": 10.045854330062866,
+      "error": "{\"error\":\"Strategy execution failed: Option contract not found: BTCUSDT 118300 2025-11-13\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9849083.377}"
+    },
+    "Extended Parameters": {
+      "status": "HTTP_400",
+      "execution_time": 9.68140697479248,
+      "error": "{\"error\":\"Strategy execution failed: Option contract not found: BTCUSDT 118300 2025-11-13\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9849093.059}"
+    }
+  }
+}
