@@ -457,7 +457,13 @@ class BackgroundServiceManager(LoggerMixin):
         lock_token = None
         lock_acquired = False
 
-        if self.redis:
+        # If Redis is unavailable, proceed without distributed locking
+        if not self.redis:
+            self.logger.debug("Redis unavailable - proceeding without distributed locking")
+            lock_acquired = True
+            lock_token = None
+        else:
+            # Redis is available, attempt to acquire lock
             try:
                 # Generate unique token for this lock attempt
                 lock_token = str(uuid.uuid4())
@@ -469,7 +475,7 @@ class BackgroundServiceManager(LoggerMixin):
                 )
             except Exception as e:
                 self.logger.warning("Unable to acquire signal dispatch lock", error=str(e))
-                # Proceed without Redis coordination if Redis is unavailable
+                # Proceed without Redis coordination if Redis operation fails
                 lock_acquired = True
                 lock_token = None
 
