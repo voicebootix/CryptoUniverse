@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "scan_id": "scan_7a1ee8cd-bfc9-4e4e-85b2-69c8e91054af_1760329806",
+  "status": "initiated",
+  "message": "Opportunity scan initiated successfully",
+  "estimated_completion_seconds": 120,
+  "poll_url": "/api/v1/opportunities/status/scan_7a1ee8cd-bfc9-4e4e-85b2-69c8e91054af_1760329806",
+  "results_url": "/api/v1/opportunities/results/scan_7a1ee8cd-bfc9-4e4e-85b2-69c8e91054af_1760329806",
+  "polling_interval_seconds": 3,
+  "instructions": "Poll the status endpoint every 3 seconds to check progress"
+}

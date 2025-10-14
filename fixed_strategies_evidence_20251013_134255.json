@@ -1,0 +1,58 @@
+{
+  "Portfolio Optimization (FIXED)": {
+    "status": "timeout",
+    "execution_time": 60.0,
+    "success": false,
+    "error": "Request timeout",
+    "evidence": "Strategy timed out after 60 seconds"
+  },
+  "Spot Momentum (FIXED)": {
+    "status": "failed",
+    "execution_time": 9.77355170249939,
+    "success": false,
+    "error": "HTTP 400",
+    "evidence": "Strategy failed with HTTP error"
+  },
+  "Spot Mean Reversion (FIXED)": {
+    "status": "timeout",
+    "execution_time": 60.0,
+    "success": false,
+    "error": "Request timeout",
+    "evidence": "Strategy timed out after 60 seconds"
+  },
+  "Spot Breakout (FIXED)": {
+    "status": "failed",
+    "execution_time": 10.622720956802368,
+    "success": false,
+    "error": "HTTP 400",
+    "evidence": "Strategy failed with HTTP error"
+  },
+  "Pairs Trading (FIXED)": {
+    "status": "failed",
+    "execution_time": 10.606091499328613,
+    "success": false,
+    "error": "HTTP 400",
+    "evidence": "Strategy failed with HTTP error"
+  },
+  "Statistical Arbitrage (FIXED)": {
+    "status": "timeout",
+    "execution_time": 60.0,
+    "success": false,
+    "error": "Request timeout",
+    "evidence": "Strategy timed out after 60 seconds"
+  },
+  "Futures Trading (FIXED)": {
+    "status": "failed",
+    "execution_time": 9.681413888931274,
+    "success": false,
+    "error": "HTTP 400",
+    "evidence": "Strategy failed with HTTP error"
+  },
+  "Options Trading (FIXED)": {
+    "status": "failed",
+    "execution_time": 9.760483264923096,
+    "success": false,
+    "error": "HTTP 400",
+    "evidence": "Strategy failed with HTTP error"
+  }
+}

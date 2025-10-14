@@ -1,0 +1,59 @@
+{
+  "Risk Management": {
+    "success": true,
+    "error": null,
+    "result_type": "<class 'dict'>",
+    "result_keys": [
+      "success",
+      "timestamp",
+      "risk_management_analysis",
+      "hedge_recommendations",
+      "execution_time_seconds",
+      "methodology_summary",
+      "regulatory_disclosures",
+      "educational_resources",
+      "compliance_category"
+    ],
+    "result_length": null
+  },
+  "Portfolio Optimization": {
+    "success": false,
+    "error": "HTTPSConnectionPool(host='cryptouniverse.onrender.com', port=443): Read timed out. (read timeout=60)"
+  },
+  "Spot Momentum": {
+    "success": false,
+    "error": "HTTP 400"
+  },
+  "Scalping": {
+    "success": true,
+    "error": null,
+    "result_type": "<class 'dict'>",
+    "result_keys": [
+      "success",
+      "timestamp",
+      "scalping_analysis",
+      "execution_time_seconds",
+      "methodology_summary",
+      "regulatory_disclosures",
+      "educational_resources",
+      "compliance_category"
+    ],
+    "result_length": null
+  },
+  "Hedge Position": {
+    "success": true,
+    "error": null,
+    "result_type": "<class 'dict'>",
+    "result_keys": [
+      "success",
+      "timestamp",
+      "hedge_analysis",
+      "execution_time_seconds",
+      "methodology_summary",
+      "regulatory_disclosures",
+      "educational_resources",
+      "compliance_category"
+    ],
+    "result_length": null
+  }
+}

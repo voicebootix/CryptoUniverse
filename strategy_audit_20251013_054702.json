@@ -1,0 +1,215 @@
+{
+  "total_strategies": 35,
+  "working_strategies": [
+    {
+      "index": 0,
+      "id": "ai_risk_management",
+      "name": "AI Risk Management",
+      "mapping": null
+    },
+    {
+      "index": 1,
+      "id": "ai_portfolio_optimization",
+      "name": "AI Portfolio Optimization",
+      "mapping": null
+    },
+    {
+      "index": 2,
+      "id": "ai_spot_momentum_strategy",
+      "name": "AI Spot Momentum",
+      "mapping": null
+    },
+    {
+      "index": 5,
+      "id": "ai_statistical_arbitrage",
+      "name": "AI Statistical Arbitrage",
+      "mapping": null
+    },
+    {
+      "index": 6,
+      "id": "ai_market_making",
+      "name": "AI Market Making",
+      "mapping": null
+    },
+    {
+      "index": 7,
+      "id": "ai_pairs_trading",
+      "name": "AI Pairs Trading",
+      "mapping": null
+    }
+  ],
+  "placeholder_strategies": [],
+  "uuid_strategies": [
+    {
+      "index": 10,
+      "id": "f9690792-15fd-4e0c-8028-ec9f3e65903c",
+      "name": "AI Futures Trading"
+    },
+    {
+      "index": 11,
+      "id": "669374e8-401f-4460-91bf-75543a35b40f",
+      "name": "AI Options Strategies"
+    },
+    {
+      "index": 12,
+      "id": "cb070606-dec4-4fc1-9918-4e05b2fea533",
+      "name": "AI Perpetual Contracts"
+    },
+    {
+      "index": 13,
+      "id": "2ec928ca-a055-452c-8b5b-549c3452bd1e",
+      "name": "AI Leverage Manager"
+    },
+    {
+      "index": 14,
+      "id": "e9d9bd92-a84f-4238-a70e-162317c6c914",
+      "name": "AI Complex Derivatives"
+    },
+    {
+      "index": 15,
+      "id": "636f2b60-5c15-4d42-9de3-1a0228a0b1c7",
+      "name": "AI Margin Monitor"
+    },
+    {
+      "index": 16,
+      "id": "042539a1-8638-4b8e-93fa-30a35c7ad597",
+      "name": "AI Funding Arbitrage"
+    },
+    {
+      "index": 17,
+      "id": "c89e477b-adfb-4df5-9a53-1b88ab9b0dea",
+      "name": "AI Basis Trading"
+    },
+    {
+      "index": 18,
+      "id": "497ea9d8-e067-4a50-aab2-e4d32bf62814",
+      "name": "AI Options Chain Explorer"
+    },
+    {
+      "index": 19,
+      "id": "0455d6a2-c4e5-401e-a54f-d11400c4f75a",
+      "name": "AI Options Greeks Calculator"
+    },
+    {
+      "index": 20,
+      "id": "89367e15-7af9-4c00-b08f-9b2226924a15",
+      "name": "AI Liquidation Guardian"
+    },
+    {
+      "index": 21,
+      "id": "15118d9f-4476-4fbe-a312-5e49ce6bff6e",
+      "name": "AI Hedge Strategist"
+    },
+    {
+      "index": 22,
+      "id": "8f3a9929-7c54-42c8-8a9c-0a186c4a70fe",
+      "name": "AI Momentum Trader"
+    },
+    {
+      "index": 23,
+      "id": "149b6ed6-a4b9-4ce2-9c97-211e71717fe1",
+      "name": "AI Mean Reversion Pro"
+    },
+    {
+      "index": 24,
+      "id": "dc07137c-0849-4852-861b-34b70893d2ab",
+      "name": "AI Breakout Hunter"
+    },
+    {
+      "index": 25,
+      "id": "151b2a57-c6e4-4f76-9d17-f3b2ddc68355",
+      "name": "AI Algorithmic Suite"
+    },
+    {
+      "index": 26,
+      "id": "c27d0812-9f37-4bf1-9d2c-bd96386ec4c1",
+      "name": "AI Pairs Trader"
+    },
+    {
+      "index": 27,
+      "id": "c9d847ec-3556-438d-9861-60ed5ae46d64",
+      "name": "AI Statistical Arbitrage"
+    },
+    {
+      "index": 28,
+      "id": "78a06223-5e71-4061-87a3-8dadc1540649",
+      "name": "AI Market Maker"
+    },
+    {
+      "index": 29,
+      "id": "377ec810-4c12-46ca-b21a-64b1e09ee0d6",
+      "name": "AI Scalping Engine"
+    },
+    {
+      "index": 30,
+      "id": "68e7dc5e-e18f-45cd-b6e2-900784d63890",
+      "name": "AI Swing Navigator"
+    },
+    {
+      "index": 31,
+      "id": "f6bef0bf-52a7-4d7f-a2bd-0efd913a819a",
+      "name": "AI Position Manager"
+    },
+    {
+      "index": 32,
+      "id": "b3ee24fd-ab51-4624-b370-2d0079a61e62",
+      "name": "AI Risk Guardian"
+    },
+    {
+      "index": 33,
+      "id": "9716b9e5-6dbc-4053-9cfd-b4d3ace03c34",
+      "name": "AI Portfolio Optimizer"
+    },
+    {
+      "index": 34,
+      "id": "ccabdb3e-7a62-467d-b52a-ec6553ab87c8",
+      "name": "AI Strategy Analytics"
+    }
+  ],
+  "unmapped_strategies": [
+    {
+      "index": 3,
+      "id": "ai_futures_arbitrage",
+      "name": "AI Futures Arbitrage"
+    },
+    {
+      "index": 4,
+      "id": "ai_options_strategies",
+      "name": "AI Options Strategies"
+    },
+    {
+      "index": 8,
+      "id": "ai_volatility_trading",
+      "name": "AI Volatility Trading"
+    },
+    {
+      "index": 9,
+      "id": "ai_news_sentiment",
+      "name": "AI News Sentiment"
+    }
+  ],
+  "duplicates_by_name": {
+    "AI Options Strategies": [
+      {
+        "index": 4,
+        "id": "ai_options_strategies"
+      },
+      {
+        "index": 11,
+        "id": "669374e8-401f-4460-91bf-75543a35b40f"
+      }
+    ],
+    "AI Statistical Arbitrage": [
+      {
+        "index": 5,
+        "id": "ai_statistical_arbitrage"
+      },
+      {
+        "index": 27,
+        "id": "c9d847ec-3556-438d-9861-60ed5ae46d64"
+      }
+    ]
+  },
+  "duplicates_by_id": {},
+  "audit_timestamp": "2025-10-13T05:47:02.958510"
+}

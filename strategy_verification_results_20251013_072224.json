@@ -1,0 +1,3589 @@
+{
+  "Risk Management": {
+    "status": "success",
+    "execution_time": 26.75274157524109,
+    "data": {
+      "success": true,
+      "strategy_function": "risk_management",
+      "execution_result": {
+        "success": true,
+        "timestamp": "2025-10-13T07:13:53.955343",
+        "risk_management_analysis": {
+          "analysis_type": "comprehensive",
+          "portfolio_risk_metrics": {
+            "portfolio_var_1d_95": 224.42257621482108,
+            "portfolio_var_1w_95": 593.7663252528558,
+            "portfolio_var_1d_pct": 6.599751687702613,
+            "portfolio_var_1w_pct": 17.46130168043993,
+            "max_drawdown_estimate": 890.6494878792837,
+            "sharpe_ratio_portfolio": -0.006,
+            "sortino_ratio": 2.0,
+            "max_single_position_loss": 68.71906791078702,
+            "correlation_benefit": 0.85,
+            "risk_capacity_utilization": 329.9875843851306
+          },
+          "individual_position_risks": {
+            "XRP": {
+              "symbol": "XRP",
+              "position_value": 180.77,
+              "daily_volatility": 0.0385527262380585,
+              "leverage": 1.0,
+              "position_var_1d": 11.499140931388828,
+              "liquidation_risk": false,
+              "concentration_weight": 0.05316029842933476,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.02639573956265166,
+              "risk_rating": "MEDIUM"
+            },
+            "ADA": {
+              "symbol": "ADA",
+              "position_value": 0.05,
+              "daily_volatility": 0.054727165143600646,
+              "leverage": 1.0,
+              "position_var_1d": 0.004514991124347053,
+              "liquidation_risk": false,
+              "concentration_weight": 1.470384976194467e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 1.0363950712234194e-05,
+              "risk_rating": "MEDIUM"
+            },
+            "USDC": {
+              "symbol": "USDC",
+              "position_value": 14.9,
+              "daily_volatility": 0.01,
+              "leverage": 1.0,
+              "position_var_1d": 0.24584999999999999,
+              "liquidation_risk": false,
+              "concentration_weight": 0.004381747229059512,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0005643371631148574,
+              "risk_rating": "LOW"
+            },
+            "DOGE": {
+              "symbol": "DOGE",
+              "position_value": 128.25,
+              "daily_volatility": 0.05976961968580783,
+              "leverage": 1.0,
+              "position_var_1d": 12.647998645763009,
+              "liquidation_risk": false,
+              "concentration_weight": 0.03771537463938808,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.02903288865092721,
+              "risk_rating": "MEDIUM"
+            },
+            "LDBNB": {
+              "symbol": "LDBNB",
+              "position_value": 0.0,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.0,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0,
+              "risk_rating": "MEDIUM"
+            },
+            "REEF": {
+              "symbol": "REEF",
+              "position_value": 2.98,
+              "daily_volatility": 0.05152032440524591,
+              "leverage": 1.0,
+              "position_var_1d": 0.25332543510059413,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0008763494458119023,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0005814966743522726,
+              "risk_rating": "MEDIUM"
+            },
+            "DON": {
+              "symbol": "DON",
+              "position_value": 0.0,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.0,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0,
+              "risk_rating": "MEDIUM"
+            },
+            "ANC": {
+              "symbol": "ANC",
+              "position_value": 0.0,
+              "daily_volatility": 0.08492256700549383,
+              "leverage": 1.0,
+              "position_var_1d": 0.0,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0,
+              "risk_rating": "HIGH"
+            },
+            "HFT": {
+              "symbol": "HFT",
+              "position_value": 0.0,
+              "daily_volatility": 0.07323880808371364,
+              "leverage": 1.0,
+              "position_var_1d": 0.0,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0,
+              "risk_rating": "HIGH"
+            },
+            "PEPE": {
+              "symbol": "PEPE",
+              "position_value": 0.0,
+              "daily_volatility": 0.06447551585322626,
+              "leverage": 1.0,
+              "position_var_1d": 0.0,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0,
+              "risk_rating": "HIGH"
+            },
+            "NTRN": {
+              "symbol": "NTRN",
+              "position_value": 0.0,
+              "daily_volatility": 0.07918971511654076,
+              "leverage": 1.0,
+              "position_var_1d": 0.0,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0,
+              "risk_rating": "HIGH"
+            },
+            "SEI": {
+              "symbol": "SEI",
+              "position_value": 0.0,
+              "daily_volatility": 0.06043650150606176,
+              "leverage": 1.0,
+              "position_var_1d": 0.0,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0,
+              "risk_rating": "HIGH"
+            },
+            "1000PEPPER": {
+              "symbol": "1000PEPPER",
+              "position_value": 0.0,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.0,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0,
+              "risk_rating": "MEDIUM"
+            },
+            "LAYER": {
+              "symbol": "LAYER",
+              "position_value": 0.13,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.010725,
+              "liquidation_risk": false,
+              "concentration_weight": 3.8230009381056145e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 2.461873530366828e-05,
+              "risk_rating": "MEDIUM"
+            },
+            "SHELL": {
+              "symbol": "SHELL",
+              "position_value": 0.08,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.0066,
+              "liquidation_risk": false,
+              "concentration_weight": 2.352615961911147e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 1.5149990956103554e-05,
+              "risk_rating": "MEDIUM"
+            },
+            "PLUME": {
+              "symbol": "PLUME",
+              "position_value": 0.47,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.038775,
+              "liquidation_risk": false,
+              "concentration_weight": 0.00013821618776227988,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 8.900619686710838e-05,
+              "risk_rating": "MEDIUM"
+            },
+            "MORPHO": {
+              "symbol": "MORPHO",
+              "position_value": 0.48,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.039599999999999996,
+              "liquidation_risk": false,
+              "concentration_weight": 0.00014115695771466883,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 9.089994573662133e-05,
+              "risk_rating": "MEDIUM"
+            },
+            "SOMI": {
+              "symbol": "SOMI",
+              "position_value": 0.68,
+              "daily_volatility": 0.09306510945089094,
+              "leverage": 1.0,
+              "position_var_1d": 0.10441905280389964,
+              "liquidation_risk": false,
+              "concentration_weight": 0.00019997235676244752,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.00023968904630666352,
+              "risk_rating": "HIGH"
+            },
+            "TREE": {
+              "symbol": "TREE",
+              "position_value": 0.08,
+              "daily_volatility": 0.07928809271413009,
+              "leverage": 1.0,
+              "position_var_1d": 0.010466028238265172,
+              "liquidation_risk": false,
+              "concentration_weight": 2.352615961911147e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 2.402427775091542e-05,
+              "risk_rating": "HIGH"
+            },
+            "TOWNS": {
+              "symbol": "TOWNS",
+              "position_value": 0.13,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.010725,
+              "liquidation_risk": false,
+              "concentration_weight": 3.8230009381056145e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 2.461873530366828e-05,
+              "risk_rating": "MEDIUM"
+            },
+            "PROVE": {
+              "symbol": "PROVE",
+              "position_value": 0.41,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.033825,
+              "liquidation_risk": false,
+              "concentration_weight": 0.00012057156804794628,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 7.764370365003071e-05,
+              "risk_rating": "MEDIUM"
+            },
+            "MITO": {
+              "symbol": "MITO",
+              "position_value": 0.07,
+              "daily_volatility": 0.10494322652058943,
+              "leverage": 1.0,
+              "position_var_1d": 0.01212094266312808,
+              "liquidation_risk": false,
+              "concentration_weight": 2.0585389666722538e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 2.782305632209699e-05,
+              "risk_rating": "HIGH"
+            },
+            "DOLO": {
+              "symbol": "DOLO",
+              "position_value": 0.05,
+              "daily_volatility": 0.0819600117843198,
+              "leverage": 1.0,
+              "position_var_1d": 0.006761700972206384,
+              "liquidation_risk": false,
+              "concentration_weight": 1.470384976194467e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 1.5521167966182324e-05,
+              "risk_rating": "HIGH"
+            },
+            "OPEN": {
+              "symbol": "OPEN",
+              "position_value": 0.17,
+              "daily_volatility": 0.12948320635317243,
+              "leverage": 1.0,
+              "position_var_1d": 0.036320039382064864,
+              "liquidation_risk": false,
+              "concentration_weight": 4.999308919061188e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 8.337094972175872e-05,
+              "risk_rating": "HIGH"
+            },
+            "LINEA": {
+              "symbol": "LINEA",
+              "position_value": 0.53,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.043725,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0001558608074766135,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.00010036869008418606,
+              "risk_rating": "MEDIUM"
+            },
+            "HOLO": {
+              "symbol": "HOLO",
+              "position_value": 0.17,
+              "daily_volatility": 0.09168532259185479,
+              "leverage": 1.0,
+              "position_var_1d": 0.025717732987015268,
+              "liquidation_risk": false,
+              "concentration_weight": 4.999308919061188e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 5.903385184314657e-05,
+              "risk_rating": "HIGH"
+            },
+            "ZKC": {
+              "symbol": "ZKC",
+              "position_value": 0.12,
+              "daily_volatility": 0.11439152273287512,
+              "leverage": 1.0,
+              "position_var_1d": 0.02264952150110927,
+              "liquidation_risk": false,
+              "concentration_weight": 3.528923942866721e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 5.1990916045739164e-05,
+              "risk_rating": "HIGH"
+            },
+            "AVNT": {
+              "symbol": "AVNT",
+              "position_value": 0.25,
+              "daily_volatility": 0.17866452517719233,
+              "leverage": 1.0,
+              "position_var_1d": 0.07369911663559184,
+              "liquidation_risk": false,
+              "concentration_weight": 7.351924880972335e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.00016917287128818747,
+              "risk_rating": "HIGH"
+            },
+            "BARD": {
+              "symbol": "BARD",
+              "position_value": 0.26,
+              "daily_volatility": 0.14601067998683834,
+              "leverage": 1.0,
+              "position_var_1d": 0.06263858171435364,
+              "liquidation_risk": false,
+              "concentration_weight": 7.646001876211229e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0001437839312841835,
+              "risk_rating": "HIGH"
+            },
+            "0G": {
+              "symbol": "0G",
+              "position_value": 0.26,
+              "daily_volatility": 0.11589137336849374,
+              "leverage": 1.0,
+              "position_var_1d": 0.04971739917508381,
+              "liquidation_risk": false,
+              "concentration_weight": 7.646001876211229e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.00011412396179750152,
+              "risk_rating": "HIGH"
+            },
+            "HEMI": {
+              "symbol": "HEMI",
+              "position_value": 0.26,
+              "daily_volatility": 0.11366361494004208,
+              "leverage": 1.0,
+              "position_var_1d": 0.04876169080927805,
+              "liquidation_risk": false,
+              "concentration_weight": 7.646001876211229e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.00011193017799467883,
+              "risk_rating": "HIGH"
+            },
+            "XPL": {
+              "symbol": "XPL",
+              "position_value": 1.33,
+              "daily_volatility": 0.1481955846944894,
+              "leverage": 1.0,
+              "position_var_1d": 0.325215210612057,
+              "liquidation_risk": false,
+              "concentration_weight": 0.00039112240366772825,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0007465162878121176,
+              "risk_rating": "HIGH"
+            },
+            "MIRA": {
+              "symbol": "MIRA",
+              "position_value": 0.28,
+              "daily_volatility": 0.11279567344592421,
+              "leverage": 1.0,
+              "position_var_1d": 0.052111601132016995,
+              "liquidation_risk": false,
+              "concentration_weight": 8.234155866689015e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.00011961974028153534,
+              "risk_rating": "HIGH"
+            },
+            "FF": {
+              "symbol": "FF",
+              "position_value": 0.87,
+              "daily_volatility": 0.16210410817760662,
+              "leverage": 1.0,
+              "position_var_1d": 0.23270044728895428,
+              "liquidation_risk": false,
+              "concentration_weight": 0.00025584698585783726,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.000534152980592259,
+              "risk_rating": "HIGH"
+            },
+            "EDEN": {
+              "symbol": "EDEN",
+              "position_value": 0.1,
+              "daily_volatility": 0.1253980411551999,
+              "leverage": 1.0,
+              "position_var_1d": 0.020690676790607983,
+              "liquidation_risk": false,
+              "concentration_weight": 2.940769952388934e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 4.74944797353595e-05,
+              "risk_rating": "HIGH"
+            },
+            "2Z": {
+              "symbol": "2Z",
+              "position_value": 0.35,
+              "daily_volatility": 0.08729771296413837,
+              "leverage": 1.0,
+              "position_var_1d": 0.050414429236789904,
+              "liquidation_risk": false,
+              "concentration_weight": 0.00010292694833361268,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.00011572396166583177,
+              "risk_rating": "HIGH"
+            },
+            "WAL": {
+              "symbol": "WAL",
+              "position_value": 0.29,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.023925,
+              "liquidation_risk": false,
+              "concentration_weight": 8.528232861927907e-05,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 5.491871721587538e-05,
+              "risk_rating": "MEDIUM"
+            },
+            "AAVE": {
+              "symbol": "AAVE",
+              "position_value": 788.71,
+              "daily_volatility": 0.048307810105456137,
+              "leverage": 1.0,
+              "position_var_1d": 62.86640729865261,
+              "liquidation_risk": false,
+              "concentration_weight": 0.2319414669148676,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.14430689424504692,
+              "risk_rating": "MEDIUM"
+            },
+            "SOL": {
+              "symbol": "SOL",
+              "position_value": 466.08,
+              "daily_volatility": 0.05014378499846784,
+              "leverage": 1.0,
+              "position_var_1d": 38.56217526494172,
+              "liquidation_risk": false,
+              "concentration_weight": 0.13706340594094343,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.08851766765326473,
+              "risk_rating": "MEDIUM"
+            },
+            "KCS": {
+              "symbol": "KCS",
+              "position_value": 0.01,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.000825,
+              "liquidation_risk": false,
+              "concentration_weight": 2.940769952388934e-06,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 1.8937488695129442e-06,
+              "risk_rating": "MEDIUM"
+            },
+            "SHIB": {
+              "symbol": "SHIB",
+              "position_value": 7.48,
+              "daily_volatility": 0.044702088469404586,
+              "leverage": 1.0,
+              "position_var_1d": 0.5517131758893914,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0021996959243869227,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0012664317613768862,
+              "risk_rating": "MEDIUM"
+            },
+            "ETHW": {
+              "symbol": "ETHW",
+              "position_value": 1.99,
+              "daily_volatility": 0.07730397903578579,
+              "leverage": 1.0,
+              "position_var_1d": 0.2538276151640026,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0005852132205253979,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0005826494051733292,
+              "risk_rating": "HIGH"
+            },
+            "VTHO": {
+              "symbol": "VTHO",
+              "position_value": 0.01,
+              "daily_volatility": 0.049561101695950925,
+              "leverage": 1.0,
+              "position_var_1d": 0.0008177581779831903,
+              "liquidation_risk": false,
+              "concentration_weight": 2.940769952388934e-06,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 1.8771256061704628e-06,
+              "risk_rating": "MEDIUM"
+            }
+          },
+          "risk_concentration": {
+            "max_exchange_exposure_pct": 56.10753807561895,
+            "exchange_breakdown": {
+              "binance": 56.10753807561895,
+              "kucoin": 43.89246192438103
+            },
+            "asset_class_concentration": {
+              "crypto": 100.0
+            },
+            "high_leverage_exposure_pct": 0.0,
+            "correlation_concentration": 0,
+            "single_point_failures": []
+          },
+          "mitigation_strategies": [
+            {
+              "risk_type": "EXCESSIVE_VAR",
+              "strategy": "POSITION_SIZE_REDUCTION",
+              "action": "Reduce overall position sizes - current 1-day VaR: 6.6%",
+              "priority": "HIGH",
+              "urgency": 0.8,
+              "expected_risk_reduction": 30
+            },
+            {
+              "risk_type": "DIRECTIONAL_RISK",
+              "strategy": "PORTFOLIO_HEDGING",
+              "action": "Implement portfolio-level hedging (index shorts, volatility longs)",
+              "priority": "MEDIUM",
+              "urgency": 0.7,
+              "expected_risk_reduction": 35
+            }
+          ],
+          "risk_monitoring": {
+            "daily_monitoring": {
+              "var_calculation": "Recalculate VaR daily",
+              "position_limits": "Monitor position size limits",
+              "correlation_tracking": "Track correlation changes",
+              "leverage_monitoring": "Monitor leverage ratios"
+            },
+            "weekly_reviews": {
+              "portfolio_rebalancing": "Weekly rebalancing review",
+              "risk_budget_allocation": "Review risk budget usage",
+              "stress_testing": "Weekly stress test scenarios",
+              "performance_attribution": "Risk-adjusted return analysis"
+            },
+            "alert_thresholds": {
+              "var_breach": "Alert if daily VaR > 102",
+              "concentration_alert": "Alert if single position > 25%",
+              "correlation_spike": "Alert if portfolio correlation > 0.9",
+              "drawdown_alert": "Alert if drawdown > 10%"
+            },
+            "scenario_analysis": {
+              "market_crash": "Simulate 20% market drop impact: $1188",
+              "exchange_outage": "Simulate major exchange going down",
+              "regulatory_shock": "Simulate regulatory crackdown",
+              "liquidity_crisis": "Simulate liquidity crunch"
+            }
+          }
+        },
+        "hedge_recommendations": [],
+        "execution_time_seconds": 16.9627,
+        "methodology_summary": {
+          "strategy": "AI Risk Guardian",
+          "category": "portfolio",
+          "summary": "Audited account risk (drawdown, VaR, concentration) before prescribing guardrails and alerts.",
+          "calculation_steps": [
+            "Aggregate current exposures, leverage and collateral usage across accounts.",
+            "Stress recent volatility regimes to measure Value-at-Risk and tail losses.",
+            "Propose stop-loss, position limits and diversification improvements tailored to findings."
+          ],
+          "calculation_notes": "Risk metrics mix historical and parametric models; low-liquidity assets require manual review.",
+          "inputs_used": {
+            "symbol": "BTC/USDT",
+            "timeframe": "1h",
+            "leverage": 1.0,
+            "risk_mode": "balanced",
+            "quantity": 0.01,
+            "simulation_mode": true
+          },
+          "evaluation_metrics": {
+            "success": true
+          }
+        },
+        "regulatory_disclosures": {
+          "risk_warning": "Crypto assets are highly volatile and can result in substantial or total losses. Outputs are informational only and do not constitute investment advice.",
+          "jurisdiction_notice": "Confirm digital asset trading is permitted in your jurisdiction and comply with all suitability requirements. Consult a licensed advisor for personalised guidance.",
+          "links": {
+            "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+            "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure"
+          },
+          "last_reviewed": "2025-10-13",
+          "rebalancing_notice": "Portfolio targets assume timely rebalancing and access to sufficient liquidity. Deviations can materially impact performance.",
+          "simulation_notice": "Results generated in simulation mode. Live execution, fees and slippage can materially differ from simulated outcomes."
+        },
+        "educational_resources": [
+          {
+            "topic": "Diversification",
+            "title": "Why spreading capital matters",
+            "summary": "Holding uncorrelated assets reduces reliance on a single performer and helps dampen portfolio volatility.",
+            "actionable_tip": "Blend layer-1s, DeFi, infrastructure tokens and stablecoins to improve risk-adjusted returns."
+          },
+          {
+            "topic": "Crypto volatility",
+            "title": "Prepare for large swings",
+            "summary": "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards.",
+            "actionable_tip": "Stress test positions assuming 30\u201380% annualised volatility and plan for gap risk."
+          },
+          {
+            "topic": "Stablecoins vs. alt-coins",
+            "title": "Different roles in a portfolio",
+            "summary": "Stablecoins provide liquidity and downside buffers, while alt-coins target growth but contribute most drawdown risk.",
+            "actionable_tip": "Maintain a stablecoin reserve to cover margin calls and fund opportunistic entries without forced selling."
+          },
+          {
+            "topic": "Leverage risk",
+            "title": "Use borrowed capital cautiously",
+            "summary": "Leverage accelerates losses during volatility spikes. Liquidations can happen quickly when collateral buffers are thin.",
+            "actionable_tip": "Limit leverage to clearly defined setups, monitor funding costs and avoid stacking multiple leveraged trades."
+          },
+          {
+            "topic": "Rebalancing cadence",
+            "title": "Keep allocations aligned",
+            "summary": "Periodic rebalancing locks in gains and reins in concentration. Ignoring drifts can magnify downside during shocks.",
+            "actionable_tip": "Review weights monthly or when allocations move >5% away from targets to maintain intended risk levels."
+          }
+        ],
+        "compliance_category": "portfolio"
+      },
+      "timestamp": "2025-10-13T07:13:53.955580",
+      "credits_used": 0
+    },
+    "error": null
+  },
+  "Portfolio Optimization": {
+    "status": "success",
+    "execution_time": 71.54394721984863,
+    "data": {
+      "success": true,
+      "strategy_function": "portfolio_optimization",
+      "execution_result": {
+        "success": true,
+        "function": "portfolio_optimization",
+        "symbol": "BTC/USDT",
+        "rebalancing_recommendations": [
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "XRP",
+            "action": "SELL",
+            "amount": 915.99,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "AAVE",
+            "action": "SELL",
+            "amount": 740.46,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "ADA",
+            "action": "SELL",
+            "amount": 715.35,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "SOL",
+            "action": "SELL",
+            "amount": 421.49,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "DOGE",
+            "action": "SELL",
+            "amount": 78.53,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "KCS",
+            "action": "SELL",
+            "amount": 24.69,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "USDC",
+            "action": "BUY",
+            "amount": 1703.14,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "REEF",
+            "action": "BUY",
+            "amount": 30.71,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "ETHW",
+            "action": "BUY",
+            "amount": 31.7,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "XPL",
+            "action": "BUY",
+            "amount": 48.09,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "FF",
+            "action": "BUY",
+            "amount": 48.54,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "SOMI",
+            "action": "BUY",
+            "amount": 39.75,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "LINEA",
+            "action": "BUY",
+            "amount": 44.39,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "MORPHO",
+            "action": "BUY",
+            "amount": 39.94,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "PLUME",
+            "action": "BUY",
+            "amount": 39.95,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "PROVE",
+            "action": "BUY",
+            "amount": 40.01,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "2Z",
+            "action": "BUY",
+            "amount": 44.57,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "WAL",
+            "action": "BUY",
+            "amount": 44.63,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "MIRA",
+            "action": "BUY",
+            "amount": 40.14,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "VTHO",
+            "action": "BUY",
+            "amount": 33.41,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "BARD",
+            "action": "BUY",
+            "amount": 40.16,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "0G",
+            "action": "BUY",
+            "amount": 44.66,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "HEMI",
+            "action": "BUY",
+            "amount": 40.16,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "AVNT",
+            "action": "BUY",
+            "amount": 49.16,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "OPEN",
+            "action": "BUY",
+            "amount": 44.75,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "HOLO",
+            "action": "BUY",
+            "amount": 40.25,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "LAYER",
+            "action": "BUY",
+            "amount": 33.56,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "TOWNS",
+            "action": "BUY",
+            "amount": 33.56,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "ZKC",
+            "action": "BUY",
+            "amount": 44.8,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "EDEN",
+            "action": "BUY",
+            "amount": 44.82,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "SHELL",
+            "action": "BUY",
+            "amount": 33.61,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "TREE",
+            "action": "BUY",
+            "amount": 40.34,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "MITO",
+            "action": "BUY",
+            "amount": 40.35,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "DOLO",
+            "action": "BUY",
+            "amount": 40.37,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "LDBNB",
+            "action": "BUY",
+            "amount": 29.2,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "DON",
+            "action": "BUY",
+            "amount": 29.2,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "ANC",
+            "action": "BUY",
+            "amount": 29.2,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "HFT",
+            "action": "BUY",
+            "amount": 33.69,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "PEPE",
+            "action": "BUY",
+            "amount": 40.42,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "NTRN",
+            "action": "BUY",
+            "amount": 33.69,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "SEI",
+            "action": "BUY",
+            "amount": 44.92,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "RISK_PARITY",
+            "symbol": "1000PEPPER",
+            "action": "BUY",
+            "amount": 29.2,
+            "rationale": "Risk Parity optimization suggests this trade",
+            "improvement_potential": 0.10113454303621765,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "XRP",
+            "action": "SELL",
+            "amount": 913.2,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "AAVE",
+            "action": "SELL",
+            "amount": 707.57,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "ADA",
+            "action": "SELL",
+            "amount": 680.78,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "SOL",
+            "action": "SELL",
+            "amount": 386.74,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "DOGE",
+            "action": "SELL",
+            "amount": 48.92,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "KCS",
+            "action": "BUY",
+            "amount": 31.81,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "USDC",
+            "action": "BUY",
+            "amount": 64.06,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "SHIB",
+            "action": "BUY",
+            "amount": 71.49,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "REEF",
+            "action": "BUY",
+            "amount": 75.98,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "ETHW",
+            "action": "BUY",
+            "amount": 76.97,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "XPL",
+            "action": "BUY",
+            "amount": 77.64,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "FF",
+            "action": "BUY",
+            "amount": 78.09,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "SOMI",
+            "action": "BUY",
+            "amount": 78.29,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "LINEA",
+            "action": "BUY",
+            "amount": 78.43,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "MORPHO",
+            "action": "BUY",
+            "amount": 78.48,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "PLUME",
+            "action": "BUY",
+            "amount": 78.49,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "PROVE",
+            "action": "BUY",
+            "amount": 78.55,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "2Z",
+            "action": "BUY",
+            "amount": 78.61,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "WAL",
+            "action": "BUY",
+            "amount": 78.67,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "MIRA",
+            "action": "BUY",
+            "amount": 78.68,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "VTHO",
+            "action": "BUY",
+            "amount": 78.68,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "BARD",
+            "action": "BUY",
+            "amount": 78.7,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "0G",
+            "action": "BUY",
+            "amount": 78.7,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "HEMI",
+            "action": "BUY",
+            "amount": 78.7,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "AVNT",
+            "action": "BUY",
+            "amount": 78.71,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "OPEN",
+            "action": "BUY",
+            "amount": 78.79,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "HOLO",
+            "action": "BUY",
+            "amount": 78.79,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "LAYER",
+            "action": "BUY",
+            "amount": 78.83,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "TOWNS",
+            "action": "BUY",
+            "amount": 78.83,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "ZKC",
+            "action": "BUY",
+            "amount": 78.84,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "EDEN",
+            "action": "BUY",
+            "amount": 78.86,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "SHELL",
+            "action": "BUY",
+            "amount": 78.88,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "TREE",
+            "action": "BUY",
+            "amount": 78.88,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "MITO",
+            "action": "BUY",
+            "amount": 78.89,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "DOLO",
+            "action": "BUY",
+            "amount": 78.91,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "LDBNB",
+            "action": "BUY",
+            "amount": 78.96,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "DON",
+            "action": "BUY",
+            "amount": 78.96,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "ANC",
+            "action": "BUY",
+            "amount": 78.96,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "HFT",
+            "action": "BUY",
+            "amount": 78.96,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "PEPE",
+            "action": "BUY",
+            "amount": 78.96,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "NTRN",
+            "action": "BUY",
+            "amount": 78.96,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "SEI",
+            "action": "BUY",
+            "amount": 78.96,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "EQUAL_WEIGHT",
+            "symbol": "1000PEPPER",
+            "action": "BUY",
+            "amount": 78.96,
+            "rationale": "Equal Weight optimization suggests this trade",
+            "improvement_potential": 0.15916279069767442,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "XRP",
+            "action": "SELL",
+            "amount": 946.15,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "AAVE",
+            "action": "SELL",
+            "amount": 748.35,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "ADA",
+            "action": "SELL",
+            "amount": 736.39,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "SOL",
+            "action": "SELL",
+            "amount": 424.84,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "DOGE",
+            "action": "SELL",
+            "amount": 97.27,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "KCS",
+            "action": "SELL",
+            "amount": 46.02,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "USDC",
+            "action": "BUY",
+            "amount": 2716.72,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "XPL",
+            "action": "BUY",
+            "amount": 29.39,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "FF",
+            "action": "BUY",
+            "amount": 29.85,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "LINEA",
+            "action": "BUY",
+            "amount": 20.22,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "2Z",
+            "action": "BUY",
+            "amount": 20.4,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "WAL",
+            "action": "BUY",
+            "amount": 20.46,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "0G",
+            "action": "BUY",
+            "amount": 20.49,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "AVNT",
+            "action": "BUY",
+            "amount": 30.47,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "OPEN",
+            "action": "BUY",
+            "amount": 20.58,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "ZKC",
+            "action": "BUY",
+            "amount": 20.63,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "EDEN",
+            "action": "BUY",
+            "amount": 20.65,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MAX_SHARPE",
+            "symbol": "SEI",
+            "action": "BUY",
+            "amount": 20.75,
+            "rationale": "Max Sharpe optimization suggests this trade",
+            "improvement_potential": 0.06537927623219675,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MIN_VARIANCE",
+            "symbol": "XRP",
+            "action": "SELL",
+            "amount": 985.91,
+            "rationale": "Min Variance optimization suggests this trade",
+            "improvement_potential": 0.03916297238371407,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MIN_VARIANCE",
+            "symbol": "AAVE",
+            "action": "SELL",
+            "amount": 784.67,
+            "rationale": "Min Variance optimization suggests this trade",
+            "improvement_potential": 0.03916297238371407,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MIN_VARIANCE",
+            "symbol": "ADA",
+            "action": "SELL",
+            "amount": 758.0,
+            "rationale": "Min Variance optimization suggests this trade",
+            "improvement_potential": 0.03916297238371407,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MIN_VARIANCE",
+            "symbol": "SOL",
+            "action": "SELL",
+            "amount": 464.12,
+            "rationale": "Min Variance optimization suggests this trade",
+            "improvement_potential": 0.03916297238371407,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MIN_VARIANCE",
+            "symbol": "DOGE",
+            "action": "SELL",
+            "amount": 125.33,
+            "rationale": "Min Variance optimization suggests this trade",
+            "improvement_potential": 0.03916297238371407,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MIN_VARIANCE",
+            "symbol": "KCS",
+            "action": "SELL",
+            "amount": 46.58,
+            "rationale": "Min Variance optimization suggests this trade",
+            "improvement_potential": 0.03916297238371407,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "MIN_VARIANCE",
+            "symbol": "USDC",
+            "action": "BUY",
+            "amount": 3303.18,
+            "rationale": "Min Variance optimization suggests this trade",
+            "improvement_potential": 0.03916297238371407,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "XRP",
+            "action": "SELL",
+            "amount": 953.76,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "AAVE",
+            "action": "SELL",
+            "amount": 754.99,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "ADA",
+            "action": "SELL",
+            "amount": 737.61,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "SOL",
+            "action": "SELL",
+            "amount": 431.82,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "DOGE",
+            "action": "SELL",
+            "amount": 102.44,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "KCS",
+            "action": "SELL",
+            "amount": 45.09,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "USDC",
+            "action": "BUY",
+            "amount": 2753.75,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "XPL",
+            "action": "BUY",
+            "amount": 24.21,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "FF",
+            "action": "BUY",
+            "amount": 24.66,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "LINEA",
+            "action": "BUY",
+            "amount": 18.43,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "2Z",
+            "action": "BUY",
+            "amount": 18.61,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "WAL",
+            "action": "BUY",
+            "amount": 18.67,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "0G",
+            "action": "BUY",
+            "amount": 18.7,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "AVNT",
+            "action": "BUY",
+            "amount": 25.28,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "OPEN",
+            "action": "BUY",
+            "amount": 18.79,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "ZKC",
+            "action": "BUY",
+            "amount": 18.84,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "EDEN",
+            "action": "BUY",
+            "amount": 18.86,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "KELLY_CRITERION",
+            "symbol": "SEI",
+            "action": "BUY",
+            "amount": 18.96,
+            "rationale": "Kelly Criterion optimization suggests this trade",
+            "improvement_potential": 0.06298685771885609,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "XRP",
+            "action": "SELL",
+            "amount": 906.73,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "AAVE",
+            "action": "SELL",
+            "amount": 732.74,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "ADA",
+            "action": "SELL",
+            "amount": 714.55,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "SOL",
+            "action": "SELL",
+            "amount": 413.29,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "DOGE",
+            "action": "SELL",
+            "amount": 72.72,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "KCS",
+            "action": "SELL",
+            "amount": 37.17,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "USDC",
+            "action": "BUY",
+            "amount": 1884.98,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "REEF",
+            "action": "BUY",
+            "amount": 20.27,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "ETHW",
+            "action": "BUY",
+            "amount": 21.26,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "XPL",
+            "action": "BUY",
+            "amount": 53.89,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "FF",
+            "action": "BUY",
+            "amount": 54.34,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "SOMI",
+            "action": "BUY",
+            "amount": 33.98,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "LINEA",
+            "action": "BUY",
+            "amount": 43.52,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "MORPHO",
+            "action": "BUY",
+            "amount": 34.17,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "PLUME",
+            "action": "BUY",
+            "amount": 34.18,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "PROVE",
+            "action": "BUY",
+            "amount": 34.24,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "2Z",
+            "action": "BUY",
+            "amount": 43.7,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "WAL",
+            "action": "BUY",
+            "amount": 43.76,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "MIRA",
+            "action": "BUY",
+            "amount": 34.37,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "VTHO",
+            "action": "BUY",
+            "amount": 22.97,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "BARD",
+            "action": "BUY",
+            "amount": 34.39,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "0G",
+            "action": "BUY",
+            "amount": 43.79,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "HEMI",
+            "action": "BUY",
+            "amount": 34.39,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "AVNT",
+            "action": "BUY",
+            "amount": 54.96,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "OPEN",
+            "action": "BUY",
+            "amount": 43.88,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "HOLO",
+            "action": "BUY",
+            "amount": 34.48,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "LAYER",
+            "action": "BUY",
+            "amount": 23.12,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "TOWNS",
+            "action": "BUY",
+            "amount": 23.12,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "ZKC",
+            "action": "BUY",
+            "amount": 43.93,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "EDEN",
+            "action": "BUY",
+            "amount": 43.95,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "SHELL",
+            "action": "BUY",
+            "amount": 23.17,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "TREE",
+            "action": "BUY",
+            "amount": 34.57,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "MITO",
+            "action": "BUY",
+            "amount": 34.58,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "DOLO",
+            "action": "BUY",
+            "amount": 34.6,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "LDBNB",
+            "action": "BUY",
+            "amount": 17.18,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "DON",
+            "action": "BUY",
+            "amount": 17.18,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "ANC",
+            "action": "BUY",
+            "amount": 17.18,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "HFT",
+            "action": "BUY",
+            "amount": 23.25,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "PEPE",
+            "action": "BUY",
+            "amount": 34.65,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "NTRN",
+            "action": "BUY",
+            "amount": 23.25,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "SEI",
+            "action": "BUY",
+            "amount": 44.05,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          },
+          {
+            "strategy": "ADAPTIVE",
+            "symbol": "1000PEPPER",
+            "action": "BUY",
+            "amount": 17.18,
+            "rationale": "Adaptive optimization suggests this trade",
+            "improvement_potential": 0.09704109328156224,
+            "risk_reduction": 0,
+            "urgency": "HIGH"
+          }
+        ],
+        "strategy_analysis": {
+          "risk_parity": {
+            "expected_return": 0.10113454303621765,
+            "risk_level": 0,
+            "sharpe_ratio": 0,
+            "weights": {
+              "XRP": 0.022479903801168457,
+              "AAVE": 0.013737718989602946,
+              "ADA": 0.013223472824216738,
+              "SOL": 0.013014681148044894,
+              "DOGE": 0.014545820106638414,
+              "KCS": 0.006611736412108369,
+              "USDC": 0.5057978355262902,
+              "SHIB": 0.0046282154884758585,
+              "REEF": 0.009917604618162554,
+              "ETHW": 0.009917604618162554,
+              "XPL": 0.014545820106638414,
+              "FF": 0.014545820106638414,
+              "SOMI": 0.011901125541795064,
+              "LINEA": 0.013223472824216738,
+              "MORPHO": 0.011901125541795064,
+              "PLUME": 0.011901125541795064,
+              "PROVE": 0.011901125541795064,
+              "2Z": 0.013223472824216738,
+              "WAL": 0.013223472824216738,
+              "MIRA": 0.011901125541795064,
+              "VTHO": 0.009917604618162554,
+              "BARD": 0.011901125541795064,
+              "0G": 0.013223472824216738,
+              "HEMI": 0.011901125541795064,
+              "AVNT": 0.014545820106638414,
+              "OPEN": 0.013223472824216738,
+              "HOLO": 0.011901125541795064,
+              "LAYER": 0.009917604618162554,
+              "TOWNS": 0.009917604618162554,
+              "ZKC": 0.013223472824216738,
+              "EDEN": 0.013223472824216738,
+              "SHELL": 0.009917604618162554,
+              "TREE": 0.011901125541795064,
+              "MITO": 0.011901125541795064,
+              "DOLO": 0.011901125541795064,
+              "LDBNB": 0.00859525733574088,
+              "DON": 0.00859525733574088,
+              "ANC": 0.00859525733574088,
+              "HFT": 0.009917604618162554,
+              "PEPE": 0.011901125541795064,
+              "NTRN": 0.009917604618162554,
+              "SEI": 0.013223472824216738,
+              "1000PEPPER": 0.00859525733574088
+            },
+            "rebalancing_needed": true
+          },
+          "equal_weight": {
+            "expected_return": 0.15916279069767442,
+            "risk_level": 0,
+            "sharpe_ratio": 0,
+            "weights": {
+              "XRP": 0.023255813953488358,
+              "AAVE": 0.023255813953488358,
+              "ADA": 0.023255813953488358,
+              "SOL": 0.023255813953488358,
+              "DOGE": 0.023255813953488358,
+              "KCS": 0.023255813953488358,
+              "USDC": 0.023255813953488358,
+              "SHIB": 0.023255813953488358,
+              "REEF": 0.023255813953488358,
+              "ETHW": 0.023255813953488358,
+              "XPL": 0.023255813953488358,
+              "FF": 0.023255813953488358,
+              "SOMI": 0.023255813953488358,
+              "LINEA": 0.023255813953488358,
+              "MORPHO": 0.023255813953488358,
+              "PLUME": 0.023255813953488358,
+              "PROVE": 0.023255813953488358,
+              "2Z": 0.023255813953488358,
+              "WAL": 0.023255813953488358,
+              "MIRA": 0.023255813953488358,
+              "VTHO": 0.023255813953488358,
+              "BARD": 0.023255813953488358,
+              "0G": 0.023255813953488358,
+              "HEMI": 0.023255813953488358,
+              "AVNT": 0.023255813953488358,
+              "OPEN": 0.023255813953488358,
+              "HOLO": 0.023255813953488358,
+              "LAYER": 0.023255813953488358,
+              "TOWNS": 0.023255813953488358,
+              "ZKC": 0.023255813953488358,
+              "EDEN": 0.023255813953488358,
+              "SHELL": 0.023255813953488358,
+              "TREE": 0.023255813953488358,
+              "MITO": 0.023255813953488358,
+              "DOLO": 0.023255813953488358,
+              "LDBNB": 0.023255813953488358,
+              "DON": 0.023255813953488358,
+              "ANC": 0.023255813953488358,
+              "HFT": 0.023255813953488358,
+              "PEPE": 0.023255813953488358,
+              "NTRN": 0.023255813953488358,
+              "SEI": 0.023255813953488358,
+              "1000PEPPER": 0.023255813953488358
+            },
+            "rebalancing_needed": true
+          },
+          "max_sharpe": {
+            "expected_return": 0.06537927623219675,
+            "risk_level": 0,
+            "sharpe_ratio": 0,
+            "weights": {
+              "XRP": 0.013586690603439762,
+              "AAVE": 0.011552506023179395,
+              "ADA": 0.007059547481340595,
+              "SOL": 0.012157520759345253,
+              "DOGE": 0.009040723622617573,
+              "KCS": 0.00033389751600935237,
+              "USDC": 0.8039527150899015,
+              "SHIB": 7.035220662317053e-05,
+              "REEF": 0.0018513424771589987,
+              "ETHW": 0.0018513424771589987,
+              "XPL": 0.009040723622617573,
+              "FF": 0.009040723622617573,
+              "SOMI": 0.003950217492829274,
+              "LINEA": 0.0061055545784567304,
+              "MORPHO": 0.003950217492829274,
+              "PLUME": 0.003950217492829274,
+              "PROVE": 0.003950217492829274,
+              "2Z": 0.0061055545784567304,
+              "WAL": 0.0061055545784567304,
+              "MIRA": 0.003950217492829274,
+              "VTHO": 0.0018513424771589987,
+              "BARD": 0.003950217492829274,
+              "0G": 0.0061055545784567304,
+              "HEMI": 0.003950217492829274,
+              "AVNT": 0.009040723622617573,
+              "OPEN": 0.0061055545784567304,
+              "HOLO": 0.003950217492829274,
+              "LAYER": 0.0018513424771589987,
+              "TOWNS": 0.0018513424771589987,
+              "ZKC": 0.0061055545784567304,
+              "EDEN": 0.0061055545784567304,
+              "SHELL": 0.0018513424771589987,
+              "TREE": 0.003950217492829274,
+              "MITO": 0.003950217492829274,
+              "DOLO": 0.003950217492829274,
+              "LDBNB": 0.0010165223677033868,
+              "DON": 0.0010165223677033868,
+              "ANC": 0.0010165223677033868,
+              "HFT": 0.0018513424771589987,
+              "PEPE": 0.003950217492829274,
+              "NTRN": 0.0018513424771589987,
+              "SEI": 0.0061055545784567304,
+              "1000PEPPER": 0.0010165223677033868
+            },
+            "rebalancing_needed": true
+          },
+          "min_variance": {
+            "expected_return": 0.03916297238371407,
+            "risk_level": 0,
+            "sharpe_ratio": 0,
+            "weights": {
+              "XRP": 0.0019290806403949377,
+              "AAVE": 0.0007204282638511959,
+              "ADA": 0.0006675019516937502,
+              "SOL": 0.0006465893559218491,
+              "DOGE": 0.0008076773615494376,
+              "KCS": 0.00016687548792343755,
+              "USDC": 0.976597074199937,
+              "SHIB": 8.176898908248437e-05,
+              "REEF": 0.00037546984782773436,
+              "ETHW": 0.00037546984782773436,
+              "XPL": 0.0008076773615494376,
+              "FF": 0.0008076773615494376,
+              "SOMI": 0.0005406765808719375,
+              "LINEA": 0.0006675019516937502,
+              "MORPHO": 0.0005406765808719375,
+              "PLUME": 0.0005406765808719375,
+              "PROVE": 0.0005406765808719375,
+              "2Z": 0.0006675019516937502,
+              "WAL": 0.0006675019516937502,
+              "MIRA": 0.0005406765808719375,
+              "VTHO": 0.00037546984782773436,
+              "BARD": 0.0005406765808719375,
+              "0G": 0.0006675019516937502,
+              "HEMI": 0.0005406765808719375,
+              "AVNT": 0.0008076773615494376,
+              "OPEN": 0.0006675019516937502,
+              "HOLO": 0.0005406765808719375,
+              "LAYER": 0.00037546984782773436,
+              "TOWNS": 0.00037546984782773436,
+              "ZKC": 0.0006675019516937502,
+              "EDEN": 0.0006675019516937502,
+              "SHELL": 0.00037546984782773436,
+              "TREE": 0.0005406765808719375,
+              "MITO": 0.0005406765808719375,
+              "DOLO": 0.0005406765808719375,
+              "LDBNB": 0.0002820195745906094,
+              "DON": 0.0002820195745906094,
+              "ANC": 0.0002820195745906094,
+              "HFT": 0.00037546984782773436,
+              "PEPE": 0.0005406765808719375,
+              "NTRN": 0.00037546984782773436,
+              "SEI": 0.0006675019516937502,
+              "1000PEPPER": 0.0002820195745906094
+            },
+            "rebalancing_needed": true
+          },
+          "kelly_criterion": {
+            "expected_return": 0.06298685771885609,
+            "risk_level": 0,
+            "sharpe_ratio": 0,
+            "weights": {
+              "XRP": 0.011293281521157642,
+              "AAVE": 0.009602487726534105,
+              "ADA": 0.006454716221977327,
+              "SOL": 0.010105379864465257,
+              "DOGE": 0.007514683112504348,
+              "KCS": 0.0006105818980622609,
+              "USDC": 0.8150989444918518,
+              "SHIB": 0.00018378518374940868,
+              "REEF": 0.0022569713969960653,
+              "ETHW": 0.0022569713969960653,
+              "XPL": 0.007514683112504348,
+              "FF": 0.007514683112504348,
+              "SOMI": 0.00401309002751608,
+              "LINEA": 0.005582457273061473,
+              "MORPHO": 0.00401309002751608,
+              "PLUME": 0.00401309002751608,
+              "PROVE": 0.00401309002751608,
+              "2Z": 0.005582457273061473,
+              "WAL": 0.005582457273061473,
+              "MIRA": 0.00401309002751608,
+              "VTHO": 0.0022569713969960653,
+              "BARD": 0.00401309002751608,
+              "0G": 0.005582457273061473,
+              "HEMI": 0.00401309002751608,
+              "AVNT": 0.007514683112504348,
+              "OPEN": 0.005582457273061473,
+              "HOLO": 0.00401309002751608,
+              "LAYER": 0.0022569713969960653,
+              "TOWNS": 0.0022569713969960653,
+              "ZKC": 0.005582457273061473,
+              "EDEN": 0.005582457273061473,
+              "SHELL": 0.0022569713969960653,
+              "TREE": 0.00401309002751608,
+              "MITO": 0.00401309002751608,
+              "DOLO": 0.00401309002751608,
+              "LDBNB": 0.0014298952378828226,
+              "DON": 0.0014298952378828226,
+              "ANC": 0.0014298952378828226,
+              "HFT": 0.0022569713969960653,
+              "PEPE": 0.00401309002751608,
+              "NTRN": 0.0022569713969960653,
+              "SEI": 0.005582457273061473,
+              "1000PEPPER": 0.0014298952378828226
+            },
+            "rebalancing_needed": true
+          },
+          "adaptive": {
+            "expected_return": 0.09704109328156224,
+            "risk_level": 0,
+            "sharpe_ratio": 0,
+            "weights": {
+              "XRP": 0.02503636447837743,
+              "AAVE": 0.016086004590121893,
+              "ADA": 0.013183352658075718,
+              "SOL": 0.015532786253952652,
+              "DOGE": 0.01626031046061198,
+              "KCS": 0.002944462462141541,
+              "USDC": 0.559502742339108,
+              "SHIB": 0.0014302127580501168,
+              "REEF": 0.0068477642243011515,
+              "ETHW": 0.0068477642243011515,
+              "XPL": 0.01626031046061198,
+              "FF": 0.01626031046061198,
+              "SOMI": 0.010202878398392509,
+              "LINEA": 0.012973576119342948,
+              "MORPHO": 0.010202878398392509,
+              "PLUME": 0.010202878398392509,
+              "PROVE": 0.010202878398392509,
+              "2Z": 0.012973576119342948,
+              "WAL": 0.012973576119342948,
+              "MIRA": 0.010202878398392509,
+              "VTHO": 0.0068477642243011515,
+              "BARD": 0.010202878398392509,
+              "0G": 0.012973576119342948,
+              "HEMI": 0.010202878398392509,
+              "AVNT": 0.01626031046061198,
+              "OPEN": 0.012973576119342948,
+              "HOLO": 0.010202878398392509,
+              "LAYER": 0.0068477642243011515,
+              "TOWNS": 0.0068477642243011515,
+              "ZKC": 0.012973576119342948,
+              "EDEN": 0.012973576119342948,
+              "SHELL": 0.0068477642243011515,
+              "TREE": 0.010202878398392509,
+              "MITO": 0.010202878398392509,
+              "DOLO": 0.010202878398392509,
+              "LDBNB": 0.005059392271965594,
+              "DON": 0.005059392271965594,
+              "ANC": 0.005059392271965594,
+              "HFT": 0.0068477642243011515,
+              "PEPE": 0.010202878398392509,
+              "NTRN": 0.0068477642243011515,
+              "SEI": 0.012973576119342948,
+              "1000PEPPER": 0.005059392271965594
+            },
+            "rebalancing_needed": true
+          }
+        },
+        "optimization_summary": {
+          "strategies_analyzed": 6,
+          "recommendations_generated": 170,
+          "best_strategy": "equal_weight",
+          "current_positions": 47,
+          "portfolio_value": 0
+        },
+        "timestamp": "2025-10-13T07:15:05.522371",
+        "execution_time_seconds": 62.0635,
+        "methodology_summary": {
+          "strategy": "AI Portfolio Optimizer",
+          "category": "portfolio",
+          "summary": "Compared six optimisation techniques (risk parity, equal weight, max Sharpe, min variance, Kelly scaling, adaptive blend) to surface rebalancing ideas.",
+          "calculation_steps": [
+            "Pull live portfolio holdings and compute expected return plus covariance inputs.",
+            "Run each optimiser under platform constraints (min/max weight, position cap).",
+            "Rank outcomes by expected return vs. volatility and highlight required trades to reach targets."
+          ],
+          "calculation_notes": "Each optimiser's weights are scaled to practical limits before combining into the final recommendation set.",
+          "inputs_used": {
+            "symbol": "BTC/USDT",
+            "timeframe": "1h",
+            "leverage": 1.0,
+            "risk_mode": "balanced",
+            "quantity": 0.01,
+            "simulation_mode": true
+          },
+          "evaluation_metrics": {
+            "success": true,
+            "strategies_analyzed": 6,
+            "recommendations_generated": 170,
+            "best_strategy": "equal_weight",
+            "current_positions": 47,
+            "portfolio_value": 0,
+            "strategies_evaluated": 6
+          }
+        },
+        "regulatory_disclosures": {
+          "risk_warning": "Crypto assets are highly volatile and can result in substantial or total losses. Outputs are informational only and do not constitute investment advice.",
+          "jurisdiction_notice": "Confirm digital asset trading is permitted in your jurisdiction and comply with all suitability requirements. Consult a licensed advisor for personalised guidance.",
+          "links": {
+            "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+            "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure"
+          },
+          "last_reviewed": "2025-10-13",
+          "rebalancing_notice": "Portfolio targets assume timely rebalancing and access to sufficient liquidity. Deviations can materially impact performance.",
+          "simulation_notice": "Results generated in simulation mode. Live execution, fees and slippage can materially differ from simulated outcomes."
+        },
+        "educational_resources": [
+          {
+            "topic": "Diversification",
+            "title": "Why spreading capital matters",
+            "summary": "Holding uncorrelated assets reduces reliance on a single performer and helps dampen portfolio volatility.",
+            "actionable_tip": "Blend layer-1s, DeFi, infrastructure tokens and stablecoins to improve risk-adjusted returns."
+          },
+          {
+            "topic": "Crypto volatility",
+            "title": "Prepare for large swings",
+            "summary": "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards.",
+            "actionable_tip": "Stress test positions assuming 30\u201380% annualised volatility and plan for gap risk."
+          },
+          {
+            "topic": "Stablecoins vs. alt-coins",
+            "title": "Different roles in a portfolio",
+            "summary": "Stablecoins provide liquidity and downside buffers, while alt-coins target growth but contribute most drawdown risk.",
+            "actionable_tip": "Maintain a stablecoin reserve to cover margin calls and fund opportunistic entries without forced selling."
+          },
+          {
+            "topic": "Leverage risk",
+            "title": "Use borrowed capital cautiously",
+            "summary": "Leverage accelerates losses during volatility spikes. Liquidations can happen quickly when collateral buffers are thin.",
+            "actionable_tip": "Limit leverage to clearly defined setups, monitor funding costs and avoid stacking multiple leveraged trades."
+          },
+          {
+            "topic": "Rebalancing cadence",
+            "title": "Keep allocations aligned",
+            "summary": "Periodic rebalancing locks in gains and reins in concentration. Ignoring drifts can magnify downside during shocks.",
+            "actionable_tip": "Review weights monthly or when allocations move >5% away from targets to maintain intended risk levels."
+          }
+        ],
+        "compliance_category": "portfolio"
+      },
+      "timestamp": "2025-10-13T07:15:05.522676",
+      "credits_used": 0
+    },
+    "error": null
+  },
+  "Spot Momentum": {
+    "status": "failed",
+    "execution_time": 9.731165170669556,
+    "data": null,
+    "error": "{\"error\":\"Strategy execution failed: Failed to get technical analysis\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9768260.335}"
+  },
+  "Spot Mean Reversion": {
+    "status": "timeout",
+    "execution_time": 120.0,
+    "data": null,
+    "error": "Request timeout after 120 seconds"
+  },
+  "Spot Breakout": {
+    "status": "failed",
+    "execution_time": 9.740473508834839,
+    "data": null,
+    "error": "{\"error\":\"Strategy execution failed: Price lookup failed: 'SpotAlgorithms' object has no attribute '_get_symbol_price'\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9768390.209}"
+  },
+  "Scalping": {
+    "status": "success",
+    "execution_time": 9.387643575668335,
+    "data": {
+      "success": true,
+      "strategy_function": "scalping_strategy",
+      "execution_result": {
+        "success": true,
+        "timestamp": "2025-10-13T07:17:34.528652",
+        "scalping_analysis": {
+          "symbol": "BTC/USDT",
+          "timeframe": "5m",
+          "market_conditions": {
+            "current_price": 115486.24,
+            "daily_volatility": 0.05,
+            "intraday_volatility": 0.0125,
+            "tick_size": 0.01,
+            "scalping_suitability": true,
+            "spread_cost_bps": 5,
+            "liquidity_score": 0.0
+          },
+          "entry_signals": [
+            {
+              "signal_type": "MOMENTUM_SCALP",
+              "direction": "LONG",
+              "entry_price": 115486.24,
+              "rationale": "Strong upward momentum: 0.5%",
+              "confidence": 50.0,
+              "timeframe": "1-5 minutes",
+              "profit_target_bps": 10
+            }
+          ],
+          "exit_strategy": {
+            "profit_taking_rules": {
+              "primary_target_bps": 8,
+              "secondary_target_bps": 15,
+              "minimum_target_bps": 3,
+              "target_hit_rate": 0.6
+            },
+            "stop_loss_rules": {
+              "hard_stop_bps": 12,
+              "time_stop_minutes": 5,
+              "volume_stop": "Exit if volume drops 50% from entry",
+              "momentum_stop": "Exit if momentum reverses"
+            },
+            "scaling_rules": {
+              "partial_profit_at": "50% target (4 bps)",
+              "scale_out_percentage": 50,
+              "trail_stop_activation": "After 6 bps profit",
+              "trail_stop_distance": 4
+            }
+          },
+          "profit_targets": {
+            "position_size_usd": 10000,
+            "target_profit_per_trade": 8.0,
+            "daily_profit_target": 200.0,
+            "trades_per_day_target": 25,
+            "win_rate_required": 60,
+            "risk_reward_ratio": 1.5,
+            "maximum_daily_loss": 500.0
+          },
+          "risk_controls": {
+            "position_limits": {
+              "max_concurrent_scalps": 3,
+              "max_symbol_exposure": 20000,
+              "cooldown_after_loss": "1 minute",
+              "daily_trade_limit": 50
+            },
+            "market_condition_filters": {
+              "min_volatility": 0.005,
+              "max_spread_bps": 8,
+              "min_volume_24h": 500000000,
+              "avoid_economic_events": true
+            },
+            "performance_circuit_breakers": {
+              "max_consecutive_losses": 3,
+              "daily_drawdown_limit": "3% of capital",
+              "win_rate_minimum": 0.5,
+              "cooling_period": "15 minutes after breaker"
+            },
+            "technical_safeguards": {
+              "latency_threshold": "100ms",
+              "slippage_tolerance": 2,
+              "order_fill_timeout": "3 seconds",
+              "price_deviation_limit": 0.5
+            }
+          }
+        },
+        "execution_time_seconds": 0.0022,
+        "methodology_summary": {
+          "strategy": "AI Scalping Engine",
+          "category": "algorithmic",
+          "summary": "Ran systematic models for AI Scalping Engine on BTC/USDT combining statistical filters and risk overlays.",
+          "calculation_steps": [
+            "Load multi-factor indicators (momentum, mean reversion, volume) and normalise them.",
+            "Blend signals using the configured strategy archetype to derive directional conviction.",
+            "Apply Kelly-inspired sizing with volatility caps to produce executable orders."
+          ],
+          "calculation_notes": "Model confidence reflects ensemble agreement and sample depth; allocations are clipped to portfolio risk limits.",
+          "inputs_used": {
+            "symbol": "BTC/USDT",
+            "timeframe": "5m",
+            "leverage": 1.0,
+            "risk_mode": "balanced",
+            "quantity": 0.01,
+            "simulation_mode": true
+          },
+          "evaluation_metrics": {
+            "success": true
+          }
+        },
+        "regulatory_disclosures": {
+          "risk_warning": "Crypto assets are highly volatile and can result in substantial or total losses. Outputs are informational only and do not constitute investment advice.",
+          "jurisdiction_notice": "Confirm digital asset trading is permitted in your jurisdiction and comply with all suitability requirements. Consult a licensed advisor for personalised guidance.",
+          "links": {
+            "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+            "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure"
+          },
+          "last_reviewed": "2025-10-13",
+          "model_risk": "Systematic strategies rely on historical relationships that may break down during structural market changes.",
+          "simulation_notice": "Results generated in simulation mode. Live execution, fees and slippage can materially differ from simulated outcomes."
+        },
+        "educational_resources": [
+          {
+            "topic": "Diversification",
+            "title": "Why spreading capital matters",
+            "summary": "Holding uncorrelated assets reduces reliance on a single performer and helps dampen portfolio volatility.",
+            "actionable_tip": "Blend layer-1s, DeFi, infrastructure tokens and stablecoins to improve risk-adjusted returns."
+          },
+          {
+            "topic": "Crypto volatility",
+            "title": "Prepare for large swings",
+            "summary": "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards.",
+            "actionable_tip": "Stress test positions assuming 30\u201380% annualised volatility and plan for gap risk."
+          },
+          {
+            "topic": "Stablecoins vs. alt-coins",
+            "title": "Different roles in a portfolio",
+            "summary": "Stablecoins provide liquidity and downside buffers, while alt-coins target growth but contribute most drawdown risk.",
+            "actionable_tip": "Maintain a stablecoin reserve to cover margin calls and fund opportunistic entries without forced selling."
+          },
+          {
+            "topic": "Leverage risk",
+            "title": "Use borrowed capital cautiously",
+            "summary": "Leverage accelerates losses during volatility spikes. Liquidations can happen quickly when collateral buffers are thin.",
+            "actionable_tip": "Limit leverage to clearly defined setups, monitor funding costs and avoid stacking multiple leveraged trades."
+          },
+          {
+            "topic": "Systematic discipline",
+            "title": "Stick to tested rules",
+            "summary": "Consistent execution is essential for algorithmic strategies. Deviating from the rule set introduces discretionary risk.",
+            "actionable_tip": "Document strategy logic, monitor performance drift and pause trading if live metrics fall outside tested ranges."
+          }
+        ],
+        "compliance_category": "algorithmic"
+      },
+      "timestamp": "2025-10-13T07:17:34.528803",
+      "credits_used": 0
+    },
+    "error": null
+  },
+  "Pairs Trading": {
+    "status": "failed",
+    "execution_time": 10.145229578018188,
+    "data": null,
+    "error": "{\"error\":\"Strategy execution failed: not enough values to unpack (expected 2, got 1)\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9768409.732}"
+  },
+  "Statistical Arbitrage": {
+    "status": "timeout",
+    "execution_time": 120.0,
+    "data": null,
+    "error": "Request timeout after 120 seconds"
+  },
+  "Market Making": {
+    "status": "success",
+    "execution_time": 9.880032300949097,
+    "data": {
+      "success": true,
+      "strategy_function": "market_making",
+      "execution_result": {
+        "success": true,
+        "timestamp": "2025-10-13T07:19:54.696468",
+        "market_making_analysis": {
+          "symbol": "BTC/USDT",
+          "strategy_type": "dual_side",
+          "market_microstructure": {
+            "current_price": 115486.24,
+            "typical_spread_bps": 10,
+            "order_book_depth_usd": 1000000,
+            "daily_volume_usd": 0.0,
+            "market_impact": 0.0006324555320336759,
+            "volatility": 0.05,
+            "liquidity_score": 0.0,
+            "market_making_suitability": false
+          },
+          "spread_analysis": {
+            "target_spread_bps": 3.0,
+            "bid_price": 115468.92,
+            "ask_price": 115503.56,
+            "spread_capture_per_trade": 17.32293600000412,
+            "competitive_advantage": true,
+            "spread_compression_risk": "MEDIUM"
+          },
+          "order_management": {
+            "order_layers": [
+              {
+                "side": "BUY",
+                "price": 115451.59412800001,
+                "size_usd": 10000.0,
+                "layer": 1
+              },
+              {
+                "side": "SELL",
+                "price": 115520.885872,
+                "size_usd": 10000.0,
+                "layer": 1
+              },
+              {
+                "side": "BUY",
+                "price": 115416.948256,
+                "size_usd": 8000.0,
+                "layer": 2
+              },
+              {
+                "side": "SELL",
+                "price": 115555.53174399999,
+                "size_usd": 8000.0,
+                "layer": 2
+              },
+              {
+                "side": "BUY",
+                "price": 115382.30238400001,
+                "size_usd": 6400.000000000001,
+                "layer": 3
+              },
+              {
+                "side": "SELL",
+                "price": 115590.177616,
+                "size_usd": 6400.000000000001,
+                "layer": 3
+              },
+              {
+                "side": "BUY",
+                "price": 115347.656512,
+                "size_usd": 5120.000000000001,
+                "layer": 4
+              },
+              {
+                "side": "SELL",
+                "price": 115624.82348800001,
+                "size_usd": 5120.000000000001,
+                "layer": 4
+              },
+              {
+                "side": "BUY",
+                "price": 115313.01064000001,
+                "size_usd": 4096.000000000001,
+                "layer": 5
+              },
+              {
+                "side": "SELL",
+                "price": 115659.46936000002,
+                "size_usd": 4096.000000000001,
+                "layer": 5
+              }
+            ],
+            "total_bid_size": 33616.0,
+            "total_ask_size": 33616.0,
+            "max_inventory_limit": 100000,
+            "inventory_rebalancing": "Adjust orders based on current inventory",
+            "order_refresh_frequency": "Every 30 seconds or on 25% price move",
+            "fill_rate_estimate": 0.0
+          },
+          "profitability_analysis": {
+            "estimated_fills_per_day": 0.0,
+            "revenue_per_fill": 17.32,
+            "daily_revenue": 0.0,
+            "daily_trading_costs": 0.0,
+            "daily_holding_costs": 10.0,
+            "estimated_daily_pnl": -10.0,
+            "monthly_pnl": -300.0,
+            "annualized_return": -3.6,
+            "sharpe_ratio_estimate": 1.5,
+            "profitability_threshold": false
+          },
+          "risk_controls": {
+            "inventory_limits": {
+              "max_long_inventory": 100000,
+              "max_short_inventory": 100000,
+              "inventory_warning_threshold": 80000.0
+            },
+            "price_risk_controls": {
+              "max_price_move_pause": "5% in 5 minutes",
+              "volatility_circuit_breaker": "Pause if volatility > 0.1%",
+              "correlation_risk": "Monitor correlation with BTC > 0.9"
+            },
+            "operational_controls": {
+              "max_fill_rate": "No more than 50% of order size filled instantly",
+              "order_size_limits": "Individual orders capped at $20000",
+              "connection_monitoring": "Pause on exchange connectivity issues"
+            },
+            "stop_loss_rules": {
+              "daily_loss_limit": 5000.0,
+              "drawdown_pause_threshold": "Pause after 3 consecutive losing days",
+              "inventory_stop": "Close inventory if market moves > 2% against position"
+            }
+          }
+        },
+        "execution_time_seconds": 0.0027,
+        "methodology_summary": {
+          "strategy": "AI Market Maker",
+          "category": "algorithmic",
+          "summary": "Ran systematic models for AI Market Maker on BTC/USDT combining statistical filters and risk overlays.",
+          "calculation_steps": [
+            "Load multi-factor indicators (momentum, mean reversion, volume) and normalise them.",
+            "Blend signals using the configured strategy archetype to derive directional conviction.",
+            "Apply Kelly-inspired sizing with volatility caps to produce executable orders."
+          ],
+          "calculation_notes": "Model confidence reflects ensemble agreement and sample depth; allocations are clipped to portfolio risk limits.",
+          "inputs_used": {
+            "symbol": "BTC/USDT",
+            "timeframe": "1h",
+            "leverage": 1.0,
+            "risk_mode": "balanced",
+            "quantity": 0.01,
+            "simulation_mode": true
+          },
+          "evaluation_metrics": {
+            "success": true
+          }
+        },
+        "regulatory_disclosures": {
+          "risk_warning": "Crypto assets are highly volatile and can result in substantial or total losses. Outputs are informational only and do not constitute investment advice.",
+          "jurisdiction_notice": "Confirm digital asset trading is permitted in your jurisdiction and comply with all suitability requirements. Consult a licensed advisor for personalised guidance.",
+          "links": {
+            "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+            "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure"
+          },
+          "last_reviewed": "2025-10-13",
+          "model_risk": "Systematic strategies rely on historical relationships that may break down during structural market changes.",
+          "simulation_notice": "Results generated in simulation mode. Live execution, fees and slippage can materially differ from simulated outcomes."
+        },
+        "educational_resources": [
+          {
+            "topic": "Diversification",
+            "title": "Why spreading capital matters",
+            "summary": "Holding uncorrelated assets reduces reliance on a single performer and helps dampen portfolio volatility.",
+            "actionable_tip": "Blend layer-1s, DeFi, infrastructure tokens and stablecoins to improve risk-adjusted returns."
+          },
+          {
+            "topic": "Crypto volatility",
+            "title": "Prepare for large swings",
+            "summary": "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards.",
+            "actionable_tip": "Stress test positions assuming 30\u201380% annualised volatility and plan for gap risk."
+          },
+          {
+            "topic": "Stablecoins vs. alt-coins",
+            "title": "Different roles in a portfolio",
+            "summary": "Stablecoins provide liquidity and downside buffers, while alt-coins target growth but contribute most drawdown risk.",
+            "actionable_tip": "Maintain a stablecoin reserve to cover margin calls and fund opportunistic entries without forced selling."
+          },
+          {
+            "topic": "Leverage risk",
+            "title": "Use borrowed capital cautiously",
+            "summary": "Leverage accelerates losses during volatility spikes. Liquidations can happen quickly when collateral buffers are thin.",
+            "actionable_tip": "Limit leverage to clearly defined setups, monitor funding costs and avoid stacking multiple leveraged trades."
+          },
+          {
+            "topic": "Systematic discipline",
+            "title": "Stick to tested rules",
+            "summary": "Consistent execution is essential for algorithmic strategies. Deviating from the rule set introduces discretionary risk.",
+            "actionable_tip": "Document strategy logic, monitor performance drift and pause trading if live metrics fall outside tested ranges."
+          }
+        ],
+        "compliance_category": "algorithmic"
+      },
+      "timestamp": "2025-10-13T07:19:54.696634",
+      "credits_used": 0
+    },
+    "error": null
+  },
+  "Futures Trading": {
+    "status": "failed",
+    "execution_time": 9.699291467666626,
+    "data": null,
+    "error": "{\"error\":\"Strategy execution failed: Invalid futures symbol: BTCUSDT\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9768549.469}"
+  },
+  "Options Trading": {
+    "status": "failed",
+    "execution_time": 9.765754461288452,
+    "data": null,
+    "error": "{\"error\":\"Strategy execution failed: Option contract not found: BTC/USDT 121300 2025-11-12\",\"status_code\":400,\"path\":\"/api/v1/strategies/execute\",\"timestamp\":9768559.238}"
+  },
+  "Funding Arbitrage": {
+    "status": "success",
+    "execution_time": 9.767487525939941,
+    "data": {
+      "success": true,
+      "strategy_function": "funding_arbitrage",
+      "execution_result": {
+        "success": true,
+        "timestamp": "2025-10-13T07:20:23.934563",
+        "funding_arbitrage_analysis": {
+          "opportunities": [],
+          "funding_analysis": {
+            "BTC": {
+              "symbol": "BTC",
+              "exchanges": {
+                "binance": {
+                  "current_rate": 8.398383772669368e-05,
+                  "predicted_rate": 9.238222149936305e-05,
+                  "funding_interval": "8h",
+                  "next_funding_time": "2025-10-13T08:00:00"
+                },
+                "okx": {
+                  "current_rate": 8.398383772669368e-05,
+                  "predicted_rate": 9.238222149936305e-05,
+                  "funding_interval": "8h",
+                  "next_funding_time": "2025-10-13T08:00:00"
+                }
+              },
+              "arbitrage_opportunities": [],
+              "optimal_strategy": {}
+            }
+          },
+          "risk_assessment": {
+            "market_risk": "MEDIUM",
+            "execution_risk": "HIGH",
+            "funding_rate_risk": "LOW",
+            "counterparty_risk": "LOW",
+            "capital_efficiency": "HIGH",
+            "recommended_allocation": "5-15% of portfolio"
+          },
+          "execution_plan": {}
+        },
+        "execution_time_seconds": 0.2979,
+        "methodology_summary": {
+          "strategy": "AI Funding Arbitrage",
+          "category": "derivatives",
+          "summary": "Evaluated derivatives order books, funding data and volatility to structure AI Funding Arbitrage on BTC/USDT with a balanced risk posture.",
+          "calculation_steps": [
+            "Pull live funding, basis and volatility metrics for the contract and underlying asset.",
+            "Translate risk mode into position sizing, leverage ceilings and margin buffers.",
+            "Assemble trade instructions and hedges before validating exchange-specific constraints."
+          ],
+          "calculation_notes": "Derivatives sizing links to margin requirements; leverage and funding costs were stress tested before recommending trades.",
+          "inputs_used": {
+            "symbol": "BTC/USDT",
+            "timeframe": "1h",
+            "leverage": 1.0,
+            "risk_mode": "balanced",
+            "quantity": 0.01,
+            "simulation_mode": true
+          },
+          "evaluation_metrics": {
+            "success": true
+          }
+        },
+        "regulatory_disclosures": {
+          "risk_warning": "Crypto assets are highly volatile and can result in substantial or total losses. Outputs are informational only and do not constitute investment advice.",
+          "jurisdiction_notice": "Confirm digital asset trading is permitted in your jurisdiction and comply with all suitability requirements. Consult a licensed advisor for personalised guidance.",
+          "links": {
+            "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+            "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure"
+          },
+          "last_reviewed": "2025-10-13",
+          "leverage_warning": "Leverage amplifies gains and losses. Maintain adequate collateral and monitor liquidation thresholds closely.",
+          "simulation_notice": "Results generated in simulation mode. Live execution, fees and slippage can materially differ from simulated outcomes."
+        },
+        "educational_resources": [
+          {
+            "topic": "Diversification",
+            "title": "Why spreading capital matters",
+            "summary": "Holding uncorrelated assets reduces reliance on a single performer and helps dampen portfolio volatility.",
+            "actionable_tip": "Blend layer-1s, DeFi, infrastructure tokens and stablecoins to improve risk-adjusted returns."
+          },
+          {
+            "topic": "Crypto volatility",
+            "title": "Prepare for large swings",
+            "summary": "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards.",
+            "actionable_tip": "Stress test positions assuming 30\u201380% annualised volatility and plan for gap risk."
+          },
+          {
+            "topic": "Stablecoins vs. alt-coins",
+            "title": "Different roles in a portfolio",
+            "summary": "Stablecoins provide liquidity and downside buffers, while alt-coins target growth but contribute most drawdown risk.",
+            "actionable_tip": "Maintain a stablecoin reserve to cover margin calls and fund opportunistic entries without forced selling."
+          },
+          {
+            "topic": "Leverage risk",
+            "title": "Use borrowed capital cautiously",
+            "summary": "Leverage accelerates losses during volatility spikes. Liquidations can happen quickly when collateral buffers are thin.",
+            "actionable_tip": "Limit leverage to clearly defined setups, monitor funding costs and avoid stacking multiple leveraged trades."
+          },
+          {
+            "topic": "Margin management",
+            "title": "Track collateral health",
+            "summary": "Margin ratios determine liquidation risk. Monitoring maintenance levels across exchanges prevents forced unwinds.",
+            "actionable_tip": "Set alerts for margin utilisation >70% and keep extra collateral ready to top up positions."
+          }
+        ],
+        "compliance_category": "derivatives"
+      },
+      "timestamp": "2025-10-13T07:20:23.934688",
+      "credits_used": 0
+    },
+    "error": null
+  },
+  "Hedge Position": {
+    "status": "success",
+    "execution_time": 9.392691850662231,
+    "data": {
+      "success": true,
+      "strategy_function": "hedge_position",
+      "execution_result": {
+        "success": true,
+        "timestamp": "2025-10-13T07:20:33.332624",
+        "hedge_analysis": {
+          "primary_position": {
+            "symbol": "BTC/USDT",
+            "size": 0.01,
+            "side": "long"
+          },
+          "hedge_analysis": {
+            "hedge_type": "DIRECT_HEDGE",
+            "hedge_symbol": "BTC/USDT",
+            "hedge_size": 0.005,
+            "hedge_side": "short",
+            "hedge_ratio": 0.5,
+            "risk_reduction": 50.0,
+            "hedge_effectiveness": 50.0
+          },
+          "hedge_recommendations": [
+            {
+              "strategy": "DIRECT_HEDGE",
+              "action": "SHORT 0.005 BTC/USDT",
+              "exchange_recommendation": "Use different exchange to avoid netting",
+              "cost_estimate": 0.5774312,
+              "risk_reduction": 50.0
+            }
+          ],
+          "cost_benefit": {
+            "total_hedge_cost": 0.5774312,
+            "hedge_cost_pct": 0.05,
+            "average_effectiveness": 50.0,
+            "cost_per_protection_pct": 0.011548624,
+            "recommended_hedge": {
+              "strategy": "DIRECT_HEDGE",
+              "action": "SHORT 0.005 BTC/USDT",
+              "exchange_recommendation": "Use different exchange to avoid netting",
+              "cost_estimate": 0.5774312,
+              "risk_reduction": 50.0
+            },
+            "cost_justification": "Review cost-benefit"
+          },
+          "execution_plan": {
+            "recommended_hedge": {
+              "strategy": "DIRECT_HEDGE",
+              "action": "SHORT 0.005 BTC/USDT",
+              "exchange_recommendation": "Use different exchange to avoid netting",
+              "cost_estimate": 0.5774312,
+              "risk_reduction": 50.0
+            },
+            "execution_priority": "MEDIUM",
+            "timing": "Can be delayed",
+            "monitoring_requirements": [
+              "Monitor correlation between primary and hedge positions",
+              "Track hedge effectiveness over time",
+              "Adjust hedge ratio as position size changes",
+              "Review hedge performance weekly"
+            ],
+            "exit_conditions": [
+              "Primary position is closed",
+              "Correlation breaks down significantly",
+              "Hedge becomes too expensive to maintain"
+            ]
+          }
+        },
+        "execution_time_seconds": 0.0002,
+        "methodology_summary": {
+          "strategy": "AI Hedge Strategist",
+          "category": "derivatives",
+          "summary": "Built hedge ratios for the provided portfolio basket using correlation and beta estimates.",
+          "calculation_steps": [
+            "Estimate factor exposures and betas for instruments needing protection.",
+            "Select hedge assets with liquidity and opposite correlation signatures.",
+            "Size hedges to neutralise targeted risk while respecting capital constraints."
+          ],
+          "calculation_notes": "Hedge effectiveness depends on correlation stability; positions are monitored for basis drift.",
+          "inputs_used": {
+            "symbol": "BTC/USDT",
+            "timeframe": "1h",
+            "leverage": 1.0,
+            "risk_mode": "balanced",
+            "quantity": 0.01,
+            "simulation_mode": true
+          },
+          "evaluation_metrics": {
+            "success": true
+          }
+        },
+        "regulatory_disclosures": {
+          "risk_warning": "Crypto assets are highly volatile and can result in substantial or total losses. Outputs are informational only and do not constitute investment advice.",
+          "jurisdiction_notice": "Confirm digital asset trading is permitted in your jurisdiction and comply with all suitability requirements. Consult a licensed advisor for personalised guidance.",
+          "links": {
+            "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+            "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure"
+          },
+          "last_reviewed": "2025-10-13",
+          "leverage_warning": "Leverage amplifies gains and losses. Maintain adequate collateral and monitor liquidation thresholds closely.",
+          "simulation_notice": "Results generated in simulation mode. Live execution, fees and slippage can materially differ from simulated outcomes."
+        },
+        "educational_resources": [
+          {
+            "topic": "Diversification",
+            "title": "Why spreading capital matters",
+            "summary": "Holding uncorrelated assets reduces reliance on a single performer and helps dampen portfolio volatility.",
+            "actionable_tip": "Blend layer-1s, DeFi, infrastructure tokens and stablecoins to improve risk-adjusted returns."
+          },
+          {
+            "topic": "Crypto volatility",
+            "title": "Prepare for large swings",
+            "summary": "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards.",
+            "actionable_tip": "Stress test positions assuming 30\u201380% annualised volatility and plan for gap risk."
+          },
+          {
+            "topic": "Stablecoins vs. alt-coins",
+            "title": "Different roles in a portfolio",
+            "summary": "Stablecoins provide liquidity and downside buffers, while alt-coins target growth but contribute most drawdown risk.",
+            "actionable_tip": "Maintain a stablecoin reserve to cover margin calls and fund opportunistic entries without forced selling."
+          },
+          {
+            "topic": "Leverage risk",
+            "title": "Use borrowed capital cautiously",
+            "summary": "Leverage accelerates losses during volatility spikes. Liquidations can happen quickly when collateral buffers are thin.",
+            "actionable_tip": "Limit leverage to clearly defined setups, monitor funding costs and avoid stacking multiple leveraged trades."
+          },
+          {
+            "topic": "Margin management",
+            "title": "Track collateral health",
+            "summary": "Margin ratios determine liquidation risk. Monitoring maintenance levels across exchanges prevents forced unwinds.",
+            "actionable_tip": "Set alerts for margin utilisation >70% and keep extra collateral ready to top up positions."
+          }
+        ],
+        "compliance_category": "derivatives"
+      },
+      "timestamp": "2025-10-13T07:20:33.332780",
+      "credits_used": 0
+    },
+    "error": null
+  },
+  "Complex Strategy": {
+    "status": "success",
+    "execution_time": 9.367863178253174,
+    "data": {
+      "success": true,
+      "strategy_function": "complex_strategy",
+      "execution_result": {
+        "success": true,
+        "strategy": "iron_condor",
+        "legs_executed": 4,
+        "max_profit": 200,
+        "max_loss": 800,
+        "breakeven_points": [
+          42000,
+          48000
+        ],
+        "timestamp": "2025-10-13T07:20:42.702824",
+        "execution_time_seconds": 0.0003,
+        "methodology_summary": {
+          "strategy": "AI Complex Derivatives",
+          "category": "derivatives",
+          "summary": "Evaluated derivatives order books, funding data and volatility to structure AI Complex Derivatives on BTC/USDT with a balanced risk posture.",
+          "calculation_steps": [
+            "Pull live funding, basis and volatility metrics for the contract and underlying asset.",
+            "Translate risk mode into position sizing, leverage ceilings and margin buffers.",
+            "Assemble trade instructions and hedges before validating exchange-specific constraints."
+          ],
+          "calculation_notes": "Derivatives sizing links to margin requirements; leverage and funding costs were stress tested before recommending trades.",
+          "inputs_used": {
+            "symbol": "BTC/USDT",
+            "timeframe": "1h",
+            "leverage": 1.0,
+            "risk_mode": "balanced",
+            "quantity": 0.01,
+            "simulation_mode": true
+          },
+          "evaluation_metrics": {
+            "success": true
+          }
+        },
+        "regulatory_disclosures": {
+          "risk_warning": "Crypto assets are highly volatile and can result in substantial or total losses. Outputs are informational only and do not constitute investment advice.",
+          "jurisdiction_notice": "Confirm digital asset trading is permitted in your jurisdiction and comply with all suitability requirements. Consult a licensed advisor for personalised guidance.",
+          "links": {
+            "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+            "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure"
+          },
+          "last_reviewed": "2025-10-13",
+          "leverage_warning": "Leverage amplifies gains and losses. Maintain adequate collateral and monitor liquidation thresholds closely.",
+          "simulation_notice": "Results generated in simulation mode. Live execution, fees and slippage can materially differ from simulated outcomes."
+        },
+        "educational_resources": [
+          {
+            "topic": "Diversification",
+            "title": "Why spreading capital matters",
+            "summary": "Holding uncorrelated assets reduces reliance on a single performer and helps dampen portfolio volatility.",
+            "actionable_tip": "Blend layer-1s, DeFi, infrastructure tokens and stablecoins to improve risk-adjusted returns."
+          },
+          {
+            "topic": "Crypto volatility",
+            "title": "Prepare for large swings",
+            "summary": "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards.",
+            "actionable_tip": "Stress test positions assuming 30\u201380% annualised volatility and plan for gap risk."
+          },
+          {
+            "topic": "Stablecoins vs. alt-coins",
+            "title": "Different roles in a portfolio",
+            "summary": "Stablecoins provide liquidity and downside buffers, while alt-coins target growth but contribute most drawdown risk.",
+            "actionable_tip": "Maintain a stablecoin reserve to cover margin calls and fund opportunistic entries without forced selling."
+          },
+          {
+            "topic": "Leverage risk",
+            "title": "Use borrowed capital cautiously",
+            "summary": "Leverage accelerates losses during volatility spikes. Liquidations can happen quickly when collateral buffers are thin.",
+            "actionable_tip": "Limit leverage to clearly defined setups, monitor funding costs and avoid stacking multiple leveraged trades."
+          },
+          {
+            "topic": "Margin management",
+            "title": "Track collateral health",
+            "summary": "Margin ratios determine liquidation risk. Monitoring maintenance levels across exchanges prevents forced unwinds.",
+            "actionable_tip": "Set alerts for margin utilisation >70% and keep extra collateral ready to top up positions."
+          }
+        ],
+        "compliance_category": "derivatives"
+      },
+      "timestamp": "2025-10-13T07:20:42.702938",
+      "credits_used": 0
+    },
+    "error": null
+  },
+  "Opportunity Discovery": {
+    "status": "timeout",
+    "opportunities_count": 0,
+    "data": null
+  }
+}

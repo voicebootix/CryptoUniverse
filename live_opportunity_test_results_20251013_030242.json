@@ -1,0 +1,23 @@
+{
+  "direct_endpoint": {
+    "status": "SUCCESS",
+    "execution_time": 4.722024,
+    "total_opportunities": 0,
+    "opportunities_count": 0,
+    "strategy_results_count": 0,
+    "scan_state": "unknown",
+    "has_error": false,
+    "error": null
+  },
+  "chat_interface": {
+    "status": "SUCCESS",
+    "execution_time": 34.733414,
+    "intent": "opportunity_discovery",
+    "content_length": 1837,
+    "has_opportunities": false,
+    "opportunities_count": 0,
+    "has_strategy_results": false,
+    "strategy_results_count": 0
+  },
+  "timestamp": "2025-10-13T03:02:42.821198"
+}
