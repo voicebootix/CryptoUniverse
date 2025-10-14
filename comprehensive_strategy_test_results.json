@@ -1,65 +1,52 @@
 {
   "risk_management": {
     "status": "SUCCESS",
-    "execution_time": 19.048364877700806,
+    "execution_time": 29.431682348251343,
     "result": {
       "success": true,
       "strategy_function": "risk_management",
       "execution_result": {
         "success": true,
-        "timestamp": "2025-10-14T05:53:56.289672",
+        "timestamp": "2025-10-14T08:56:10.958745",
         "risk_management_analysis": {
           "analysis_type": "comprehensive",
           "portfolio_risk_metrics": {
-            "portfolio_var_1d_95": 222.1964051412731,
-            "portfolio_var_1w_95": 587.8764302163623,
-            "portfolio_var_1d_pct": 6.717286110267852,
-            "portfolio_var_1w_pct": 17.77226853303714,
-            "max_drawdown_estimate": 881.8146453245436,
+            "portfolio_var_1d_95": 220.53631670516123,
+            "portfolio_var_1w_95": 583.4842490600362,
+            "portfolio_var_1d_pct": 6.798975133264518,
+            "portfolio_var_1w_pct": 17.98839737273015,
+            "max_drawdown_estimate": 875.2263735900542,
             "sharpe_ratio_portfolio": -0.006000000000000001,
             "sortino_ratio": 2.0,
-            "max_single_position_loss": 67.40713072777032,
+            "max_single_position_loss": 66.66613509716011,
             "correlation_benefit": 0.85,
-            "risk_capacity_utilization": 335.8643055133926
+            "risk_capacity_utilization": 339.9487566632259
           },
           "individual_position_risks": {
-            "BNB": {
-              "symbol": "BNB",
-              "position_value": 0.0,
-              "daily_volatility": 0.05102555620571742,
-              "leverage": 1.0,
-              "position_var_1d": 0.0,
-              "liquidation_risk": false,
-              "concentration_weight": 0.0,
-              "liquidity_risk": false,
-              "correlation_to_btc": 0.7,
-              "risk_contribution": 0.0,
-              "risk_rating": "MEDIUM"
-            },
             "XRP": {
               "symbol": "XRP",
-              "position_value": 172.71,
-              "daily_volatility": 0.0388598322743064,
+              "position_value": 169.9,
+              "daily_volatility": 0.039432202063266926,
               "leverage": 1.0,
-              "position_var_1d": 11.073944692957506,
+              "position_var_1d": 11.054226365405933,
               "liquidation_risk": false,
-              "concentration_weight": 0.05221247766662737,
+              "concentration_weight": 0.05237894113766196,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.025674400014050802,
+              "risk_contribution": 0.025821604106047998,
               "risk_rating": "MEDIUM"
             },
             "ADA": {
               "symbol": "ADA",
               "position_value": 0.05,
-              "daily_volatility": 0.055353856214082064,
+              "daily_volatility": 0.05598253926828008,
               "leverage": 1.0,
-              "position_var_1d": 0.00456669313766177,
+              "position_var_1d": 0.004618559489633106,
               "liquidation_risk": false,
-              "concentration_weight": 1.5115649836902139e-05,
+              "concentration_weight": 1.54146383571695e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 1.05876550415059e-05,
+              "risk_contribution": 1.0788508461773095e-05,
               "risk_rating": "MEDIUM"
             },
             "USDC": {
@@ -69,23 +56,23 @@
               "leverage": 1.0,
               "position_var_1d": 0.24584999999999999,
               "liquidation_risk": false,
-              "concentration_weight": 0.004504463651396838,
+              "concentration_weight": 0.004593562230436511,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.0005699912197925775,
+              "risk_contribution": 0.0005742818320908141,
               "risk_rating": "LOW"
             },
             "DOGE": {
               "symbol": "DOGE",
-              "position_value": 123.22,
-              "daily_volatility": 0.06021084211528576,
+              "position_value": 120.83,
+              "daily_volatility": 0.06072711752191923,
               "leverage": 1.0,
-              "position_var_1d": 12.241646942985094,
+              "position_var_1d": 12.107135056786275,
               "liquidation_risk": false,
-              "concentration_weight": 0.03725100745806163,
+              "concentration_weight": 0.03725101505393581,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.028381660660167386,
+              "risk_contribution": 0.028281097017621087,
               "risk_rating": "HIGH"
             },
             "LDBNB": {
@@ -108,10 +95,10 @@
               "leverage": 1.0,
               "position_var_1d": 0.25332543510059413,
               "liquidation_risk": false,
-              "concentration_weight": 0.0009008927302793675,
+              "concentration_weight": 0.0009187124460873022,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.0005873226510371084,
+              "risk_contribution": 0.000591743725787154,
               "risk_rating": "MEDIUM"
             },
             "DON": {
@@ -143,7 +130,7 @@
             "HFT": {
               "symbol": "HFT",
               "position_value": 0.0,
-              "daily_volatility": 0.07695518321389426,
+              "daily_volatility": 0.07789621728226293,
               "leverage": 1.0,
               "position_var_1d": 0.0,
               "liquidation_risk": false,
@@ -156,7 +143,7 @@
             "PEPE": {
               "symbol": "PEPE",
               "position_value": 0.0,
-              "daily_volatility": 0.06445324895712674,
+              "daily_volatility": 0.06508920829487064,
               "leverage": 1.0,
               "position_var_1d": 0.0,
               "liquidation_risk": false,
@@ -169,7 +156,7 @@
             "NTRN": {
               "symbol": "NTRN",
               "position_value": 0.0,
-              "daily_volatility": 0.08105649970677993,
+              "daily_volatility": 0.08161747449424346,
               "leverage": 1.0,
               "position_var_1d": 0.0,
               "liquidation_risk": false,
@@ -182,7 +169,7 @@
             "SEI": {
               "symbol": "SEI",
               "position_value": 0.0,
-              "daily_volatility": 0.0610680610105661,
+              "daily_volatility": 0.06180367662789395,
               "leverage": 1.0,
               "position_var_1d": 0.0,
               "liquidation_risk": false,
@@ -212,10 +199,10 @@
               "leverage": 1.0,
               "position_var_1d": 0.010725,
               "liquidation_risk": false,
-              "concentration_weight": 3.930068957594556e-05,
+              "concentration_weight": 4.00780597286407e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 2.486538878289768e-05,
+              "risk_contribution": 2.5052563144901286e-05,
               "risk_rating": "MEDIUM"
             },
             "SHELL": {
@@ -225,62 +212,62 @@
               "leverage": 1.0,
               "position_var_1d": 0.0066,
               "liquidation_risk": false,
-              "concentration_weight": 2.4185039739043422e-05,
+              "concentration_weight": 2.46634213714712e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 1.5301777712552416e-05,
+              "risk_contribution": 1.541696193532387e-05,
               "risk_rating": "MEDIUM"
             },
             "PLUME": {
               "symbol": "PLUME",
-              "position_value": 0.45,
-              "daily_volatility": 0.05,
-              "leverage": 1.0,
-              "position_var_1d": 0.037125000000000005,
-              "liquidation_risk": false,
-              "concentration_weight": 0.00013604084853211925,
-              "liquidity_risk": false,
-              "correlation_to_btc": 0.7,
-              "risk_contribution": 8.607249963310736e-05,
-              "risk_rating": "MEDIUM"
-            },
-            "MORPHO": {
-              "symbol": "MORPHO",
               "position_value": 0.44,
               "daily_volatility": 0.05,
               "leverage": 1.0,
               "position_var_1d": 0.0363,
               "liquidation_risk": false,
-              "concentration_weight": 0.00013301771856473883,
+              "concentration_weight": 0.0001356488175430916,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 8.41597774190383e-05,
+              "risk_contribution": 8.479329064428128e-05,
+              "risk_rating": "MEDIUM"
+            },
+            "MORPHO": {
+              "symbol": "MORPHO",
+              "position_value": 0.43,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.035475,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0001325658898716577,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 8.286617040236579e-05,
               "risk_rating": "MEDIUM"
             },
             "SOMI": {
               "symbol": "SOMI",
-              "position_value": 0.63,
-              "daily_volatility": 0.09304154898185177,
+              "position_value": 0.61,
+              "daily_volatility": 0.09396951327160857,
               "leverage": 1.0,
-              "position_var_1d": 0.09671669016663491,
+              "position_var_1d": 0.09458031510787401,
               "liquidation_risk": false,
-              "concentration_weight": 0.00019045718794496696,
+              "concentration_weight": 0.0001880585879574679,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.0002242329233369169,
+              "risk_contribution": 0.0002209304724013683,
               "risk_rating": "HIGH"
             },
             "TREE": {
               "symbol": "TREE",
-              "position_value": 0.08,
-              "daily_volatility": 0.07960871699144921,
+              "position_value": 0.07,
+              "daily_volatility": 0.08016121351730647,
               "leverage": 1.0,
-              "position_var_1d": 0.010508350642871296,
+              "position_var_1d": 0.009258620161248897,
               "liquidation_risk": false,
-              "concentration_weight": 2.4185039739043422e-05,
+              "concentration_weight": 2.1580493700037303e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 2.436309782769301e-05,
+              "risk_contribution": 2.1627241605999453e-05,
               "risk_rating": "HIGH"
             },
             "TOWNS": {
@@ -290,231 +277,231 @@
               "leverage": 1.0,
               "position_var_1d": 0.009899999999999999,
               "liquidation_risk": false,
-              "concentration_weight": 3.627755960856513e-05,
+              "concentration_weight": 3.69951320572068e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 2.2952666568828626e-05,
+              "risk_contribution": 2.31254429029858e-05,
               "risk_rating": "MEDIUM"
             },
             "PROVE": {
               "symbol": "PROVE",
-              "position_value": 0.4,
+              "position_value": 0.39,
               "daily_volatility": 0.05,
               "leverage": 1.0,
-              "position_var_1d": 0.033,
+              "position_var_1d": 0.032175,
               "liquidation_risk": false,
-              "concentration_weight": 0.00012092519869521711,
+              "concentration_weight": 0.00012023417918592211,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 7.65088885627621e-05,
+              "risk_contribution": 7.515768943470386e-05,
               "risk_rating": "MEDIUM"
             },
             "MITO": {
               "symbol": "MITO",
-              "position_value": 0.07,
-              "daily_volatility": 0.1012820005751385,
+              "position_value": 0.06,
+              "daily_volatility": 0.10179837611830804,
               "leverage": 1.0,
-              "position_var_1d": 0.011698071066428497,
+              "position_var_1d": 0.010078039235712495,
               "liquidation_risk": false,
-              "concentration_weight": 2.1161909771662996e-05,
+              "concentration_weight": 1.84975660286034e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 2.712140653395907e-05,
+              "risk_contribution": 2.354132534540606e-05,
               "risk_rating": "HIGH"
             },
             "DOLO": {
               "symbol": "DOLO",
               "position_value": 0.05,
-              "daily_volatility": 0.08630976758968772,
+              "daily_volatility": 0.08627306828344707,
               "leverage": 1.0,
-              "position_var_1d": 0.007120555826149238,
+              "position_var_1d": 0.007117528133384382,
               "liquidation_risk": false,
-              "concentration_weight": 1.5115649836902139e-05,
+              "concentration_weight": 1.54146383571695e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 1.6508660975993284e-05,
+              "risk_contribution": 1.6625857622118752e-05,
               "risk_rating": "HIGH"
             },
             "OPEN": {
               "symbol": "OPEN",
               "position_value": 0.15,
-              "daily_volatility": 0.12884431223475656,
+              "daily_volatility": 0.12926595937486657,
               "leverage": 1.0,
-              "position_var_1d": 0.03188896727810225,
+              "position_var_1d": 0.031993324945279476,
               "liquidation_risk": false,
-              "concentration_weight": 4.534694951070641e-05,
+              "concentration_weight": 4.62439150715085e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 7.393301345036034e-05,
+              "risk_contribution": 7.473331407057897e-05,
               "risk_rating": "HIGH"
             },
             "LINEA": {
               "symbol": "LINEA",
-              "position_value": 0.54,
+              "position_value": 0.52,
               "daily_volatility": 0.05,
               "leverage": 1.0,
-              "position_var_1d": 0.044550000000000006,
+              "position_var_1d": 0.0429,
               "liquidation_risk": false,
-              "concentration_weight": 0.0001632490182385431,
+              "concentration_weight": 0.0001603122389145628,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.00010328699955972882,
+              "risk_contribution": 0.00010021025257960514,
               "risk_rating": "MEDIUM"
             },
             "HOLO": {
               "symbol": "HOLO",
-              "position_value": 0.17,
-              "daily_volatility": 0.09216554870831478,
+              "position_value": 0.16,
+              "daily_volatility": 0.09319563154939149,
               "leverage": 1.0,
-              "position_var_1d": 0.025852436412682298,
+              "position_var_1d": 0.024603646729039353,
               "liquidation_risk": false,
-              "concentration_weight": 5.139320944546728e-05,
+              "concentration_weight": 4.93268427429424e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 5.9937611411327355e-05,
+              "risk_contribution": 5.747174016541747e-05,
               "risk_rating": "HIGH"
             },
             "ZKC": {
               "symbol": "ZKC",
-              "position_value": 0.11,
-              "daily_volatility": 0.11279690531310346,
+              "position_value": 0.1,
+              "daily_volatility": 0.11340945064688647,
               "leverage": 1.0,
-              "position_var_1d": 0.020472638314328277,
+              "position_var_1d": 0.01871255935673627,
               "liquidation_risk": false,
-              "concentration_weight": 3.325442964118471e-05,
+              "concentration_weight": 3.0829276714339e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 4.7464812223535626e-05,
+              "risk_contribution": 4.371072959322599e-05,
               "risk_rating": "HIGH"
             },
             "AVNT": {
               "symbol": "AVNT",
-              "position_value": 0.23,
-              "daily_volatility": 0.17582572961260373,
+              "position_value": 0.22,
+              "daily_volatility": 0.17647819298714673,
               "leverage": 1.0,
-              "position_var_1d": 0.06672586438798311,
+              "position_var_1d": 0.06406158405433426,
               "liquidation_risk": false,
-              "concentration_weight": 6.953198924974983e-05,
+              "concentration_weight": 6.78244087715458e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.00015470065826406592,
+              "risk_contribution": 0.00014964166710336696,
               "risk_rating": "HIGH"
             },
             "BARD": {
               "symbol": "BARD",
-              "position_value": 0.26,
-              "daily_volatility": 0.143807076445121,
+              "position_value": 0.25,
+              "daily_volatility": 0.14409019782440013,
               "leverage": 1.0,
-              "position_var_1d": 0.061693235794956905,
+              "position_var_1d": 0.05943720660256505,
               "liquidation_risk": false,
-              "concentration_weight": 7.860137915189112e-05,
+              "concentration_weight": 7.70731917858475e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.00014303275462159283,
+              "risk_contribution": 0.00013883956844450393,
               "risk_rating": "HIGH"
             },
             "0G": {
               "symbol": "0G",
-              "position_value": 0.26,
-              "daily_volatility": 0.1136695159631786,
+              "position_value": 0.24,
+              "daily_volatility": 0.11456971478906529,
               "leverage": 1.0,
-              "position_var_1d": 0.04876422234820362,
+              "position_var_1d": 0.045369607056469856,
               "liquidation_risk": false,
-              "concentration_weight": 7.860137915189112e-05,
+              "concentration_weight": 7.39902641144136e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.0001130574682875292,
+              "risk_contribution": 0.0001059790159106359,
               "risk_rating": "HIGH"
             },
             "HEMI": {
               "symbol": "HEMI",
-              "position_value": 0.25,
-              "daily_volatility": 0.11243402870536974,
+              "position_value": 0.24,
+              "daily_volatility": 0.1140335699999042,
               "leverage": 1.0,
-              "position_var_1d": 0.04637903684096502,
+              "position_var_1d": 0.045157293719962056,
               "liquidation_risk": false,
-              "concentration_weight": 7.55782491845107e-05,
+              "concentration_weight": 7.39902641144136e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.00010752753216101908,
+              "risk_contribution": 0.00010548307248225676,
               "risk_rating": "HIGH"
             },
             "XPL": {
               "symbol": "XPL",
-              "position_value": 1.24,
-              "daily_volatility": 0.14416139645263354,
+              "position_value": 1.17,
+              "daily_volatility": 0.14492580690339096,
               "leverage": 1.0,
-              "position_var_1d": 0.2949542171420882,
+              "position_var_1d": 0.2797792702269962,
               "liquidation_risk": false,
-              "concentration_weight": 0.000374868115955173,
+              "concentration_weight": 0.0003607025375577663,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.0006838369494072957,
+              "risk_contribution": 0.000653537327179135,
               "risk_rating": "HIGH"
             },
             "MIRA": {
               "symbol": "MIRA",
-              "position_value": 0.29,
-              "daily_volatility": 0.11442182668294076,
+              "position_value": 0.27,
+              "daily_volatility": 0.11373702106314705,
               "leverage": 1.0,
-              "position_var_1d": 0.054750844067787144,
+              "position_var_1d": 0.05066984288363201,
               "liquidation_risk": false,
-              "concentration_weight": 8.76707690540324e-05,
+              "concentration_weight": 8.32390471287153e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.00012693715840907547,
+              "risk_contribution": 0.00011835985439481753,
               "risk_rating": "HIGH"
             },
             "FF": {
               "symbol": "FF",
-              "position_value": 0.87,
-              "daily_volatility": 0.1761718489053923,
+              "position_value": 0.84,
+              "daily_volatility": 0.17717680633590038,
               "leverage": 1.0,
-              "position_var_1d": 0.2528946891036906,
+              "position_var_1d": 0.24556705358155792,
               "liquidation_risk": false,
-              "concentration_weight": 0.0002630123071620972,
+              "concentration_weight": 0.00025896592440044757,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.0005863239874772312,
+              "risk_contribution": 0.0005736208966115932,
               "risk_rating": "HIGH"
             },
             "EDEN": {
               "symbol": "EDEN",
               "position_value": 0.09,
-              "daily_volatility": 0.12143120803017457,
+              "daily_volatility": 0.12257744518800523,
               "leverage": 1.0,
-              "position_var_1d": 0.018032534392480922,
+              "position_var_1d": 0.018202750610418775,
               "liquidation_risk": false,
-              "concentration_weight": 2.720816970642385e-05,
+              "concentration_weight": 2.77463490429051e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 4.180755043449992e-05,
+              "risk_contribution": 4.2519865648336294e-05,
               "risk_rating": "HIGH"
             },
             "2Z": {
               "symbol": "2Z",
-              "position_value": 0.35,
-              "daily_volatility": 0.09020611254568357,
+              "position_value": 0.33,
+              "daily_volatility": 0.09070928310955365,
               "leverage": 1.0,
-              "position_var_1d": 0.052094029995132254,
+              "position_var_1d": 0.04939120465315196,
               "liquidation_risk": false,
-              "concentration_weight": 0.00010580954885831496,
+              "concentration_weight": 0.0001017366131573187,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.00012077746471765937,
+              "risk_contribution": 0.00011537307910264165,
               "risk_rating": "HIGH"
             },
             "WAL": {
               "symbol": "WAL",
-              "position_value": 0.28,
-              "daily_volatility": 0.06746655125776842,
+              "position_value": 0.27,
+              "daily_volatility": 0.07649012514681351,
               "leverage": 1.0,
-              "position_var_1d": 0.031169546681089007,
+              "position_var_1d": 0.034076350752905424,
               "liquidation_risk": false,
-              "concentration_weight": 8.464763908665198e-05,
+              "concentration_weight": 8.32390471287153e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 7.226507192652272e-05,
+              "risk_contribution": 7.959906097761935e-05,
               "risk_rating": "HIGH"
             },
             "EUL": {
@@ -524,36 +511,49 @@
               "leverage": 1.0,
               "position_var_1d": 0.014849999999999999,
               "liquidation_risk": false,
-              "concentration_weight": 5.44163394128477e-05,
+              "concentration_weight": 5.54926980858102e-05,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 3.4428999853242935e-05,
+              "risk_contribution": 3.46881643544787e-05,
+              "risk_rating": "MEDIUM"
+            },
+            "ENSO": {
+              "symbol": "ENSO",
+              "position_value": 0.0,
+              "daily_volatility": 0.05,
+              "leverage": 1.0,
+              "position_var_1d": 0.0,
+              "liquidation_risk": false,
+              "concentration_weight": 0.0,
+              "liquidity_risk": false,
+              "correlation_to_btc": 0.7,
+              "risk_contribution": 0.0,
               "risk_rating": "MEDIUM"
             },
             "AAVE": {
               "symbol": "AAVE",
-              "position_value": 772.78,
-              "daily_volatility": 0.04948461585231031,
+              "position_value": 756.3,
+              "daily_volatility": 0.05019330813753738,
               "leverage": 1.0,
-              "position_var_1d": 63.09719037327479,
+              "position_var_1d": 62.635978258292205,
               "liquidation_risk": false,
-              "concentration_weight": 0.2336214376192247,
+              "concentration_weight": 0.23316181979054584,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.14628775475431108,
+              "risk_contribution": 0.1463115897863431,
               "risk_rating": "MEDIUM"
             },
             "SOL": {
               "symbol": "SOL",
-              "position_value": 469.91,
-              "daily_volatility": 0.05185586759132173,
+              "position_value": 460.56,
+              "daily_volatility": 0.05243372146547104,
               "leverage": 1.0,
-              "position_var_1d": 40.20652472073269,
+              "position_var_1d": 39.845643350926615,
               "liquidation_risk": false,
-              "concentration_weight": 0.1420599002971737,
+              "concentration_weight": 0.1419873168355597,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.09321686422286292,
+              "risk_contribution": 0.09307557073177669,
               "risk_rating": "MEDIUM"
             },
             "KCS": {
@@ -563,57 +563,57 @@
               "leverage": 1.0,
               "position_var_1d": 0.000825,
               "liquidation_risk": false,
-              "concentration_weight": 3.0231299673804278e-06,
+              "concentration_weight": 3.0829276714339e-06,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 1.912722214069052e-06,
+              "risk_contribution": 1.9271202419154836e-06,
               "risk_rating": "MEDIUM"
             },
             "SHIB": {
               "symbol": "SHIB",
-              "position_value": 7.35,
-              "daily_volatility": 0.045335753494807264,
+              "position_value": 7.23,
+              "daily_volatility": 0.04582667629965369,
               "leverage": 1.0,
-              "position_var_1d": 0.5498093505082751,
+              "position_var_1d": 0.5466893349167187,
               "liquidation_risk": false,
-              "concentration_weight": 0.002222000526024614,
+              "concentration_weight": 0.00222895670644671,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.0012747061311758248,
+              "risk_contribution": 0.001277013434372511,
               "risk_rating": "MEDIUM"
             },
             "ETHW": {
               "symbol": "ETHW",
-              "position_value": 1.95,
-              "daily_volatility": 0.07860600568533178,
+              "position_value": 1.87,
+              "daily_volatility": 0.07958366790327291,
               "leverage": 1.0,
-              "position_var_1d": 0.252914823292555,
+              "position_var_1d": 0.2455554073155486,
               "liquidation_risk": false,
-              "concentration_weight": 0.0005895103436391834,
+              "concentration_weight": 0.0005765074745581393,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 0.000586370667610932,
+              "risk_contribution": 0.0005735936920601152,
               "risk_rating": "HIGH"
             },
             "VTHO": {
               "symbol": "VTHO",
               "position_value": 0.01,
-              "daily_volatility": 0.051033876124635384,
+              "daily_volatility": 0.05186518726867882,
               "leverage": 1.0,
-              "position_var_1d": 0.0008420589560564838,
+              "position_var_1d": 0.0008557755899332005,
               "liquidation_risk": false,
-              "concentration_weight": 3.0231299673804278e-06,
+              "concentration_weight": 3.0829276714339e-06,
               "liquidity_risk": false,
               "correlation_to_btc": 0.7,
-              "risk_contribution": 1.9522725706727667e-06,
+              "risk_contribution": 1.9990090447241636e-06,
               "risk_rating": "MEDIUM"
             }
           },
           "risk_concentration": {
-            "max_exchange_exposure_pct": 55.49317830722861,
+            "max_exchange_exposure_pct": 55.52445224082597,
             "exchange_breakdown": {
-              "binance": 55.49317830722861,
-              "kucoin": 44.506821692771396
+              "binance": 55.52445224082597,
+              "kucoin": 44.47554775917401
             },
             "asset_class_concentration": {
               "crypto": 100.0
@@ -626,7 +626,7 @@
             {
               "risk_type": "EXCESSIVE_VAR",
               "strategy": "POSITION_SIZE_REDUCTION",
-              "action": "Reduce overall position sizes - current 1-day VaR: 6.7%",
+              "action": "Reduce overall position sizes - current 1-day VaR: 6.8%",
               "priority": "HIGH",
               "urgency": 0.8,
               "expected_risk_reduction": 30
@@ -654,13 +654,13 @@
               "performance_attribution": "Risk-adjusted return analysis"
             },
             "alert_thresholds": {
-              "var_breach": "Alert if daily VaR > 99",
+              "var_breach": "Alert if daily VaR > 97",
               "concentration_alert": "Alert if single position > 25%",
               "correlation_spike": "Alert if portfolio correlation > 0.9",
               "drawdown_alert": "Alert if drawdown > 10%"
             },
             "scenario_analysis": {
-              "market_crash": "Simulate 20% market drop impact: $1176",
+              "market_crash": "Simulate 20% market drop impact: $1167",
               "exchange_outage": "Simulate major exchange going down",
               "regulatory_shock": "Simulate regulatory crackdown",
               "liquidity_crisis": "Simulate liquidity crunch"
@@ -668,7 +668,7 @@
           }
         },
         "hedge_recommendations": [],
-        "execution_time_seconds": 8.7779,
+        "execution_time_seconds": 19.8195,
         "methodology_summary": {
           "strategy": "AI Risk Guardian",
           "category": "portfolio",
@@ -736,18 +736,18 @@
         ],
         "compliance_category": "portfolio"
       },
-      "timestamp": "2025-10-14T05:53:56.289916",
+      "timestamp": "2025-10-14T08:56:10.959002",
       "credits_used": 0
     }
   },
   "portfolio_optimization": {
-    "status": "HTTP_ERROR",
-    "execution_time": 3.3543999195098877,
-    "error": "HTTP 502"
+    "status": "TIMEOUT",
+    "execution_time": 30.065659523010254,
+    "error": "Request timeout"
   },
   "spot_momentum_strategy": {
     "status": "SUCCESS",
-    "execution_time": 20.99493169784546,
+    "execution_time": 10.24424409866333,
     "result": {
       "success": true,
       "strategy_function": "spot_momentum_strategy",
@@ -760,23 +760,23 @@
           "confidence": 80
         },
         "indicators": {
-          "rsi": 31.4,
+          "rsi": 14.9,
           "macd_trend": "BEARISH",
           "momentum_score": 8
         },
         "execution_result": {
           "success": true,
           "simulation_result": {
-            "order_id": "SIM_1760421260_f3b57eabe",
+            "order_id": "SIM_1760432211_64d461285",
             "status": "FILLED",
-            "execution_price": 112564.60896624236,
-            "quantity": 0.00991163209019292,
-            "fees": 1.1156989904498256,
-            "execution_time": "2025-10-14T05:54:20.658735",
-            "slippage_bps": 0.000796541928167746,
+            "execution_price": 111802.90654360474,
+            "quantity": 0.00996933873161471,
+            "fees": 1.1146010465122584,
+            "execution_time": "2025-10-14T08:56:51.270343",
+            "slippage_bps": 0.0005852804136021867,
             "strategy_id": "8f3a9929-7c54-42c8-8a9c-0a186c4a70fe"
           },
-          "timestamp": "2025-10-14T05:54:20.658739",
+          "timestamp": "2025-10-14T08:56:51.270347",
           "strategy_id": "8f3a9929-7c54-42c8-8a9c-0a186c4a70fe"
         },
         "risk_management": {
@@ -784,8 +784,8 @@
           "take_profit": null,
           "position_size": 0.01
         },
-        "timestamp": "2025-10-14T05:54:20.658753",
-        "execution_time_seconds": 11.254,
+        "timestamp": "2025-10-14T08:56:51.270364",
+        "execution_time_seconds": 0.5717,
         "methodology_summary": {
           "strategy": "AI Momentum Trader",
           "category": "spot",
@@ -846,36 +846,120 @@
         ],
         "compliance_category": "spot"
       },
-      "timestamp": "2025-10-14T05:54:20.659029",
+      "timestamp": "2025-10-14T08:56:51.270662",
       "credits_used": 0
     }
   },
   "spot_mean_reversion": {
     "status": "HTTP_ERROR",
-    "execution_time": 3.1102230548858643,
-    "error": "HTTP 502"
+    "execution_time": 13.025194883346558,
+    "error": "HTTP 400"
   },
   "spot_breakout_strategy": {
-    "status": "HTTP_ERROR",
-    "execution_time": 10.283191919326782,
-    "error": "HTTP 400"
+    "status": "SUCCESS",
+    "execution_time": 10.583785772323608,
+    "result": {
+      "success": true,
+      "strategy_function": "spot_breakout_strategy",
+      "execution_result": {
+        "success": true,
+        "strategy": "breakout",
+        "breakout_analysis": {
+          "breakout_detected": false,
+          "direction": "HOLD",
+          "conviction": 1.0,
+          "stop_loss": 114387.55320000001,
+          "take_profit": 106537.427,
+          "confidence": 60.0
+        },
+        "current_price": 112144.66,
+        "key_levels": {
+          "resistance": [],
+          "support": []
+        },
+        "execution_result": null,
+        "timestamp": "2025-10-14T08:57:14.877399",
+        "execution_time_seconds": 0.6625,
+        "methodology_summary": {
+          "strategy": "AI Breakout Hunter",
+          "category": "spot",
+          "summary": "Applied quantitative indicators to BTCUSDT to produce AI Breakout Hunter entries on the 1h timeframe.",
+          "calculation_steps": [
+            "Compute momentum, mean-reversion and breakout signals over the configured lookback horizon.",
+            "Filter signals through volatility, liquidity and correlation screens to avoid crowded trades.",
+            "Translate valid signals into position sizes that respect the configured risk budget."
+          ],
+          "calculation_notes": "Spot allocations rely on historical candles; slippage and execution latency are considered before sizing trades.",
+          "inputs_used": {
+            "symbol": "BTCUSDT",
+            "timeframe": "1h",
+            "leverage": 1.0,
+            "risk_mode": "balanced",
+            "quantity": 0.01,
+            "simulation_mode": true
+          },
+          "evaluation_metrics": {
+            "success": true
+          }
+        },
+        "regulatory_disclosures": {
+          "risk_warning": "Crypto assets are highly volatile and can result in substantial or total losses. Outputs are informational only and do not constitute investment advice.",
+          "jurisdiction_notice": "Confirm digital asset trading is permitted in your jurisdiction and comply with all suitability requirements. Consult a licensed advisor for personalised guidance.",
+          "links": {
+            "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+            "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure"
+          },
+          "last_reviewed": "2025-10-14",
+          "simulation_notice": "Results generated in simulation mode. Live execution, fees and slippage can materially differ from simulated outcomes."
+        },
+        "educational_resources": [
+          {
+            "topic": "Diversification",
+            "title": "Why spreading capital matters",
+            "summary": "Holding uncorrelated assets reduces reliance on a single performer and helps dampen portfolio volatility.",
+            "actionable_tip": "Blend layer-1s, DeFi, infrastructure tokens and stablecoins to improve risk-adjusted returns."
+          },
+          {
+            "topic": "Crypto volatility",
+            "title": "Prepare for large swings",
+            "summary": "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards.",
+            "actionable_tip": "Stress test positions assuming 30\u201380% annualised volatility and plan for gap risk."
+          },
+          {
+            "topic": "Stablecoins vs. alt-coins",
+            "title": "Different roles in a portfolio",
+            "summary": "Stablecoins provide liquidity and downside buffers, while alt-coins target growth but contribute most drawdown risk.",
+            "actionable_tip": "Maintain a stablecoin reserve to cover margin calls and fund opportunistic entries without forced selling."
+          },
+          {
+            "topic": "Leverage risk",
+            "title": "Use borrowed capital cautiously",
+            "summary": "Leverage accelerates losses during volatility spikes. Liquidations can happen quickly when collateral buffers are thin.",
+            "actionable_tip": "Limit leverage to clearly defined setups, monitor funding costs and avoid stacking multiple leveraged trades."
+          }
+        ],
+        "compliance_category": "spot"
+      },
+      "timestamp": "2025-10-14T08:57:14.877731",
+      "credits_used": 0
+    }
   },
   "scalping_strategy": {
     "status": "SUCCESS",
-    "execution_time": 9.657533168792725,
+    "execution_time": 11.664400815963745,
     "result": {
       "success": true,
       "strategy_function": "scalping_strategy",
       "execution_result": {
         "success": true,
-        "timestamp": "2025-10-14T05:54:43.695050",
+        "timestamp": "2025-10-14T08:57:26.544002",
         "scalping_analysis": {
           "symbol": "BTCUSDT",
           "timeframe": "1h",
           "market_conditions": {
-            "current_price": 112674.91,
-            "daily_volatility": 0.022355453531792913,
-            "intraday_volatility": 0.005588863382948228,
+            "current_price": 112144.66,
+            "daily_volatility": 0.022619835383087792,
+            "intraday_volatility": 0.005654958845771948,
             "tick_size": 0.01,
             "scalping_suitability": true,
             "spread_cost_bps": 5,
@@ -885,7 +969,7 @@
             {
               "signal_type": "MOMENTUM_SCALP",
               "direction": "LONG",
-              "entry_price": 112674.91,
+              "entry_price": 112144.66,
               "rationale": "Strong upward momentum: 0.5%",
               "confidence": 50.0,
               "timeframe": "1-5 minutes",
@@ -948,7 +1032,7 @@
             }
           }
         },
-        "execution_time_seconds": 0.2902,
+        "execution_time_seconds": 2.2969,
         "methodology_summary": {
           "strategy": "AI Scalping Engine",
           "category": "algorithmic",
@@ -1016,24 +1100,148 @@
         ],
         "compliance_category": "algorithmic"
       },
-      "timestamp": "2025-10-14T05:54:43.695286",
+      "timestamp": "2025-10-14T08:57:26.544197",
       "credits_used": 0
     }
   },
   "pairs_trading": {
-    "status": "HTTP_ERROR",
-    "execution_time": 9.683176279067993,
-    "error": "HTTP 400"
+    "status": "SUCCESS",
+    "execution_time": 10.036504983901978,
+    "result": {
+      "success": true,
+      "strategy_function": "pairs_trading",
+      "execution_result": {
+        "success": true,
+        "timestamp": "2025-10-14T08:57:36.579914",
+        "pairs_trading_analysis": {
+          "pair": "BTC-ETH",
+          "strategy_type": "statistical_arbitrage",
+          "correlation_analysis": {
+            "historical_correlation": 0.0,
+            "current_correlation": 0.0,
+            "correlation_stability": true,
+            "correlation_strength": "WEAK",
+            "pair_suitability": false
+          },
+          "spread_analysis": {
+            "current_ratio": 28.07,
+            "historical_mean_ratio": 15.0,
+            "historical_std": 1.5,
+            "z_score": 8.71,
+            "spread_percentile": 0.95,
+            "mean_reversion_probability": 0.9
+          },
+          "trading_signals": {
+            "signal_type": "DIVERGENCE_ENTRY",
+            "action_symbol_a": "SHORT",
+            "action_symbol_b": "LONG",
+            "rationale": "Ratio 28.07 is 8.71 std devs above mean",
+            "expected_reversion": "DOWNWARD",
+            "confidence": 95
+          },
+          "position_sizing": {
+            "total_pair_capital": 10000.0,
+            "symbol_a_allocation": 5000.0,
+            "symbol_b_allocation": 5000.0,
+            "symbol_a_quantity": 0.044585270489027294,
+            "symbol_b_quantity": 1.2514266263540437,
+            "dollar_neutral": true,
+            "beta_neutral": 1.2
+          },
+          "risk_assessment": {
+            "individual_volatilities": {
+              "BTC": 0.02261983911177716,
+              "ETH": 0.04227005018397744
+            },
+            "spread_volatility": 0.0324449446478773,
+            "correlation_risk": 1.0,
+            "maximum_loss_estimate": 1500.0,
+            "stop_loss_recommendation": 9.712108470322834,
+            "risk_level": "MEDIUM",
+            "recommended_holding_period": "2-4 weeks for mean reversion"
+          }
+        },
+        "execution_time_seconds": 0.6731,
+        "methodology_summary": {
+          "strategy": "AI Pairs Trader",
+          "category": "algorithmic",
+          "summary": "Ran systematic models for AI Pairs Trader on BTCUSDT combining statistical filters and risk overlays.",
+          "calculation_steps": [
+            "Load multi-factor indicators (momentum, mean reversion, volume) and normalise them.",
+            "Blend signals using the configured strategy archetype to derive directional conviction.",
+            "Apply Kelly-inspired sizing with volatility caps to produce executable orders."
+          ],
+          "calculation_notes": "Model confidence reflects ensemble agreement and sample depth; allocations are clipped to portfolio risk limits.",
+          "inputs_used": {
+            "symbol": "BTCUSDT",
+            "timeframe": "1h",
+            "leverage": 1.0,
+            "risk_mode": "balanced",
+            "quantity": 0.01,
+            "simulation_mode": true
+          },
+          "evaluation_metrics": {
+            "success": true
+          }
+        },
+        "regulatory_disclosures": {
+          "risk_warning": "Crypto assets are highly volatile and can result in substantial or total losses. Outputs are informational only and do not constitute investment advice.",
+          "jurisdiction_notice": "Confirm digital asset trading is permitted in your jurisdiction and comply with all suitability requirements. Consult a licensed advisor for personalised guidance.",
+          "links": {
+            "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+            "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure"
+          },
+          "last_reviewed": "2025-10-14",
+          "model_risk": "Systematic strategies rely on historical relationships that may break down during structural market changes.",
+          "simulation_notice": "Results generated in simulation mode. Live execution, fees and slippage can materially differ from simulated outcomes."
+        },
+        "educational_resources": [
+          {
+            "topic": "Diversification",
+            "title": "Why spreading capital matters",
+            "summary": "Holding uncorrelated assets reduces reliance on a single performer and helps dampen portfolio volatility.",
+            "actionable_tip": "Blend layer-1s, DeFi, infrastructure tokens and stablecoins to improve risk-adjusted returns."
+          },
+          {
+            "topic": "Crypto volatility",
+            "title": "Prepare for large swings",
+            "summary": "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards.",
+            "actionable_tip": "Stress test positions assuming 30\u201380% annualised volatility and plan for gap risk."
+          },
+          {
+            "topic": "Stablecoins vs. alt-coins",
+            "title": "Different roles in a portfolio",
+            "summary": "Stablecoins provide liquidity and downside buffers, while alt-coins target growth but contribute most drawdown risk.",
+            "actionable_tip": "Maintain a stablecoin reserve to cover margin calls and fund opportunistic entries without forced selling."
+          },
+          {
+            "topic": "Leverage risk",
+            "title": "Use borrowed capital cautiously",
+            "summary": "Leverage accelerates losses during volatility spikes. Liquidations can happen quickly when collateral buffers are thin.",
+            "actionable_tip": "Limit leverage to clearly defined setups, monitor funding costs and avoid stacking multiple leveraged trades."
+          },
+          {
+            "topic": "Systematic discipline",
+            "title": "Stick to tested rules",
+            "summary": "Consistent execution is essential for algorithmic strategies. Deviating from the rule set introduces discretionary risk.",
+            "actionable_tip": "Document strategy logic, monitor performance drift and pause trading if live metrics fall outside tested ranges."
+          }
+        ],
+        "compliance_category": "algorithmic"
+      },
+      "timestamp": "2025-10-14T08:57:36.580080",
+      "credits_used": 0
+    }
   },
   "statistical_arbitrage": {
     "status": "SUCCESS",
-    "execution_time": 9.525243043899536,
+    "execution_time": 10.160021781921387,
     "result": {
       "success": true,
       "strategy_function": "statistical_arbitrage",
       "execution_result": {
         "success": true,
-        "timestamp": "2025-10-14T05:55:02.915854",
+        "timestamp": "2025-10-14T08:57:46.742876",
         "statistical_arbitrage_analysis": {
           "universe": [
             "BTC"
@@ -1065,7 +1273,7 @@
               "signal": "SHORT",
               "score": 0.0,
               "rationale": "Low mean_reversion score: 0.00",
-              "current_price": 112674.91,
+              "current_price": 112144.66,
               "confidence": 0.0,
               "expected_holding_period": "1-2 weeks",
               "risk_rating": "MEDIUM"
@@ -1082,7 +1290,7 @@
                 "signal": "SHORT",
                 "allocation_usd": 12500.0,
                 "weight": 0.125,
-                "quantity": 0.11093862866187335,
+                "quantity": 0.11146317622256824,
                 "expected_return": 0.0,
                 "risk_contribution": 0.125
               }
@@ -1114,7 +1322,7 @@
             ]
           }
         },
-        "execution_time_seconds": 0.0022,
+        "execution_time_seconds": 0.0003,
         "methodology_summary": {
           "strategy": "AI Statistical Arbitrage",
           "category": "algorithmic",
@@ -1182,37 +1390,37 @@
         ],
         "compliance_category": "algorithmic"
       },
-      "timestamp": "2025-10-14T05:55:02.916066",
+      "timestamp": "2025-10-14T08:57:46.743042",
       "credits_used": 0
     }
   },
   "market_making": {
     "status": "SUCCESS",
-    "execution_time": 9.300799131393433,
+    "execution_time": 9.942128419876099,
     "result": {
       "success": true,
       "strategy_function": "market_making",
       "execution_result": {
         "success": true,
-        "timestamp": "2025-10-14T05:55:12.217235",
+        "timestamp": "2025-10-14T08:57:56.685650",
         "market_making_analysis": {
           "symbol": "BTCUSDT",
           "strategy_type": "dual_side",
           "market_microstructure": {
-            "current_price": 112674.91,
+            "current_price": 112144.66,
             "typical_spread_bps": 10,
             "order_book_depth_usd": 1000000,
             "daily_volume_usd": 0.0,
             "market_impact": 0.0006324555320336759,
-            "volatility": 0.022355453531792913,
+            "volatility": 0.022619835383087792,
             "liquidity_score": 0.0,
             "market_making_suitability": false
           },
           "spread_analysis": {
             "target_spread_bps": 3.0,
-            "bid_price": 112658.01,
-            "ask_price": 112691.81,
-            "spread_capture_per_trade": 16.901236500001687,
+            "bid_price": 112127.84,
+            "ask_price": 112161.48,
+            "spread_capture_per_trade": 16.82169900000008,
             "competitive_advantage": true,
             "spread_compression_risk": "MEDIUM"
           },
@@ -1220,61 +1428,61 @@
             "order_layers": [
               {
                 "side": "BUY",
-                "price": 112641.107527,
+                "price": 112111.016602,
                 "size_usd": 10000.0,
                 "layer": 1
               },
               {
                 "side": "SELL",
-                "price": 112708.712473,
+                "price": 112178.303398,
                 "size_usd": 10000.0,
                 "layer": 1
               },
               {
                 "side": "BUY",
-                "price": 112607.305054,
+                "price": 112077.373204,
                 "size_usd": 8000.0,
                 "layer": 2
               },
               {
                 "side": "SELL",
-                "price": 112742.514946,
+                "price": 112211.94679599999,
                 "size_usd": 8000.0,
                 "layer": 2
               },
               {
                 "side": "BUY",
-                "price": 112573.50258100001,
+                "price": 112043.729806,
                 "size_usd": 6400.000000000001,
                 "layer": 3
               },
               {
                 "side": "SELL",
-                "price": 112776.317419,
+                "price": 112245.59019399999,
                 "size_usd": 6400.000000000001,
                 "layer": 3
               },
               {
                 "side": "BUY",
-                "price": 112539.700108,
+                "price": 112010.086408,
                 "size_usd": 5120.000000000001,
                 "layer": 4
               },
               {
                 "side": "SELL",
-                "price": 112810.11989200002,
+                "price": 112279.23359200002,
                 "size_usd": 5120.000000000001,
                 "layer": 4
               },
               {
                 "side": "BUY",
-                "price": 112505.89763500002,
+                "price": 111976.44301,
                 "size_usd": 4096.000000000001,
                 "layer": 5
               },
               {
                 "side": "SELL",
-                "price": 112843.922365,
+                "price": 112312.87699,
                 "size_usd": 4096.000000000001,
                 "layer": 5
               }
@@ -1288,7 +1496,7 @@
           },
           "profitability_analysis": {
             "estimated_fills_per_day": 0.0,
-            "revenue_per_fill": 16.9,
+            "revenue_per_fill": 16.82,
             "daily_revenue": 0.0,
             "daily_trading_costs": 0.0,
             "daily_holding_costs": 10.0,
@@ -1321,7 +1529,7 @@
             }
           }
         },
-        "execution_time_seconds": 0.0016,
+        "execution_time_seconds": 0.0015,
         "methodology_summary": {
           "strategy": "AI Market Maker",
           "category": "algorithmic",
@@ -1389,29 +1597,245 @@
         ],
         "compliance_category": "algorithmic"
       },
-      "timestamp": "2025-10-14T05:55:12.217355",
+      "timestamp": "2025-10-14T08:57:56.685831",
       "credits_used": 0
     }
   },
   "futures_trade": {
-    "status": "HTTP_ERROR",
-    "execution_time": 18.50913667678833,
-    "error": "HTTP 400"
+    "status": "SUCCESS",
+    "execution_time": 14.463077545166016,
+    "result": {
+      "success": true,
+      "strategy_function": "futures_trade",
+      "execution_result": {
+        "success": true,
+        "strategy_type": "long_futures",
+        "execution_result": {
+          "success": false,
+          "error": "Binance API Error: Invalid API-key, IP, or permissions for action."
+        },
+        "position_details": {
+          "symbol": "BTCUSDT",
+          "size": 0.001783,
+          "leverage": 2.0,
+          "entry_price": null,
+          "margin_required": 0.0008915
+        },
+        "risk_management": {
+          "stop_loss": null,
+          "take_profit": null,
+          "max_drawdown": 10.0
+        },
+        "timestamp": "2025-10-14T08:58:11.149085",
+        "execution_time_seconds": 4.9079,
+        "methodology_summary": {
+          "strategy": "AI Futures Trading",
+          "category": "derivatives",
+          "summary": "Evaluated derivatives order books, funding data and volatility to structure AI Futures Trading on BTCUSDT with a balanced risk posture.",
+          "calculation_steps": [
+            "Pull live funding, basis and volatility metrics for the contract and underlying asset.",
+            "Translate risk mode into position sizing, leverage ceilings and margin buffers.",
+            "Assemble trade instructions and hedges before validating exchange-specific constraints."
+          ],
+          "calculation_notes": "Derivatives sizing links to margin requirements; leverage and funding costs were stress tested before recommending trades.",
+          "inputs_used": {
+            "symbol": "BTCUSDT",
+            "timeframe": "1h",
+            "leverage": 2.0,
+            "risk_mode": "balanced",
+            "quantity": 0.01,
+            "simulation_mode": true
+          },
+          "evaluation_metrics": {
+            "success": true
+          }
+        },
+        "regulatory_disclosures": {
+          "risk_warning": "Crypto assets are highly volatile and can result in substantial or total losses. Outputs are informational only and do not constitute investment advice.",
+          "jurisdiction_notice": "Confirm digital asset trading is permitted in your jurisdiction and comply with all suitability requirements. Consult a licensed advisor for personalised guidance.",
+          "links": {
+            "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+            "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure"
+          },
+          "last_reviewed": "2025-10-14",
+          "leverage_warning": "Leverage amplifies gains and losses. Maintain adequate collateral and monitor liquidation thresholds closely.",
+          "simulation_notice": "Results generated in simulation mode. Live execution, fees and slippage can materially differ from simulated outcomes."
+        },
+        "educational_resources": [
+          {
+            "topic": "Diversification",
+            "title": "Why spreading capital matters",
+            "summary": "Holding uncorrelated assets reduces reliance on a single performer and helps dampen portfolio volatility.",
+            "actionable_tip": "Blend layer-1s, DeFi, infrastructure tokens and stablecoins to improve risk-adjusted returns."
+          },
+          {
+            "topic": "Crypto volatility",
+            "title": "Prepare for large swings",
+            "summary": "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards.",
+            "actionable_tip": "Stress test positions assuming 30\u201380% annualised volatility and plan for gap risk."
+          },
+          {
+            "topic": "Stablecoins vs. alt-coins",
+            "title": "Different roles in a portfolio",
+            "summary": "Stablecoins provide liquidity and downside buffers, while alt-coins target growth but contribute most drawdown risk.",
+            "actionable_tip": "Maintain a stablecoin reserve to cover margin calls and fund opportunistic entries without forced selling."
+          },
+          {
+            "topic": "Leverage risk",
+            "title": "Use borrowed capital cautiously",
+            "summary": "Leverage accelerates losses during volatility spikes. Liquidations can happen quickly when collateral buffers are thin.",
+            "actionable_tip": "Limit leverage to clearly defined setups, monitor funding costs and avoid stacking multiple leveraged trades."
+          },
+          {
+            "topic": "Margin management",
+            "title": "Track collateral health",
+            "summary": "Margin ratios determine liquidation risk. Monitoring maintenance levels across exchanges prevents forced unwinds.",
+            "actionable_tip": "Set alerts for margin utilisation >70% and keep extra collateral ready to top up positions."
+          }
+        ],
+        "compliance_category": "derivatives"
+      },
+      "timestamp": "2025-10-14T08:58:11.149285",
+      "credits_used": 0
+    }
   },
   "options_trade": {
-    "status": "HTTP_ERROR",
-    "execution_time": 9.975932121276855,
-    "error": "HTTP 400"
+    "status": "SUCCESS",
+    "execution_time": 10.11871862411499,
+    "result": {
+      "success": true,
+      "strategy_function": "options_trade",
+      "execution_result": {
+        "success": true,
+        "strategy_type": "call_option",
+        "option_details": {
+          "contract_symbol": "BTCUSDT2025-11-13C117752",
+          "strike_price": 117800,
+          "expiry_date": "2025-11-13",
+          "premium": 2286.63,
+          "quantity": 0.01
+        },
+        "greeks": {
+          "delta": 0.6,
+          "gamma": 0.001,
+          "theta": -15.5,
+          "vega": 0.12,
+          "rho": 0.05,
+          "implied_volatility": 0.8,
+          "time_value": 2286.63,
+          "intrinsic_value": 0
+        },
+        "execution_result": {
+          "success": true,
+          "order_id": "OPT_1760432301_8776e165",
+          "contract_symbol": "BTCUSDT2025-11-13C117752",
+          "action": "BUY",
+          "quantity": 0.01,
+          "execution_price": 2286.63,
+          "total_premium": 22.866300000000003,
+          "greeks": {
+            "delta": 0.6,
+            "gamma": 0.001,
+            "theta": -15.5,
+            "vega": 0.12,
+            "rho": 0.05,
+            "implied_volatility": 0.8,
+            "time_value": 2286.63,
+            "intrinsic_value": 0
+          },
+          "execution_time": "2025-10-14T08:58:21.265826",
+          "status": "FILLED"
+        },
+        "risk_analysis": {
+          "max_loss": 22.866300000000003,
+          "max_profit": "Unlimited",
+          "breakeven": 120038.52300000002,
+          "probability_profit": 0.45,
+          "time_decay": -15.5,
+          "volatility_impact": 0.12
+        },
+        "timestamp": "2025-10-14T08:58:21.265830",
+        "execution_time_seconds": 0.0008,
+        "methodology_summary": {
+          "strategy": "AI Options Strategies",
+          "category": "derivatives",
+          "summary": "Evaluated derivatives order books, funding data and volatility to structure AI Options Strategies on BTCUSDT with a balanced risk posture.",
+          "calculation_steps": [
+            "Pull live funding, basis and volatility metrics for the contract and underlying asset.",
+            "Translate risk mode into position sizing, leverage ceilings and margin buffers.",
+            "Assemble trade instructions and hedges before validating exchange-specific constraints."
+          ],
+          "calculation_notes": "Derivatives sizing links to margin requirements; leverage and funding costs were stress tested before recommending trades.",
+          "inputs_used": {
+            "symbol": "BTCUSDT",
+            "timeframe": "1h",
+            "leverage": 1.0,
+            "risk_mode": "balanced",
+            "quantity": 0.01,
+            "simulation_mode": true
+          },
+          "evaluation_metrics": {
+            "success": true
+          }
+        },
+        "regulatory_disclosures": {
+          "risk_warning": "Crypto assets are highly volatile and can result in substantial or total losses. Outputs are informational only and do not constitute investment advice.",
+          "jurisdiction_notice": "Confirm digital asset trading is permitted in your jurisdiction and comply with all suitability requirements. Consult a licensed advisor for personalised guidance.",
+          "links": {
+            "terms_of_service": "https://cryptouniverse.app/legal/terms-of-service",
+            "risk_disclosure": "https://cryptouniverse.app/legal/risk-disclosure"
+          },
+          "last_reviewed": "2025-10-14",
+          "leverage_warning": "Leverage amplifies gains and losses. Maintain adequate collateral and monitor liquidation thresholds closely.",
+          "simulation_notice": "Results generated in simulation mode. Live execution, fees and slippage can materially differ from simulated outcomes."
+        },
+        "educational_resources": [
+          {
+            "topic": "Diversification",
+            "title": "Why spreading capital matters",
+            "summary": "Holding uncorrelated assets reduces reliance on a single performer and helps dampen portfolio volatility.",
+            "actionable_tip": "Blend layer-1s, DeFi, infrastructure tokens and stablecoins to improve risk-adjusted returns."
+          },
+          {
+            "topic": "Crypto volatility",
+            "title": "Prepare for large swings",
+            "summary": "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards.",
+            "actionable_tip": "Stress test positions assuming 30\u201380% annualised volatility and plan for gap risk."
+          },
+          {
+            "topic": "Stablecoins vs. alt-coins",
+            "title": "Different roles in a portfolio",
+            "summary": "Stablecoins provide liquidity and downside buffers, while alt-coins target growth but contribute most drawdown risk.",
+            "actionable_tip": "Maintain a stablecoin reserve to cover margin calls and fund opportunistic entries without forced selling."
+          },
+          {
+            "topic": "Leverage risk",
+            "title": "Use borrowed capital cautiously",
+            "summary": "Leverage accelerates losses during volatility spikes. Liquidations can happen quickly when collateral buffers are thin.",
+            "actionable_tip": "Limit leverage to clearly defined setups, monitor funding costs and avoid stacking multiple leveraged trades."
+          },
+          {
+            "topic": "Margin management",
+            "title": "Track collateral health",
+            "summary": "Margin ratios determine liquidation risk. Monitoring maintenance levels across exchanges prevents forced unwinds.",
+            "actionable_tip": "Set alerts for margin utilisation >70% and keep extra collateral ready to top up positions."
+          }
+        ],
+        "compliance_category": "derivatives"
+      },
+      "timestamp": "2025-10-14T08:58:21.266051",
+      "credits_used": 0
+    }
   },
   "funding_arbitrage": {
     "status": "SUCCESS",
-    "execution_time": 9.280855178833008,
+    "execution_time": 10.859940767288208,
     "result": {
       "success": true,
       "strategy_function": "funding_arbitrage",
       "execution_result": {
         "success": true,
-        "timestamp": "2025-10-14T05:55:49.980830",
+        "timestamp": "2025-10-14T08:58:32.129639",
         "funding_arbitrage_analysis": {
           "opportunities": [],
           "funding_analysis": {
@@ -1419,22 +1843,22 @@
               "symbol": "BTC",
               "exchanges": {
                 "BINANCE": {
-                  "current_rate": 8.471090706358583e-05,
-                  "predicted_rate": 9.318199776994443e-05,
+                  "current_rate": 8.52396707661756e-05,
+                  "predicted_rate": 9.376363784279317e-05,
                   "funding_interval": "8h",
-                  "next_funding_time": "2025-10-14T08:00:00"
+                  "next_funding_time": "2025-10-14T16:00:00"
                 },
                 "KRAKEN": {
-                  "current_rate": 8.471090706358583e-05,
-                  "predicted_rate": 9.318199776994443e-05,
+                  "current_rate": 8.52396707661756e-05,
+                  "predicted_rate": 9.376363784279317e-05,
                   "funding_interval": "8h",
-                  "next_funding_time": "2025-10-14T08:00:00"
+                  "next_funding_time": "2025-10-14T16:00:00"
                 },
                 "KUCOIN": {
-                  "current_rate": 8.471090706358583e-05,
-                  "predicted_rate": 9.318199776994443e-05,
+                  "current_rate": 8.52396707661756e-05,
+                  "predicted_rate": 9.376363784279317e-05,
                   "funding_interval": "8h",
-                  "next_funding_time": "2025-10-14T08:00:00"
+                  "next_funding_time": "2025-10-14T16:00:00"
                 }
               },
               "arbitrage_opportunities": [],
@@ -1451,7 +1875,7 @@
           },
           "execution_plan": {}
         },
-        "execution_time_seconds": 0.0037,
+        "execution_time_seconds": 0.0028,
         "methodology_summary": {
           "strategy": "AI Funding Arbitrage",
           "category": "derivatives",
@@ -1519,19 +1943,19 @@
         ],
         "compliance_category": "derivatives"
       },
-      "timestamp": "2025-10-14T05:55:49.980994",
+      "timestamp": "2025-10-14T08:58:32.129801",
       "credits_used": 0
     }
   },
   "hedge_position": {
     "status": "SUCCESS",
-    "execution_time": 9.328248023986816,
+    "execution_time": 9.889756917953491,
     "result": {
       "success": true,
       "strategy_function": "hedge_position",
       "execution_result": {
         "success": true,
-        "timestamp": "2025-10-14T05:55:59.317933",
+        "timestamp": "2025-10-14T08:58:42.011972",
         "hedge_analysis": {
           "primary_position": {
             "symbol": "BTCUSDT",
@@ -1552,20 +1976,20 @@
               "strategy": "DIRECT_HEDGE",
               "action": "SHORT 0.005 BTCUSDT",
               "exchange_recommendation": "Use different exchange to avoid netting",
-              "cost_estimate": 0.56337455,
+              "cost_estimate": 0.5607233,
               "risk_reduction": 50.0
             }
           ],
           "cost_benefit": {
-            "total_hedge_cost": 0.56337455,
+            "total_hedge_cost": 0.5607233,
             "hedge_cost_pct": 0.05,
             "average_effectiveness": 50.0,
-            "cost_per_protection_pct": 0.011267491000000001,
+            "cost_per_protection_pct": 0.011214466000000001,
             "recommended_hedge": {
               "strategy": "DIRECT_HEDGE",
               "action": "SHORT 0.005 BTCUSDT",
               "exchange_recommendation": "Use different exchange to avoid netting",
-              "cost_estimate": 0.56337455,
+              "cost_estimate": 0.5607233,
               "risk_reduction": 50.0
             },
             "cost_justification": "Review cost-benefit"
@@ -1575,7 +1999,7 @@
               "strategy": "DIRECT_HEDGE",
               "action": "SHORT 0.005 BTCUSDT",
               "exchange_recommendation": "Use different exchange to avoid netting",
-              "cost_estimate": 0.56337455,
+              "cost_estimate": 0.5607233,
               "risk_reduction": 50.0
             },
             "execution_priority": "MEDIUM",
@@ -1661,13 +2085,13 @@
         ],
         "compliance_category": "derivatives"
       },
-      "timestamp": "2025-10-14T05:55:59.318062",
+      "timestamp": "2025-10-14T08:58:42.012307",
       "credits_used": 0
     }
   },
   "complex_strategy": {
     "status": "SUCCESS",
-    "execution_time": 9.34462571144104,
+    "execution_time": 10.275920391082764,
     "result": {
       "success": true,
       "strategy_function": "complex_strategy",
@@ -1681,8 +2105,8 @@
           42000,
           48000
         ],
-        "timestamp": "2025-10-14T05:56:08.657280",
-        "execution_time_seconds": 0.0003,
+        "timestamp": "2025-10-14T08:58:52.295970",
+        "execution_time_seconds": 0.0004,
         "methodology_summary": {
           "strategy": "AI Complex Derivatives",
           "category": "derivatives",
@@ -1750,7 +2174,7 @@
         ],
         "compliance_category": "derivatives"
       },
-      "timestamp": "2025-10-14T05:56:08.657419",
+      "timestamp": "2025-10-14T08:58:52.296146",
       "credits_used": 0
     }
   }
