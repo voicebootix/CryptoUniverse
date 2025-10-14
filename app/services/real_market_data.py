@@ -453,29 +453,28 @@ class RealMarketDataService(LoggerMixin):
         }
 
     def _normalize_symbol(self, symbol: str) -> str:
-        """
-        Normalize symbol to CCXT format.
+        """Normalize symbol to CCXT's expected ``BASE/QUOTE`` format."""
 
-        Converts: BTC, BTCUSDT, BTC-USDT -> BTC/USDT
-        """
-        # Remove common suffixes
-        symbol = symbol.upper().replace('-', '').replace('_', '')
+        if not symbol:
+            return "BTC/USDT"
 
-        # Handle single asset symbols
-        if len(symbol) <= 4:
-            symbol = f"{symbol}/USDT"
-        # Handle combined symbols
-        elif 'USDT' in symbol:
-            base = symbol.replace('USDT', '')
-            symbol = f"{base}/USDT"
-        elif 'USD' in symbol:
-            base = symbol.replace('USD', '')
-            symbol = f"{base}/USD"
-        elif 'BTC' in symbol and symbol != 'BTC':
-            base = symbol.replace('BTC', '')
-            symbol = f"{base}/BTC"
+        cleaned_symbol = symbol.upper().strip()
 
-        return symbol
+        if "/" in cleaned_symbol:
+            base, quote = cleaned_symbol.split("/", 1)
+            base = base.replace("-", "").replace("_", "")
+            quote = quote.replace("-", "").replace("_", "") or "USDT"
+            return f"{base}/{quote}"
+
+        collapsed = cleaned_symbol.replace("-", "").replace("_", "")
+
+        known_quotes = ["USDT", "USD", "USDC", "BTC", "ETH", "EUR"]
+        for quote in known_quotes:
+            if collapsed.endswith(quote) and len(collapsed) > len(quote):
+                base = collapsed[: -len(quote)]
+                return f"{base}/{quote}"
+
+        return f"{collapsed}/USDT"
 
     def _generate_synthetic_orderbook(
         self,
