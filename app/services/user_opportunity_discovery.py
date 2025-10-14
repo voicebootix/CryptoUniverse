@@ -3520,23 +3520,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             
             portfolio_result: UnifiedStrategyPortfolio = await unified_service.get_user_strategy_portfolio(user_id)
             
-            # Convert UnifiedStrategyPortfolio to expected dict format
-            return {
-                "success": True,
-                "user_id": portfolio_result.user_id,
-                "user_role": portfolio_result.user_role.value,
-                "active_strategies": portfolio_result.strategies,
-                "summary": portfolio_result.summary,
-                "metadata": portfolio_result.metadata,
-                "generated_at": datetime.utcnow().isoformat(),
-                "data_source": "unified_enterprise_system"
-            }
+            # Use canonical to_dict() method which properly filters active_strategies
+            portfolio_dict = portfolio_result.to_dict()
+            
+            # Return success with canonical schema
+            return {'success': True, **portfolio_dict}
         except Exception as e:
-            self.logger.error("Failed to get user portfolio", 
-                            user_id=user_id, 
-                            error=str(e),
-                            error_type=type(e).__name__,
-                            exc_info=True)
+            self.logger.exception("Failed to get user portfolio", extra={"user_id": user_id})
             return {'success': False, 'active_strategies': [], 'error': str(e)}
 
     async def _get_cached_opportunities(
