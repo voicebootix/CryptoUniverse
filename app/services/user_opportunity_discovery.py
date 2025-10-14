@@ -519,19 +519,47 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         if not scan_id:
             scan_id = getattr(task, "scan_id", f"user_discovery_{user_id}_{int(time.time())}")
 
+        # Load portfolio first to get accurate strategy count
+        portfolio_result = await self._get_user_portfolio(user_id)
+        
+        if not portfolio_result.get("success") or not portfolio_result.get("active_strategies"):
+            self.logger.warning("❌ NO STRATEGIES FOUND IN PORTFOLIO",
+                              scan_id=scan_id,
+                              user_id=user_id,
+                              portfolio_result=portfolio_result)
+            return await self._handle_no_strategies_user(user_id, scan_id)
+        
+        active_strategies = portfolio_result.get("active_strategies", [])
+        total_strategies = len(active_strategies)
+        
+        # ENTERPRISE PERFORMANCE METRICS
+        metrics = {
+            'scan_id': scan_id,
+            'start_time': discovery_start_time,
+            'portfolio_fetch_time': 0,
+            'asset_discovery_time': 0,
+            'strategy_scan_times': {},
+            'total_strategies': total_strategies,  # Use the actual count
+            'total_opportunities': 0,
+            'cache_hits': 0,
+            'cache_misses': 0,
+            'timeouts': 0,
+            'errors': []
+        }
+        
         placeholder_payload = {
             "success": True,
             "scan_id": scan_id,
             "user_id": user_id,
             "opportunities": [],
             "total_opportunities": 0,
-            "message": "Opportunity scan started. We'll notify you as soon as results are ready.",
+            "message": f"Opportunity scan started. Analyzing {total_strategies} strategies for opportunities...",
             "scan_state": "pending",
             "metadata": {
                 "scan_state": "pending",
-                "message": "Scanning your active strategies for new opportunities...",
+                "message": f"Scanning your {total_strategies} active strategies for new opportunities...",
                 "strategies_completed": 0,
-                "total_strategies": 0,
+                "total_strategies": total_strategies,
                 "generated_at": datetime.utcnow().isoformat(),
             },
             "background_scan": True,
@@ -569,21 +597,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovery_start_time = time.time()
         scan_id = existing_scan_id or f"user_discovery_{user_id}_{int(time.time())}"
         
-        # ENTERPRISE PERFORMANCE METRICS
-        metrics = {
-            'scan_id': scan_id,
-            'start_time': discovery_start_time,
-            'portfolio_fetch_time': 0,
-            'asset_discovery_time': 0,
-            'strategy_scan_times': {},
-            'total_strategies': 0,
-            'total_opportunities': 0,
-            'cache_hits': 0,
-            'cache_misses': 0,
-            'timeouts': 0,
-            'errors': []
-        }
-        
         self.logger.info("🔍 ENTERPRISE User Opportunity Discovery Starting",
                         scan_id=scan_id,
                         user_id=user_id,
@@ -609,38 +622,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    opportunities_count=len(cached_opportunities.get("opportunities", [])))
                     return cached_opportunities
             
-            # STEP 3: Get user's active strategy portfolio WITH CACHING (Performance Fix)
-            portfolio_start = time.time()
-            portfolio_result = await self._get_user_portfolio_cached(user_id)
-            metrics['portfolio_fetch_time'] = time.time() - portfolio_start
-            
-            # Track cache hits/misses
-            if 'error' in portfolio_result and portfolio_result['error'] == 'temporary_failure':
-                metrics['timeouts'] += 1
-            
-            # Check if cache was hit (response time < 0.1s indicates cache hit)
-            if metrics['portfolio_fetch_time'] < 0.1:
-                metrics['cache_hits'] += 1
-            else:
-                metrics['cache_misses'] += 1
-            
-            # CRITICAL DEBUG: Log detailed portfolio information
-            self.logger.info("🔍 STRATEGY PORTFOLIO DEBUG",
-                           scan_id=scan_id,
-                           user_id=user_id,
-                           portfolio_success=portfolio_result.get("success"),
-                           portfolio_keys=list(portfolio_result.keys()),
-                           active_strategies_count=len(portfolio_result.get("active_strategies", [])),
-                           total_strategies=portfolio_result.get("total_strategies", 0),
-                           active_strategies_list=[s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])],
-                           portfolio_error=portfolio_result.get("error"))
-            
-            if not portfolio_result.get("success") or not portfolio_result.get("active_strategies"):
-                self.logger.warning("❌ NO STRATEGIES FOUND IN PORTFOLIO",
-                                  scan_id=scan_id,
-                                  user_id=user_id,
-                                  portfolio_result=portfolio_result)
-                return await self._handle_no_strategies_user(user_id, scan_id)
+            # STEP 3: Use portfolio data already loaded above
+            # Portfolio is already loaded and validated in the initial response
             
             active_strategies = portfolio_result["active_strategies"]
             
