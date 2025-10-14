@@ -38,7 +38,7 @@ def debug_individual_strategies():
     try:
         response_data = response.json()
         if not response_data or 'access_token' not in response_data or not response_data['access_token']:
-            print(f"❌ Invalid login response: missing or empty access_token")
+            print("❌ Invalid login response: missing or empty access_token")
             return
         token = response_data['access_token']
     except (ValueError, json.JSONDecodeError) as e:
@@ -215,19 +215,21 @@ def debug_individual_strategies():
                 }
             except (ValueError, KeyError, TypeError, RuntimeError) as e:
                 execution_time = time.time() - start_time
-                print(f"      💥 STRATEGY ERROR ({execution_time:.1f}s): {str(e)}")
+                error_msg = f"{e!s}"
+                print(f"      💥 STRATEGY ERROR ({execution_time:.1f}s): {error_msg}")
                 strategy_results[test_case["name"]] = {
                     "status": "STRATEGY_ERROR",
                     "execution_time": execution_time,
-                    "error": str(e)
+                    "error": error_msg
                 }
             except Exception as e:
                 execution_time = time.time() - start_time
-                print(f"      💥 UNEXPECTED ERROR ({execution_time:.1f}s): {str(e)}")
+                error_msg = f"{e!s}"
+                print(f"      💥 UNEXPECTED ERROR ({execution_time:.1f}s): {error_msg}")
                 strategy_results[test_case["name"]] = {
                     "status": "UNEXPECTED_ERROR",
                     "execution_time": execution_time,
-                    "error": str(e)
+                    "error": error_msg
                 }
                 # Continue to next strategy to allow full diagnostics to complete
         
