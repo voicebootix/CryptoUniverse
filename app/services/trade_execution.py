@@ -25,6 +25,7 @@ import structlog
 from app.core.config import get_settings
 from app.core.database import AsyncSessionLocal, get_database
 from app.core.redis import get_redis_client, redis_manager
+from app.services.state_coordinator import resilient_state_coordinator
 from app.core.logging import LoggerMixin, trade_logger
 from app.models.trading import Trade, Position, Order, TradingStrategy
 from app.models.exchange import ExchangeAccount, ExchangeApiKey, ExchangeBalance, ExchangeStatus, ApiKeyStatus
@@ -750,6 +751,17 @@ class TradeExecutionService(LoggerMixin):
                     if value:
                         emergency_reason = key
                         break
+
+            if not emergency_reason:
+                fallback_hit = await resilient_state_coordinator.any_active(
+                    [
+                        ("global", "global_emergency_stop"),
+                        ("emergency_halt", user_id),
+                        ("emergency_stop", user_id),
+                    ]
+                )
+                if fallback_hit:
+                    emergency_reason = f"{fallback_hit[0]}:{fallback_hit[1]}"
 
             if emergency_reason:
                 self.logger.warning(
