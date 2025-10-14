@@ -622,8 +622,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    opportunities_count=len(cached_opportunities.get("opportunities", [])))
                     return cached_opportunities
             
-            # STEP 3: Use portfolio data already loaded above
-            # Portfolio is already loaded and validated in the initial response
+            # STEP 3: Load portfolio data for this discovery
+            portfolio_result = await self._get_user_portfolio(user_id)
+            
+            if not portfolio_result.get("success") or not portfolio_result.get("active_strategies"):
+                self.logger.warning("❌ NO STRATEGIES FOUND IN PORTFOLIO",
+                                  scan_id=scan_id,
+                                  user_id=user_id,
+                                  portfolio_result=portfolio_result)
+                return await self._handle_no_strategies_user(user_id, scan_id)
             
             active_strategies = portfolio_result["active_strategies"]
             
@@ -3504,6 +3511,22 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             "discovered_at": opportunity.discovered_at.isoformat()
         }
     
+    async def _get_user_portfolio(self, user_id: str) -> Dict[str, Any]:
+        """Get user's portfolio with active strategies."""
+        try:
+            # Use the unified strategy service to get portfolio
+            from app.services.unified_strategy_service import UnifiedStrategyService
+            unified_service = UnifiedStrategyService()
+            
+            portfolio_result = await unified_service.get_user_portfolio(user_id)
+            return portfolio_result
+        except Exception as e:
+            self.logger.error("Failed to get user portfolio", 
+                            user_id=user_id, 
+                            error=str(e),
+                            error_type=type(e).__name__)
+            return {'success': False, 'active_strategies': [], 'error': str(e)}
+
     async def _get_cached_opportunities(
         self,
         user_id: str,
