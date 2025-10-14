@@ -2944,7 +2944,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         )
 
         except Exception as error:
-            self.logger.error(
+            self.logger.exception(
                 "Hedge opportunity scan failed",
                 user_id=user_profile.user_id,
                 scan_id=scan_id,
@@ -3037,7 +3037,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         )
 
         except Exception as error:
-            self.logger.error(
+            self.logger.exception(
                 "Complex strategy opportunity scan failed",
                 user_id=user_profile.user_id,
                 scan_id=scan_id,

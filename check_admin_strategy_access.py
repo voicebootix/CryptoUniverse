@@ -34,7 +34,16 @@ def check_admin_strategy_access():
         print(f"❌ Login failed: {response.status_code}")
         return
     
-    token = response.json().get('access_token')
+    try:
+        response_data = response.json()
+        if not response_data or 'access_token' not in response_data or not response_data['access_token']:
+            print(f"❌ Invalid login response: missing or empty access_token")
+            return
+        token = response_data['access_token']
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"❌ Failed to parse login response: {e}")
+        return
+    
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     print("✅ Authentication successful")
     
@@ -42,8 +51,9 @@ def check_admin_strategy_access():
     print("\n📊 Checking Admin Portfolio...")
     
     try:
+        portfolio_url = f"{api_base_url.rstrip('/')}/api/v1/unified-strategies/portfolio"
         portfolio_response = requests.get(
-            "https://cryptouniverse.onrender.com/api/v1/unified-strategies/portfolio",
+            portfolio_url,
             headers=headers,
             timeout=60
         )
@@ -81,15 +91,23 @@ def check_admin_strategy_access():
             print(f"   ❌ Portfolio fetch failed: {portfolio_response.status_code}")
             print(f"   Error: {portfolio_response.text[:200]}")
             
+    except requests.exceptions.RequestException as e:
+        print(f"   💥 Network error: {str(e)}")
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"   💥 JSON parsing error: {str(e)}")
+    except (KeyError, ValueError) as e:
+        print(f"   💥 Data access error: {str(e)}")
     except Exception as e:
-        print(f"   💥 Exception: {str(e)}")
+        print(f"   💥 Unexpected error: {str(e)}")
+        raise
     
     # Check admin strategy access endpoint
     print("\n🔑 Checking Admin Strategy Access...")
     
     try:
+        access_url = f"{api_base_url.rstrip('/')}/api/v1/admin-strategy-access/admin-portfolio-status"
         access_response = requests.get(
-            "https://cryptouniverse.onrender.com/api/v1/admin-strategy-access/admin-portfolio-status",
+            access_url,
             headers=headers,
             timeout=30
         )
@@ -102,8 +120,15 @@ def check_admin_strategy_access():
             print(f"   ❌ Admin access failed: {access_response.status_code}")
             print(f"   Error: {access_response.text[:200]}")
             
+    except requests.exceptions.RequestException as e:
+        print(f"   💥 Network error: {str(e)}")
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"   💥 JSON parsing error: {str(e)}")
+    except (KeyError, ValueError) as e:
+        print(f"   💥 Data access error: {str(e)}")
     except Exception as e:
-        print(f"   💥 Exception: {str(e)}")
+        print(f"   💥 Unexpected error: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     check_admin_strategy_access()

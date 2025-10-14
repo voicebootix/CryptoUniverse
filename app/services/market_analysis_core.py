@@ -1956,7 +1956,6 @@ class MarketAnalysisService(LoggerMixin):
                 "high_24h": round(current_price * 1.01, 4),
                 "low_24h": round(current_price * 0.99, 4),
                 "volume": round(volume_24h, 4),
-                "change_24h": price_change,
             },
         }
 

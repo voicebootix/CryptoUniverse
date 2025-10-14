@@ -35,7 +35,16 @@ def debug_individual_strategies():
         print(f"❌ Login failed: {response.status_code}")
         return
     
-    token = response.json().get('access_token')
+    try:
+        response_data = response.json()
+        if not response_data or 'access_token' not in response_data or not response_data['access_token']:
+            print(f"❌ Invalid login response: missing or empty access_token")
+            return
+        token = response_data['access_token']
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"❌ Failed to parse login response: {e}")
+        return
+    
     headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
     print("✅ Authentication successful")
     
@@ -142,8 +151,9 @@ def debug_individual_strategies():
             start_time = time.time()
             
             try:
+                strategy_url = f"{api_base_url.rstrip('/')}/api/v1/strategies/execute"
                 response = requests.post(
-                    "https://cryptouniverse.onrender.com/api/v1/strategies/execute",
+                    strategy_url,
                     json=strategy_data,
                     headers=headers,
                     timeout=15
@@ -154,9 +164,18 @@ def debug_individual_strategies():
                 print(f"      Status: {response.status_code} ({execution_time:.1f}s)")
                 
                 if response.status_code == 200:
-                    result = response.json()
-                    success = result.get("success", False)
-                    error = result.get("error", "")
+                    try:
+                        result = response.json()
+                        success = result.get("success", False)
+                        error = result.get("error", "")
+                    except (ValueError, json.JSONDecodeError) as e:
+                        print(f"      ❌ JSON decode error: {e}")
+                        strategy_results[test_case["name"]] = {
+                            "status": "JSON_ERROR",
+                            "execution_time": execution_time,
+                            "error": f"JSON decode error: {e}"
+                        }
+                        continue
                     
                     if success:
                         print(f"      ✅ SUCCESS: {strategy['name']}")
@@ -177,8 +196,8 @@ def debug_individual_strategies():
                     try:
                         error_detail = response.json()
                         print(f"      Error Detail: {error_detail}")
-                    except:
-                        print(f"      Raw Response: {response.text[:200]}")
+                    except (ValueError, json.JSONDecodeError) as e:
+                        print(f"      Raw Response: {response.text[:200]} (JSON decode error: {e})")
                     
                     strategy_results[test_case["name"]] = {
                         "status": f"HTTP_{response.status_code}",
@@ -194,14 +213,23 @@ def debug_individual_strategies():
                     "execution_time": execution_time,
                     "error": "Request timeout"
                 }
-            except Exception as e:
+            except (ValueError, KeyError, TypeError, RuntimeError) as e:
                 execution_time = time.time() - start_time
-                print(f"      💥 EXCEPTION ({execution_time:.1f}s): {str(e)}")
+                print(f"      💥 STRATEGY ERROR ({execution_time:.1f}s): {str(e)}")
                 strategy_results[test_case["name"]] = {
-                    "status": "EXCEPTION",
+                    "status": "STRATEGY_ERROR",
                     "execution_time": execution_time,
                     "error": str(e)
                 }
+            except Exception as e:
+                execution_time = time.time() - start_time
+                print(f"      💥 UNEXPECTED ERROR ({execution_time:.1f}s): {str(e)}")
+                strategy_results[test_case["name"]] = {
+                    "status": "UNEXPECTED_ERROR",
+                    "execution_time": execution_time,
+                    "error": str(e)
+                }
+                raise  # Re-raise unexpected errors
         
         results[strategy["name"]] = strategy_results
     

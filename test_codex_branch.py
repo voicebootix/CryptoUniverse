@@ -109,8 +109,9 @@ def test_codex_branch():
         start_time = time.time()
         
         try:
+            strategy_url = f"{api_base_url.rstrip('/')}/api/v1/strategies/execute"
             response = requests.post(
-                "https://cryptouniverse.onrender.com/api/v1/strategies/execute",
+                strategy_url,
                 headers=headers,
                 json=payload,
                 timeout=30
