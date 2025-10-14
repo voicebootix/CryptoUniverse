@@ -9,7 +9,7 @@ import asyncio
 import time
 import psutil
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List, Set
 import structlog
 from app.core.logging import LoggerMixin
@@ -521,6 +521,25 @@ class BackgroundServiceManager(LoggerMixin):
                         user_map=user_map,
                     )
                     total_deliveries += len(deliveries)
+
+                    # Update last_event_at for successfully dispatched subscriptions
+                    if deliveries:
+                        dispatch_time = datetime.now(timezone.utc)
+                        # Build a map of subscription_id -> delivery status
+                        subscription_delivery_map = {}
+                        for delivery in deliveries:
+                            sub_id = delivery.subscription_id
+                            if sub_id not in subscription_delivery_map:
+                                subscription_delivery_map[sub_id] = []
+                            subscription_delivery_map[sub_id].append(delivery.status)
+
+                        # Update subscriptions that had at least one successful delivery
+                        for subscription in due_subscriptions:
+                            if subscription.id in subscription_delivery_map:
+                                statuses = subscription_delivery_map[subscription.id]
+                                # Update timestamp if any delivery was successful
+                                if "delivered" in statuses:
+                                    subscription.last_event_at = dispatch_time
 
                 await db.commit()
 
