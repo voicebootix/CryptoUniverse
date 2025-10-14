@@ -8,6 +8,7 @@ autonomous trading cycles, and configurable intervals for the AI money manager.
 import asyncio
 import time
 import psutil
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Set
 import structlog
@@ -453,18 +454,24 @@ class BackgroundServiceManager(LoggerMixin):
             return
 
         lock_key = "background:signal_dispatch_lock"
-        lock_acquired = True
+        lock_token = None
+        lock_acquired = False
+
         if self.redis:
             try:
+                # Generate unique token for this lock attempt
+                lock_token = str(uuid.uuid4())
                 lock_acquired = await self.redis.set(
                     lock_key,
-                    "1",
+                    lock_token,
                     ex=self.intervals.get("signal_dispatch", 300),
                     nx=True,
                 )
             except Exception as e:
                 self.logger.warning("Unable to acquire signal dispatch lock", error=str(e))
-                lock_acquired = True  # proceed without Redis coordination
+                # Proceed without Redis coordination if Redis is unavailable
+                lock_acquired = True
+                lock_token = None
 
         if not lock_acquired:
             self.logger.debug("Signal dispatch skipped - lock already held")
@@ -518,14 +525,23 @@ class BackgroundServiceManager(LoggerMixin):
                 await db.commit()
 
         finally:
-            if self.redis:
+            # Only delete lock if we acquired it and have the token
+            if self.redis and lock_token:
                 try:
-                    await self.redis.delete(lock_key)
-                except Exception:
-                    pass
+                    # Atomic conditional delete using Lua script
+                    lua_script = """
+                    if redis.call("get", KEYS[1]) == ARGV[1] then
+                        return redis.call("del", KEYS[1])
+                    else
+                        return 0
+                    end
+                    """
+                    await self.redis.eval(lua_script, 1, lock_key, lock_token)
+                except Exception as e:
+                    self.logger.warning("Failed to release lock atomically", error=str(e))
 
         if total_deliveries:
-            system_monitoring_service.metrics_collector.record_metric(
+            system_monitoring_service.record_metric(
                 "signal_dispatch_deliveries",
                 float(total_deliveries),
                 {"timestamp": datetime.utcnow().isoformat()},
