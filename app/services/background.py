@@ -579,9 +579,22 @@ class BackgroundServiceManager(LoggerMixin):
         subscription: SignalSubscription,
         channel: SignalChannel,
     ) -> bool:
-        limit = min(subscription.max_daily_events or 0, channel.max_daily_events or 0)
+        # Build list of provided limits (not None)
+        limits = []
+        if subscription.max_daily_events is not None:
+            limits.append(subscription.max_daily_events)
+        if channel.max_daily_events is not None:
+            limits.append(channel.max_daily_events)
+
+        # If no limits provided, allow unlimited
+        if not limits:
+            return True
+
+        # Get minimum of provided limits
+        limit = min(limits)
         if limit <= 0:
             return True
+
         day_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         count_stmt = select(func.count(SignalDeliveryLog.id)).where(
             SignalDeliveryLog.subscription_id == subscription.id,
