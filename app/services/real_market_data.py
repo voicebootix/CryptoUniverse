@@ -146,72 +146,72 @@ class RealMarketDataService(LoggerMixin):
                             error=str(nonce_error)
                         )
 
-            # Fetch real ticker data with enterprise-grade error handling
-            ticker = await exchange_obj.fetch_ticker(ccxt_symbol)
-            
-            # Validate ticker data before processing
-            if not self._validate_market_data(ticker, "ticker"):
-                self.logger.warning(
-                    f"Invalid ticker data received from {exch_name}",
-                    symbol=symbol,
-                    ticker_preview=str(ticker)[:200]
-                )
+                # Fetch real ticker data with enterprise-grade error handling
+                ticker = await exchange_obj.fetch_ticker(ccxt_symbol)
+                
+                # Validate ticker data before processing
+                if not self._validate_market_data(ticker, "ticker"):
+                    self.logger.warning(
+                        f"Invalid ticker data received from {exch_name}",
+                        symbol=symbol,
+                        ticker_preview=str(ticker)[:200]
+                    )
+                    continue
+
+                # Safely extract ticker values with fallbacks
+                last_price = ticker.get('last') or ticker.get('close') or 0
+                last_price = float(last_price) if last_price else 0
+
+                bid_val = ticker.get('bid') or last_price or 0
+                bid_price = float(bid_val) if bid_val else 0
+
+                ask_val = ticker.get('ask') or last_price or 0
+                ask_price = float(ask_val) if ask_val else 0
+
+                # Always convert to quote volume for consistency
+                quote_volume = ticker.get('quoteVolume')
+                base_volume = ticker.get('baseVolume')
+
+                if quote_volume:
+                    volume_24h = float(quote_volume)
+                elif base_volume and last_price:
+                    # Convert base volume to quote volume
+                    volume_24h = float(base_volume) * last_price
+                else:
+                    volume_24h = 0
+
+                change_val = ticker.get('percentage') or ticker.get('change') or 0
+                change_24h = float(change_val) if change_val else 0
+
+                high_val = ticker.get('high') or last_price or 0
+                high_24h = float(high_val) if high_val else 0
+
+                low_val = ticker.get('low') or last_price or 0
+                low_24h = float(low_val) if low_val else 0
+
+                price_data = {
+                    'symbol': symbol,
+                    'price': last_price,
+                    'bid': bid_price,
+                    'ask': ask_price,
+                    'volume_24h': volume_24h,
+                    'change_24h': change_24h,
+                    'high_24h': high_24h,
+                    'low_24h': low_24h,
+                    'exchange': exch_name,
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'source': 'real_market_data'
+                }
+
+                # Cache the result
+                await self._cache_data(cache_key, price_data, self.cache_ttl['ticker'])
+
+                self.logger.info(f"✅ Fetched real price for {symbol}: ${price_data['price']:.2f}")
+                return price_data
+
+            except Exception as e:
+                self.logger.warning(f"Failed to fetch from {exch_name}: {str(e)}")
                 continue
-
-            # Safely extract ticker values with fallbacks
-            last_price = ticker.get('last') or ticker.get('close') or 0
-            last_price = float(last_price) if last_price else 0
-
-            bid_val = ticker.get('bid') or last_price or 0
-            bid_price = float(bid_val) if bid_val else 0
-
-            ask_val = ticker.get('ask') or last_price or 0
-            ask_price = float(ask_val) if ask_val else 0
-
-            # Always convert to quote volume for consistency
-            quote_volume = ticker.get('quoteVolume')
-            base_volume = ticker.get('baseVolume')
-
-            if quote_volume:
-                volume_24h = float(quote_volume)
-            elif base_volume and last_price:
-                # Convert base volume to quote volume
-                volume_24h = float(base_volume) * last_price
-            else:
-                volume_24h = 0
-
-            change_val = ticker.get('percentage') or ticker.get('change') or 0
-            change_24h = float(change_val) if change_val else 0
-
-            high_val = ticker.get('high') or last_price or 0
-            high_24h = float(high_val) if high_val else 0
-
-            low_val = ticker.get('low') or last_price or 0
-            low_24h = float(low_val) if low_val else 0
-
-            price_data = {
-                'symbol': symbol,
-                'price': last_price,
-                'bid': bid_price,
-                'ask': ask_price,
-                'volume_24h': volume_24h,
-                'change_24h': change_24h,
-                'high_24h': high_24h,
-                'low_24h': low_24h,
-                'exchange': exch_name,
-                'timestamp': datetime.utcnow().isoformat(),
-                'source': 'real_market_data'
-            }
-
-            # Cache the result
-            await self._cache_data(cache_key, price_data, self.cache_ttl['ticker'])
-
-            self.logger.info(f"✅ Fetched real price for {symbol}: ${price_data['price']:.2f}")
-            return price_data
-
-        except Exception as e:
-            self.logger.warning(f"Failed to fetch from {exch_name}: {str(e)}")
-            continue
 
         # If all exchanges fail, return error
         self.logger.error(f"❌ Could not fetch real price for {symbol}")
