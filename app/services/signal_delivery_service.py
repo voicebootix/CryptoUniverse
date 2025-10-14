@@ -125,8 +125,15 @@ class SignalDeliveryService:
             if delivery_log:
                 deliveries.append(delivery_log)
 
-        # Only debit credits if at least one delivery succeeded
-        if deliveries:
+        # Determine successful deliveries
+        successful = [d for d in deliveries if d and d.status == "delivered"]
+
+        # Persist all delivery logs
+        for d in deliveries:
+            db.add(d)
+
+        # Debit only if at least one delivery succeeded
+        if successful:
             cost, transaction_id = await self._debit_per_signal(
                 db,
                 subscription=subscription,
@@ -134,15 +141,11 @@ class SignalDeliveryService:
                 plan=plan,
                 event_id=event.id,
             )
-            # Update the first delivery log with credit information
+            # Update the first successful log with credit information
             if cost > 0:
-                deliveries[0].credit_cost = cost
-                deliveries[0].credit_transaction_id = transaction_id
+                successful[0].credit_cost = cost
+                successful[0].credit_transaction_id = transaction_id
                 charged = True
-
-            # Add all deliveries to the session
-            for delivery_log in deliveries:
-                db.add(delivery_log)
         else:
             # ALL deliveries failed - record critical alert
             system_monitoring_service.metrics_collector.record_metric(
@@ -164,9 +167,10 @@ class SignalDeliveryService:
 
         await db.flush()
 
+        delivered_count = float(len(successful))
         system_monitoring_service.metrics_collector.record_metric(
             "signal_delivery_count",
-            float(len(deliveries)),
+            delivered_count,
             {"channel": channel.slug},
         )
 

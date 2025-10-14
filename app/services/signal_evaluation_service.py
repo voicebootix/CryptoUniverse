@@ -69,11 +69,29 @@ class SignalEvaluationService:
 
         # Get configuration
         config = channel.configuration or {}
-        timeframe = config.get("timeframe", "1h")
-        default_symbols = config.get("default_symbols", [])
 
-        # Determine symbols to use
-        target_symbols = list(symbols) if symbols else default_symbols
+        # Check for per-subscription overrides first
+        sub_metadata = {}
+        if subscription and subscription.metadata:
+            sub_metadata = subscription.metadata if isinstance(subscription.metadata, dict) else {}
+
+        # Priority: subscription override > passed symbols > channel default
+        override_symbols = sub_metadata.get("override_symbols")
+        if override_symbols:
+            # Normalize override_symbols to list
+            if isinstance(override_symbols, str):
+                target_symbols = [override_symbols]
+            elif isinstance(override_symbols, list):
+                target_symbols = override_symbols
+            else:
+                target_symbols = []
+        elif symbols:
+            target_symbols = list(symbols)
+        else:
+            target_symbols = config.get("default_symbols", [])
+
+        # Priority: subscription override > channel config > default
+        timeframe = sub_metadata.get("override_timeframe") or config.get("timeframe", "1h")
 
         # Generate batch signals (cached for 15 minutes)
         batch_signals = await self.engine.generate_batch_signals(

@@ -236,7 +236,17 @@ async def webhook_execute(
 ) -> SignalDeliveryActionResponse:
     await _verify_signature({"delivery_id": str(action.delivery_id)}, action.signature)
     delivery_log = await _get_delivery(db, action.delivery_id)
-    user = delivery_log.subscription.user
+
+    # Avoid async lazy-loads; fetch user explicitly
+    result = await db.execute(
+        select(User)
+        .join(SignalSubscription, SignalSubscription.user_id == User.id)
+        .where(SignalSubscription.id == delivery_log.subscription_id)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found for delivery")
+
     result = await signal_execution_bridge.execute(
         db,
         delivery_log=delivery_log,
