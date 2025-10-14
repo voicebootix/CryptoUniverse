@@ -36,6 +36,27 @@ class ChatMemoryService:
         self.context_window_size = 50  # Messages to keep in active context
         self.summarization_threshold = 200  # Messages to include in summary
         self.session_timeout_hours = 24  # Hours before session becomes inactive
+
+    @staticmethod
+    def _coerce_uuid(value: Any, field_name: str) -> uuid.UUID:
+        """Convert incoming identifiers to UUID objects."""
+
+        if isinstance(value, uuid.UUID):
+            return value
+
+        try:
+            return uuid.UUID(str(value))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_name} must be a valid UUID") from exc
+
+    @staticmethod
+    def _normalize_message_type(message_type: Any) -> str:
+        """Ensure message types are stored as simple strings."""
+
+        if hasattr(message_type, "value"):
+            return str(message_type.value)
+
+        return str(message_type)
     
     async def create_session(
         self,
@@ -99,7 +120,7 @@ class ChatMemoryService:
         session_id: str,
         user_id: str,
         content: str,
-        message_type: str,
+        message_type: Any,
         intent: Optional[str] = None,
         confidence: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -127,11 +148,15 @@ class ChatMemoryService:
         """
         try:
             async for db in get_database():
+                session_uuid = self._coerce_uuid(session_id, "session_id")
+                user_uuid = self._coerce_uuid(user_id, "user_id")
+                normalized_type = self._normalize_message_type(message_type)
+
                 message = ChatMessage(
-                    session_id=session_id,
-                    user_id=user_id,
+                    session_id=session_uuid,
+                    user_id=user_uuid,
                     content=content,
-                    message_type=message_type,
+                    message_type=normalized_type,
                     intent=intent,
                     confidence=confidence,
                     message_metadata=metadata or {},
@@ -146,20 +171,48 @@ class ChatMemoryService:
                 # Update session last activity
                 await db.execute(
                     text("UPDATE chat_sessions SET last_activity = :now WHERE session_id = :session_id"),
-                    {"now": datetime.utcnow(), "session_id": session_id}
+                    {"now": datetime.utcnow(), "session_id": str(session_uuid)}
                 )
-                
+
                 await db.commit()
                 await db.refresh(message)
-                
+
                 # Check if session needs summarization
-                await self._check_and_summarize_session(db, session_id)
-                
+                await self._check_and_summarize_session(db, str(session_uuid))
+
                 return str(message.message_id)
-                
+
         except SQLAlchemyError as e:
             logger.error("Failed to save chat message", error=str(e), session_id=session_id)
             raise Exception(f"Failed to save chat message: {str(e)}")
+
+    async def add_message(
+        self,
+        session_id: str,
+        user_id: str,
+        message_type: Any,
+        content: str,
+        intent: Optional[str] = None,
+        confidence: Optional[float] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        model_used: Optional[str] = None,
+        processing_time_ms: Optional[float] = None,
+        tokens_used: Optional[float] = None,
+    ) -> str:
+        """Backward-compatible alias for :meth:`save_message`."""
+
+        return await self.save_message(
+            session_id=session_id,
+            user_id=user_id,
+            content=content,
+            message_type=message_type,
+            intent=intent,
+            confidence=confidence,
+            metadata=metadata,
+            model_used=model_used,
+            processing_time_ms=processing_time_ms,
+            tokens_used=tokens_used,
+        )
     
     async def get_session_messages(
         self,
