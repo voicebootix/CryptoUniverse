@@ -3515,16 +3515,28 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         """Get user's portfolio with active strategies."""
         try:
             # Use the unified strategy service to get portfolio
-            from app.services.unified_strategy_service import UnifiedStrategyService
+            from app.services.unified_strategy_service import UnifiedStrategyService, UnifiedStrategyPortfolio
             unified_service = UnifiedStrategyService()
             
-            portfolio_result = await unified_service.get_user_portfolio(user_id)
-            return portfolio_result
+            portfolio_result: UnifiedStrategyPortfolio = await unified_service.get_user_strategy_portfolio(user_id)
+            
+            # Convert UnifiedStrategyPortfolio to expected dict format
+            return {
+                "success": True,
+                "user_id": portfolio_result.user_id,
+                "user_role": portfolio_result.user_role.value,
+                "active_strategies": portfolio_result.strategies,
+                "summary": portfolio_result.summary,
+                "metadata": portfolio_result.metadata,
+                "generated_at": datetime.utcnow().isoformat(),
+                "data_source": "unified_enterprise_system"
+            }
         except Exception as e:
             self.logger.error("Failed to get user portfolio", 
                             user_id=user_id, 
                             error=str(e),
-                            error_type=type(e).__name__)
+                            error_type=type(e).__name__,
+                            exc_info=True)
             return {'success': False, 'active_strategies': [], 'error': str(e)}
 
     async def _get_cached_opportunities(
