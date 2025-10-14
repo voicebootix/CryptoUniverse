@@ -77,18 +77,28 @@ class SignalEvaluationService:
 
         # Priority: subscription override > passed symbols > channel default
         override_symbols = sub_metadata.get("override_symbols")
+        target_symbols = None
+
         if override_symbols:
-            # Normalize override_symbols to list
+            # Validate and normalize override_symbols to list
             if isinstance(override_symbols, str):
                 target_symbols = [override_symbols]
             elif isinstance(override_symbols, list):
                 target_symbols = override_symbols
             else:
-                target_symbols = []
-        elif symbols:
-            target_symbols = list(symbols)
-        else:
-            target_symbols = config.get("default_symbols", [])
+                # Invalid type - log warning and fall through to other sources
+                self.logger.warning(
+                    "Invalid override_symbols type, ignoring",
+                    channel=channel.slug,
+                    override_type=type(override_symbols).__name__,
+                )
+
+        # Fall back to passed symbols or channel default
+        if target_symbols is None:
+            if symbols:
+                target_symbols = list(symbols)
+            else:
+                target_symbols = config.get("default_symbols", [])
 
         # Priority: subscription override > channel config > default
         timeframe = sub_metadata.get("override_timeframe") or config.get("timeframe", "1h")

@@ -451,7 +451,7 @@ async def get_channel_performance(
     try:
         perf = await signal_performance_service.get_channel_performance(db, channel_id, days=days)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
 
     return {
         "success": True,

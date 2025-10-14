@@ -254,6 +254,15 @@ class SignalDeliveryService:
             )
             return None
 
+        # Check if connection is authenticated (valid auth_token)
+        if not connection.is_authenticated:
+            self.logger.info(
+                "Telegram delivery skipped: expired authentication",
+                user_id=str(user.id),
+                connection_id=str(connection.id),
+            )
+            return None
+
         unauthenticated_fields = []
         if not connection.telegram_chat_id or connection.telegram_chat_id == "pending":
             unauthenticated_fields.append("chat_id")
