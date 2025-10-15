@@ -625,7 +625,7 @@ class BackgroundServiceManager(LoggerMixin):
         if limit <= 0:
             return True
 
-        day_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         count_stmt = select(func.count(SignalDeliveryLog.id)).where(
             SignalDeliveryLog.subscription_id == subscription.id,
             SignalDeliveryLog.delivered_at >= day_start,
