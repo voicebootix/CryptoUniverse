@@ -13,7 +13,7 @@ import uuid
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from pydantic import BaseModel, field_validator
 from sqlalchemy import and_, or_, func, select, case, desc
 from sqlalchemy.exc import SQLAlchemyError
@@ -30,6 +30,7 @@ from app.models.credit import CreditAccount, CreditTransactionType
 from app.models.system import SystemHealth, AuditLog
 from app.models.strategy_access import UserStrategyAccess, StrategyAccessType
 from app.models.strategy_submission import StrategySubmission, StrategyStatus
+from app.models.signal import SignalDeliveryLog, SignalEvent, SignalSubscription, SignalChannel
 from app.models.copy_trading import StrategyPublisher
 from app.services.master_controller import MasterSystemController
 from app.services.background import BackgroundServiceManager
@@ -78,6 +79,20 @@ class PeriodInfo(BaseModel):
     previous_start: Optional[datetime]
     previous_end: Optional[datetime]
     duration_days: Optional[int]
+
+
+class SignalDeliveryAudit(BaseModel):
+    delivery_id: UUID
+    channel_slug: str
+    user_id: UUID
+    delivery_channel: str
+    status: str
+    credit_cost: int
+    delivered_at: datetime
+    acknowledged_at: Optional[datetime]
+    executed_at: Optional[datetime]
+    metadata: Dict[str, Any]
+    payload: Dict[str, Any]
 
 
 def _resolve_period(period: Optional[str]) -> PeriodInfo:
@@ -2962,3 +2977,47 @@ async def review_strategy(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to review strategy"
         ) from e
+
+@router.get("/signals/deliveries", response_model=List[SignalDeliveryAudit])
+async def admin_signal_deliveries(
+    limit: int = Query(100, ge=1, le=500),
+    channel_slug: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    db: AsyncSession = Depends(get_database),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+) -> List[SignalDeliveryAudit]:
+    stmt = (
+        select(
+            SignalDeliveryLog,
+            SignalChannel.slug,
+            SignalSubscription.user_id,
+        )
+        .join(SignalSubscription, SignalDeliveryLog.subscription_id == SignalSubscription.id)
+        .join(SignalChannel, SignalSubscription.channel_id == SignalChannel.id)
+        .order_by(SignalDeliveryLog.delivered_at.desc())
+        .limit(limit)
+    )
+    if channel_slug:
+        stmt = stmt.where(SignalChannel.slug == channel_slug)
+    if status_filter:
+        stmt = stmt.where(SignalDeliveryLog.status == status_filter)
+
+    result = await db.execute(stmt)
+    records = result.all()
+
+    return [
+        SignalDeliveryAudit(
+            delivery_id=delivery.id,
+            channel_slug=slug,
+            user_id=user_id,
+            delivery_channel=delivery.delivery_channel,
+            status=delivery.status,
+            credit_cost=delivery.credit_cost,
+            delivered_at=delivery.delivered_at,
+            acknowledged_at=delivery.acknowledged_at,
+            executed_at=delivery.executed_at,
+            metadata=delivery.metadata or {},
+            payload=delivery.payload or {},
+        )
+        for delivery, slug, user_id in records
+    ]

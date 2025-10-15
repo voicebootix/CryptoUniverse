@@ -103,7 +103,12 @@ class SystemMonitoringService:
             "memory_usage_pct": {"warning": 85.0, "critical": 95.0},
             "disk_usage_pct": {"warning": 80.0, "critical": 90.0},
             "response_time_ms": {"warning": 2000.0, "critical": 5000.0},
-            "error_rate_pct": {"warning": 5.0, "critical": 10.0}
+            "error_rate_pct": {"warning": 5.0, "critical": 10.0},
+            # Signal-specific thresholds
+            "signal_generation_empty": {"warning": 3.0, "critical": 10.0},  # Count in 15 min
+            "signal_delivery_failed_all": {"warning": 2.0, "critical": 5.0},  # Count in 15 min
+            "signal_delivery_telegram_failed": {"warning": 5.0, "critical": 15.0},  # Count in 15 min
+            "signal_delivery_webhook_failed": {"warning": 5.0, "critical": 15.0},  # Count in 15 min
         }
     
     async def start_monitoring(self, interval_seconds: int = 120):  # PRODUCTION: 2 minutes instead of 30s
@@ -239,41 +244,62 @@ class SystemMonitoringService:
         """Check for alert conditions and generate alerts."""
         try:
             current_time = datetime.utcnow()
-            
+
             for metric_name, thresholds in self.thresholds.items():
-                summary = self.metrics_collector.get_metric_summary(metric_name, duration_minutes=5)
-                
+                summary = self.metrics_collector.get_metric_summary(metric_name, duration_minutes=15)
+
                 if "error" in summary:
                     continue
-                
-                current_value = summary.get("current", 0)
-                
+
+                # For count-based metrics (like signal failures), use points_count
+                # For percentage-based metrics (like CPU), use current value
+                if metric_name.startswith("signal_"):
+                    # Count-based metric - check total occurrences in time window
+                    check_value = summary.get("points_count", 0)
+                else:
+                    # Percentage/value-based metric - check current value
+                    check_value = summary.get("current", 0)
+
                 # Check critical threshold
-                if current_value >= thresholds["critical"]:
+                if check_value >= thresholds["critical"]:
                     alert_id = f"{metric_name}_critical_{int(time.time())}"
+
+                    # Build appropriate message based on metric type
+                    if metric_name.startswith("signal_"):
+                        message = f"{metric_name}: {check_value} failures in 15 min >= {thresholds['critical']} (CRITICAL)"
+                    else:
+                        message = f"{metric_name}: {check_value:.2f} >= {thresholds['critical']} (CRITICAL)"
+
                     alert = SystemAlert(
                         id=alert_id,
                         severity="critical",
-                        message=f"{metric_name}: {current_value:.2f} >= {thresholds['critical']} (CRITICAL)",
+                        message=message,
                         timestamp=current_time
                     )
                     await self._add_alert(alert)
-                    
+
                     # ENTERPRISE: Trigger cleanup for disk usage issues
-                    if metric_name == "disk_usage_pct" and current_value >= 80:
+                    if metric_name == "disk_usage_pct" and check_value >= 80:
                         await self._trigger_disk_cleanup()
-                
+
                 # Check warning threshold
-                elif current_value >= thresholds["warning"]:
+                elif check_value >= thresholds["warning"]:
                     alert_id = f"{metric_name}_warning_{int(time.time())}"
+
+                    # Build appropriate message based on metric type
+                    if metric_name.startswith("signal_"):
+                        message = f"{metric_name}: {check_value} failures in 15 min >= {thresholds['warning']} (WARNING)"
+                    else:
+                        message = f"{metric_name}: {check_value:.2f} >= {thresholds['warning']} (WARNING)"
+
                     alert = SystemAlert(
                         id=alert_id,
-                        severity="warning", 
-                        message=f"{metric_name}: {current_value:.2f} >= {thresholds['warning']} (WARNING)",
+                        severity="warning",
+                        message=message,
                         timestamp=current_time
                     )
                     await self._add_alert(alert)
-        
+
         except Exception as e:
             logger.error("Failed to check alert conditions", error=str(e))
     
