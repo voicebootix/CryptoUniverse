@@ -315,7 +315,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             },
             "strategy_recommendations": strategy_recommendations,
             "execution_time_ms": execution_time_ms,
-            "last_updated": datetime.utcnow().isoformat(),
+            "last_updated": self._current_timestamp().isoformat(),
             "performance_metrics": {
                 "portfolio_fetch_time_ms": metrics.get("portfolio_fetch_time", 0) * 1000,
                 "cache_hit_rate": metrics.get("cache_hits", 0)
@@ -333,7 +333,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         metadata["total_strategies"] = total_strategies
         metadata["remaining_strategies"] = max(total_strategies - strategies_completed, 0)
         metadata.setdefault("message", "Partial opportunity scan results while remaining strategies finish." if partial else "Full opportunity scan results available.")
-        metadata["generated_at"] = datetime.utcnow().isoformat()
+        metadata["generated_at"] = self._current_timestamp().isoformat()
 
         return response
 
@@ -621,7 +621,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 "scan_state",
                 "partial" if cached_entry.partial else "cached",
             )
-            metadata.setdefault("generated_at", datetime.utcnow().isoformat())
+            metadata.setdefault("generated_at", self._current_timestamp().isoformat())
             return payload
 
         # For force refresh requests allow a brief wait for fresh data
@@ -679,7 +679,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 "message": f"Scanning your {total_strategies} active strategies for new opportunities...",
                 "strategies_completed": 0,
                 "total_strategies": total_strategies,
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": self._current_timestamp().isoformat(),
             },
             "background_scan": True,
         }
@@ -1285,7 +1285,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 "spread_percentage": opp.get("spread_percentage", 0),
                                 "exchanges": opp.get("exchanges", [])
                             },
-                            discovered_at=datetime.utcnow()
+                            discovered_at=self._current_timestamp()
                         )
                         opportunities.append(opportunity)
             
@@ -1346,7 +1346,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 "lookback_period": opp.get("lookback_period", "30d"),
                                 "strategy_type": opp.get("strategy_type", "mean_reversion")
                             },
-                            discovered_at=datetime.utcnow()
+                            discovered_at=self._current_timestamp()
                         )
                         opportunities.append(opportunity)
                     
@@ -1420,7 +1420,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 "signal_type": signals.get("signal_type", ""),
                                 "pair_symbols": [pair[0], pair[1]]
                             },
-                            discovered_at=datetime.utcnow()
+                            discovered_at=self._current_timestamp()
                         )
                         opportunities.append(opportunity)
                         
@@ -1523,7 +1523,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                     "meets_original_threshold": signal_strength > 6.0,
                                     "recommendation": "STRONG BUY" if signal_strength > 6.0 else "CONSIDER" if signal_strength > 4.5 else "MONITOR"
                                 },
-                                discovered_at=datetime.utcnow()
+                                discovered_at=self._current_timestamp()
                             )
                             opportunities.append(opportunity)
                             
@@ -1601,7 +1601,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 "bollinger_position": signals.get("bollinger_position", 0),
                                 "mean_price": signals.get("mean_price", 0)
                             },
-                            discovered_at=datetime.utcnow()
+                            discovered_at=self._current_timestamp()
                         )
                         opportunities.append(opportunity)
                         
@@ -1675,7 +1675,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 "volume_surge": signals.get("volume_surge", 0),
                                 "breakout_direction": signals.get("direction", "up")
                             },
-                            discovered_at=datetime.utcnow()
+                            discovered_at=self._current_timestamp()
                         )
                         opportunities.append(opportunity)
                         
@@ -1759,7 +1759,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                         "rationale": recommendation.get("rationale", ""),
                                         "portfolio_protection": True
                                     },
-                                    discovered_at=datetime.utcnow()
+                                    discovered_at=self._current_timestamp()
                                 )
                                 opportunities.append(opportunity)
                         else:
@@ -1784,7 +1784,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                         "urgency": recommendation.get("urgency_score", 0),
                                         "portfolio_protection": True
                                     },
-                                    discovered_at=datetime.utcnow()
+                                    discovered_at=self._current_timestamp()
                                 )
                                 opportunities.append(opportunity)
                         
@@ -1994,7 +1994,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             entry_price=None,
                             exit_price=None,
                             metadata=metadata,
-                            discovered_at=datetime.utcnow(),
+                            discovered_at=self._current_timestamp(),
                         )
                         opportunities.append(opportunity)
 
@@ -2056,7 +2056,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             entry_price=None,
                             exit_price=None,
                             metadata=metadata,
-                            discovered_at=datetime.utcnow(),
+                            discovered_at=self._current_timestamp(),
                         )
                         opportunities.append(opportunity)
                         
@@ -2141,7 +2141,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                     "stop_loss_pct": 0.2,
                                     "expected_duration_min": signal.get("duration_min", 5)
                                 },
-                                discovered_at=datetime.utcnow()
+                                discovered_at=self._current_timestamp()
                             ))
                             
                 except Exception as e:
@@ -2226,7 +2226,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                     "order_book_depth": signal.get("order_book_depth", {}),
                                     "estimated_fills_per_hour": signal.get("fills_per_hour", 0)
                                 },
-                                discovered_at=datetime.utcnow()
+                                discovered_at=self._current_timestamp()
                             ))
                             
                 except Exception as e:
@@ -2762,7 +2762,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             "timeframe_breakdown": payload.get("timeframe_breakdown", {}),
                             "market_sentiment": market_sentiment,
                         },
-                        discovered_at=datetime.utcnow(),
+                        discovered_at=self._current_timestamp(),
                     )
                 )
 
@@ -2837,7 +2837,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         "volatility": signal.get("volatility", 0),
                         "volume_24h": signal.get("volume_24h", 0)
                     },
-                    discovered_at=datetime.utcnow()
+                    discovered_at=self._current_timestamp()
                 )
             
             return None
@@ -2907,7 +2907,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         if "fallback_used" not in snapshot:
             snapshot["fallback_used"] = False
 
-        snapshot.setdefault("calculation_timestamp", datetime.utcnow().isoformat())
+        snapshot.setdefault("calculation_timestamp", self._current_timestamp().isoformat())
 
         return snapshot
 
@@ -2925,7 +2925,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             "inputs": {},
             "credit_profile": None,
             "assumptions": [],
-            "calculation_timestamp": datetime.utcnow().isoformat(),
+            "calculation_timestamp": self._current_timestamp().isoformat(),
             "fallback_used": False,
         }
 
@@ -3436,7 +3436,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                         "components": {"position_value": position_value},
                                     },
                                 },
-                                discovered_at=datetime.utcnow(),
+                                discovered_at=self._current_timestamp(),
                             )
 
                             opportunities.append(opportunity)
@@ -3657,7 +3657,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                     "components": {"option_premium": net_premium},
                                 },
                             },
-                            discovered_at=datetime.utcnow(),
+                            discovered_at=self._current_timestamp(),
                         )
 
                         opportunities.append(opportunity)
@@ -4187,9 +4187,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     try:
                         cache_time = datetime.fromisoformat(cache_time_str)
                     except ValueError:
-                        cache_time = datetime.utcnow() - timedelta(hours=1)
+                        cache_time = self._current_timestamp() - timedelta(hours=1)
                 else:
-                    cache_time = datetime.utcnow() - timedelta(hours=1)
+                    cache_time = self._current_timestamp() - timedelta(hours=1)
 
                 cached_fingerprint = metadata.get("strategy_fingerprint") or payload.get("user_profile", {}).get("strategy_fingerprint")
                 if cached_fingerprint and cached_fingerprint != user_profile.strategy_fingerprint:
@@ -4204,18 +4204,18 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 total_opportunities = payload.get("total_opportunities", 0)
                 if total_opportunities == 0:
                     zero_ttl = metadata.get("zero_ttl_seconds", 120)
-                    if datetime.utcnow() - cache_time > timedelta(seconds=zero_ttl):
+                    if self._current_timestamp() - cache_time > timedelta(seconds=zero_ttl):
                         self.logger.info(
                             "Discarding zero-result cache to force rescan",
                             user_id=user_id,
-                            age_seconds=(datetime.utcnow() - cache_time).total_seconds(),
+                            age_seconds=(self._current_timestamp() - cache_time).total_seconds(),
                             zero_ttl=zero_ttl
                         )
                         return None
 
                 # Cache is fresh for 5 minutes for non-zero results, 2 minutes for zero results
                 max_age = timedelta(minutes=5) if total_opportunities > 0 else timedelta(seconds=metadata.get("zero_ttl_seconds", 120))
-                if datetime.utcnow() - cache_time < max_age:
+                if self._current_timestamp() - cache_time < max_age:
                     return payload
 
         except Exception as e:
@@ -4237,7 +4237,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             cache_key = f"user_opportunities:{user_id}:{user_profile.user_tier}:{user_profile.active_strategy_count}"
 
-            cache_time = datetime.utcnow().isoformat()
+            cache_time = self._current_timestamp().isoformat()
             total_opportunities = result.get("total_opportunities", 0)
 
             # Ensure cached payload is immutable by storing a JSON-safe copy
@@ -4295,7 +4295,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 return
             
             # Increment error counters
-            error_key = f"opportunity_discovery_errors:{datetime.utcnow().strftime('%Y-%m-%d')}"
+            error_key = f"opportunity_discovery_errors:{self._current_timestamp().strftime('%Y-%m-%d')}"
             await self.redis.incr(error_key)
             await self.redis.expire(error_key, 86400 * 7)  # 7 days
             
@@ -4310,7 +4310,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 "user_id": user_id,
                 "error": error,
                 "execution_time_ms": execution_time,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": self._current_timestamp().isoformat()
             }
             
             error_log_key = f"opportunity_error_log:{scan_id}"
@@ -4382,7 +4382,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         "fallback": True,
                         "description": "Review your portfolio risk profile and get protection recommendations"
                     },
-                    "discovered_at": datetime.utcnow().isoformat()
+                    "discovered_at": self._current_timestamp().isoformat()
                 }
             ]
             
