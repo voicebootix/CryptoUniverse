@@ -21,7 +21,7 @@ import math
 import re
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from decimal import Decimal
@@ -144,6 +144,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             "options_strategies": self._scan_options_trading_opportunities,
             "volatility_trading": self._scan_volatility_trading_opportunities,
             "news_sentiment": self._scan_news_sentiment_opportunities,
+        }
+
+        # Canonical strategy aliases so display names map to scanners
+        self._strategy_aliases = {
+            self._normalize_strategy_identifier("ai futures arbitrage"): "futures_arbitrage",
+            self._normalize_strategy_identifier("ai futures trading"): "futures_trade",
+            self._normalize_strategy_identifier("ai options strategies"): "options_strategies",
+            self._normalize_strategy_identifier("ai options trading"): "options_trade",
+            self._normalize_strategy_identifier("ai volatility trading"): "volatility_trading",
+            self._normalize_strategy_identifier("ai news sentiment"): "news_sentiment",
         }
         
         # User tier configurations - Enterprise-grade with dynamic limits
@@ -367,6 +377,41 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 error=str(exc)
             )
             return "none"
+
+    def _normalize_strategy_identifier(self, value: Optional[str]) -> str:
+        """Normalize strategy identifiers/names for alias lookups."""
+
+        if not value:
+            return ""
+
+        normalized = re.sub(r"[^a-z0-9]+", "", str(value).lower())
+        return normalized
+
+    def _resolve_strategy_alias(self, *candidates: str) -> Optional[str]:
+        """Resolve a strategy alias from multiple identifier candidates."""
+
+        for candidate in candidates:
+            normalized = self._normalize_strategy_identifier(candidate)
+            if not normalized:
+                continue
+            alias = self._strategy_aliases.get(normalized)
+            if alias:
+                return alias
+        return None
+
+    def _current_timestamp(self) -> datetime:
+        """Return timezone-aware UTC timestamps for opportunity payloads."""
+
+        return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _resolve_owned_strategy_id(owned_ids: List[str], *candidates: str) -> Optional[str]:
+        """Return the first matching candidate present in the owned strategy ids."""
+
+        for candidate in candidates:
+            if candidate in owned_ids:
+                return candidate
+        return candidates[0] if candidates else None
 
     def _looks_like_uuid(self, value: str) -> bool:
         """Return True when value appears to be a UUID."""
@@ -1064,22 +1109,35 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         
         # FIXED: Try multiple ID formats to find scanner
         # Extract strategy function name with multiple fallback attempts
-        strategy_func_candidates = []
-        
+        strategy_func_candidates: List[str] = []
+
         # Try removing "ai_" prefix
         if strategy_id.startswith("ai_"):
-            strategy_func_candidates.append(strategy_id.replace("ai_", ""))
-        
+            strategy_func_candidates.append(strategy_id.replace("ai_", "", 1))
+
         # Try the ID as-is
         strategy_func_candidates.append(strategy_id)
-        
+
         # Try adding "ai_" prefix if not present
-        if not strategy_id.startswith("ai_"):
+        if strategy_id and not strategy_id.startswith("ai_"):
             strategy_func_candidates.append(f"ai_{strategy_id}")
-        
+
         # Try removing "_strategy" suffix
         if strategy_id.endswith("_strategy"):
-            strategy_func_candidates.append(strategy_id.replace("_strategy", ""))
+            strategy_func_candidates.append(strategy_id[: -len("_strategy")])
+
+        # Try alias resolution using both ID and display name
+        alias_candidate = self._resolve_strategy_alias(strategy_id, strategy_name)
+        if alias_candidate:
+            strategy_func_candidates.append(alias_candidate)
+
+        # Deduplicate while preserving insertion order
+        seen_candidates = set()
+        strategy_func_candidates = [
+            candidate
+            for candidate in strategy_func_candidates
+            if candidate and not (candidate in seen_candidates or seen_candidates.add(candidate))
+        ]
         
         # Find matching scanner
         strategy_func = None
@@ -2247,16 +2305,19 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         
         try:
             # Check if user owns options trading strategy
-            strategy_id = "ai_options_trade"
+            candidate_ids = ("ai_options_strategies", "ai_options_trade")
             owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
-            
-            # FIXED: Log but don't block - dispatcher already handles strategy filtering
+            strategy_id = self._resolve_owned_strategy_id(owned_strategy_ids, *candidate_ids)
+
             if strategy_id not in owned_strategy_ids:
-                self.logger.warning("Strategy not in portfolio, scanning anyway", 
-                                   user_id=user_profile.user_id, 
-                                   scan_id=scan_id,
-                                   strategy_id=strategy_id,
-                                   portfolio_strategies=len(owned_strategy_ids))
+                self.logger.warning(
+                    "Strategy not in portfolio, scanning anyway",
+                    user_id=user_profile.user_id,
+                    scan_id=scan_id,
+                    strategy_id=strategy_id,
+                    portfolio_strategies=len(owned_strategy_ids),
+                    known_candidates=candidate_ids,
+                )
             
             # Get top volume symbols for options analysis
             symbols = self._get_top_symbols_by_volume(discovered_assets, limit=15)
@@ -2281,8 +2342,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     
                     if result and result.confidence_score > 30:  # 3.0 signal strength * 10
                         opportunities.append(result)
-            
-            self.logger.info(f"✅ Options scanner found {len(opportunities)} opportunities", 
+
+            self.logger.info(f"✅ Options scanner found {len(opportunities)} opportunities",
                            scan_id=scan_id, strategy_id=strategy_id)
             
         except Exception as e:
@@ -2350,7 +2411,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             
             if signal_strength > 3.0 or expected_edge > 2.0:  # Lower edge threshold for more opportunities
                 return OpportunityResult(
-                    strategy_id="ai_options_trade",
+                    strategy_id=strategy_id or candidate_ids[0],
                     strategy_name=f"AI Options Trading ({signal.get('strategy_type', 'Iron Condor')})",
                     opportunity_type="options",
                     symbol=symbol,
@@ -2381,7 +2442,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         "expected_edge": expected_edge,
                         "option_details": option_details
                     },
-                    discovered_at=datetime.utcnow()
+                    discovered_at=self._current_timestamp()
                 )
             
             return None
@@ -2488,7 +2549,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             "volatility_forecast": payload.get("volatility_forecast", {}),
                             "risk_metrics": payload.get("risk_metrics", {}),
                         },
-                        discovered_at=datetime.utcnow(),
+                        discovered_at=self._current_timestamp(),
                     )
                 )
 
@@ -2594,7 +2655,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             "whale_activity": signal.get("whale_activity"),
                             "recommendation": signal.get("recommendation"),
                         },
-                        discovered_at=datetime.utcnow(),
+                        discovered_at=self._current_timestamp(),
                     )
                 )
 
@@ -3483,7 +3544,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 "basis_analysis": basis_metrics,
                                 "risk_assessment": analysis.get("risk_assessment", {}),
                             },
-                            discovered_at=datetime.utcnow(),
+                            discovered_at=self._current_timestamp(),
                         )
                     )
 

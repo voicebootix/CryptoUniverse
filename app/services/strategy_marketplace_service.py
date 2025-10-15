@@ -12,7 +12,9 @@ Revolutionary business model: Strategy subscriptions with performance-based pric
 """
 
 import asyncio
+import copy
 import json
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Tuple
@@ -85,6 +87,55 @@ class StrategyMarketplaceItem:
     tier: str  # free, basic, pro, enterprise
 
 
+@dataclass
+class _CachedStrategyAccessRecord:
+    """Lightweight cache structure for strategy access records."""
+
+    strategy_id: str
+    strategy_type: Optional["StrategyType"]
+    is_active: bool
+    expires_at: Optional[datetime]
+    metadata_json: Dict[str, Any]
+    subscription_type: Optional[str]
+    credits_paid: int
+
+    @classmethod
+    def from_model(cls, record: "UserStrategyAccess") -> "_CachedStrategyAccessRecord":
+        metadata = record.metadata_json if isinstance(record.metadata_json, dict) else {}
+        return cls(
+            strategy_id=record.strategy_id,
+            strategy_type=record.strategy_type,
+            is_active=bool(record.is_active),
+            expires_at=record.expires_at,
+            metadata_json=metadata,
+            subscription_type=getattr(record, "subscription_type", None),
+            credits_paid=getattr(record, "credits_paid", 0),
+        )
+
+    def is_valid(self) -> bool:
+        if not self.is_active:
+            return False
+
+        if self.expires_at is None:
+            return True
+
+        expiry = self.expires_at
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+
+        return datetime.now(timezone.utc) <= expiry
+
+    def clone(self) -> "_CachedStrategyAccessRecord":
+        return _CachedStrategyAccessRecord(
+            strategy_id=self.strategy_id,
+            strategy_type=self.strategy_type,
+            is_active=self.is_active,
+            expires_at=self.expires_at,
+            metadata_json=copy.deepcopy(self.metadata_json),
+            subscription_type=self.subscription_type,
+            credits_paid=self.credits_paid,
+        )
+
 class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     """
     Unified strategy marketplace service.
@@ -96,9 +147,10 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
     def __init__(self):
         self.ai_strategy_catalog = self._build_ai_strategy_catalog()
         self.performance_cache = {}
-        
+
         # Strategy pricing will be loaded dynamically from admin settings
         self.strategy_pricing = None
+        self._access_record_cache: Dict[str, Dict[str, Any]] = {}
     
     # Win Rate Conversion Utilities
     # CANONICAL UNIT: 0-1 (fraction) for all internal operations
@@ -2176,8 +2228,30 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
 
     async def _load_active_strategy_access_records(
         self, user_id: str
-    ) -> Tuple[List[UserStrategyAccess], Optional[int]]:
+    ) -> Tuple[List[_CachedStrategyAccessRecord], Optional[int]]:
         """Fetch active strategy access records and compute a safe TTL."""
+
+        self._prune_access_record_cache()
+
+        cache_key = str(user_id)
+        cached_entry = self._access_record_cache.get(cache_key)
+        now_monotonic = time.monotonic()
+
+        if cached_entry and cached_entry.get("expires_at", 0) > now_monotonic:
+            records = [record.clone() for record in cached_entry.get("records", [])]
+            ttl_seconds = cached_entry.get("ttl_seconds")
+
+            self.logger.debug(
+                "Using cached strategy access records",
+                user_id=user_id,
+                record_count=len(records),
+                ttl_seconds=ttl_seconds,
+            )
+
+            return records, ttl_seconds
+
+        if cached_entry:
+            self._access_record_cache.pop(cache_key, None)
 
         try:
             import uuid
@@ -2206,7 +2280,8 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         if not access_records:
             return [], None
 
-        valid_records = [record for record in access_records if record.is_valid()]
+        cached_records = [_CachedStrategyAccessRecord.from_model(record) for record in access_records]
+        valid_records = [record for record in cached_records if record.is_valid()]
         if not valid_records:
             return [], None
 
@@ -2226,7 +2301,30 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         if expiry_candidates:
             ttl_seconds = min(ttl_seconds or expiry_candidates[0], min(expiry_candidates))
 
-        return valid_records, ttl_seconds
+        cache_ttl = ttl_seconds or 300
+        cache_entry = {
+            "records": [record.clone() for record in valid_records],
+            "expires_at": time.monotonic() + max(30, min(cache_ttl, 1800)),
+            "ttl_seconds": ttl_seconds,
+        }
+        self._access_record_cache[cache_key] = cache_entry
+
+        return [record.clone() for record in cache_entry["records"]], ttl_seconds
+
+    def _prune_access_record_cache(self) -> None:
+        """Remove expired cache entries for strategy access records."""
+
+        if not self._access_record_cache:
+            return
+
+        now_monotonic = time.monotonic()
+        expired_keys = [
+            key for key, entry in self._access_record_cache.items()
+            if entry.get("expires_at", 0) <= now_monotonic
+        ]
+
+        for key in expired_keys:
+            self._access_record_cache.pop(key, None)
 
     async def _hydrate_strategies_from_db(self, user_id: str, redis_client) -> List[str]:
         """Rebuild the user's strategy portfolio directly from the database."""

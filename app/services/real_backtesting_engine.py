@@ -140,7 +140,10 @@ class RealBacktestingEngine(LoggerMixin):
                 max_drawdown=results.get('max_drawdown')
             )
 
-            return results
+            payload = {"success": True, "results": deepcopy(results)}
+            payload.update(results)
+
+            return payload
 
         except Exception as e:
             self.logger.error("Backtest failed", error=str(e))
