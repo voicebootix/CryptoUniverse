@@ -5196,12 +5196,48 @@ class MarketAnalysisService(LoggerMixin):
     async def get_market_overview(self) -> Dict[str, Any]:
         """Get comprehensive market overview for adaptive timing and decision making."""
         start_time = time.time()
+        cache_key = self._build_cache_key("market_overview")
+        redis_client = None
 
         try:
-            cache_key = self._build_cache_key("market_overview")
             cached_response = await self._get_cached_result(cache_key)
             if cached_response:
                 return cached_response
+
+            # Attempt to hydrate from Redis before calling external APIs
+            try:
+                from app.core.redis import get_redis_client  # Local import to avoid circular deps
+
+                redis_client = await get_redis_client()
+            except Exception as redis_error:  # pragma: no cover - defensive logging
+                self.logger.debug(
+                    "Redis unavailable for market overview lookup",
+                    error=str(redis_error),
+                )
+                redis_client = None
+
+            if redis_client:
+                try:
+                    cached_bytes = await redis_client.get(cache_key)
+                except Exception as redis_error:  # pragma: no cover - defensive logging
+                    self.logger.warning(
+                        "Failed to read market overview from Redis",
+                        error=str(redis_error),
+                    )
+                else:
+                    if cached_bytes:
+                        try:
+                            if isinstance(cached_bytes, bytes):
+                                cached_bytes = cached_bytes.decode("utf-8")
+                            redis_payload = json.loads(cached_bytes)
+                        except (json.JSONDecodeError, TypeError) as decode_error:
+                            self.logger.warning(
+                                "Failed to decode market overview cache payload",
+                                error=str(decode_error),
+                            )
+                        else:
+                            await self._set_cached_result(cache_key, redis_payload, pre_processed=True)
+                            return self._mark_cache_hit(redis_payload)
 
             from app.services.market_data_feeds import get_market_overview
 
@@ -5256,6 +5292,38 @@ class MarketAnalysisService(LoggerMixin):
 
             response_with_metadata = self._prepare_for_cache(response)
             await self._set_cached_result(cache_key, response_with_metadata, pre_processed=True)
+
+            # Persist to Redis with a short TTL so subsequent workers can reuse it
+            if not redis_client:
+                try:
+                    from app.core.redis import get_redis_client  # Local import avoids module-level cost
+
+                    redis_client = await get_redis_client()
+                except Exception as redis_error:  # pragma: no cover - defensive logging
+                    self.logger.debug(
+                        "Redis unavailable when persisting market overview",
+                        error=str(redis_error),
+                    )
+                    redis_client = None
+
+            if redis_client and response_with_metadata.get("success"):
+                try:
+                    ttl_seconds = 60
+                    await redis_client.setex(
+                        cache_key,
+                        ttl_seconds,
+                        json.dumps(response_with_metadata, default=str),
+                    )
+                    await redis_client.set(
+                        "market_analysis:last_overview_refresh",
+                        datetime.utcnow().isoformat(),
+                    )
+                except Exception as redis_error:  # pragma: no cover - defensive logging
+                    self.logger.warning(
+                        "Failed to hydrate Redis market overview cache",
+                        error=str(redis_error),
+                    )
+
             return response_with_metadata
 
         except Exception as e:
