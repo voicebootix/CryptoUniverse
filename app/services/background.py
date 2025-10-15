@@ -590,11 +590,18 @@ class BackgroundServiceManager(LoggerMixin):
         return True
 
     def _subscription_due(self, channel: SignalChannel, subscription: SignalSubscription) -> bool:
-        cadence = subscription.cadence_override_minutes or channel.cadence_minutes or 15
+        # Check for explicit None to preserve 0 values
+        if subscription.cadence_override_minutes is not None:
+            cadence = subscription.cadence_override_minutes
+        elif channel.cadence_minutes is not None:
+            cadence = channel.cadence_minutes
+        else:
+            cadence = 15
+
         last_event = subscription.last_event_at
         if not last_event:
             return True
-        return datetime.utcnow() >= last_event + timedelta(minutes=cadence)
+        return datetime.now(timezone.utc) >= last_event + timedelta(minutes=cadence)
 
     async def _under_daily_limit(
         self,
