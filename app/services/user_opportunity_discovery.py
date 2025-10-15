@@ -2329,7 +2329,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 
                 # Use asyncio.gather for parallel execution
                 tasks = [
-                    self._analyze_options_opportunity(symbol, user_profile.user_id, scan_id)
+                    self._analyze_options_opportunity(
+                        symbol,
+                        user_profile.user_id,
+                        scan_id,
+                        strategy_id,
+                        candidate_ids,
+                    )
                     for symbol in batch
                 ]
                 
@@ -2351,9 +2357,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         
         return opportunities
     
-    async def _analyze_options_opportunity(self, symbol: str, user_id: str, scan_id: str) -> Optional[OpportunityResult]:
+    async def _analyze_options_opportunity(
+        self,
+        symbol: str,
+        user_id: str,
+        scan_id: str,
+        strategy_id: Optional[str],
+        candidate_ids: Tuple[str, ...],
+    ) -> Optional[OpportunityResult]:
         """Analyze single symbol for options opportunity with Greeks."""
-        
+
         try:
             # Call trading strategies service for options analysis
             options_result = await trading_strategies_service.execute_strategy(
@@ -2410,8 +2423,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             expected_edge = risk_analysis.get("expected_edge", 0) or option_details.get("expected_profit_pct", 0)
             
             if signal_strength > 3.0 or expected_edge > 2.0:  # Lower edge threshold for more opportunities
+                resolved_strategy_id = strategy_id or next(
+                    (candidate for candidate in candidate_ids if candidate),
+                    "ai_options_strategies",
+                )
                 return OpportunityResult(
-                    strategy_id=strategy_id or candidate_ids[0],
+                    strategy_id=resolved_strategy_id,
                     strategy_name=f"AI Options Trading ({signal.get('strategy_type', 'Iron Condor')})",
                     opportunity_type="options",
                     symbol=symbol,
