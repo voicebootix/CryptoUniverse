@@ -72,8 +72,8 @@ class SignalEvaluationService:
 
         # Check for per-subscription overrides first
         sub_metadata = {}
-        if subscription and subscription.metadata:
-            sub_metadata = subscription.metadata if isinstance(subscription.metadata, dict) else {}
+        if subscription and subscription.meta:
+            sub_metadata = subscription.meta if isinstance(subscription.meta, dict) else {}
 
         # Priority: subscription override > passed symbols > channel default
         override_symbols = sub_metadata.get("override_symbols")
@@ -166,7 +166,7 @@ class SignalEvaluationService:
                 "all_signals_count": len(filtered_signals),
                 "timestamp": best_signal.timestamp.isoformat(),
             },
-            metadata={
+            meta={
                 "source": source,
                 "symbols": [best_signal.symbol],
                 "timeframe": timeframe,

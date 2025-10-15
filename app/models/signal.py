@@ -40,7 +40,7 @@ class SignalChannel(Base):
     delivery_channels = Column(JSONB, nullable=False, default=list)
     pricing = Column(JSONB, nullable=False, default=dict)
     configuration = Column(JSONB, nullable=False, default=dict)
-    metadata = Column(JSONB, nullable=False, default=dict)
+    meta = Column(JSONB, nullable=False, default=dict)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(
@@ -97,7 +97,7 @@ class SignalSubscription(Base):
     webhook_url = Column(String(512), nullable=True)
     max_daily_events = Column(Integer, nullable=False, default=12)
     cadence_override_minutes = Column(Integer, nullable=True)
-    metadata = Column(JSONB, nullable=False, default=dict)
+    meta = Column(JSONB, nullable=False, default=dict)
     last_event_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
     updated_at = Column(
@@ -146,7 +146,7 @@ class SignalEvent(Base):
     risk_band = Column(String(32), nullable=False, default="balanced")
     opportunity_payload = Column(JSONB, nullable=False, default=dict)
     analysis_snapshot = Column(JSONB, nullable=False, default=dict)
-    metadata = Column(JSONB, nullable=False, default=dict)
+    meta = Column(JSONB, nullable=False, default=dict)
     created_by_user_id = Column(PG_UUID(as_uuid=True), nullable=True, index=True)
     created_at = Column(DateTime, nullable=False, server_default=func.now())
 
@@ -204,7 +204,7 @@ class SignalDeliveryLog(Base):
     acknowledged_at = Column(DateTime, nullable=True)
     executed_at = Column(DateTime, nullable=True)
     execution_reference = Column(String(255), nullable=True)
-    metadata = Column(JSONB, nullable=False, default=dict)
+    meta = Column(JSONB, nullable=False, default=dict)
 
     event = relationship("SignalEvent", back_populates="deliveries")
     subscription = relationship("SignalSubscription", back_populates="deliveries")
