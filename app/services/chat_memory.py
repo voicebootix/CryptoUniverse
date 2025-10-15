@@ -7,7 +7,7 @@ features like summarization and context management.
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Tuple
 import uuid
 from sqlalchemy import desc, asc, and_, or_, select, text, func
@@ -174,7 +174,7 @@ class ChatMemoryService:
                     if not existing_session.is_active:
                         existing_session.is_active = True
 
-                existing_session.last_activity = datetime.utcnow()
+                existing_session.last_activity = datetime.now(timezone.utc)
 
                 message = ChatMessage(
                     session_id=session_uuid,
