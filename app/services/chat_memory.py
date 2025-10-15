@@ -7,7 +7,7 @@ features like summarization and context management.
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Tuple
 import uuid
 from sqlalchemy import desc, asc, and_, or_, select, text, func
@@ -152,6 +152,30 @@ class ChatMemoryService:
                 user_uuid = self._coerce_uuid(user_id, "user_id")
                 normalized_type = self._normalize_message_type(message_type)
 
+                # Ensure session exists (handles cases where background tasks reuse stale IDs)
+                existing_session = await db.get(ChatSession, session_uuid)
+                if not existing_session:
+                    logger.warning(
+                        "Chat session missing when saving message, recreating",
+                        session_id=str(session_uuid),
+                        user_id=str(user_uuid),
+                    )
+                    existing_session = ChatSession(
+                        session_id=session_uuid,
+                        user_id=user_uuid,
+                        session_type="general",
+                        context={},
+                        active_strategies=[],
+                        is_active=True,
+                    )
+                    db.add(existing_session)
+                    await db.flush()
+                else:
+                    if not existing_session.is_active:
+                        existing_session.is_active = True
+
+                existing_session.last_activity = datetime.now(timezone.utc)
+
                 message = ChatMessage(
                     session_id=session_uuid,
                     user_id=user_uuid,
@@ -165,14 +189,8 @@ class ChatMemoryService:
                     tokens_used=tokens_used,
                     processed=True
                 )
-                
+
                 db.add(message)
-                
-                # Update session last activity
-                await db.execute(
-                    text("UPDATE chat_sessions SET last_activity = :now WHERE session_id = :session_id"),
-                    {"now": datetime.utcnow(), "session_id": str(session_uuid)}
-                )
 
                 await db.commit()
                 await db.refresh(message)

@@ -139,7 +139,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             "options_trade": self._scan_options_trading_opportunities,
             "funding_arbitrage": self._scan_funding_arbitrage_opportunities,
             "hedge_position": self._scan_hedge_opportunities,
-            "complex_strategy": self._scan_complex_strategy_opportunities
+            "complex_strategy": self._scan_complex_strategy_opportunities,
+            "futures_arbitrage": self._scan_futures_arbitrage_opportunities,
+            "options_strategies": self._scan_options_trading_opportunities,
+            "volatility_trading": self._scan_volatility_trading_opportunities,
+            "news_sentiment": self._scan_news_sentiment_opportunities,
         }
         
         # User tier configurations - Enterprise-grade with dynamic limits
@@ -363,6 +367,76 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 error=str(exc)
             )
             return "none"
+
+    def _looks_like_uuid(self, value: str) -> bool:
+        """Return True when value appears to be a UUID."""
+
+        try:
+            uuid.UUID(str(value))
+            return True
+        except Exception:
+            return False
+
+    def _extract_base_symbol(self, symbol: str) -> str:
+        """Extract base asset from trading pair symbol."""
+
+        if not symbol:
+            return ""
+
+        normalized = symbol.upper().replace("-", "/")
+        if "/" in normalized:
+            return normalized.split("/", 1)[0]
+        if normalized.endswith("USDT") or normalized.endswith("USDC"):
+            return normalized[:-4]
+        if normalized.endswith("USD"):
+            return normalized[:-3]
+        return normalized
+
+    def _parse_usd_value(self, value: Any, default: float = 0.0) -> float:
+        """Safely parse USD-like values ("$50,000" → 50000)."""
+
+        if value is None:
+            return default
+
+        if isinstance(value, (int, float, Decimal)):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        try:
+            cleaned = re.sub(r"[^0-9.\-]", "", str(value))
+            if cleaned in {"", "-", "--"}:
+                return default
+            return float(cleaned)
+        except (TypeError, ValueError):
+            return default
+
+    def _score_to_risk_level(self, normalized_score: float) -> str:
+        """Map 0-1 normalized score to qualitative risk labels."""
+
+        score = max(0.0, min(1.0, normalized_score))
+        if score < 0.25:
+            return "low"
+        if score < 0.5:
+            return "medium"
+        if score < 0.75:
+            return "high"
+        return "very_high"
+
+    def _determine_required_capital(
+        self,
+        strategy_info: Dict[str, Any],
+        fallback: float
+    ) -> float:
+        """Determine required capital from strategy metadata with fallback."""
+
+        for key in ("required_capital_usd", "min_capital_usd", "min_capital"):
+            if key in strategy_info:
+                parsed = self._parse_usd_value(strategy_info.get(key))
+                if parsed > 0:
+                    return parsed
+        return fallback
 
     async def _get_user_portfolio_cached(self, user_id: str) -> Dict[str, Any]:
         """Get user portfolio with enterprise caching and circuit breaker pattern."""
@@ -596,23 +670,37 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         
         discovery_start_time = time.time()
         scan_id = existing_scan_id or f"user_discovery_{user_id}_{int(time.time())}"
-        
+
         self.logger.info("🔍 ENTERPRISE User Opportunity Discovery Starting",
                         scan_id=scan_id,
                         user_id=user_id,
                         force_refresh=force_refresh)
-        
+
+        metrics: Dict[str, Any] = {
+            "scan_id": scan_id,
+            "start_time": discovery_start_time,
+            "portfolio_fetch_time": 0.0,
+            "asset_discovery_time": 0.0,
+            "strategy_scan_times": {},
+            "total_strategies": 0,
+            "total_opportunities": 0,
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "timeouts": 0,
+            "errors": [],
+        }
+
         try:
             # Initialize if needed
             if not self.redis:
                 await self.async_init()
-            
+
             # STEP 1: Build user opportunity profile
             user_profile = await self._build_user_opportunity_profile(user_id)
-            
+
             if user_profile.active_strategy_count == 0:
                 return await self._handle_no_strategies_user(user_id, scan_id)
-            
+
             # STEP 2: Check cache first (unless force refresh)
             if not force_refresh:
                 cached_opportunities = await self._get_cached_opportunities(user_id, user_profile)
@@ -623,8 +711,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     return cached_opportunities
             
             # STEP 3: Load portfolio data for this discovery
+            portfolio_fetch_start = time.time()
             portfolio_result = await self._get_user_portfolio(user_id)
-            
+            metrics["portfolio_fetch_time"] = time.time() - portfolio_fetch_start
+
             if not portfolio_result.get("success") or not portfolio_result.get("active_strategies"):
                 self.logger.warning("❌ NO STRATEGIES FOUND IN PORTFOLIO",
                                   scan_id=scan_id,
@@ -642,10 +732,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                            strategies=[s.get("strategy_id") for s in active_strategies])
 
             # STEP 4: Get enterprise asset discovery based on user tier
+            asset_discovery_start = time.time()
             discovered_assets = await enterprise_asset_filter.discover_all_assets_with_volume_filtering(
                 min_tier=user_profile.max_asset_tier,
                 force_refresh=force_refresh
             )
+            metrics["asset_discovery_time"] = time.time() - asset_discovery_start
 
             if not discovered_assets or sum(len(assets) for assets in discovered_assets.values()) == 0:
                 self.logger.warning("No assets discovered", scan_id=scan_id, user_tier=user_profile.user_tier)
@@ -659,6 +751,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             total_strategies = len(active_strategies)
             metrics['total_strategies'] = total_strategies
             strategies_completed = 0
+            strategy_timings: Dict[str, float] = {}
 
             initial_snapshot = self._assemble_response(
                 user_id=user_id,
@@ -678,13 +771,18 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             # Create semaphore for bounded concurrency - Optimized for performance
             strategy_semaphore = asyncio.Semaphore(15)  # Run max 15 strategies concurrently (increased from 3)
-            
+
             async def scan_strategy_with_semaphore(strategy_info):
+                strategy_identifier = strategy_info.get("strategy_id", "Unknown")
+                start_time = time.time()
                 async with strategy_semaphore:
-                    return await self._scan_strategy_opportunities(
-                        strategy_info, discovered_assets, user_profile, scan_id, portfolio_result
-                    )
-            
+                    try:
+                        return await self._scan_strategy_opportunities(
+                            strategy_info, discovered_assets, user_profile, scan_id, portfolio_result
+                        )
+                    finally:
+                        strategy_timings[strategy_identifier] = time.time() - start_time
+
             # Run all strategy scans concurrently
             strategy_tasks = [
                 scan_strategy_with_semaphore(strategy)
@@ -704,6 +802,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                       scan_id=scan_id,
                                       strategy=strategy_name,
                                       error=str(result))
+                    metrics['errors'].append({
+                        "strategy_id": strategy_id,
+                        "strategy_name": strategy_name,
+                        "error": str(result),
+                    })
+                    if isinstance(result, asyncio.TimeoutError):
+                        metrics['timeouts'] += 1
                 else:
                     # CRITICAL DEBUG: Log what each strategy scanner returned
                     self.logger.info("🔍 STRATEGY SCAN RESULT",
@@ -767,7 +872,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     snapshot_response,
                     partial=True,
                 )
-            
+
+            metrics['strategy_scan_times'] = strategy_timings
             # STEP 6: Rank and filter opportunities
             ranked_opportunities = await self._rank_and_filter_opportunities(
                 all_opportunities, user_profile, scan_id
@@ -993,7 +1099,28 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             # Check if we have a scanner for this strategy
             if not strategy_func or strategy_func not in self.strategy_scanners:
-                self.logger.warning("❌ No scanner found for strategy", 
+                if self._looks_like_uuid(strategy_id):
+                    self.logger.info(
+                        "⚙️ Routing UUID strategy to community scanner",
+                        scan_id=scan_id,
+                        strategy_id=strategy_id,
+                        strategy_name=strategy_name,
+                    )
+                    community_opportunities = await self._scan_community_strategy_opportunities(
+                        strategy_info,
+                        discovered_assets,
+                        user_profile,
+                        scan_id,
+                        portfolio_result,
+                    )
+
+                    return {
+                        "strategy_id": strategy_id,
+                        "strategy_name": strategy_name,
+                        "opportunities": community_opportunities,
+                    }
+
+                self.logger.warning("❌ No scanner found for strategy",
                                   strategy_id=strategy_id,
                                   strategy_func=strategy_func,
                                   tried_candidates=strategy_func_candidates,
@@ -1033,15 +1160,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     
     async def _scan_funding_arbitrage_opportunities(
         self,
-        discovered_assets: Dict[str, List[Any]], 
+        discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
         scan_id: str,
         portfolio_result: Dict[str, Any]
     ) -> List[OpportunityResult]:
         """Scan funding rate arbitrage opportunities using REAL trading strategies service."""
-        
+
         opportunities = []
-        
+
         try:
             # Get top volume symbols from discovered assets for funding arbitrage
             top_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
@@ -2108,10 +2235,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         return opportunities
     
     async def _scan_options_trading_opportunities(
-        self, 
-        discovered_assets: Dict[str, List[Any]], 
-        user_profile: UserOpportunityProfile, 
-        scan_id: str, 
+        self,
+        discovered_assets: Dict[str, List[Any]],
+        user_profile: UserOpportunityProfile,
+        scan_id: str,
         portfolio_result: Dict[str, Any]
     ) -> List[OpportunityResult]:
         """Enterprise options trading scanner with Greeks analysis."""
@@ -2262,17 +2389,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         except Exception as e:
             self.logger.debug(f"Options analysis failed for {symbol}", error=str(e), scan_id=scan_id)
             return None
-    
+
     def _calculate_options_risk(self, greeks: Dict[str, float]) -> str:
         """Calculate risk level based on Greeks."""
-        
+
         # Sophisticated risk calculation based on Greeks
         delta_risk = abs(greeks.get("delta", 0))
         gamma_risk = abs(greeks.get("gamma", 0)) * 10  # Gamma is more sensitive
         vega_risk = abs(greeks.get("vega", 0)) * 5
-        
+
         total_risk = delta_risk + gamma_risk + vega_risk
-        
+
         if total_risk < 0.3:
             return "low"
         elif total_risk < 0.6:
@@ -2281,10 +2408,306 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             return "high"
         else:
             return "very_high"
-    
+
+    async def _scan_volatility_trading_opportunities(
+        self,
+        discovered_assets: Dict[str, List[Any]],
+        user_profile: UserOpportunityProfile,
+        scan_id: str,
+        portfolio_result: Dict[str, Any],
+    ) -> List[OpportunityResult]:
+        """Surface trades where realized volatility is spiking."""
+
+        opportunities: List[OpportunityResult] = []
+
+        try:
+            strategy_id = "ai_volatility_trading"
+            owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
+
+            if strategy_id not in owned_strategy_ids:
+                self.logger.warning(
+                    "Strategy not in portfolio, scanning anyway",
+                    user_id=user_profile.user_id,
+                    scan_id=scan_id,
+                    strategy_id=strategy_id,
+                    portfolio_strategies=len(owned_strategy_ids),
+                )
+
+            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=12)
+            base_symbols = []
+            for symbol in symbols:
+                base = self._extract_base_symbol(symbol)
+                if base and base not in base_symbols:
+                    base_symbols.append(base)
+
+            if not base_symbols:
+                return opportunities
+
+            volatility_result = await market_analysis_service.volatility_analysis(
+                ",".join(base_symbols[:8]),
+                user_id=user_profile.user_id,
+            )
+
+            if not volatility_result.get("success"):
+                return opportunities
+
+            individual = volatility_result.get("volatility_analysis", {}).get("individual_analysis", {})
+
+            for base_symbol, payload in individual.items():
+                overall_vol = float(payload.get("overall_volatility", 0.0))
+                ranking = (payload.get("volatility_ranking") or "").lower()
+                timeframes = payload.get("timeframes", {})
+                primary_tf = timeframes.get("1h") or timeframes.get("4h") or next(iter(timeframes.values()), {})
+                percentile = self._parse_usd_value(primary_tf.get("volatility_percentile"), 0.0)
+
+                if overall_vol < 0.025 and ranking != "high":
+                    continue
+
+                confidence = max(35.0, min(95.0, percentile))
+                profit_potential = max(500.0, overall_vol * 25000.0)
+                risk_level = self._score_to_risk_level(min(overall_vol / 0.10, 1.0))
+
+                opportunities.append(
+                    OpportunityResult(
+                        strategy_id=strategy_id,
+                        strategy_name=f"AI Volatility Trading ({base_symbol})",
+                        opportunity_type="volatility_breakout",
+                        symbol=f"{base_symbol}/USDT",
+                        exchange="binance",
+                        profit_potential_usd=round(profit_potential, 2),
+                        confidence_score=confidence,
+                        risk_level=risk_level,
+                        required_capital_usd=self._determine_required_capital({}, fallback=10000.0),
+                        estimated_timeframe="1d",
+                        entry_price=None,
+                        exit_price=None,
+                        metadata={
+                            "overall_volatility": overall_vol,
+                            "volatility_ranking": ranking,
+                            "volatility_percentile": percentile,
+                            "volatility_forecast": payload.get("volatility_forecast", {}),
+                            "risk_metrics": payload.get("risk_metrics", {}),
+                        },
+                        discovered_at=datetime.utcnow(),
+                    )
+                )
+
+            self.logger.info(
+                "✅ Volatility trading scanner completed",
+                scan_id=scan_id,
+                opportunities=len(opportunities),
+            )
+
+        except Exception as exc:
+            self.logger.error(
+                "Volatility trading scan failed",
+                scan_id=scan_id,
+                error=str(exc),
+            )
+
+        return opportunities
+
+    async def _scan_news_sentiment_opportunities(
+        self,
+        discovered_assets: Dict[str, List[Any]],
+        user_profile: UserOpportunityProfile,
+        scan_id: str,
+        portfolio_result: Dict[str, Any],
+    ) -> List[OpportunityResult]:
+        """Leverage the real-time sentiment engine for news-driven trades."""
+
+        from app.services.realtime_sentiment_engine import realtime_sentiment_engine
+
+        opportunities: List[OpportunityResult] = []
+
+        try:
+            strategy_id = "ai_news_sentiment"
+            owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
+
+            if strategy_id not in owned_strategy_ids:
+                self.logger.warning(
+                    "Strategy not in portfolio, scanning anyway",
+                    user_id=user_profile.user_id,
+                    scan_id=scan_id,
+                    strategy_id=strategy_id,
+                    portfolio_strategies=len(owned_strategy_ids),
+                )
+
+            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=12)
+            base_symbols = []
+            for symbol in symbols:
+                base = self._extract_base_symbol(symbol)
+                if base and base not in base_symbols:
+                    base_symbols.append(base)
+
+            if not base_symbols:
+                return opportunities
+
+            if realtime_sentiment_engine.redis is None:
+                await realtime_sentiment_engine.async_init()
+
+            sentiment_result = await realtime_sentiment_engine.analyze_realtime_sentiment(
+                symbols=base_symbols[:10],
+                user_id=user_profile.user_id,
+            )
+
+            if not sentiment_result.get("success"):
+                return opportunities
+
+            for signal in sentiment_result.get("sentiment_signals", []):
+                news_impact = self._parse_usd_value(signal.get("news_impact"), 0.0)
+                sentiment_score = self._parse_usd_value(signal.get("sentiment_score"), 0.0)
+                confidence_raw = self._parse_usd_value(signal.get("confidence"), 50.0)
+
+                if abs(news_impact) < 10 or abs(sentiment_score) < 25:
+                    continue
+
+                direction = "bullish" if sentiment_score > 0 else "bearish"
+                symbol = signal.get("symbol", "")
+                if not symbol:
+                    continue
+
+                confidence = max(40.0, min(95.0, confidence_raw))
+                profit_potential = max(400.0, abs(news_impact) * 120.0)
+                risk_level = self._score_to_risk_level(abs(sentiment_score) / 100.0)
+
+                opportunities.append(
+                    OpportunityResult(
+                        strategy_id=strategy_id,
+                        strategy_name=f"AI News Sentiment ({symbol})",
+                        opportunity_type="news_sentiment",
+                        symbol=f"{symbol}/USDT",
+                        exchange="binance",
+                        profit_potential_usd=round(profit_potential, 2),
+                        confidence_score=confidence,
+                        risk_level=risk_level,
+                        required_capital_usd=self._determine_required_capital({}, fallback=7500.0),
+                        estimated_timeframe="6h",
+                        entry_price=None,
+                        exit_price=None,
+                        metadata={
+                            "direction": direction,
+                            "news_impact": news_impact,
+                            "sentiment_score": sentiment_score,
+                            "volume_score": signal.get("volume_score"),
+                            "social_momentum": signal.get("social_momentum"),
+                            "whale_activity": signal.get("whale_activity"),
+                            "recommendation": signal.get("recommendation"),
+                        },
+                        discovered_at=datetime.utcnow(),
+                    )
+                )
+
+            self.logger.info(
+                "✅ News sentiment scanner completed",
+                scan_id=scan_id,
+                opportunities=len(opportunities),
+            )
+
+        except Exception as exc:
+            self.logger.error(
+                "News sentiment scan failed",
+                scan_id=scan_id,
+                error=str(exc),
+            )
+
+        return opportunities
+
+    async def _scan_community_strategy_opportunities(
+        self,
+        strategy_info: Dict[str, Any],
+        discovered_assets: Dict[str, List[Any]],
+        user_profile: UserOpportunityProfile,
+        scan_id: str,
+        portfolio_result: Dict[str, Any],
+    ) -> List[OpportunityResult]:
+        """Fallback scanner for user-created or community strategies."""
+
+        opportunities: List[OpportunityResult] = []
+
+        try:
+            strategy_id = strategy_info.get("strategy_id", "community")
+            strategy_name = strategy_info.get("name", "Community Strategy")
+
+            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=8)
+            base_symbols = []
+            for symbol in symbols:
+                base = self._extract_base_symbol(symbol)
+                if base and base not in base_symbols:
+                    base_symbols.append(base)
+
+            if not base_symbols:
+                return opportunities
+
+            sentiment_result = await market_analysis_service.market_sentiment(
+                ",".join(base_symbols[:6]),
+                user_id=user_profile.user_id,
+            )
+
+            if not sentiment_result.get("success"):
+                return opportunities
+
+            individual = sentiment_result.get("data", {}).get("individual_sentiment", {})
+            market_sentiment = sentiment_result.get("data", {}).get("market_sentiment", {})
+
+            required_capital = self._determine_required_capital(strategy_info, fallback=5000.0)
+
+            for base_symbol, payload in individual.items():
+                overall = payload.get("overall_sentiment", {})
+                score = self._parse_usd_value(overall.get("score"), 0.0)
+
+                if abs(score) < 0.2:
+                    continue
+
+                direction = overall.get("label", "neutral").upper()
+                confidence = max(30.0, min(90.0, abs(score) * 100))
+                profit_potential = max(300.0, required_capital * abs(score) * 0.4)
+                risk_level = self._score_to_risk_level(min(abs(score) * 1.5, 1.0))
+
+                opportunities.append(
+                    OpportunityResult(
+                        strategy_id=strategy_id,
+                        strategy_name=f"{strategy_name} ({base_symbol})",
+                        opportunity_type="community_signal",
+                        symbol=f"{base_symbol}/USDT",
+                        exchange="binance",
+                        profit_potential_usd=round(profit_potential, 2),
+                        confidence_score=confidence,
+                        risk_level=risk_level,
+                        required_capital_usd=required_capital,
+                        estimated_timeframe="1d",
+                        entry_price=None,
+                        exit_price=None,
+                        metadata={
+                            "sentiment_score": score,
+                            "sentiment_label": overall.get("label"),
+                            "timeframe_breakdown": payload.get("timeframe_breakdown", {}),
+                            "market_sentiment": market_sentiment,
+                        },
+                        discovered_at=datetime.utcnow(),
+                    )
+                )
+
+            self.logger.info(
+                "✅ Community strategy sentiment scanner completed",
+                scan_id=scan_id,
+                strategy_id=strategy_id,
+                opportunities=len(opportunities),
+            )
+
+        except Exception as exc:
+            self.logger.warning(
+                "Community strategy scan failed",
+                scan_id=scan_id,
+                strategy=strategy_info.get("strategy_id"),
+                error=str(exc),
+            )
+
+        return opportunities
+
     async def _analyze_futures_opportunity(self, symbol: str, user_id: str, scan_id: str) -> Optional[OpportunityResult]:
         """Analyze single symbol for futures opportunity with leverage calculation."""
-        
+
         try:
             # Call trading strategies service for futures analysis
             futures_result = await trading_strategies_service.execute_strategy(
@@ -2960,6 +3383,134 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         return opportunities
 
+    async def _scan_futures_arbitrage_opportunities(
+        self,
+        discovered_assets: Dict[str, List[Any]],
+        user_profile: UserOpportunityProfile,
+        scan_id: str,
+        portfolio_result: Dict[str, Any],
+    ) -> List[OpportunityResult]:
+        """Scan cross-market futures arbitrage opportunities using basis analysis."""
+
+        opportunities: List[OpportunityResult] = []
+
+        try:
+            strategy_id = "ai_futures_arbitrage"
+            owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
+
+            if strategy_id not in owned_strategy_ids:
+                self.logger.warning(
+                    "Strategy not in portfolio, scanning anyway",
+                    user_id=user_profile.user_id,
+                    scan_id=scan_id,
+                    strategy_id=strategy_id,
+                    portfolio_strategies=len(owned_strategy_ids),
+                )
+
+            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=10)
+            base_symbols = []
+            for symbol in symbols:
+                base = self._extract_base_symbol(symbol)
+                if base and base not in base_symbols:
+                    base_symbols.append(base)
+
+            for base_symbol in base_symbols:
+                try:
+                    basis_result = await trading_strategies_service.execute_strategy(
+                        function="basis_trade",
+                        symbol=base_symbol,
+                        parameters={"trade_type": "cash_carry"},
+                        user_id=user_profile.user_id,
+                        simulation_mode=True,
+                    )
+
+                    if not basis_result.get("success"):
+                        continue
+
+                    analysis = basis_result.get("basis_trade_analysis", {})
+                    basis_metrics = analysis.get("basis_analysis", {})
+                    recommendation = analysis.get("trade_recommendation", {})
+
+                    action = recommendation.get("action", "")
+                    if not action or action.upper().startswith("NO_TRADE"):
+                        continue
+
+                    expected_profit_pct = self._parse_usd_value(
+                        recommendation.get("expected_profit_pct"),
+                        default=0.0,
+                    )
+                    if expected_profit_pct <= 0:
+                        continue
+
+                    position_size = self._parse_usd_value(
+                        recommendation.get("position_size_recommendation"),
+                        default=25000.0,
+                    )
+                    profit_potential = position_size * (expected_profit_pct / 100)
+
+                    margin_required = self._parse_usd_value(
+                        recommendation.get("margin_required"),
+                        default=position_size * 0.2,
+                    )
+
+                    annualized_return = self._parse_usd_value(
+                        basis_metrics.get("annualized_return_pct"),
+                        default=expected_profit_pct,
+                    )
+                    confidence = max(25.0, min(95.0, abs(annualized_return)))
+
+                    required_capital = max(margin_required, 5000.0)
+                    futures_details = analysis.get("futures_info", {}).get("quarterly_future", {})
+
+                    opportunities.append(
+                        OpportunityResult(
+                            strategy_id=strategy_id,
+                            strategy_name=f"AI Futures Arbitrage ({base_symbol})",
+                            opportunity_type="futures_arbitrage",
+                            symbol=f"{base_symbol}/USDT",
+                            exchange=analysis.get("spot_info", {}).get("exchange", "binance"),
+                            profit_potential_usd=round(profit_potential, 2),
+                            confidence_score=confidence,
+                            risk_level=self._score_to_risk_level(abs(annualized_return) / 20.0),
+                            required_capital_usd=required_capital,
+                            estimated_timeframe=f"{futures_details.get('days_to_expiry', 60)}d",
+                            entry_price=analysis.get("spot_info", {}).get("price"),
+                            exit_price=futures_details.get("price"),
+                            metadata={
+                                "expected_profit_pct": expected_profit_pct,
+                                "annualized_return_pct": annualized_return,
+                                "trade_action": action,
+                                "basis_analysis": basis_metrics,
+                                "risk_assessment": analysis.get("risk_assessment", {}),
+                            },
+                            discovered_at=datetime.utcnow(),
+                        )
+                    )
+
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    self.logger.debug(
+                        "Basis trade analysis failed for symbol",
+                        symbol=base_symbol,
+                        scan_id=scan_id,
+                        error=str(exc),
+                    )
+                    continue
+
+            self.logger.info(
+                "✅ Futures arbitrage scanner completed",
+                scan_id=scan_id,
+                opportunities=len(opportunities),
+            )
+
+        except Exception as exc:
+            self.logger.error(
+                "Futures arbitrage scan failed",
+                scan_id=scan_id,
+                error=str(exc),
+            )
+
+        return opportunities
+
     async def _scan_complex_strategy_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Surface complex options strategy structures from the derivatives engine."""
 
@@ -3514,17 +4065,19 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _get_user_portfolio(self, user_id: str) -> Dict[str, Any]:
         """Get user's portfolio with active strategies."""
         try:
-            # Use the unified strategy service to get portfolio
-            from app.services.unified_strategy_service import UnifiedStrategyService, UnifiedStrategyPortfolio
-            unified_service = UnifiedStrategyService()
-            
-            portfolio_result: UnifiedStrategyPortfolio = await unified_service.get_user_strategy_portfolio(user_id)
-            
-            # Use canonical to_dict() method which properly filters active_strategies
-            portfolio_dict = portfolio_result.to_dict()
-            
-            # Return success with canonical schema
-            return {'success': True, **portfolio_dict}
+            portfolio_result = await self._get_user_portfolio_cached(user_id)
+
+            if portfolio_result.get("success") and portfolio_result.get("active_strategies") is not None:
+                return portfolio_result
+
+            admin_snapshot = await strategy_marketplace_service.get_admin_portfolio_snapshot(user_id)
+            if admin_snapshot and admin_snapshot.get("success"):
+                return admin_snapshot
+
+            # Ensure consistent structure even on degraded responses
+            portfolio_result.setdefault("active_strategies", [])
+            portfolio_result.setdefault("success", False)
+            return portfolio_result
         except Exception as e:
             self.logger.exception("Failed to get user portfolio", extra={"user_id": user_id})
             return {'success': False, 'active_strategies': [], 'error': str(e)}

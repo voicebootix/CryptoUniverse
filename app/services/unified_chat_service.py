@@ -16,7 +16,7 @@ import copy
 import re
 import uuid
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Dict, List, Optional, Any, AsyncGenerator, Union, Tuple, Iterable
 from dataclasses import dataclass, asdict
@@ -643,7 +643,7 @@ class UnifiedChatService(LoggerMixin):
                     "type": "collect_investor_profile",
                     "missing_fields": missing_fields,
                 },
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
             }
 
             if stream:
@@ -685,7 +685,7 @@ class UnifiedChatService(LoggerMixin):
                 "interface": interface.value,
                 "conversation_mode": conversation_mode.value,
             },
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
         }
 
         if stream:
@@ -1308,7 +1308,7 @@ class UnifiedChatService(LoggerMixin):
         ttl_seconds = 120 if partial else self._opportunity_cache_ttl
         cache_record = {
             "payload": copy.deepcopy(payload),
-            "cached_at": datetime.utcnow().isoformat(),
+            "cached_at": datetime.now(timezone.utc).isoformat(),
             "partial": partial,
             "ttl": ttl_seconds,
         }
@@ -1431,7 +1431,7 @@ class UnifiedChatService(LoggerMixin):
                 "message": message,
                 "strategies_completed": 0,
                 "total_strategies": 0,
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
             },
             "background_scan": True,
         }
@@ -1511,7 +1511,7 @@ class UnifiedChatService(LoggerMixin):
             "total_strategies": total_int,
             "percent": percent,
             "metadata": metadata,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
         self._opportunity_progress[user_id] = progress_snapshot
@@ -1551,7 +1551,7 @@ class UnifiedChatService(LoggerMixin):
                 "strategies_completed": snapshot.get("strategies_completed"),
                 "total_strategies": snapshot.get("total_strategies"),
             },
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         return event, signature
@@ -1723,7 +1723,7 @@ class UnifiedChatService(LoggerMixin):
         - 5-phase execution
         - Real data only
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         
         # Get or create session
         if not session_id:
@@ -1787,7 +1787,7 @@ class UnifiedChatService(LoggerMixin):
                     "intent": intent_analysis["intent"],
                     "requires_action": requirements_check.get("requires_action", False),
                     "action_data": requirements_check.get("action_data"),
-                    "timestamp": datetime.utcnow()
+                    "timestamp": datetime.now(timezone.utc)
                 }
                 
                 if stream:
@@ -1860,7 +1860,7 @@ class UnifiedChatService(LoggerMixin):
                                 "type": "credit_purchase",
                                 "required_credits": charge_request["credits"],
                             },
-                            "timestamp": datetime.utcnow(),
+                            "timestamp": datetime.now(timezone.utc),
                         }
 
                 response = await self._generate_complete_response(
@@ -1892,7 +1892,7 @@ class UnifiedChatService(LoggerMixin):
                 "success": False,
                 "error": str(e),
                 "session_id": session_id,
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now(timezone.utc)
             }
 
             if charge_context:
@@ -1936,7 +1936,7 @@ class UnifiedChatService(LoggerMixin):
             session_id=session_id,
         )
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         self.sessions[created_session_id] = ChatSession(
             session_id=created_session_id,
             user_id=user_id,
@@ -1994,7 +1994,7 @@ class UnifiedChatService(LoggerMixin):
                     "trading_mode": trading_mode.value,
                 }
 
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             self.sessions[session_id] = ChatSession(
                 session_id=session_id,
                 user_id=user_id,
@@ -2007,7 +2007,7 @@ class UnifiedChatService(LoggerMixin):
                 messages=[],
             )
         else:
-            self.sessions[session_id].last_activity = datetime.utcnow()
+            self.sessions[session_id].last_activity = datetime.now(timezone.utc)
 
         return self.sessions[session_id]
     
@@ -2847,14 +2847,14 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                     "response_time": response["elapsed_time"],
                     "context_data_keys": list(context_data.keys())
                 },
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now(timezone.utc)
             }
         else:
             return {
                 "success": False,
                 "error": response["error"],
                 "session_id": session.session_id,
-                "timestamp": datetime.utcnow()
+                "timestamp": datetime.now(timezone.utc)
             }
     
     async def _generate_streaming_response(
@@ -2884,7 +2884,7 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                 yield {
                     "type": "error",
                     "content": "Insufficient credits for this operation. Please purchase additional credits to continue.",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 return
 
@@ -2892,7 +2892,7 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
         yield {
             "type": "processing",
             "content": "Analyzing your request...",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
         intent = intent_analysis["intent"]
@@ -2935,7 +2935,7 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
             yield {
                 "type": "error",
                 "content": "We ran into an issue preparing the data for your request. Please try again in a moment.",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
             if charge_request and user_id and charge_context:
                 try:
@@ -2983,7 +2983,7 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                         "message": stage_message,
                         "percent": percent_complete,
                     },
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 progress_emitted = True
 
@@ -3002,7 +3002,7 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                     "message": followup_message,
                     "percent": followup_percent,
                 },
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         
         personality = self.personalities[session.trading_mode]
@@ -3026,7 +3026,7 @@ Respond naturally using ONLY the real data provided."""
                 yield {
                     "type": "response",
                     "content": chunk,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "personality": personality["name"]
                 }
 
@@ -3046,7 +3046,7 @@ Respond naturally using ONLY the real data provided."""
                         yield {
                             "type": "response",
                             "content": additional_content,
-                            "timestamp": datetime.utcnow().isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
                             "personality": personality["name"],
                             "persona_applied": True
                         }
@@ -3060,7 +3060,7 @@ Respond naturally using ONLY the real data provided."""
                         yield {
                             "type": "persona_enriched",
                             "content": persona_response,
-                            "timestamp": datetime.utcnow().isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
                             "personality": personality["name"],
                             "replaces_previous": True
                         }
@@ -3085,7 +3085,7 @@ Respond naturally using ONLY the real data provided."""
                     "content": "This action requires your confirmation. Would you like to proceed?",
                     "action": "confirm_action",
                     "decision_id": decision_id,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
 
             # Save conversation with persona-applied response
@@ -3108,7 +3108,7 @@ Respond naturally using ONLY the real data provided."""
 
         yield {
             "type": "complete",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
     
     def _build_response_prompt(
@@ -3891,8 +3891,8 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "intent": intent_analysis["intent"].value,
                     "context_data": context_data,
                     "conversation_mode": conversation_mode.value,
-                    "created_at": datetime.utcnow().isoformat(),
-                    "expires_at": (datetime.utcnow() + timedelta(minutes=5)).isoformat()
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
                 }
                 await redis.setex(
                     f"pending_decision:{decision_id}",
@@ -4559,7 +4559,7 @@ Provide a helpful response using the real data available. Never use placeholder 
         for session_id, session in self.sessions.items():
             if session.user_id == user_id:
                 # Consider session active if used in last 24 hours
-                if (datetime.utcnow() - session.last_activity).total_seconds() < 86400:
+                if (datetime.now(timezone.utc) - session.last_activity).total_seconds() < 86400:
                     active_sessions.append(session_id)
         return active_sessions
 
@@ -4576,7 +4576,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "change_24h": market_info.get("change_24h", 0),
                     "volume_24h": market_info.get("volume_24h", 0),
                     "trend": "bullish" if market_info.get("change_24h", 0) > 0 else "bearish",
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.now(timezone.utc).isoformat()
                 }
             else:
                 return {"symbol": symbol, "current_price": 0, "error": "Symbol data not available"}
@@ -4595,7 +4595,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                 "indicators": tech_data.get("indicators", {}),
                 "trend": tech_data.get("overall_trend", "neutral"),
                 "strength": tech_data.get("signal_strength", 0),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
         except Exception as e:
             self.logger.error("Technical analysis failed", error=str(e), symbol=symbol)
@@ -4619,7 +4619,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                 "fear_greed_index": market_overview.get("market_fear_greed_index", 50),
                 "factors": risk_factors,
                 "risk_level": "high" if len(risk_factors) > 1 else "medium" if risk_factors else "low",
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
         except Exception as e:
             self.logger.error("Market risk analysis failed", error=str(e), user_id=user_id)
@@ -4655,7 +4655,7 @@ Provide a helpful response using the real data available. Never use placeholder 
                     "error": rebalancing_summary.get("error", "Unable to perform rebalancing analysis"),
                     "details": rebalancing_summary,
                     "portfolio_snapshot": portfolio_snapshot,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
 
             # Enrich the summary with current risk diagnostics

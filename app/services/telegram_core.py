@@ -13,7 +13,7 @@ import asyncio
 import json
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Tuple, TYPE_CHECKING
 import uuid
 import hmac
@@ -650,7 +650,7 @@ class MessageRouter(LoggerMixin):
             last_name=user_data.get("last_name"),
             is_authenticated=True,  # Simplified for demo
             permissions=["read", "trade", "admin"],  # Simplified for demo
-            last_activity=datetime.utcnow()
+            last_activity=datetime.now(timezone.utc)
         )
     
     async def _is_user_authenticated(self, user_id: str) -> bool:

@@ -870,7 +870,9 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             )
             
             if backtest_result.get("success"):
-                return backtest_result["results"]
+                if "results" in backtest_result:
+                    return backtest_result["results"]
+                return backtest_result
             else:
                 # Fallback to strategy-specific realistic results
                 return self._get_realistic_backtest_by_strategy(strategy_func)
