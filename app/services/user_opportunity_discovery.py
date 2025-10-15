@@ -596,23 +596,37 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         
         discovery_start_time = time.time()
         scan_id = existing_scan_id or f"user_discovery_{user_id}_{int(time.time())}"
-        
+
         self.logger.info("🔍 ENTERPRISE User Opportunity Discovery Starting",
                         scan_id=scan_id,
                         user_id=user_id,
                         force_refresh=force_refresh)
-        
+
+        metrics: Dict[str, Any] = {
+            "scan_id": scan_id,
+            "start_time": discovery_start_time,
+            "portfolio_fetch_time": 0.0,
+            "asset_discovery_time": 0.0,
+            "strategy_scan_times": {},
+            "total_strategies": 0,
+            "total_opportunities": 0,
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "timeouts": 0,
+            "errors": [],
+        }
+
         try:
             # Initialize if needed
             if not self.redis:
                 await self.async_init()
-            
+
             # STEP 1: Build user opportunity profile
             user_profile = await self._build_user_opportunity_profile(user_id)
-            
+
             if user_profile.active_strategy_count == 0:
                 return await self._handle_no_strategies_user(user_id, scan_id)
-            
+
             # STEP 2: Check cache first (unless force refresh)
             if not force_refresh:
                 cached_opportunities = await self._get_cached_opportunities(user_id, user_profile)
@@ -623,8 +637,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     return cached_opportunities
             
             # STEP 3: Load portfolio data for this discovery
+            portfolio_fetch_start = time.time()
             portfolio_result = await self._get_user_portfolio(user_id)
-            
+            metrics["portfolio_fetch_time"] = time.time() - portfolio_fetch_start
+
             if not portfolio_result.get("success") or not portfolio_result.get("active_strategies"):
                 self.logger.warning("❌ NO STRATEGIES FOUND IN PORTFOLIO",
                                   scan_id=scan_id,
@@ -642,10 +658,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                            strategies=[s.get("strategy_id") for s in active_strategies])
 
             # STEP 4: Get enterprise asset discovery based on user tier
+            asset_discovery_start = time.time()
             discovered_assets = await enterprise_asset_filter.discover_all_assets_with_volume_filtering(
                 min_tier=user_profile.max_asset_tier,
                 force_refresh=force_refresh
             )
+            metrics["asset_discovery_time"] = time.time() - asset_discovery_start
 
             if not discovered_assets or sum(len(assets) for assets in discovered_assets.values()) == 0:
                 self.logger.warning("No assets discovered", scan_id=scan_id, user_tier=user_profile.user_tier)
@@ -659,6 +677,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             total_strategies = len(active_strategies)
             metrics['total_strategies'] = total_strategies
             strategies_completed = 0
+            strategy_timings: Dict[str, float] = {}
 
             initial_snapshot = self._assemble_response(
                 user_id=user_id,
@@ -678,13 +697,18 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             # Create semaphore for bounded concurrency - Optimized for performance
             strategy_semaphore = asyncio.Semaphore(15)  # Run max 15 strategies concurrently (increased from 3)
-            
+
             async def scan_strategy_with_semaphore(strategy_info):
+                strategy_identifier = strategy_info.get("strategy_id", "Unknown")
+                start_time = time.time()
                 async with strategy_semaphore:
-                    return await self._scan_strategy_opportunities(
-                        strategy_info, discovered_assets, user_profile, scan_id, portfolio_result
-                    )
-            
+                    try:
+                        return await self._scan_strategy_opportunities(
+                            strategy_info, discovered_assets, user_profile, scan_id, portfolio_result
+                        )
+                    finally:
+                        strategy_timings[strategy_identifier] = time.time() - start_time
+
             # Run all strategy scans concurrently
             strategy_tasks = [
                 scan_strategy_with_semaphore(strategy)
@@ -704,6 +728,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                       scan_id=scan_id,
                                       strategy=strategy_name,
                                       error=str(result))
+                    metrics['errors'].append({
+                        "strategy_id": strategy_id,
+                        "strategy_name": strategy_name,
+                        "error": str(result),
+                    })
+                    if isinstance(result, asyncio.TimeoutError):
+                        metrics['timeouts'] += 1
                 else:
                     # CRITICAL DEBUG: Log what each strategy scanner returned
                     self.logger.info("🔍 STRATEGY SCAN RESULT",
@@ -767,7 +798,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     snapshot_response,
                     partial=True,
                 )
-            
+
+            metrics['strategy_scan_times'] = strategy_timings
             # STEP 6: Rank and filter opportunities
             ranked_opportunities = await self._rank_and_filter_opportunities(
                 all_opportunities, user_profile, scan_id
