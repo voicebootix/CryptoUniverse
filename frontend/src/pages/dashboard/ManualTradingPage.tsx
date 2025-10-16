@@ -822,6 +822,26 @@ const ManualTradingPage: React.FC = () => {
 
   const workflowDisabled = isStreaming || isAnalyzing;
 
+  useEffect(() => {
+    if (!connectionStatus) {
+      return;
+    }
+
+    const normalizedStatus = connectionStatus.toLowerCase();
+    const message =
+      connectionStatus === 'OPEN'
+        ? 'AI consensus channel connected.'
+        : `AI consensus connection ${normalizedStatus}.`;
+
+    pushWorkflowLog('info', message);
+  }, [connectionStatus, pushWorkflowLog]);
+
+  useEffect(() => {
+    if (isStreaming && activeTab !== 'workflow') {
+      setActiveTab('workflow');
+    }
+  }, [isStreaming, activeTab]);
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
