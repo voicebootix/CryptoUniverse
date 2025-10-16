@@ -469,6 +469,7 @@ const ManualTradingPage: React.FC = () => {
             if (data.type === 'complete') {
               controller.abort();
               setIsStreaming(false);
+              streamingControllerRef.current = null;
               handlePhaseUpdate(data.metadata?.phase || 'completed', data.content || 'Workflow completed.');
               setCurrentPhase(ExecutionPhase.COMPLETED);
 
@@ -493,6 +494,7 @@ const ManualTradingPage: React.FC = () => {
             if (data.type === 'error') {
               controller.abort();
               setIsStreaming(false);
+              streamingControllerRef.current = null;
               pushWorkflowLog('error', data.error || 'AI workflow encountered an error.');
             }
           } catch (error) {
@@ -502,20 +504,24 @@ const ManualTradingPage: React.FC = () => {
         },
         onerror: (error) => {
           setIsStreaming(false);
+          streamingControllerRef.current = null;
           pushWorkflowLog('error', `Streaming error: ${error.message}`);
           controller.abort();
           throw error;
         },
         onclose: () => {
           setIsStreaming(false);
+          streamingControllerRef.current = null;
+          pushWorkflowLog('info', 'AI workflow connection closed.');
         }
       });
-    } catch (error: any) {
-      setIsStreaming(false);
-      streamingControllerRef.current?.abort();
-      pushWorkflowLog('error', error?.message || 'AI workflow failed to start.');
-    }
-  }, [
+      } catch (error: any) {
+        setIsStreaming(false);
+        streamingControllerRef.current?.abort();
+        streamingControllerRef.current = null;
+        pushWorkflowLog('error', error?.message || 'AI workflow failed to start.');
+      }
+    }, [
     isStreaming,
     toast,
     resetWorkflowState,
