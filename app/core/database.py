@@ -210,7 +210,8 @@ class DatabaseManager:
     def __init__(self):
         self._engine = engine
         self._query_times = {}  # Track query performance
-        self._slow_query_threshold = 1.0  # 1 second threshold
+        self._slow_query_threshold = 0.5  # Align with engine-level semantics (0.5s)
+        self._max_tracked_queries = 1000  # Bounded tracking to prevent memory growth
     
     async def connect(self) -> None:
         """Connect to database."""
@@ -281,22 +282,17 @@ class DatabaseManager:
                 
                 execution_time = time.time() - start_time
                 
-                # Track query performance
-                if query_name not in self._query_times:
-                    self._query_times[query_name] = []
-                self._query_times[query_name].append(execution_time)
+                # Track query performance with bounded tracking
+                if len(self._query_times) < self._max_tracked_queries:
+                    if query_name not in self._query_times:
+                        self._query_times[query_name] = []
+                    self._query_times[query_name].append(execution_time)
+                elif query_name in self._query_times:
+                    # Only track if already being tracked
+                    self._query_times[query_name].append(execution_time)
                 
-                # Log slow queries
-                if execution_time > self._slow_query_threshold:
-                    import structlog
-                    logger = structlog.get_logger()
-                    logger.warning(
-                        "Slow database query detected",
-                        query_name=query_name,
-                        execution_time=execution_time,
-                        threshold=self._slow_query_threshold,
-                        query_preview=query[:100] + "..." if len(query) > 100 else query
-                    )
+                # Note: Slow query warnings are handled by engine-level event handlers
+                # to avoid duplication. This method focuses on performance tracking.
                 
                 return result
                 

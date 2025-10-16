@@ -16,6 +16,7 @@ Date: 2025-09-12
 
 import asyncio
 import copy
+import dataclasses
 import json
 import math
 import re
@@ -2718,6 +2719,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         """Fallback scanner for user-created or community strategies."""
 
         opportunities: List[OpportunityResult] = []
+        
+        # Reference portfolio_result to silence linter warnings
+        _ = portfolio_result
 
         try:
             strategy_id = strategy_info.get("strategy_id", "community")
@@ -2775,6 +2779,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         metadata={
                             "sentiment_score": score,
                             "sentiment_label": overall.get("label"),
+                            "direction": direction,
                             "timeframe_breakdown": payload.get("timeframe_breakdown", {}),
                             "market_sentiment": market_sentiment,
                         },
@@ -4439,15 +4444,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with pro-level analysis
             enhanced_opportunities = []
             for opp in base_opportunities:
-                # Add pro-level metadata
-                opp["strategy_type"] = "funding_arbitrage_pro"
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 15)
-                opp["metadata"]["pro_features"] = {
-                    "advanced_spread_analysis": True,
-                    "multi_exchange_arbitrage": True,
-                    "risk_adjusted_returns": True
-                }
-                enhanced_opportunities.append(opp)
+                # Create new OpportunityResult with pro-level enhancements
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="funding_arbitrage_pro",
+                    confidence_score=min(95, opp.confidence_score + 15),
+                    metadata={
+                        **opp.metadata,
+                        "pro_features": {
+                            "advanced_spread_analysis": True,
+                            "multi_exchange_arbitrage": True,
+                            "risk_adjusted_returns": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4468,14 +4479,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with pro-level analysis
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "market_making_pro"
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 10)
-                opp["metadata"]["pro_features"] = {
-                    "advanced_order_book_analysis": True,
-                    "dynamic_spread_adjustment": True,
-                    "liquidity_provision_optimization": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="market_making_pro",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "pro_features": {
+                            "advanced_order_book_analysis": True,
+                            "dynamic_spread_adjustment": True,
+                            "liquidity_provision_optimization": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4496,14 +4513,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with engine-level analysis
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "scalping_engine"
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 5)
-                opp["metadata"]["engine_features"] = {
-                    "high_frequency_analysis": True,
-                    "micro_trend_detection": True,
-                    "rapid_execution_optimization": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="scalping_engine",
+                    confidence_score=min(95, opp.confidence_score + 5),
+                    metadata={
+                        **opp.metadata,
+                        "engine_features": {
+                            "high_frequency_analysis": True,
+                            "micro_trend_detection": True,
+                            "rapid_execution_optimization": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4524,15 +4547,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with swing-specific analysis
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "swing_navigator"
-                opp["timeframe"] = "4h"  # Swing trading timeframe
-                opp["confidence"] = min(90, opp.get("confidence", 70) + 5)
-                opp["metadata"]["swing_features"] = {
-                    "trend_continuation_analysis": True,
-                    "swing_point_identification": True,
-                    "multi_timeframe_confirmation": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="swing_navigator",
+                    estimated_timeframe="4h",  # Swing trading timeframe
+                    confidence_score=min(90, opp.confidence_score + 5),
+                    metadata={
+                        **opp.metadata,
+                        "swing_features": {
+                            "trend_continuation_analysis": True,
+                            "swing_point_identification": True,
+                            "multi_timeframe_confirmation": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4553,14 +4582,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with position management features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "position_manager"
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 10)
-                opp["metadata"]["position_features"] = {
-                    "dynamic_position_sizing": True,
-                    "risk_adjusted_allocation": True,
-                    "portfolio_correlation_analysis": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="position_manager",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "position_features": {
+                            "dynamic_position_sizing": True,
+                            "risk_adjusted_allocation": True,
+                            "portfolio_correlation_analysis": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4581,14 +4616,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with guardian features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "risk_guardian"
-                opp["confidence"] = min(98, opp.get("confidence", 70) + 15)
-                opp["metadata"]["guardian_features"] = {
-                    "real_time_risk_monitoring": True,
-                    "automatic_hedge_activation": True,
-                    "portfolio_protection_alerts": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="risk_guardian",
+                    confidence_score=min(98, opp.confidence_score + 15),
+                    metadata={
+                        **opp.metadata,
+                        "guardian_features": {
+                            "real_time_risk_monitoring": True,
+                            "automatic_hedge_activation": True,
+                            "portfolio_protection_alerts": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4609,14 +4650,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with optimizer features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "portfolio_optimizer"
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 10)
-                opp["metadata"]["optimizer_features"] = {
-                    "advanced_allocation_algorithms": True,
-                    "dynamic_rebalancing": True,
-                    "risk_return_optimization": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="portfolio_optimizer",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "optimizer_features": {
+                            "advanced_allocation_algorithms": True,
+                            "dynamic_rebalancing": True,
+                            "risk_return_optimization": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4637,14 +4684,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with analytics features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "strategy_analytics"
-                opp["confidence"] = min(90, opp.get("confidence", 70) + 5)
-                opp["metadata"]["analytics_features"] = {
-                    "performance_attribution": True,
-                    "strategy_correlation_analysis": True,
-                    "predictive_analytics": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="strategy_analytics",
+                    confidence_score=min(90, opp.confidence_score + 5),
+                    metadata={
+                        **opp.metadata,
+                        "analytics_features": {
+                            "performance_attribution": True,
+                            "strategy_correlation_analysis": True,
+                            "predictive_analytics": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4665,14 +4718,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with trader features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "momentum_trader"
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 10)
-                opp["metadata"]["trader_features"] = {
-                    "advanced_momentum_indicators": True,
-                    "trend_strength_analysis": True,
-                    "entry_exit_optimization": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="momentum_trader",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "trader_features": {
+                            "advanced_momentum_indicators": True,
+                            "trend_strength_analysis": True,
+                            "entry_exit_optimization": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4693,14 +4752,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with pro features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "mean_reversion_pro"
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 15)
-                opp["metadata"]["pro_features"] = {
-                    "advanced_statistical_models": True,
-                    "multi_timeframe_mean_reversion": True,
-                    "volatility_adjusted_signals": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="mean_reversion_pro",
+                    confidence_score=min(95, opp.confidence_score + 15),
+                    metadata={
+                        **opp.metadata,
+                        "pro_features": {
+                            "advanced_statistical_models": True,
+                            "multi_timeframe_mean_reversion": True,
+                            "volatility_adjusted_signals": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4721,14 +4786,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with hunter features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "breakout_hunter"
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 10)
-                opp["metadata"]["hunter_features"] = {
-                    "advanced_pattern_recognition": True,
-                    "volume_confirmation_analysis": True,
-                    "false_breakout_filtering": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="breakout_hunter",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "hunter_features": {
+                            "advanced_pattern_recognition": True,
+                            "volume_confirmation_analysis": True,
+                            "false_breakout_filtering": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4749,14 +4820,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with suite features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "algorithmic_suite"
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 10)
-                opp["metadata"]["suite_features"] = {
-                    "multi_strategy_coordination": True,
-                    "adaptive_algorithm_selection": True,
-                    "cross_strategy_optimization": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="algorithmic_suite",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "suite_features": {
+                            "multi_strategy_coordination": True,
+                            "adaptive_algorithm_selection": True,
+                            "cross_strategy_optimization": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4777,14 +4854,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with trader features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "pairs_trader"
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 10)
-                opp["metadata"]["trader_features"] = {
-                    "advanced_correlation_analysis": True,
-                    "cointegration_testing": True,
-                    "pairs_selection_optimization": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="pairs_trader",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "trader_features": {
+                            "advanced_correlation_analysis": True,
+                            "cointegration_testing": True,
+                            "pairs_selection_optimization": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4805,14 +4888,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with pro features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "statistical_arbitrage_pro"
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 15)
-                opp["metadata"]["pro_features"] = {
-                    "advanced_statistical_models": True,
-                    "machine_learning_enhancement": True,
-                    "high_frequency_execution": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="statistical_arbitrage_pro",
+                    confidence_score=min(95, opp.confidence_score + 15),
+                    metadata={
+                        **opp.metadata,
+                        "pro_features": {
+                            "advanced_statistical_models": True,
+                            "machine_learning_enhancement": True,
+                            "high_frequency_execution": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4833,14 +4922,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with maker features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "market_maker"
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 10)
-                opp["metadata"]["maker_features"] = {
-                    "advanced_liquidity_provision": True,
-                    "dynamic_spread_management": True,
-                    "inventory_risk_management": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="market_maker",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "maker_features": {
+                            "advanced_liquidity_provision": True,
+                            "dynamic_spread_management": True,
+                            "inventory_risk_management": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4861,14 +4956,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with pro engine features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "scalping_engine_pro"
-                opp["confidence"] = min(98, opp.get("confidence", 70) + 15)
-                opp["metadata"]["pro_engine_features"] = {
-                    "ultra_high_frequency_analysis": True,
-                    "microsecond_execution_optimization": True,
-                    "advanced_latency_arbitrage": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="scalping_engine_pro",
+                    confidence_score=min(98, opp.confidence_score + 15),
+                    metadata={
+                        **opp.metadata,
+                        "pro_engine_features": {
+                            "ultra_high_frequency_analysis": True,
+                            "microsecond_execution_optimization": True,
+                            "advanced_latency_arbitrage": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             
@@ -4889,15 +4990,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Enhance with pro navigator features
             enhanced_opportunities = []
             for opp in base_opportunities:
-                opp["strategy_type"] = "swing_navigator_pro"
-                opp["timeframe"] = "4h"  # Swing trading timeframe
-                opp["confidence"] = min(95, opp.get("confidence", 70) + 15)
-                opp["metadata"]["pro_navigator_features"] = {
-                    "advanced_trend_analysis": True,
-                    "multi_timeframe_synthesis": True,
-                    "predictive_swing_identification": True
-                }
-                enhanced_opportunities.append(opp)
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    strategy_type="swing_navigator_pro",
+                    estimated_timeframe="4h",  # Swing trading timeframe
+                    confidence_score=min(95, opp.confidence_score + 15),
+                    metadata={
+                        **opp.metadata,
+                        "pro_navigator_features": {
+                            "advanced_trend_analysis": True,
+                            "multi_timeframe_synthesis": True,
+                            "predictive_swing_identification": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
             
             return enhanced_opportunities
             

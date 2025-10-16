@@ -2,12 +2,26 @@
 -- ENTERPRISE DATABASE OPTIMIZATION SCRIPT
 -- Phase 4: Performance Optimization
 -- =====================================================
+--
+-- ⚠️  CRITICAL: TRANSACTION REQUIREMENTS
+-- =====================================================
+-- This script contains CREATE INDEX CONCURRENTLY and VACUUM statements
+-- that MUST be executed outside a transaction to avoid failures.
+--
+-- For manual execution:
+--   psql -d your_database -f database_optimization.sql
+--
+-- For migrations (Alembic):
+--   Use autocommit_block with postgresql_concurrently=True
+--   or equivalent DB client settings
+--
+-- =====================================================
 
 -- 1. CRITICAL INDEXES FOR FREQUENTLY QUERIED COLUMNS
 -- =====================================================
 
 -- User-related indexes
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_id ON users(id);
+-- Note: idx_users_id removed - primary key already indexed
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_created_at ON users(created_at);
 
@@ -27,7 +41,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_created_at ON chat_mes
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_session_id_created_at ON chat_messages(session_id, created_at);
 
 -- Trading strategies indexes
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_trading_strategies_id ON trading_strategies(id);
+-- Note: idx_trading_strategies_id removed - primary key already indexed
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_trading_strategies_strategy_type ON trading_strategies(strategy_type);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_trading_strategies_created_at ON trading_strategies(created_at);
 
@@ -130,13 +144,25 @@ ANALYZE system_configuration;
 -- 6. QUERY OPTIMIZATION SETTINGS
 -- =====================================================
 
--- Optimize PostgreSQL settings for better performance
-ALTER SYSTEM SET shared_buffers = '256MB';
-ALTER SYSTEM SET effective_cache_size = '1GB';
-ALTER SYSTEM SET maintenance_work_mem = '64MB';
-ALTER SYSTEM SET checkpoint_completion_target = 0.9;
-ALTER SYSTEM SET wal_buffers = '16MB';
-ALTER SYSTEM SET default_statistics_target = 100;
+-- PostgreSQL cluster-level optimization (requires superuser privileges)
+-- =====================================================
+-- The following ALTER SYSTEM statements require superuser privileges
+-- and cluster-wide changes. They should be executed by DBAs or in
+-- infrastructure-as-code playbooks, not in application-managed scripts.
+--
+-- Required cluster-level changes:
+-- ALTER SYSTEM SET shared_buffers = '256MB';
+-- ALTER SYSTEM SET effective_cache_size = '1GB';
+-- ALTER SYSTEM SET maintenance_work_mem = '64MB';
+-- ALTER SYSTEM SET checkpoint_completion_target = 0.9;
+-- ALTER SYSTEM SET wal_buffers = '16MB';
+-- ALTER SYSTEM SET default_statistics_target = 100;
+--
+-- After executing these commands, restart PostgreSQL or reload configuration:
+-- SELECT pg_reload_conf();
+--
+-- For application-level tuning, use session-level SET commands in
+-- database connection initialization instead.
 
 -- 7. VACUUM AND REINDEX
 -- =====================================================

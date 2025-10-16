@@ -2759,7 +2759,8 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         
         # Get portfolio position information
         positions = portfolio_snapshot.get("positions", {})
-        held_qty = positions.get(symbol, 0)
+        position_data = positions.get(symbol, {})
+        held_qty = position_data.get("quantity", 0) if isinstance(position_data, dict) else 0
         available_cash = portfolio_snapshot.get("cash", 0)
         desired_qty = 0.1  # Base quantity
         
