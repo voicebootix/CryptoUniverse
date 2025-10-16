@@ -307,7 +307,7 @@ const ManualTradingPage: React.FC = () => {
     setStreamingContent('');
     setAiSummary(null);
     setPhaseHistory([]);
-    setCurrentPhase(ExecutionPhase.ANALYSIS);
+    setCurrentPhase(ExecutionPhase.IDLE);
   }, []);
 
   const buildWorkflowMessage = useCallback(() => {
@@ -420,6 +420,7 @@ const ManualTradingPage: React.FC = () => {
       const controller = new AbortController();
       streamingControllerRef.current = controller;
       setIsStreaming(true);
+      setCurrentPhase(ExecutionPhase.ANALYSIS);
 
       let fullContent = '';
       let streamMetadata: Record<string, any> = {};
