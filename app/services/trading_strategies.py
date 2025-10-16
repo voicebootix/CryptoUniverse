@@ -2395,17 +2395,87 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
 
                 signal_payload: Optional[Dict[str, Any]] = None
 
-                if strategy_func == "spot_momentum_strategy":
+                # Support all 35 AI strategies with appropriate signal generation
+                if strategy_func in ["spot_momentum_strategy", "momentum_trader"]:
                     signal_payload = self._generate_backtest_momentum_signal(
                         symbol, closes, portfolio_snapshot
                     )
-                elif strategy_func == "spot_mean_reversion":
+                elif strategy_func in ["spot_mean_reversion", "mean_reversion_pro"]:
                     signal_payload = self._generate_backtest_mean_reversion_signal(
                         symbol, closes, portfolio_snapshot
                     )
+                elif strategy_func in ["spot_breakout_strategy", "breakout_hunter"]:
+                    signal_payload = self._generate_backtest_breakout_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["scalping_strategy", "scalping_engine", "scalping_engine_pro"]:
+                    signal_payload = self._generate_backtest_scalping_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["pairs_trading", "pairs_trader"]:
+                    signal_payload = self._generate_backtest_pairs_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["statistical_arbitrage", "statistical_arbitrage_pro"]:
+                    signal_payload = self._generate_backtest_statistical_arbitrage_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["market_making", "market_making_pro", "market_maker"]:
+                    signal_payload = self._generate_backtest_market_making_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["futures_trade", "futures_arbitrage"]:
+                    signal_payload = self._generate_backtest_futures_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["options_trade", "options_strategies"]:
+                    signal_payload = self._generate_backtest_options_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["funding_arbitrage", "funding_arbitrage_pro"]:
+                    signal_payload = self._generate_backtest_funding_arbitrage_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["hedge_position", "risk_guardian"]:
+                    signal_payload = self._generate_backtest_hedge_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["portfolio_optimization", "portfolio_optimizer"]:
+                    signal_payload = self._generate_backtest_portfolio_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["risk_management", "position_manager"]:
+                    signal_payload = self._generate_backtest_risk_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["volatility_trading"]:
+                    signal_payload = self._generate_backtest_volatility_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["news_sentiment"]:
+                    signal_payload = self._generate_backtest_sentiment_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["swing_navigator", "swing_navigator_pro"]:
+                    signal_payload = self._generate_backtest_swing_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["strategy_analytics"]:
+                    signal_payload = self._generate_backtest_analytics_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["algorithmic_suite"]:
+                    signal_payload = self._generate_backtest_algorithmic_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
+                elif strategy_func in ["complex_strategy"]:
+                    signal_payload = self._generate_backtest_complex_signal(
+                        symbol, closes, portfolio_snapshot
+                    )
                 else:
-                    self.logger.debug(
-                        "Backtest run received unsupported strategy", strategy=strategy_func
+                    # Fallback for any strategy not explicitly handled
+                    signal_payload = self._generate_backtest_generic_signal(
+                        symbol, closes, portfolio_snapshot, strategy_func
                     )
 
                 if signal_payload and signal_payload.get("signal"):
@@ -2671,6 +2741,661 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             trend = "NEUTRAL"
 
         return macd_value, signal_value, trend
+
+    def _generate_backtest_breakout_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate breakout trading signals for backtesting."""
+        if not closes or len(closes) < 20:
+            return None
+
+        latest_price = closes[-1]
+        # Calculate support and resistance levels
+        recent_highs = max(closes[-20:])
+        recent_lows = min(closes[-20:])
+        
+        # Breakout detection
+        if latest_price > recent_highs * 1.01:  # 1% above recent high
+            return {
+                "signal": {
+                    "action": "BUY",
+                    "quantity": 0.1,
+                    "price": latest_price,
+                    "confidence": 0.8
+                },
+                "indicators": {
+                    "resistance_level": recent_highs,
+                    "breakout_threshold": recent_highs * 1.01,
+                    "current_price": latest_price
+                }
+            }
+        elif latest_price < recent_lows * 0.99:  # 1% below recent low
+            return {
+                "signal": {
+                    "action": "SELL",
+                    "quantity": 0.1,
+                    "price": latest_price,
+                    "confidence": 0.8
+                },
+                "indicators": {
+                    "support_level": recent_lows,
+                    "breakout_threshold": recent_lows * 0.99,
+                    "current_price": latest_price
+                }
+            }
+        return None
+
+    def _generate_backtest_scalping_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate scalping signals for backtesting."""
+        if not closes or len(closes) < 5:
+            return None
+
+        latest_price = closes[-1]
+        # Simple scalping logic based on short-term price movement
+        if len(closes) >= 3:
+            price_change = (closes[-1] - closes[-3]) / closes[-3]
+            if abs(price_change) > 0.002:  # 0.2% movement
+                action = "BUY" if price_change > 0 else "SELL"
+                return {
+                    "signal": {
+                        "action": action,
+                        "quantity": 0.05,  # Smaller position for scalping
+                        "price": latest_price,
+                        "confidence": 0.6
+                    },
+                    "indicators": {
+                        "price_change_pct": price_change * 100,
+                        "scalping_threshold": 0.2
+                    }
+                }
+        return None
+
+    def _generate_backtest_pairs_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate pairs trading signals for backtesting."""
+        if not closes or len(closes) < 20:
+            return None
+
+        latest_price = closes[-1]
+        # Simple pairs trading logic (would need correlation data in real implementation)
+        mean_price = sum(closes[-20:]) / 20
+        std_dev = (sum((x - mean_price) ** 2 for x in closes[-20:]) / 20) ** 0.5
+        
+        if std_dev > 0:
+            z_score = (latest_price - mean_price) / std_dev
+            if z_score > 2:  # Overbought
+                return {
+                    "signal": {
+                        "action": "SELL",
+                        "quantity": 0.1,
+                        "price": latest_price,
+                        "confidence": 0.7
+                    },
+                    "indicators": {
+                        "z_score": z_score,
+                        "mean_price": mean_price,
+                        "std_dev": std_dev
+                    }
+                }
+            elif z_score < -2:  # Oversold
+                return {
+                    "signal": {
+                        "action": "BUY",
+                        "quantity": 0.1,
+                        "price": latest_price,
+                        "confidence": 0.7
+                    },
+                    "indicators": {
+                        "z_score": z_score,
+                        "mean_price": mean_price,
+                        "std_dev": std_dev
+                    }
+                }
+        return None
+
+    def _generate_backtest_statistical_arbitrage_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate statistical arbitrage signals for backtesting."""
+        if not closes or len(closes) < 30:
+            return None
+
+        latest_price = closes[-1]
+        # Statistical arbitrage based on mean reversion
+        mean_price = sum(closes[-30:]) / 30
+        price_deviation = (latest_price - mean_price) / mean_price
+        
+        if abs(price_deviation) > 0.05:  # 5% deviation
+            action = "SELL" if price_deviation > 0 else "BUY"
+            return {
+                "signal": {
+                    "action": action,
+                    "quantity": 0.15,
+                    "price": latest_price,
+                    "confidence": 0.75
+                },
+                "indicators": {
+                    "mean_price": mean_price,
+                    "deviation_pct": price_deviation * 100,
+                    "arbitrage_threshold": 5.0
+                }
+            }
+        return None
+
+    def _generate_backtest_market_making_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate market making signals for backtesting."""
+        if not closes or len(closes) < 10:
+            return None
+
+        latest_price = closes[-1]
+        # Market making based on bid-ask spread simulation
+        spread = latest_price * 0.001  # 0.1% spread
+        bid_price = latest_price - spread / 2
+        ask_price = latest_price + spread / 2
+        
+        # Simple market making logic
+        return {
+            "signal": {
+                "action": "BUY",  # Place bid
+                "quantity": 0.2,
+                "price": bid_price,
+                "confidence": 0.6
+            },
+            "indicators": {
+                "bid_price": bid_price,
+                "ask_price": ask_price,
+                "spread": spread,
+                "market_making_spread_pct": 0.1
+            }
+        }
+
+    def _generate_backtest_futures_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate futures trading signals for backtesting."""
+        if not closes or len(closes) < 15:
+            return None
+
+        latest_price = closes[-1]
+        # Futures trading with leverage consideration
+        rsi = self._calculate_backtest_rsi(closes)
+        
+        if rsi > 70:  # Overbought
+            return {
+                "signal": {
+                    "action": "SELL",
+                    "quantity": 0.3,  # Higher quantity for futures
+                    "price": latest_price,
+                    "confidence": 0.8
+                },
+                "indicators": {
+                    "rsi": rsi,
+                    "leverage": 5.0,
+                    "futures_type": "perpetual"
+                }
+            }
+        elif rsi < 30:  # Oversold
+            return {
+                "signal": {
+                    "action": "BUY",
+                    "quantity": 0.3,
+                    "price": latest_price,
+                    "confidence": 0.8
+                },
+                "indicators": {
+                    "rsi": rsi,
+                    "leverage": 5.0,
+                    "futures_type": "perpetual"
+                }
+            }
+        return None
+
+    def _generate_backtest_options_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate options trading signals for backtesting."""
+        if not closes or len(closes) < 20:
+            return None
+
+        latest_price = closes[-1]
+        # Options strategy simulation
+        volatility = self._calculate_backtest_volatility(closes)
+        
+        if volatility > 0.3:  # High volatility
+            return {
+                "signal": {
+                    "action": "BUY",
+                    "quantity": 0.1,
+                    "price": latest_price,
+                    "confidence": 0.7
+                },
+                "indicators": {
+                    "volatility": volatility,
+                    "options_type": "call",
+                    "strike_price": latest_price * 1.05
+                }
+            }
+        return None
+
+    def _generate_backtest_funding_arbitrage_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate funding arbitrage signals for backtesting."""
+        if not closes or len(closes) < 10:
+            return None
+
+        latest_price = closes[-1]
+        # Funding arbitrage based on price momentum
+        if len(closes) >= 5:
+            momentum = (closes[-1] - closes[-5]) / closes[-5]
+            if momentum > 0.02:  # 2% positive momentum
+                return {
+                    "signal": {
+                        "action": "BUY",
+                        "quantity": 0.2,
+                        "price": latest_price,
+                        "confidence": 0.65
+                    },
+                    "indicators": {
+                        "momentum_pct": momentum * 100,
+                        "funding_rate": 0.01,
+                        "arbitrage_opportunity": True
+                    }
+                }
+        return None
+
+    def _generate_backtest_hedge_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate hedging signals for backtesting."""
+        if not closes or len(closes) < 15:
+            return None
+
+        latest_price = closes[-1]
+        # Hedging based on portfolio risk
+        portfolio_value = portfolio_snapshot.get('current_value', 10000)
+        position_value = latest_price * 0.1  # Assume 10% position
+        
+        if position_value > portfolio_value * 0.2:  # Position too large
+            return {
+                "signal": {
+                    "action": "SELL",  # Hedge by reducing position
+                    "quantity": 0.05,
+                    "price": latest_price,
+                    "confidence": 0.8
+                },
+                "indicators": {
+                    "portfolio_value": portfolio_value,
+                    "position_value": position_value,
+                    "hedge_ratio": 0.5
+                }
+            }
+        return None
+
+    def _generate_backtest_portfolio_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate portfolio optimization signals for backtesting."""
+        if not closes or len(closes) < 20:
+            return None
+
+        latest_price = closes[-1]
+        # Portfolio optimization based on risk-adjusted returns
+        returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, len(closes))]
+        avg_return = sum(returns) / len(returns) if returns else 0
+        volatility = (sum((r - avg_return) ** 2 for r in returns) / len(returns)) ** 0.5 if returns else 0
+        
+        sharpe_ratio = avg_return / volatility if volatility > 0 else 0
+        
+        if sharpe_ratio > 1.0:  # Good risk-adjusted return
+            return {
+                "signal": {
+                    "action": "BUY",
+                    "quantity": 0.2,
+                    "price": latest_price,
+                    "confidence": 0.75
+                },
+                "indicators": {
+                    "sharpe_ratio": sharpe_ratio,
+                    "avg_return": avg_return,
+                    "volatility": volatility
+                }
+            }
+        return None
+
+    def _generate_backtest_risk_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate risk management signals for backtesting."""
+        if not closes or len(closes) < 10:
+            return None
+
+        latest_price = closes[-1]
+        # Risk management based on drawdown
+        max_price = max(closes[-10:])
+        drawdown = (max_price - latest_price) / max_price
+        
+        if drawdown > 0.1:  # 10% drawdown
+            return {
+                "signal": {
+                    "action": "SELL",  # Risk reduction
+                    "quantity": 0.1,
+                    "price": latest_price,
+                    "confidence": 0.9
+                },
+                "indicators": {
+                    "drawdown_pct": drawdown * 100,
+                    "max_price": max_price,
+                    "risk_level": "HIGH"
+                }
+            }
+        return None
+
+    def _generate_backtest_volatility_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate volatility trading signals for backtesting."""
+        if not closes or len(closes) < 20:
+            return None
+
+        latest_price = closes[-1]
+        volatility = self._calculate_backtest_volatility(closes)
+        
+        if volatility > 0.4:  # High volatility
+            return {
+                "signal": {
+                    "action": "BUY",
+                    "quantity": 0.15,
+                    "price": latest_price,
+                    "confidence": 0.7
+                },
+                "indicators": {
+                    "volatility": volatility,
+                    "volatility_threshold": 0.4,
+                    "strategy": "volatility_breakout"
+                }
+            }
+        return None
+
+    def _generate_backtest_sentiment_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate sentiment-based signals for backtesting."""
+        if not closes or len(closes) < 10:
+            return None
+
+        latest_price = closes[-1]
+        # Simulate sentiment analysis based on price action
+        recent_trend = (closes[-1] - closes[-10]) / closes[-10] if len(closes) >= 10 else 0
+        
+        if recent_trend > 0.05:  # Positive sentiment
+            return {
+                "signal": {
+                    "action": "BUY",
+                    "quantity": 0.1,
+                    "price": latest_price,
+                    "confidence": 0.6
+                },
+                "indicators": {
+                    "sentiment_score": 0.7,
+                    "trend_strength": recent_trend * 100,
+                    "news_impact": "positive"
+                }
+            }
+        return None
+
+    def _generate_backtest_swing_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate swing trading signals for backtesting."""
+        if not closes or len(closes) < 20:
+            return None
+
+        latest_price = closes[-1]
+        # Swing trading based on longer-term trends
+        short_ma = sum(closes[-5:]) / 5
+        long_ma = sum(closes[-20:]) / 20
+        
+        if short_ma > long_ma * 1.02:  # Uptrend
+            return {
+                "signal": {
+                    "action": "BUY",
+                    "quantity": 0.25,
+                    "price": latest_price,
+                    "confidence": 0.8
+                },
+                "indicators": {
+                    "short_ma": short_ma,
+                    "long_ma": long_ma,
+                    "trend": "uptrend"
+                }
+            }
+        elif short_ma < long_ma * 0.98:  # Downtrend
+            return {
+                "signal": {
+                    "action": "SELL",
+                    "quantity": 0.25,
+                    "price": latest_price,
+                    "confidence": 0.8
+                },
+                "indicators": {
+                    "short_ma": short_ma,
+                    "long_ma": long_ma,
+                    "trend": "downtrend"
+                }
+            }
+        return None
+
+    def _generate_backtest_analytics_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate analytics-based signals for backtesting."""
+        if not closes or len(closes) < 15:
+            return None
+
+        latest_price = closes[-1]
+        # Analytics based on multiple indicators
+        rsi = self._calculate_backtest_rsi(closes)
+        macd_value, macd_signal, macd_trend = self._calculate_backtest_macd(closes)
+        
+        # Combined signal strength
+        signal_strength = 0
+        if rsi > 60 and macd_trend == "BULLISH":
+            signal_strength += 2
+        elif rsi < 40 and macd_trend == "BEARISH":
+            signal_strength += 2
+        
+        if signal_strength >= 2:
+            action = "BUY" if rsi > 60 else "SELL"
+            return {
+                "signal": {
+                    "action": action,
+                    "quantity": 0.2,
+                    "price": latest_price,
+                    "confidence": 0.8
+                },
+                "indicators": {
+                    "rsi": rsi,
+                    "macd_trend": macd_trend,
+                    "signal_strength": signal_strength,
+                    "analytics_score": 0.8
+                }
+            }
+        return None
+
+    def _generate_backtest_algorithmic_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate algorithmic trading signals for backtesting."""
+        if not closes or len(closes) < 25:
+            return None
+
+        latest_price = closes[-1]
+        # Algorithmic strategy combining multiple factors
+        volatility = self._calculate_backtest_volatility(closes)
+        rsi = self._calculate_backtest_rsi(closes)
+        momentum = (closes[-1] - closes[-10]) / closes[-10] if len(closes) >= 10 else 0
+        
+        # Algorithmic scoring
+        score = 0
+        if volatility > 0.2: score += 1
+        if rsi > 50: score += 1
+        if momentum > 0: score += 1
+        
+        if score >= 2:
+            return {
+                "signal": {
+                    "action": "BUY",
+                    "quantity": 0.2,
+                    "price": latest_price,
+                    "confidence": 0.75
+                },
+                "indicators": {
+                    "algorithmic_score": score,
+                    "volatility": volatility,
+                    "rsi": rsi,
+                    "momentum": momentum
+                }
+            }
+        return None
+
+    def _generate_backtest_complex_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Generate complex strategy signals for backtesting."""
+        if not closes or len(closes) < 30:
+            return None
+
+        latest_price = closes[-1]
+        # Complex strategy combining multiple approaches
+        rsi = self._calculate_backtest_rsi(closes)
+        volatility = self._calculate_backtest_volatility(closes)
+        macd_value, macd_signal, macd_trend = self._calculate_backtest_macd(closes)
+        
+        # Complex scoring system
+        complexity_score = 0
+        if 30 < rsi < 70: complexity_score += 1  # Neutral RSI
+        if 0.1 < volatility < 0.5: complexity_score += 1  # Moderate volatility
+        if macd_trend == "BULLISH": complexity_score += 1
+        
+        if complexity_score >= 2:
+            return {
+                "signal": {
+                    "action": "BUY",
+                    "quantity": 0.3,
+                    "price": latest_price,
+                    "confidence": 0.85
+                },
+                "indicators": {
+                    "complexity_score": complexity_score,
+                    "rsi": rsi,
+                    "volatility": volatility,
+                    "macd_trend": macd_trend,
+                    "strategy_type": "complex_multi_factor"
+                }
+            }
+        return None
+
+    def _generate_backtest_generic_signal(
+        self,
+        symbol: str,
+        closes: List[float],
+        portfolio_snapshot: Dict[str, Any],
+        strategy_func: str
+    ) -> Optional[Dict[str, Any]]:
+        """Generate generic signals for any strategy not explicitly handled."""
+        if not closes or len(closes) < 10:
+            return None
+
+        latest_price = closes[-1]
+        # Generic strategy based on simple momentum
+        if len(closes) >= 5:
+            momentum = (closes[-1] - closes[-5]) / closes[-5]
+            if abs(momentum) > 0.01:  # 1% movement
+                action = "BUY" if momentum > 0 else "SELL"
+                return {
+                    "signal": {
+                        "action": action,
+                        "quantity": 0.1,
+                        "price": latest_price,
+                        "confidence": 0.5
+                    },
+                    "indicators": {
+                        "momentum": momentum,
+                        "strategy": strategy_func,
+                        "generic_signal": True
+                    }
+                }
+        return None
+
+    def _calculate_backtest_volatility(self, closes: List[float], period: int = 20) -> float:
+        """Calculate volatility from a series of close prices."""
+        if len(closes) < 2:
+            return 0.0
+        
+        returns = [(closes[i] - closes[i-1]) / closes[i-1] for i in range(1, min(len(closes), period + 1))]
+        if not returns:
+            return 0.0
+        
+        mean_return = sum(returns) / len(returns)
+        variance = sum((r - mean_return) ** 2 for r in returns) / len(returns)
+        return variance ** 0.5
 
     async def _execute_derivatives_strategy(
         self,

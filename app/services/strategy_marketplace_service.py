@@ -922,15 +922,25 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             )
             
             if backtest_result.get("success"):
-                if "results" in backtest_result:
+                # Check if results exist and are valid
+                if "results" in backtest_result and backtest_result["results"]:
                     return backtest_result["results"]
-                return backtest_result
+                elif backtest_result.get("results") is not None:
+                    # Results exist but might be empty - still valid
+                    return backtest_result["results"]
+                else:
+                    # Success but no results - use the full result
+                    return backtest_result
             else:
-                # Fallback to strategy-specific realistic results
+                # Backtest failed - use fallback
+                self.logger.warning(f"Backtest failed for {strategy_func}, using fallback", 
+                                  error=backtest_result.get("error", "Unknown error"))
                 return self._get_realistic_backtest_by_strategy(strategy_func)
                 
         except Exception as e:
-            self.logger.error(f"Real backtesting failed for {strategy_func}", error=str(e))
+            self.logger.error(f"Real backtesting failed for {strategy_func}", 
+                            error=str(e), exc_info=True)
+            # Return fallback results instead of crashing
             return self._get_realistic_backtest_by_strategy(strategy_func)
     
     async def _run_real_historical_backtest(
