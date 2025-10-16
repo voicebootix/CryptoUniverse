@@ -194,6 +194,8 @@ Ready to manage your crypto wealth! 💎
         'risk': r'^/risk(?:\s+(\w+))?',
         'trade': r'^/trade\s+(\w+)\s+(buy|sell)\s+(\d+(?:\.\d+)?)',
         'strategies': r'^/strategies(?:\s+(\w+))?',
+        'signals': r'^/signals(?:\s+([\w-]+)(?:\s+([\w-]+))?)?',
+        'signalsettings': r'^/signalsettings(?:\s+(frequency|strategies|allocation)\s*(.+)?)?',
         'ai': r'^/ai\s+(.+)',
         'help': r'^/help(?:\s+(\w+))?',
         'start': r'^/start',

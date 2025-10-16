@@ -2752,10 +2752,12 @@ class MasterSystemController(LoggerMixin):
     # ===============================================================================
     
     async def execute_5_phase_autonomous_cycle(
-        self, 
-        user_id: str = "system", 
+        self,
+        user_id: str = "system",
         source: str = "autonomous",
         symbols: Optional[List[str]] = None,
+        *,
+        analysis_only: bool = False,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -2774,14 +2776,21 @@ class MasterSystemController(LoggerMixin):
         # Extract risk tolerance from kwargs for pipeline execution
         risk_tolerance = kwargs.get('risk_tolerance', 'balanced')
         
-        self.logger.info(f"🚀 ENTERPRISE 5-Phase Pipeline Starting", 
-                        cycle_id=cycle_id, source=source, user_id=user_id, risk_tolerance=risk_tolerance)
+        self.logger.info(
+            "🚀 ENTERPRISE 5-Phase Pipeline Starting",
+            cycle_id=cycle_id,
+            source=source,
+            user_id=user_id,
+            risk_tolerance=risk_tolerance,
+            analysis_only=analysis_only,
+        )
         
         pipeline_result = {
             "success": False,
             "cycle_id": cycle_id,
             "source": source,
             "user_id": user_id,
+            "analysis_only": analysis_only,
             "phases": {},
             "execution_time_ms": 0,
             "timestamp": datetime.utcnow().isoformat()
@@ -2963,7 +2972,18 @@ class MasterSystemController(LoggerMixin):
             # PHASE 5: TRADE EXECUTION SERVICE - VALIDATED EXECUTION
             # =============================================================================
             
-            if validation.get("approved"):
+            if analysis_only:
+                pipeline_result["phases"]["phase_5"] = {
+                    "status": "skipped",
+                    "reason": "analysis_only",
+                    "approved": validation.get("approved", False),
+                }
+                self.logger.info(
+                    "⏭️ Phase 5 Skipped - analysis only run",
+                    cycle_id=cycle_id,
+                    approved=validation.get("approved", False),
+                )
+            elif validation.get("approved"):
                 phase_5_start = time.time()
                 self.logger.info("⚡ Phase 5: Trade Execution Starting", cycle_id=cycle_id)
                 
