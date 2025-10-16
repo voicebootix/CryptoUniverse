@@ -186,6 +186,7 @@ const ManualTradingPage: React.FC = () => {
 
   const streamingControllerRef = useRef<AbortController | null>(null);
   const manualSessionRef = useRef<string | null>(null);
+  const initializingSessionPromiseRef = useRef<Promise<void> | null>(null);
 
   const availableSymbols = useMemo(() => {
     const symbols = new Set<string>();
@@ -219,7 +220,19 @@ const ManualTradingPage: React.FC = () => {
     let existingSession = sessionId || useChatStore.getState().sessionId;
 
     if (!existingSession) {
-      await initializeSession();
+      if (!initializingSessionPromiseRef.current) {
+        initializingSessionPromiseRef.current = initializeSession();
+      }
+
+      try {
+        await initializingSessionPromiseRef.current;
+      } catch (error) {
+        manualSessionRef.current = null;
+        throw error;
+      } finally {
+        initializingSessionPromiseRef.current = null;
+      }
+
       existingSession = useChatStore.getState().sessionId;
     }
 
@@ -254,6 +267,7 @@ const ManualTradingPage: React.FC = () => {
           : existingDetails;
         updated[existingIndex] = {
           ...updated[existingIndex],
+          icon: IconComponent,
           details: mergedDetails
         };
         return updated;
@@ -265,7 +279,7 @@ const ManualTradingPage: React.FC = () => {
           phase,
           title: PHASE_CONFIG[phase].title,
           description: PHASE_CONFIG[phase].description,
-          icon: <IconComponent className="h-4 w-4" />,
+          icon: IconComponent,
           color: PHASE_CONFIG[phase].color,
           details: newDetails.length ? [...baseDetails, ...newDetails] : baseDetails
         }
@@ -1086,13 +1100,13 @@ const ManualTradingPage: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <span>Daily P&amp;L</span>
                     <span className={dailyPnL >= 0 ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                      {formatCurrency(dailyPnL)} ({formatPercentage(dailyPnLPercent / 100)})
+                      {formatCurrency(dailyPnL)} ({formatPercentage(dailyPnLPercent)})
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span>Total P&amp;L</span>
                     <span className={totalPnL >= 0 ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                      {formatCurrency(totalPnL)} ({formatPercentage(totalPnLPercent / 100)})
+                      {formatCurrency(totalPnL)} ({formatPercentage(totalPnLPercent)})
                     </span>
                   </div>
                 </CardContent>
@@ -1531,7 +1545,7 @@ const ManualTradingPage: React.FC = () => {
                         </div>
                         <div className="flex items-center justify-between">
                           <span>Win Rate</span>
-                          <span className="font-medium">{formatPercentage(strategy.win_rate / 100)}</span>
+                          <span className="font-medium">{formatPercentage(strategy.win_rate)}</span>
                         </div>
                         <div className="flex items-center justify-between">
                           <span>Total P&amp;L</span>
@@ -1660,7 +1674,7 @@ const ManualTradingPage: React.FC = () => {
                         <div className="flex items-center justify-between">
                           <span className="font-semibold">{item.symbol}</span>
                           <span className={item.change >= 0 ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                            {formatPercentage(item.change / 100)}
+                            {formatPercentage(item.change)}
                           </span>
                         </div>
                         <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
