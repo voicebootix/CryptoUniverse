@@ -189,35 +189,53 @@ class BackgroundServiceManager(LoggerMixin):
         """Wrap service functions with error handling and recovery."""
         max_retries = 3
         retry_delay = 5  # seconds
-        
+
+        async def update_service_status(status: str):
+            """Update service status in both local dict and Redis for multi-worker coordination."""
+            self.services[service_name] = status
+            if self.redis:
+                try:
+                    await self.redis.hset(
+                        "background_services_status",
+                        service_name,
+                        json.dumps({
+                            "status": status,
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "interval": self.intervals.get(service_name, 0)
+                        })
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Failed to update Redis status for {service_name}", error=str(e))
+
         for attempt in range(max_retries):
             try:
-                self.services[service_name] = "running"
+                await update_service_status("running")
                 self.logger.info(f" {service_name} service started successfully")
-                
+
                 # Run the service function
                 await service_func()
-                
+
             except asyncio.CancelledError:
                 # Re-raise cancellation immediately - don't treat as error
+                await update_service_status("stopped")
                 raise
             except Exception as e:
-                self.services[service_name] = "error"
-                self.logger.exception(f"❌ {service_name} service failed", 
-                                    attempt=attempt + 1, 
+                await update_service_status("error")
+                self.logger.exception(f"❌ {service_name} service failed",
+                                    attempt=attempt + 1,
                                     max_retries=max_retries)
-                
+
                 if attempt < max_retries - 1:
                     self.logger.info(f"🔄 Retrying {service_name} in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2  # Exponential backoff
                 else:
                     self.logger.exception(f"💀 {service_name} service permanently failed after {max_retries} attempts")
-                    self.services[service_name] = "failed"
+                    await update_service_status("failed")
                     return
-                    
+
         # If we get here, service ended normally
-        self.services[service_name] = "stopped"
+        await update_service_status("stopped")
         self.logger.warning(f" {service_name} service stopped unexpectedly")
     
     async def stop_all(self):
@@ -239,20 +257,47 @@ class BackgroundServiceManager(LoggerMixin):
         self.logger.info("All background services stopped")
     
     async def health_check(self) -> Dict[str, str]:
-        """Get real health status of all services."""
+        """Get real health status of all services from Redis (multi-worker compatible)."""
         health_status = {}
-        
-        for service_name, task in self.tasks.items():
-            if task.cancelled():
-                health_status[service_name] = "stopped"
-            elif task.done():
-                if task.exception():
-                    health_status[service_name] = "error"
+
+        # Try to get status from Redis first (works across all workers)
+        if self.redis:
+            try:
+                redis_statuses = await self.redis.hgetall("background_services_status")
+                for service_name, status_json in redis_statuses.items():
+                    try:
+                        # Decode bytes if necessary
+                        if isinstance(service_name, bytes):
+                            service_name = service_name.decode()
+                        if isinstance(status_json, bytes):
+                            status_json = status_json.decode()
+
+                        status_data = json.loads(status_json)
+                        health_status[service_name] = status_data.get("status", "unknown")
+                    except (json.JSONDecodeError, AttributeError) as e:
+                        self.logger.warning(f"Failed to parse status for {service_name}", error=str(e))
+                        health_status[service_name] = "unknown"
+            except Exception as e:
+                self.logger.warning("Failed to get status from Redis, falling back to local tasks", error=str(e))
+
+        # If Redis failed or returned empty, fall back to local task status
+        if not health_status:
+            for service_name, task in self.tasks.items():
+                if task.cancelled():
+                    health_status[service_name] = "stopped"
+                elif task.done():
+                    if task.exception():
+                        health_status[service_name] = "error"
+                    else:
+                        health_status[service_name] = "completed"
                 else:
-                    health_status[service_name] = "completed"
-            else:
-                health_status[service_name] = "running"
-        
+                    health_status[service_name] = "running"
+
+        # Fill in any missing services with "not_started"
+        for service_name in self.intervals.keys():
+            if service_name not in health_status:
+                health_status[service_name] = "not_started"
+
         return health_status
     
     async def get_system_metrics(self) -> Dict[str, Any]:
@@ -926,7 +971,6 @@ class BackgroundServiceManager(LoggerMixin):
                         cached_symbols = await self.redis.get(cache_key)
                         if cached_symbols:
                             try:
-                                import json
                                 return set(json.loads(cached_symbols))
                             except:
                                 pass
@@ -944,9 +988,8 @@ class BackgroundServiceManager(LoggerMixin):
                         
                         # Cache successful results for 5 minutes
                         if self.redis and valid_symbols:
-                            import json
                             await self.redis.setex(
-                                f"api_symbols_cache:{api_config['name'].lower()}", 
+                                f"api_symbols_cache:{api_config['name'].lower()}",
                                 300,  # 5 minute cache
                                 json.dumps(list(valid_symbols))
                             )
@@ -1129,8 +1172,7 @@ class BackgroundServiceManager(LoggerMixin):
                     from app.core.database import get_database
                     from app.models.exchange import ExchangeAccount
                     from sqlalchemy import select, and_, distinct
-                    import json
-                    
+
                     async for db in get_database():
                         stmt = select(distinct(ExchangeAccount.user_id)).where(
                             and_(
@@ -1148,13 +1190,12 @@ class BackgroundServiceManager(LoggerMixin):
                         self.logger.debug(f"Cached {len(user_ids)} active users")
                 
                 # Proceed with sync...
-                
+
                 # Get all users with active exchange accounts
                 from app.core.database import get_database
                 from app.models.exchange import ExchangeAccount
                 from sqlalchemy import select, and_, distinct
-                import json
-                
+
                 async for db in get_database():
                     # Find all users with active exchange accounts
                     stmt = select(distinct(ExchangeAccount.user_id)).where(
