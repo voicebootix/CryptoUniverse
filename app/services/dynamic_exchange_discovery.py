@@ -524,6 +524,14 @@ class DynamicExchangeDiscovery:
         """Cache discovery results in Redis."""
         
         try:
+            # Ensure Redis client is initialized
+            if self.redis_client is None:
+                await self.async_init()
+            
+            if self.redis_client is None:
+                logger.warning("Redis client not available, skipping cache")
+                return
+                
             await self.redis_client.set(
                 "exchange_discovery_results",
                 json.dumps(results, default=str),
@@ -532,6 +540,11 @@ class DynamicExchangeDiscovery:
             
             logger.debug("Cached exchange discovery results")
             
+        except AttributeError as e:
+            if "'NoneType' object has no attribute 'set'" in str(e):
+                logger.warning("Redis client not initialized, skipping cache")
+            else:
+                logger.warning(f"Failed to cache discovery results", error=str(e))
         except Exception as e:
             logger.warning(f"Failed to cache discovery results", error=str(e))
     

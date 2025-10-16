@@ -86,12 +86,18 @@ execution_options = {"compiled_cache": {}}  # Enable query compilation cache
 if "postgresql" in async_db_url:
     execution_options["isolation_level"] = "READ_COMMITTED"
 
+# ENTERPRISE: Use QueuePool for production performance
+poolclass = QueuePool if "postgresql" in async_db_url else NullPool
+
 engine = create_async_engine(
     async_db_url,
-    poolclass=NullPool,   # ASYNC COMPATIBLE: Required for async engines
-    # NullPool doesn't support pool_size, max_overflow, pool_timeout parameters
-    pool_pre_ping=True,   # ENTERPRISE: Health check connections
-    pool_recycle=1800,    # PRODUCTION: Faster recycle for cloud (30 min)
+    poolclass=poolclass,
+    # ENTERPRISE: Connection pooling for production
+    pool_size=20,          # Base number of connections
+    max_overflow=30,       # Additional connections when needed
+    pool_timeout=30,       # Timeout for getting connection
+    pool_pre_ping=True,    # ENTERPRISE: Health check connections
+    pool_recycle=1800,     # PRODUCTION: Recycle connections (30 min)
     echo=getattr(settings, 'DATABASE_ECHO', False),
     future=True,
     # ENTERPRISE: Production performance settings
@@ -195,6 +201,8 @@ class DatabaseManager:
     
     def __init__(self):
         self._engine = engine
+        self._query_times = {}  # Track query performance
+        self._slow_query_threshold = 1.0  # 1 second threshold
     
     async def connect(self) -> None:
         """Connect to database."""
@@ -250,6 +258,70 @@ class DatabaseManager:
     def transaction(self):
         """Start a database transaction."""
         return self._engine.begin()
+    
+    async def execute_with_monitoring(self, query, values=None, query_name="unknown"):
+        """Execute query with performance monitoring."""
+        import time
+        start_time = time.time()
+        
+        try:
+            async with self._engine.begin() as conn:
+                if values:
+                    result = await conn.execute(text(query), values)
+                else:
+                    result = await conn.execute(text(query))
+                
+                execution_time = time.time() - start_time
+                
+                # Track query performance
+                if query_name not in self._query_times:
+                    self._query_times[query_name] = []
+                self._query_times[query_name].append(execution_time)
+                
+                # Log slow queries
+                if execution_time > self._slow_query_threshold:
+                    import structlog
+                    logger = structlog.get_logger()
+                    logger.warning(
+                        "Slow database query detected",
+                        query_name=query_name,
+                        execution_time=execution_time,
+                        threshold=self._slow_query_threshold,
+                        query_preview=query[:100] + "..." if len(query) > 100 else query
+                    )
+                
+                return result
+                
+        except Exception as e:
+            execution_time = time.time() - start_time
+            import structlog
+            logger = structlog.get_logger()
+            logger.error(
+                "Database query failed",
+                query_name=query_name,
+                execution_time=execution_time,
+                error=str(e),
+                query_preview=query[:100] + "..." if len(query) > 100 else query
+            )
+            raise
+    
+    def get_query_performance_stats(self):
+        """Get query performance statistics."""
+        stats = {}
+        for query_name, times in self._query_times.items():
+            if times:
+                stats[query_name] = {
+                    "count": len(times),
+                    "avg_time": sum(times) / len(times),
+                    "min_time": min(times),
+                    "max_time": max(times),
+                    "slow_queries": len([t for t in times if t > self._slow_query_threshold])
+                }
+        return stats
+    
+    def reset_performance_stats(self):
+        """Reset query performance statistics."""
+        self._query_times.clear()
 
 
 # Database manager instance

@@ -902,6 +902,7 @@ class BackgroundServiceManager(LoggerMixin):
     
     async def _balance_sync_service(self):
         """Sync exchange balances for all users."""
+        import json  # Move import to top of function
         self.logger.info(" Balance sync service started")
         
         while self.running:
@@ -921,7 +922,6 @@ class BackgroundServiceManager(LoggerMixin):
                     from app.core.database import get_database
                     from app.models.exchange import ExchangeAccount
                     from sqlalchemy import select, and_, distinct
-                    import json
                     
                     async for db in get_database():
                         stmt = select(distinct(ExchangeAccount.user_id)).where(
@@ -945,7 +945,6 @@ class BackgroundServiceManager(LoggerMixin):
                 from app.core.database import get_database
                 from app.models.exchange import ExchangeAccount
                 from sqlalchemy import select, and_, distinct
-                import json
                 
                 async for db in get_database():
                     # Find all users with active exchange accounts
