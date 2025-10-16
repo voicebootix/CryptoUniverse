@@ -89,19 +89,27 @@ if "postgresql" in async_db_url:
 # ENTERPRISE: Use QueuePool for production performance
 poolclass = QueuePool if "postgresql" in async_db_url else NullPool
 
+# Build engine kwargs conditionally based on pool type
+engine_kwargs = {
+    "url": async_db_url,
+    "poolclass": poolclass,
+    "echo": getattr(settings, 'DATABASE_ECHO', False),
+    "future": True,
+    "execution_options": execution_options,
+}
+
+# Only add QueuePool-specific parameters for PostgreSQL
+if poolclass == QueuePool:
+    engine_kwargs.update({
+        "pool_size": 20,          # Base number of connections
+        "max_overflow": 30,       # Additional connections when needed
+        "pool_timeout": 30,       # Timeout for getting connection
+        "pool_pre_ping": True,    # ENTERPRISE: Health check connections
+        "pool_recycle": 1800,     # PRODUCTION: Recycle connections (30 min)
+    })
+
 engine = create_async_engine(
-    async_db_url,
-    poolclass=poolclass,
-    # ENTERPRISE: Connection pooling for production
-    pool_size=20,          # Base number of connections
-    max_overflow=30,       # Additional connections when needed
-    pool_timeout=30,       # Timeout for getting connection
-    pool_pre_ping=True,    # ENTERPRISE: Health check connections
-    pool_recycle=1800,     # PRODUCTION: Recycle connections (30 min)
-    echo=getattr(settings, 'DATABASE_ECHO', False),
-    future=True,
-    # ENTERPRISE: Production performance settings
-    execution_options=execution_options,
+    **engine_kwargs,
     # PRODUCTION: Optimized settings for asyncpg driver
     connect_args={
         "command_timeout": 30,  # Command timeout in seconds
@@ -296,11 +304,10 @@ class DatabaseManager:
             execution_time = time.time() - start_time
             import structlog
             logger = structlog.get_logger()
-            logger.error(
+            logger.exception(
                 "Database query failed",
                 query_name=query_name,
                 execution_time=execution_time,
-                error=str(e),
                 query_preview=query[:100] + "..." if len(query) > 100 else query
             )
             raise

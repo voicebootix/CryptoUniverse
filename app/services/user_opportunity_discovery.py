@@ -4160,12 +4160,19 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             portfolio_result = await self._get_user_portfolio_cached(user_id)
 
-            active_strategies = portfolio_result.get("active_strategies")
-            if portfolio_result.get("success") and active_strategies:
-                return portfolio_result
+            # Check if portfolio fetch was successful and has active strategies
+            if portfolio_result.get("success") and portfolio_result.get("active_strategies") is not None:
+                active_strategies = portfolio_result.get("active_strategies", [])
+                # If user has strategies, return their portfolio
+                if active_strategies:
+                    return portfolio_result
+                # If user has no strategies, fall back to admin snapshot
+                self.logger.info("User has no active strategies, falling back to admin snapshot", user_id=user_id)
 
+            # Fallback to admin snapshot for users without strategies
             admin_snapshot = await strategy_marketplace_service.get_admin_portfolio_snapshot(user_id)
             if admin_snapshot and admin_snapshot.get("success"):
+                self.logger.info("Using admin portfolio snapshot for user", user_id=user_id)
                 return admin_snapshot
 
             # Ensure consistent structure even on degraded responses
@@ -4414,149 +4421,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             scan_id=scan_id, error=str(e))
             return {"success": False, "opportunities": []}
 
-    # Additional AI Strategy Scanners (Missing implementations)
-    async def _scan_futures_arbitrage_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
-        """Scan for futures arbitrage opportunities"""
-        try:
-            self.logger.info("🔍 Scanning futures arbitrage opportunities", scan_id=scan_id)
-            
-            # Use existing futures trading logic as base
-            futures_result = await self._scan_futures_trading_opportunities(discovered_assets, user_profile, scan_id, portfolio_result)
-            
-            if futures_result:
-                opportunities = futures_result
-                # Enhance with arbitrage-specific analysis
-                for opp in opportunities:
-                    opp["strategy_type"] = "futures_arbitrage"
-                    opp["confidence"] = min(95, opp.get("confidence", 70) + 10)
-                    
-                return opportunities
-            
-            return []
-            
-        except Exception as e:
-            self.logger.error("Futures arbitrage scan failed", scan_id=scan_id, error=str(e))
-            return []
 
-    async def _scan_volatility_trading_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
-        """Scan for volatility trading opportunities"""
-        try:
-            self.logger.info("🔍 Scanning volatility trading opportunities", scan_id=scan_id)
-            
-            opportunities = []
-            
-            # Analyze volatility patterns
-            for asset in discovered_assets.get("tier_enterprise", [])[:10]:  # Limit to top 10 assets
-                try:
-                    # Get volatility data
-                    volatility_data = await self.market_analysis_service.get_volatility_analysis(
-                        symbol=asset["symbol"],
-                        timeframe="1h"
-                    )
-                    
-                    if volatility_data and volatility_data.get("volatility") > 0.05:  # High volatility threshold
-                        opportunity = {
-                            "symbol": asset["symbol"],
-                            "strategy_type": "volatility_trading",
-                            "confidence": min(90, int(volatility_data.get("volatility", 0) * 1000)),
-                            "entry_price": asset.get("price", 0),
-                            "target_price": asset.get("price", 0) * (1 + volatility_data.get("volatility", 0)),
-                            "stop_loss": asset.get("price", 0) * (1 - volatility_data.get("volatility", 0) * 0.5),
-                            "timeframe": "1h",
-                            "risk_level": "medium",
-                            "expected_return": f"{volatility_data.get('volatility', 0) * 100:.1f}%",
-                            "description": f"High volatility opportunity in {asset['symbol']}",
-                            "discovered_at": self._current_timestamp()
-                        }
-                        opportunities.append(opportunity)
-                        
-                except Exception as e:
-                    self.logger.warning("Volatility analysis failed for asset", 
-                                      symbol=asset["symbol"], error=str(e))
-                    continue
-            
-            return opportunities
-            
-        except Exception as e:
-            self.logger.error("Volatility trading scan failed", scan_id=scan_id, error=str(e))
-            return []
 
-    async def _scan_news_sentiment_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
-        """Scan for news sentiment opportunities"""
-        try:
-            self.logger.info("🔍 Scanning news sentiment opportunities", scan_id=scan_id)
-            
-            opportunities = []
-            
-            # Analyze sentiment for top assets
-            for asset in discovered_assets.get("tier_enterprise", [])[:5]:  # Limit to top 5 assets
-                try:
-                    # Simulate sentiment analysis (in real implementation, use news API)
-                    sentiment_score = 0.6 + (hash(asset["symbol"]) % 40) / 100  # Simulated sentiment
-                    
-                    if sentiment_score > 0.7:  # Positive sentiment threshold
-                        opportunity = {
-                            "symbol": asset["symbol"],
-                            "strategy_type": "news_sentiment",
-                            "confidence": int(sentiment_score * 100),
-                            "entry_price": asset.get("price", 0),
-                            "target_price": asset.get("price", 0) * (1 + sentiment_score * 0.05),
-                            "stop_loss": asset.get("price", 0) * (1 - sentiment_score * 0.03),
-                            "timeframe": "4h",
-                            "risk_level": "medium",
-                            "expected_return": f"{sentiment_score * 5:.1f}%",
-                            "description": f"Positive sentiment opportunity in {asset['symbol']}",
-                            "discovered_at": self._current_timestamp()
-                        }
-                        opportunities.append(opportunity)
-                        
-                except Exception as e:
-                    self.logger.warning("Sentiment analysis failed for asset", 
-                                      symbol=asset["symbol"], error=str(e))
-                    continue
-            
-            return opportunities
-            
-        except Exception as e:
-            self.logger.error("News sentiment scan failed", scan_id=scan_id, error=str(e))
-            return []
 
-    async def _scan_community_strategy_opportunities(self, strategy_info, discovered_assets, user_profile, scan_id, portfolio_result):
-        """Scan for community strategy opportunities"""
-        try:
-            self.logger.info("🔍 Scanning community strategy opportunities", 
-                           scan_id=scan_id, strategy_id=strategy_info.get("strategy_id"))
-            
-            # For community strategies, provide basic opportunity structure
-            opportunities = []
-            
-            # Get top assets for community strategy analysis
-            top_assets = []
-            for tier_assets in discovered_assets.values():
-                top_assets.extend(tier_assets[:3])  # Top 3 from each tier
-            
-            for asset in top_assets[:5]:  # Limit to 5 assets
-                opportunity = {
-                    "symbol": asset["symbol"],
-                    "strategy_type": "community_strategy",
-                    "confidence": 60 + (hash(asset["symbol"]) % 30),  # 60-90% confidence
-                    "entry_price": asset.get("price", 0),
-                    "target_price": asset.get("price", 0) * 1.05,  # 5% target
-                    "stop_loss": asset.get("price", 0) * 0.95,  # 5% stop loss
-                    "timeframe": "4h",
-                    "risk_level": "medium",
-                    "expected_return": "5.0%",
-                    "description": f"Community strategy opportunity in {asset['symbol']}",
-                    "discovered_at": self._current_timestamp()
-                }
-                opportunities.append(opportunity)
-            
-            return opportunities
-            
-        except Exception as e:
-            self.logger.error("Community strategy scan failed", 
-                            scan_id=scan_id, error=str(e))
-            return []
 
     # Additional Enterprise Scanner Implementations (16 missing methods)
     async def _scan_funding_arbitrage_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):

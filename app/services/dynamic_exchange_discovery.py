@@ -540,13 +540,8 @@ class DynamicExchangeDiscovery:
             
             logger.debug("Cached exchange discovery results")
             
-        except AttributeError as e:
-            if "'NoneType' object has no attribute 'set'" in str(e):
-                logger.warning("Redis client not initialized, skipping cache")
-            else:
-                logger.warning(f"Failed to cache discovery results", error=str(e))
         except Exception as e:
-            logger.warning(f"Failed to cache discovery results", error=str(e))
+            logger.warning("Failed to cache discovery results", error=str(e))
     
     async def get_available_exchanges(self, 
                                     capabilities: Optional[List[str]] = None,

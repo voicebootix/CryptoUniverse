@@ -2757,35 +2757,53 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         recent_highs = max(closes[-20:])
         recent_lows = min(closes[-20:])
         
-        # Breakout detection
+        # Get portfolio position information
+        positions = portfolio_snapshot.get("positions", {})
+        held_qty = positions.get(symbol, 0)
+        available_cash = portfolio_snapshot.get("cash", 0)
+        desired_qty = 0.1  # Base quantity
+        
+        # Breakout detection with portfolio position checks
         if latest_price > recent_highs * 1.01:  # 1% above recent high
-            return {
-                "signal": {
-                    "action": "BUY",
-                    "quantity": 0.1,
-                    "price": latest_price,
-                    "confidence": 0.8
-                },
-                "indicators": {
-                    "resistance_level": recent_highs,
-                    "breakout_threshold": recent_highs * 1.01,
-                    "current_price": latest_price
+            # Only BUY if we don't already have a long position
+            if held_qty == 0 and available_cash > latest_price * desired_qty:
+                # Calculate quantity based on available cash
+                quantity = min(desired_qty, available_cash / latest_price)
+                return {
+                    "signal": {
+                        "action": "BUY",
+                        "quantity": quantity,
+                        "price": latest_price,
+                        "confidence": 0.8
+                    },
+                    "indicators": {
+                        "resistance_level": recent_highs,
+                        "breakout_threshold": recent_highs * 1.01,
+                        "current_price": latest_price,
+                        "held_quantity": held_qty,
+                        "available_cash": available_cash
+                    }
                 }
-            }
         elif latest_price < recent_lows * 0.99:  # 1% below recent low
-            return {
-                "signal": {
-                    "action": "SELL",
-                    "quantity": 0.1,
-                    "price": latest_price,
-                    "confidence": 0.8
-                },
-                "indicators": {
-                    "support_level": recent_lows,
-                    "breakout_threshold": recent_lows * 0.99,
-                    "current_price": latest_price
+            # Only SELL if we have a position to sell
+            if held_qty > 0:
+                # Calculate quantity to sell (don't short)
+                quantity = min(desired_qty, held_qty)
+                return {
+                    "signal": {
+                        "action": "SELL",
+                        "quantity": quantity,
+                        "price": latest_price,
+                        "confidence": 0.8
+                    },
+                    "indicators": {
+                        "support_level": recent_lows,
+                        "breakout_threshold": recent_lows * 0.99,
+                        "current_price": latest_price,
+                        "held_quantity": held_qty,
+                        "available_cash": available_cash
+                    }
                 }
-            }
         return None
 
     def _generate_backtest_scalping_signal(
