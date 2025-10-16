@@ -419,7 +419,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             uuid.UUID(str(value))
             return True
-        except Exception:
+        except (ValueError, TypeError):
             return False
 
     def _extract_base_symbol(self, symbol: str) -> str:
@@ -2309,15 +2309,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             owned_strategy_ids = [s.get("strategy_id") for s in portfolio_result.get("active_strategies", [])]
             strategy_id = self._resolve_owned_strategy_id(owned_strategy_ids, *candidate_ids)
 
-            if strategy_id not in owned_strategy_ids:
+            if not strategy_id or strategy_id not in owned_strategy_ids:
                 self.logger.warning(
-                    "Strategy not in portfolio, scanning anyway",
+                    "Strategy not in portfolio, skipping options scan",
                     user_id=user_profile.user_id,
                     scan_id=scan_id,
                     strategy_id=strategy_id,
                     portfolio_strategies=len(owned_strategy_ids),
                     known_candidates=candidate_ids,
                 )
+                return opportunities
             
             # Get top volume symbols for options analysis
             symbols = self._get_top_symbols_by_volume(discovered_assets, limit=15)
@@ -2352,8 +2353,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self.logger.info(f"✅ Options scanner found {len(opportunities)} opportunities",
                            scan_id=scan_id, strategy_id=strategy_id)
             
-        except Exception as e:
-            self.logger.error("Options trading scan failed", scan_id=scan_id, error=str(e))
+        except Exception:
+            self.logger.exception("Options trading scan failed", scan_id=scan_id)
         
         return opportunities
     
@@ -2576,11 +2577,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 opportunities=len(opportunities),
             )
 
-        except Exception as exc:
-            self.logger.error(
+        except Exception:
+            self.logger.exception(
                 "Volatility trading scan failed",
                 scan_id=scan_id,
-                error=str(exc),
             )
 
         return opportunities
@@ -2682,11 +2682,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 opportunities=len(opportunities),
             )
 
-        except Exception as exc:
-            self.logger.error(
+        except Exception:
+            self.logger.exception(
                 "News sentiment scan failed",
                 scan_id=scan_id,
-                error=str(exc),
             )
 
         return opportunities
@@ -3580,11 +3579,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 opportunities=len(opportunities),
             )
 
-        except Exception as exc:
-            self.logger.error(
+        except Exception:
+            self.logger.exception(
                 "Futures arbitrage scan failed",
                 scan_id=scan_id,
-                error=str(exc),
             )
 
         return opportunities
@@ -4145,7 +4143,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             portfolio_result = await self._get_user_portfolio_cached(user_id)
 
-            if portfolio_result.get("success") and portfolio_result.get("active_strategies") is not None:
+            active_strategies = portfolio_result.get("active_strategies")
+            if portfolio_result.get("success") and active_strategies:
                 return portfolio_result
 
             admin_snapshot = await strategy_marketplace_service.get_admin_portfolio_snapshot(user_id)
