@@ -1763,8 +1763,15 @@ class UnifiedChatService(LoggerMixin):
         charge_context: Optional[Dict[str, Any]] = None
 
         try:
-            # Step 1: Analyze intent using ChatAI (fast)
-            intent_analysis = await self._analyze_intent_unified(message, session.context)
+        # Step 1: Analyze intent using ChatAI (fast)
+        intent_analysis = await self._analyze_intent_unified(message, session.context)
+        
+        # Debug logging for opportunity discovery
+        if "opportunit" in message.lower() or "find" in message.lower():
+            self.logger.info("Opportunity-related message detected", 
+                           message=message,
+                           detected_intent=intent_analysis.get("intent"),
+                           confidence=intent_analysis.get("confidence"))
 
             # Step 2: Check requirements (credits, strategies, etc.)
             requirements_check = await self._check_requirements(
@@ -2643,6 +2650,7 @@ class UnifiedChatService(LoggerMixin):
             if optimization_summary:
                 context_data["portfolio_optimization"] = optimization_summary
                 context_data["allowed_symbols"] = optimization_summary.get("allowed_symbols", [])
+                
         elif intent == ChatIntent.RISK_ASSESSMENT:
             # Get comprehensive risk metrics
             context_data["risk_metrics"] = await self.portfolio_risk.risk_analysis(user_id)
@@ -3421,12 +3429,22 @@ REBALANCING ANALYSIS ERROR:
             return "\n".join(instructions)
 
         elif intent == ChatIntent.OPPORTUNITY_DISCOVERY:
+            self.logger.info("Building opportunity discovery prompt", 
+                           intent=intent.value,
+                           context_keys=list(context_data.keys()),
+                           opportunities_data_keys=list(context_data.get("opportunities", {}).keys()))
+            
             opportunities_data = context_data.get("opportunities", {})
             opportunities = opportunities_data.get("opportunities", [])
             strategy_performance = opportunities_data.get("strategy_performance", {})
             user_profile = opportunities_data.get("user_profile", {})
             user_preferences = context_data.get("user_config", {})
             allowed_symbols = context_data.get("allowed_symbols")
+            
+            self.logger.info("Opportunity discovery data", 
+                           opportunities_count=len(opportunities),
+                           strategy_performance_keys=list(strategy_performance.keys()),
+                           user_profile_keys=list(user_profile.keys()))
 
             filtered_opportunities = self._filter_opportunities_by_profile(
                 opportunities,
@@ -3772,6 +3790,17 @@ CREDIT OPTIONS:
 Guide the user on credit purchase options, usage optimization, and tier benefits."""
 
         # Default prompt for other intents
+        if intent == ChatIntent.OPPORTUNITY_DISCOVERY:
+            # Fallback for opportunity discovery if context data is missing
+            self.logger.warning("Opportunity discovery fallback triggered", 
+                              intent=intent.value,
+                              context_keys=list(context_data.keys()))
+            return f"""User asked: "{message}"
+
+I'm currently scanning the market for the best trading opportunities using your active strategies. This process may take a moment as I analyze real-time market data across multiple exchanges.
+
+Please wait while I complete the comprehensive opportunity analysis..."""
+        
         return f"""User asked: "{message}"
 
 Intent: {intent.value}
