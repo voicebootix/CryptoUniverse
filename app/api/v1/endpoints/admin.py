@@ -13,7 +13,7 @@ import uuid
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from pydantic import BaseModel, field_validator
 from sqlalchemy import and_, or_, func, select, case, desc
 from sqlalchemy.exc import SQLAlchemyError
@@ -30,6 +30,7 @@ from app.models.credit import CreditAccount, CreditTransactionType
 from app.models.system import SystemHealth, AuditLog
 from app.models.strategy_access import UserStrategyAccess, StrategyAccessType
 from app.models.strategy_submission import StrategySubmission, StrategyStatus
+from app.models.signal import SignalDeliveryLog, SignalEvent, SignalSubscription, SignalChannel
 from app.models.copy_trading import StrategyPublisher
 from app.services.master_controller import MasterSystemController
 from app.services.background import BackgroundServiceManager
@@ -78,6 +79,20 @@ class PeriodInfo(BaseModel):
     previous_start: Optional[datetime]
     previous_end: Optional[datetime]
     duration_days: Optional[int]
+
+
+class SignalDeliveryAudit(BaseModel):
+    delivery_id: UUID
+    channel_slug: str
+    user_id: UUID
+    delivery_channel: str
+    status: str
+    credit_cost: int
+    delivered_at: datetime
+    acknowledged_at: Optional[datetime]
+    executed_at: Optional[datetime]
+    metadata: Dict[str, Any]
+    payload: Dict[str, Any]
 
 
 def _resolve_period(period: Optional[str]) -> PeriodInfo:
@@ -2962,3 +2977,220 @@ async def review_strategy(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to review strategy"
         ) from e
+
+@router.get("/signals/deliveries", response_model=List[SignalDeliveryAudit])
+async def admin_signal_deliveries(
+    limit: int = Query(100, ge=1, le=500),
+    channel_slug: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    db: AsyncSession = Depends(get_database),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+) -> List[SignalDeliveryAudit]:
+    stmt = (
+        select(
+            SignalDeliveryLog,
+            SignalChannel.slug,
+            SignalSubscription.user_id,
+        )
+        .join(SignalSubscription, SignalDeliveryLog.subscription_id == SignalSubscription.id)
+        .join(SignalChannel, SignalSubscription.channel_id == SignalChannel.id)
+        .order_by(SignalDeliveryLog.delivered_at.desc())
+        .limit(limit)
+    )
+    if channel_slug:
+        stmt = stmt.where(SignalChannel.slug == channel_slug)
+    if status_filter:
+        stmt = stmt.where(SignalDeliveryLog.status == status_filter)
+
+    result = await db.execute(stmt)
+    records = result.all()
+
+    return [
+        SignalDeliveryAudit(
+            delivery_id=delivery.id,
+            channel_slug=slug,
+            user_id=user_id,
+            delivery_channel=delivery.delivery_channel,
+            status=delivery.status,
+            credit_cost=delivery.credit_cost,
+            delivered_at=delivery.delivered_at,
+            acknowledged_at=delivery.acknowledged_at,
+            executed_at=delivery.executed_at,
+            metadata=delivery.metadata or {},
+            payload=delivery.payload or {},
+        )
+        for delivery, slug, user_id in records
+    ]
+
+
+# ============================================================================
+# SYSTEM DIAGNOSTICS & LOGS
+# ============================================================================
+
+@router.get("/system/logs")
+async def get_system_logs(
+    lines: int = Query(100, ge=1, le=1000, description="Number of log lines to retrieve"),
+    service: Optional[str] = Query(None, description="Filter by service name (background, signal, etc)"),
+    level: Optional[str] = Query(None, description="Filter by log level (INFO, WARNING, ERROR)"),
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+):
+    """
+    Retrieve recent system logs for debugging.
+
+    This endpoint reads structured logs from memory/file system for admin diagnostics.
+    Useful for debugging background services without direct server access.
+    """
+    await rate_limiter.check_rate_limit(
+        key="admin:system_logs",
+        limit=20,
+        window=60,
+        user_id=str(current_user.id)
+    )
+
+    try:
+        import os
+        import json
+        from collections import deque
+
+        logs = []
+
+        # Try to read from log file if it exists
+        log_file_paths = [
+            "/var/log/cryptouniverse.log",
+            "./logs/app.log",
+            "./cryptouniverse.log",
+        ]
+
+        log_file = None
+        for path in log_file_paths:
+            if os.path.exists(path):
+                log_file = path
+                break
+
+        if log_file:
+            # Read last N lines from log file
+            with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                # Use deque for efficient tail reading
+                all_lines = deque(f, maxlen=lines * 2)  # Get more than needed for filtering
+
+                for line in all_lines:
+                    try:
+                        # Try to parse as JSON (structlog format)
+                        log_entry = json.loads(line.strip())
+
+                        # Apply filters
+                        if service and service.lower() not in str(log_entry.get('event', '')).lower():
+                            continue
+                        if level and log_entry.get('level', '').upper() != level.upper():
+                            continue
+
+                        logs.append(log_entry)
+                    except json.JSONDecodeError:
+                        # Plain text log line
+                        if service and service.lower() not in line.lower():
+                            continue
+                        if level and level.upper() not in line.upper():
+                            continue
+
+                        logs.append({
+                            "timestamp": None,
+                            "level": "UNKNOWN",
+                            "event": line.strip(),
+                            "format": "plain"
+                        })
+
+                    if len(logs) >= lines:
+                        break
+        else:
+            # No log file found - return in-memory logs from structlog if available
+            logs.append({
+                "timestamp": datetime.utcnow().isoformat(),
+                "level": "WARNING",
+                "event": "No log file found. Check RENDER_LOG_PATH environment variable.",
+                "log_paths_checked": log_file_paths
+            })
+
+        return {
+            "success": True,
+            "log_file": log_file,
+            "logs": logs[-lines:],  # Return last N logs
+            "total_returned": len(logs[-lines:]),
+            "filters": {
+                "service": service,
+                "level": level,
+                "lines": lines
+            }
+        }
+
+    except Exception as e:
+        logger.exception("Failed to retrieve system logs")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve logs: {str(e)}"
+        )
+
+
+@router.get("/system/background-services")
+async def get_background_services_detailed(
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+):
+    """
+    Get detailed status of all background services including startup info.
+
+    This provides diagnostic information about:
+    - Which services are running
+    - Service startup times
+    - Last execution times
+    - Error counts
+    - Configuration intervals
+    """
+    await rate_limiter.check_rate_limit(
+        key="admin:background_services",
+        limit=30,
+        window=60,
+        user_id=str(current_user.id)
+    )
+
+    try:
+        # Get health check from background manager
+        services_health = await background_manager.health_check()
+
+        # Get system metrics which includes service info
+        system_metrics = await background_manager.get_system_metrics()
+
+        # Get detailed status for each service
+        service_details = {}
+        for service_name in background_manager.intervals.keys():
+            try:
+                detail = await background_manager.get_service_status(service_name)
+                service_details[service_name] = {
+                    "status": services_health.get(service_name, "not_started"),
+                    "interval_seconds": background_manager.intervals.get(service_name, 0),
+                    "details": detail
+                }
+            except Exception as e:
+                service_details[service_name] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+
+        return {
+            "success": True,
+            "uptime_hours": system_metrics.get("uptime_hours", 0),
+            "services": service_details,
+            "services_summary": {
+                "total": len(service_details),
+                "running": sum(1 for s in service_details.values() if s.get("status") == "running"),
+                "stopped": sum(1 for s in service_details.values() if s.get("status") in ["stopped", "not_started"]),
+                "error": sum(1 for s in service_details.values() if s.get("status") == "error"),
+            },
+            "intervals": background_manager.intervals,
+            "redis_available": system_metrics.get("active_connections", 0) > 0,
+        }
+
+    except Exception as e:
+        logger.exception("Failed to retrieve background services status")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve services status: {str(e)}"
+        )

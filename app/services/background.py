@@ -8,18 +8,24 @@ autonomous trading cycles, and configurable intervals for the AI money manager.
 import asyncio
 import time
 import psutil
-from datetime import datetime, timedelta
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List, Set
 import structlog
 from app.core.logging import LoggerMixin
 from app.core.config import get_settings
 from app.core.redis_manager import get_redis_manager
 from app.core.redis import get_redis_client
+from app.core.database import AsyncSessionLocal
 from app.services.state_coordinator import resilient_state_coordinator
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
+from sqlalchemy import select, and_, distinct, func
 from app.models.user import User
-from sqlalchemy import select, and_, distinct
+from app.models.signal import SignalChannel, SignalSubscription, SignalDeliveryLog
+from app.services.signal_channel_service import signal_channel_service
+from app.services.signal_delivery_service import signal_delivery_service
+from app.services.system_monitoring import system_monitoring_service
 import json
 
 settings = get_settings()
@@ -49,7 +55,8 @@ class BackgroundServiceManager(LoggerMixin):
             "market_data_sync": 180,      # 3 minutes (reduced frequency)
             "balance_sync": 600,          # 10 minutes (reduced frequency)
             "risk_monitor": 60,           # 1 minute (increased from 30s)
-            "rate_limit_cleanup": 3600    # 1 hour (reduced frequency)
+            "rate_limit_cleanup": 3600,   # 1 hour (reduced frequency)
+            "signal_dispatch": 300        # 5 minutes between signal batches
         }
         
         # Dynamic service configurations (no hardcoded restrictions)
@@ -123,6 +130,7 @@ class BackgroundServiceManager(LoggerMixin):
             ("market_data_sync", self._market_data_sync_service),
             ("balance_sync", self._balance_sync_service),
             ("risk_monitor", self._risk_monitor_service),
+            ("signal_dispatch", self._signal_dispatch_service),
         ]
         
         for service_name, service_func in deferred_services:
@@ -154,13 +162,14 @@ class BackgroundServiceManager(LoggerMixin):
         # Start individual services with error isolation
         services_to_start = [
             ("health_monitor", self._health_monitor_service),
-            ("metrics_collector", self._metrics_collector_service), 
+            ("metrics_collector", self._metrics_collector_service),
             ("cleanup_service", self._cleanup_service),
             ("autonomous_cycles", self._autonomous_cycles_service),
             ("market_data_sync", self._market_data_sync_service),
             ("balance_sync", self._balance_sync_service),
             ("risk_monitor", self._risk_monitor_service),
-            ("rate_limit_cleanup", self._rate_limit_cleanup_service)
+            ("rate_limit_cleanup", self._rate_limit_cleanup_service),
+            ("signal_dispatch", self._signal_dispatch_service),
         ]
         
         for service_name, service_func in services_to_start:
@@ -180,35 +189,53 @@ class BackgroundServiceManager(LoggerMixin):
         """Wrap service functions with error handling and recovery."""
         max_retries = 3
         retry_delay = 5  # seconds
-        
+
+        async def update_service_status(status: str):
+            """Update service status in both local dict and Redis for multi-worker coordination."""
+            self.services[service_name] = status
+            if self.redis:
+                try:
+                    await self.redis.hset(
+                        "background_services_status",
+                        service_name,
+                        json.dumps({
+                            "status": status,
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "interval": self.intervals.get(service_name, 0)
+                        })
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Failed to update Redis status for {service_name}", error=str(e))
+
         for attempt in range(max_retries):
             try:
-                self.services[service_name] = "running"
+                await update_service_status("running")
                 self.logger.info(f" {service_name} service started successfully")
-                
+
                 # Run the service function
                 await service_func()
-                
+
             except asyncio.CancelledError:
                 # Re-raise cancellation immediately - don't treat as error
+                await update_service_status("stopped")
                 raise
             except Exception as e:
-                self.services[service_name] = "error"
-                self.logger.exception(f"❌ {service_name} service failed", 
-                                    attempt=attempt + 1, 
+                await update_service_status("error")
+                self.logger.exception(f"❌ {service_name} service failed",
+                                    attempt=attempt + 1,
                                     max_retries=max_retries)
-                
+
                 if attempt < max_retries - 1:
                     self.logger.info(f"🔄 Retrying {service_name} in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
                     retry_delay *= 2  # Exponential backoff
                 else:
                     self.logger.exception(f"💀 {service_name} service permanently failed after {max_retries} attempts")
-                    self.services[service_name] = "failed"
+                    await update_service_status("failed")
                     return
-                    
+
         # If we get here, service ended normally
-        self.services[service_name] = "stopped"
+        await update_service_status("stopped")
         self.logger.warning(f" {service_name} service stopped unexpectedly")
     
     async def stop_all(self):
@@ -230,20 +257,47 @@ class BackgroundServiceManager(LoggerMixin):
         self.logger.info("All background services stopped")
     
     async def health_check(self) -> Dict[str, str]:
-        """Get real health status of all services."""
+        """Get real health status of all services from Redis (multi-worker compatible)."""
         health_status = {}
-        
-        for service_name, task in self.tasks.items():
-            if task.cancelled():
-                health_status[service_name] = "stopped"
-            elif task.done():
-                if task.exception():
-                    health_status[service_name] = "error"
+
+        # Try to get status from Redis first (works across all workers)
+        if self.redis:
+            try:
+                redis_statuses = await self.redis.hgetall("background_services_status")
+                for service_name, status_json in redis_statuses.items():
+                    try:
+                        # Decode bytes if necessary
+                        if isinstance(service_name, bytes):
+                            service_name = service_name.decode()
+                        if isinstance(status_json, bytes):
+                            status_json = status_json.decode()
+
+                        status_data = json.loads(status_json)
+                        health_status[service_name] = status_data.get("status", "unknown")
+                    except (json.JSONDecodeError, AttributeError) as e:
+                        self.logger.warning(f"Failed to parse status for {service_name}", error=str(e))
+                        health_status[service_name] = "unknown"
+            except Exception as e:
+                self.logger.warning("Failed to get status from Redis, falling back to local tasks", error=str(e))
+
+        # If Redis failed or returned empty, fall back to local task status
+        if not health_status:
+            for service_name, task in self.tasks.items():
+                if task.cancelled():
+                    health_status[service_name] = "stopped"
+                elif task.done():
+                    if task.exception():
+                        health_status[service_name] = "error"
+                    else:
+                        health_status[service_name] = "completed"
                 else:
-                    health_status[service_name] = "completed"
-            else:
-                health_status[service_name] = "running"
-        
+                    health_status[service_name] = "running"
+
+        # Fill in any missing services with "not_started"
+        for service_name in self.intervals.keys():
+            if service_name not in health_status:
+                health_status[service_name] = "not_started"
+
         return health_status
     
     async def get_system_metrics(self) -> Dict[str, Any]:
@@ -399,7 +453,7 @@ class BackgroundServiceManager(LoggerMixin):
     async def _metrics_collector_service(self):
         """Collect and store system metrics."""
         self.logger.info(" Metrics collector service started")
-        
+
         while self.running:
             try:
                 metrics = await self.get_system_metrics()
@@ -423,8 +477,207 @@ class BackgroundServiceManager(LoggerMixin):
                 
             except Exception as e:
                 self.logger.error("Metrics collector error", error=str(e))
-            
+
             await asyncio.sleep(self.intervals["metrics_collector"])
+
+    async def _signal_dispatch_service(self):
+        """Evaluate and dispatch signal intelligence on a cadence."""
+        self.logger.info(" Signal dispatch service started")
+
+        while self.running:
+            interval = self.intervals.get("signal_dispatch", 300)
+            try:
+                await self._run_signal_dispatch_cycle()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # pragma: no cover - defensive logging
+                self.logger.exception("Signal dispatch cycle failed", error=str(e))
+            await asyncio.sleep(interval)
+
+    async def _run_signal_dispatch_cycle(self):
+        if not await self._is_signal_dispatch_allowed():
+            return
+
+        lock_key = "background:signal_dispatch_lock"
+        lock_token = None
+        lock_acquired = False
+
+        if self.redis:
+            try:
+                # Generate unique token for this lock attempt
+                lock_token = str(uuid.uuid4())
+                lock_acquired = await self.redis.set(
+                    lock_key,
+                    lock_token,
+                    ex=self.intervals.get("signal_dispatch", 300),
+                    nx=True,
+                )
+            except Exception as e:
+                self.logger.warning("Unable to acquire signal dispatch lock", error=str(e))
+                # Proceed without Redis coordination if Redis is unavailable
+                lock_acquired = True
+                lock_token = None
+        else:
+            # No Redis client: run cycle without distributed coordination
+            lock_acquired = True
+            lock_token = None
+
+        if not lock_acquired:
+            self.logger.debug("Signal dispatch skipped - lock already held")
+            return
+
+        total_deliveries = 0
+        try:
+            async with AsyncSessionLocal() as db:
+                await signal_channel_service.seed_default_channels(db)
+
+                channels_result = await db.execute(
+                    select(SignalChannel).where(SignalChannel.is_active.is_(True))
+                )
+                channels = channels_result.scalars().all()
+
+                for channel in channels:
+                    subscriptions_result = await db.execute(
+                        select(SignalSubscription).where(
+                            SignalSubscription.channel_id == channel.id,
+                            SignalSubscription.is_active.is_(True),
+                        )
+                    )
+                    subscriptions = subscriptions_result.scalars().all()
+
+                    due_subscriptions = []
+                    user_ids = set()
+                    for subscription in subscriptions:
+                        if not self._subscription_due(channel, subscription):
+                            continue
+                        if not await self._under_daily_limit(db, subscription, channel):
+                            continue
+                        due_subscriptions.append(subscription)
+                        user_ids.add(subscription.user_id)
+
+                    if not due_subscriptions:
+                        continue
+
+                    users_result = await db.execute(
+                        select(User).where(User.id.in_(list(user_ids)))
+                    )
+                    user_map = {str(user.id): user for user in users_result.scalars().all()}
+
+                    deliveries = await signal_delivery_service.dispatch_channel(
+                        db,
+                        channel=channel,
+                        subscriptions=due_subscriptions,
+                        user_map=user_map,
+                    )
+                    total_deliveries += len(deliveries)
+
+                    # Update last_event_at for successfully dispatched subscriptions
+                    if deliveries:
+                        dispatch_time = datetime.now(timezone.utc)
+                        # Build a map of subscription_id -> delivery status
+                        subscription_delivery_map = {}
+                        for delivery in deliveries:
+                            sub_id = delivery.subscription_id
+                            if sub_id not in subscription_delivery_map:
+                                subscription_delivery_map[sub_id] = []
+                            subscription_delivery_map[sub_id].append(delivery.status)
+
+                        # Update subscriptions that had at least one successful delivery
+                        for subscription in due_subscriptions:
+                            if subscription.id in subscription_delivery_map:
+                                statuses = subscription_delivery_map[subscription.id]
+                                # Update timestamp if any delivery was successful
+                                if "delivered" in statuses:
+                                    subscription.last_event_at = dispatch_time
+
+                await db.commit()
+
+        finally:
+            # Only delete lock if we acquired it and have the token
+            if self.redis and lock_token:
+                try:
+                    # Atomic conditional delete using Lua script
+                    lua_script = """
+                    if redis.call("get", KEYS[1]) == ARGV[1] then
+                        return redis.call("del", KEYS[1])
+                    else
+                        return 0
+                    end
+                    """
+                    await self.redis.eval(lua_script, 1, lock_key, lock_token)
+                except Exception as e:
+                    self.logger.warning("Failed to release lock atomically", error=str(e))
+
+        if total_deliveries:
+            system_monitoring_service.record_metric(
+                "signal_dispatch_deliveries",
+                float(total_deliveries),
+                {"timestamp": datetime.utcnow().isoformat()},
+            )
+            self.logger.info("Signal dispatch cycle complete", deliveries=total_deliveries)
+
+    async def _is_signal_dispatch_allowed(self) -> bool:
+        if not self.redis:
+            return True
+        try:
+            global_stop = await self.redis.get("global_emergency_stop")
+            market_halt = await self.redis.get("market_halt_active")
+        except Exception as e:
+            self.logger.warning("Signal dispatch emergency check failed", error=str(e))
+            return True
+
+        if global_stop:
+            self.logger.warning("Signal dispatch paused due to global emergency stop")
+            return False
+        if market_halt:
+            self.logger.warning("Signal dispatch paused due to market halt flag")
+            return False
+        return True
+
+    def _subscription_due(self, channel: SignalChannel, subscription: SignalSubscription) -> bool:
+        # Check for explicit None to preserve 0 values
+        if subscription.cadence_override_minutes is not None:
+            cadence = subscription.cadence_override_minutes
+        elif channel.cadence_minutes is not None:
+            cadence = channel.cadence_minutes
+        else:
+            cadence = 15
+
+        last_event = subscription.last_event_at
+        if not last_event:
+            return True
+        return datetime.now(timezone.utc) >= last_event + timedelta(minutes=cadence)
+
+    async def _under_daily_limit(
+        self,
+        db: AsyncSession,
+        subscription: SignalSubscription,
+        channel: SignalChannel,
+    ) -> bool:
+        # Build list of provided limits (not None)
+        limits = []
+        if subscription.max_daily_events is not None:
+            limits.append(subscription.max_daily_events)
+        if channel.max_daily_events is not None:
+            limits.append(channel.max_daily_events)
+
+        # If no limits provided, allow unlimited
+        if not limits:
+            return True
+
+        # Get minimum of provided limits
+        limit = min(limits)
+        if limit <= 0:
+            return True
+
+        day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        count_stmt = select(func.count(SignalDeliveryLog.id)).where(
+            SignalDeliveryLog.subscription_id == subscription.id,
+            SignalDeliveryLog.delivered_at >= day_start,
+        )
+        result = await db.execute(count_stmt)
+        count = result.scalar_one() or 0
+        return count < limit
     
     async def _cleanup_service(self):
         """Clean up old data and optimize storage."""
@@ -718,7 +971,6 @@ class BackgroundServiceManager(LoggerMixin):
                         cached_symbols = await self.redis.get(cache_key)
                         if cached_symbols:
                             try:
-                                import json
                                 return set(json.loads(cached_symbols))
                             except:
                                 pass
@@ -736,9 +988,8 @@ class BackgroundServiceManager(LoggerMixin):
                         
                         # Cache successful results for 5 minutes
                         if self.redis and valid_symbols:
-                            import json
                             await self.redis.setex(
-                                f"api_symbols_cache:{api_config['name'].lower()}", 
+                                f"api_symbols_cache:{api_config['name'].lower()}",
                                 300,  # 5 minute cache
                                 json.dumps(list(valid_symbols))
                             )
@@ -940,7 +1191,7 @@ class BackgroundServiceManager(LoggerMixin):
                         self.logger.debug(f"Cached {len(user_ids)} active users")
                 
                 # Proceed with sync...
-                
+
                 # Get all users with active exchange accounts
                 from app.core.database import get_database
                 from app.models.exchange import ExchangeAccount

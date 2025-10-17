@@ -427,6 +427,22 @@ class MessageRouter(LoggerMixin):
             return await self._handle_trade_command(chat_id, user_id, args)
         elif command_type == "strategies":
             return await self._handle_strategies_command(chat_id, user_id, args)
+        elif command_type == "signals":
+            return await self._handle_signals_command(chat_id, user_id, args)
+        elif command_type == "signalsettings":
+            return await self._handle_signal_settings_command(chat_id, user_id, args)
+        elif command_type == "signal_config":
+            return await self._handle_signal_config_command(chat_id, user_id, args)
+        elif command_type == "signal_symbols":
+            return await self._handle_signal_symbols_command(chat_id, user_id, args)
+        elif command_type == "signal_timeframe":
+            return await self._handle_signal_timeframe_command(chat_id, user_id, args)
+        elif command_type == "signal_autopilot":
+            return await self._handle_signal_autopilot_command(chat_id, user_id, args)
+        elif command_type == "signal_history":
+            return await self._handle_signal_history_command(chat_id, user_id, args)
+        elif command_type == "signal_performance":
+            return await self._handle_signal_performance_command(chat_id, user_id, args)
         elif command_type == "ai":
             return await self._handle_ai_command(chat_id, user_id, args)
         elif command_type == "settings":
@@ -850,7 +866,7 @@ Use the AI chat to get trading recommendations:
     
     async def _handle_strategies_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
         """Handle /strategies command."""
-        
+
         strategies_text = """
 🎯 **Available Trading Strategies**
 
@@ -873,13 +889,312 @@ Ask me: "What's the best strategy for BTC right now?" or "Show me momentum signa
 
 Use /ai [question] for strategy recommendations! 🤖
         """
-        
+
         await self.telegram_api.send_message(chat_id, strategies_text)
         return {"success": True, "command": "strategies"}
-    
+
+    async def _handle_signals_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
+        """Handle /signals command for channel management via Telegram."""
+
+        from sqlalchemy import select
+
+        from app.core.database import AsyncSessionLocal
+        from app.models.signal import SignalSubscription
+        from app.models.telegram_integration import UserTelegramConnection
+        from app.models.user import User
+        from app.services.signal_channel_service import (
+            SignalAccessError,
+            SignalSubscriptionError,
+            signal_channel_service,
+        )
+
+        normalized_args = [arg.strip().lower() for arg in args if arg and arg.strip()]
+        action = normalized_args[0] if normalized_args else "list"
+        slug = normalized_args[1] if len(normalized_args) > 1 else None
+
+        async with AsyncSessionLocal() as db:
+            connection_stmt = select(UserTelegramConnection).where(
+                UserTelegramConnection.telegram_user_id == user_id
+            )
+            connection = (await db.execute(connection_stmt)).scalar_one_or_none()
+            if not connection and chat_id:
+                fallback_stmt = select(UserTelegramConnection).where(
+                    UserTelegramConnection.telegram_chat_id == chat_id
+                )
+                connection = (await db.execute(fallback_stmt)).scalar_one_or_none()
+            if not connection:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "🔗 Your Telegram chat is not linked for delivery. Use /start to pair your account and retry.",
+                )
+                return {"success": False, "error": "connection_missing"}
+
+            if not connection.user_id:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "⚠️ Unable to resolve your CryptoUniverse profile. Please relink your account using /start.",
+                )
+                return {"success": False, "error": "invalid_user_identifier"}
+
+            user = await db.get(User, connection.user_id)
+            if not user:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "⚠️ Account not found. Please complete onboarding from the web app before requesting signals.",
+                )
+                return {"success": False, "error": "user_missing"}
+
+            try:
+                if action in {"list", "status", "overview"}:
+                    overview = await self._render_signal_overview(db, user, connection)
+                    await self.telegram_api.send_message(chat_id, overview)
+                    return {"success": True, "command": "signals", "action": "list"}
+
+                if action in {"subscribe", "join"}:
+                    if not slug:
+                        await self.telegram_api.send_message(
+                            chat_id,
+                            "Usage: /signals subscribe <channel-slug>\nFind channel slugs in /signals list.",
+                        )
+                        return {"success": False, "error": "missing_channel_slug"}
+
+                    channel = await signal_channel_service.get_channel_by_slug(db, slug)
+                    if not channel or not channel.is_active:
+                        await self.telegram_api.send_message(
+                            chat_id,
+                            f"🚫 Channel `{slug}` is not available. Use /signals list to review active options.",
+                        )
+                        return {"success": False, "error": "channel_not_found"}
+
+                    try:
+                        subscription = await signal_channel_service.subscribe(
+                            db,
+                            user=user,
+                            channel=channel,
+                            preferred_channels=("telegram",),
+                            billing_plan="standard",
+                            autopilot_enabled=connection.trading_enabled,
+                            webhook_url=None,
+                        )
+                    except (SignalSubscriptionError, SignalAccessError) as exc:
+                        await db.rollback()
+                        await self.telegram_api.send_message(
+                            chat_id,
+                            f"🚫 Subscription failed: {exc}",
+                        )
+                        return {"success": False, "error": "subscription_failed"}
+
+                    await db.commit()
+
+                    confirmation = (
+                        f"✅ Subscribed to *{channel.name}*."
+                        f"\n• Cadence: every {channel.cadence_minutes} minutes"
+                        f"\n• Preferred delivery: Telegram"
+                        f"\n• Reserved credits: {subscription.reserved_credits}"
+                    )
+                    overview = await self._render_signal_overview(db, user, connection)
+                    await self.telegram_api.send_message(chat_id, f"{confirmation}\n\n{overview}")
+                    return {"success": True, "command": "signals", "action": "subscribe"}
+
+                if action in {"unsubscribe", "leave", "stop"}:
+                    if not slug:
+                        await self.telegram_api.send_message(
+                            chat_id,
+                            "Usage: /signals unsubscribe <channel-slug>\nFind channel slugs in /signals list.",
+                        )
+                        return {"success": False, "error": "missing_channel_slug"}
+
+                    channel = await signal_channel_service.get_channel_by_slug(db, slug)
+                    if not channel:
+                        await self.telegram_api.send_message(
+                            chat_id,
+                            f"🚫 Channel `{slug}` was not found.",
+                        )
+                        return {"success": False, "error": "channel_not_found"}
+
+                    subscription_result = await db.execute(
+                        select(SignalSubscription).where(
+                            SignalSubscription.channel_id == channel.id,
+                            SignalSubscription.user_id == user.id,
+                            SignalSubscription.is_active.is_(True),
+                        )
+                    )
+                    subscription = subscription_result.scalar_one_or_none()
+                    if not subscription:
+                        await self.telegram_api.send_message(
+                            chat_id,
+                            f"ℹ️ You are not currently subscribed to `{channel.slug}`.",
+                        )
+                        return {"success": False, "error": "subscription_missing"}
+
+                    await signal_channel_service.unsubscribe(db, subscription)
+                    await db.commit()
+
+                    confirmation = (
+                        f"🛑 Subscription to *{channel.name}* paused."
+                        "\nReserved credits have been released."
+                    )
+                    overview = await self._render_signal_overview(db, user, connection)
+                    await self.telegram_api.send_message(chat_id, f"{confirmation}\n\n{overview}")
+                    return {"success": True, "command": "signals", "action": "unsubscribe"}
+
+                if action in {"help", "?"}:
+                    help_text = """
+📡 **Signal Intelligence Commands**
+
+/signals list — View available channels and your status
+/signals subscribe <slug> — Activate a channel (e.g. /signals subscribe momentum-alpha)
+/signals unsubscribe <slug> — Pause a channel and release reserved credits
+/signalsettings frequency <minutes> — Override Telegram cadence (minimum 5 minutes)
+/signalsettings strategies <slug,slug> — Focus Telegram dispatch on specific channels
+/signalsettings allocation <units> — Default allocation per signal for quick actions
+                    """.strip()
+                    await self.telegram_api.send_message(chat_id, help_text)
+                    return {"success": True, "command": "signals", "action": "help"}
+
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "❓ Unknown signals command. Use /signals help for supported actions.",
+                )
+                return {"success": False, "error": "unknown_action"}
+
+            except Exception as exc:
+                await db.rollback()
+                self.logger.error("Signals command failed", error=str(exc), exc_info=True)
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "⚠️ An error occurred while processing your request. Please try again shortly.",
+                )
+                return {"success": False, "error": "signals_command_exception"}
+
+    async def _handle_signal_settings_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
+        """Handle /signalsettings command to tune Telegram delivery preferences."""
+
+        from sqlalchemy import select
+
+        from app.core.database import AsyncSessionLocal
+        from app.models.telegram_integration import UserTelegramConnection
+        from app.models.user import User
+
+        normalized_args = [arg.strip() for arg in args if arg and arg.strip()]
+        if not normalized_args:
+            await self.telegram_api.send_message(
+                chat_id,
+                "Usage:\n"
+                "/signalsettings frequency <minutes>\n"
+                "/signalsettings strategies <slug,slug>\n"
+                "/signalsettings allocation <units>",
+            )
+            return {"success": False, "error": "missing_arguments"}
+
+        setting = normalized_args[0].lower()
+        value = normalized_args[1] if len(normalized_args) > 1 else None
+
+        async with AsyncSessionLocal() as db:
+            connection_stmt = select(UserTelegramConnection).where(
+                UserTelegramConnection.telegram_user_id == user_id
+            )
+            connection = (await db.execute(connection_stmt)).scalar_one_or_none()
+            if not connection and chat_id:
+                fallback_stmt = select(UserTelegramConnection).where(
+                    UserTelegramConnection.telegram_chat_id == chat_id
+                )
+                connection = (await db.execute(fallback_stmt)).scalar_one_or_none()
+            if not connection:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "🔗 Your Telegram chat is not linked for delivery. Use /start to pair your account and retry.",
+                )
+                return {"success": False, "error": "connection_missing"}
+
+            if not connection.user_id:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "⚠️ Unable to resolve your CryptoUniverse profile. Please relink your account using /start.",
+                )
+                return {"success": False, "error": "invalid_user_identifier"}
+
+            user = await db.get(User, connection.user_id)
+            if not user:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "⚠️ Account not found. Complete onboarding from the web app before updating settings.",
+                )
+                return {"success": False, "error": "user_missing"}
+
+            preferences = dict(connection.signal_preferences or {})
+
+            try:
+                if setting == "frequency":
+                    if not value:
+                        raise ValueError("Specify a cadence in minutes")
+                    minutes = int(value)
+                    if minutes < 5 or minutes > 720:
+                        raise ValueError("Frequency must be between 5 and 720 minutes")
+                    preferences["frequency_minutes"] = minutes
+
+                elif setting == "strategies":
+                    strategies_value = value or ""
+                    strategies = [
+                        slug.strip().lower()
+                        for slug in strategies_value.replace(",", " ").split()
+                        if slug.strip()
+                    ]
+                    preferences["strategies"] = strategies
+
+                elif setting == "allocation":
+                    if not value:
+                        raise ValueError("Specify an allocation amount in units")
+                    allocation = float(value)
+                    if allocation <= 0 or allocation > 10:
+                        raise ValueError("Allocation must be greater than 0 and no more than 10 units")
+                    preferences["default_allocation"] = allocation
+
+                else:
+                    await self.telegram_api.send_message(
+                        chat_id,
+                        "❓ Unknown setting. Valid options: frequency, strategies, allocation.",
+                    )
+                    return {"success": False, "error": "invalid_setting"}
+
+                connection.signal_preferences = preferences
+                connection.updated_at = datetime.utcnow()
+                await db.flush()
+                await db.commit()
+
+            except ValueError as exc:
+                await db.rollback()
+                await self.telegram_api.send_message(chat_id, f"⚠️ {exc}")
+                return {"success": False, "error": "invalid_setting_value"}
+            except Exception as exc:  # pragma: no cover - defensive logging
+                await db.rollback()
+                self.logger.error("Signal settings update failed", error=str(exc), exc_info=True)
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "⚠️ Unable to update preferences right now. Please try again later.",
+                )
+                return {"success": False, "error": "settings_update_failed"}
+
+            frequency = preferences.get("frequency_minutes")
+            strategies = preferences.get("strategies", [])
+            allocation = preferences.get("default_allocation")
+
+            summary_lines = [
+                "⚙️ **Signal Delivery Preferences Updated**",
+                f"• Frequency override: {'every ' + str(frequency) + ' minutes' if frequency else 'platform default'}",
+                "• Strategy focus: "
+                + (", ".join(strategies) if strategies else "all subscribed channels"),
+                "• Default allocation per signal: "
+                + (f"{allocation}" if allocation is not None else "use channel recommendation"),
+            ]
+
+            overview = await self._render_signal_overview(db, user, connection)
+            await self.telegram_api.send_message(chat_id, "\n".join(summary_lines) + "\n\n" + overview)
+            return {"success": True, "command": "signalsettings", "setting": setting}
+
     async def _handle_ai_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
         """Handle /ai command - direct AI query."""
-        
+
         if not args:
             await self.telegram_api.send_message(
                 chat_id,
@@ -892,7 +1207,7 @@ Use /ai [question] for strategy recommendations! 🤖
     
     async def _handle_settings_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
         """Handle /settings command."""
-        
+
         settings_text = """
 ⚙️ **CryptoUniverse Settings**
 
@@ -909,10 +1224,550 @@ Use /ai [question] for strategy recommendations! 🤖
 
 Current settings are optimized for safety and comprehensive analysis. 🛡️
         """
-        
+
         await self.telegram_api.send_message(chat_id, settings_text)
         return {"success": True, "command": "settings"}
-    
+
+    async def _handle_signal_config_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
+        """Handle /signal_config command - Show signal channel configuration."""
+        from sqlalchemy import select
+        from app.core.database import AsyncSessionLocal
+        from app.models.signal import SignalChannel, SignalSubscription
+        from app.models.telegram_integration import UserTelegramConnection
+
+        channel_slug = args[0] if args else None
+
+        async with AsyncSessionLocal() as db:
+            # Get user connection
+            connection_stmt = select(UserTelegramConnection).where(
+                UserTelegramConnection.telegram_user_id == user_id
+            )
+            connection = (await db.execute(connection_stmt)).scalar_one_or_none()
+
+            if not connection or not connection.user_id:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "🔗 Please link your account first using /start"
+                )
+                return {"success": False, "error": "not_connected"}
+
+            if not channel_slug:
+                # Show all subscriptions
+                subs_stmt = (
+                    select(SignalSubscription, SignalChannel)
+                    .join(SignalChannel, SignalSubscription.channel_id == SignalChannel.id)
+                    .where(SignalSubscription.user_id == connection.user_id)
+                    .where(SignalSubscription.is_active.is_(True))
+                )
+                results = (await db.execute(subs_stmt)).all()
+
+                if not results:
+                    await self.telegram_api.send_message(
+                        chat_id,
+                        "📡 No active signal subscriptions.\n\nUse /signals to browse available channels."
+                    )
+                    return {"success": True}
+
+                response = "📡 **Your Signal Subscriptions:**\n\n"
+                for sub, channel in results:
+                    config = channel.configuration or {}
+                    timeframe = config.get("timeframe", "1h")
+                    symbols = config.get("default_symbols", [])
+
+                    response += f"**{channel.name}** (`{channel.slug}`)\n"
+                    response += f"• Timeframe: {timeframe}\n"
+                    response += f"• Autopilot: {'✅ ON' if sub.autopilot_enabled else '❌ OFF'}\n"
+                    response += f"• Max daily signals: {sub.max_daily_events}\n"
+                    if symbols:
+                        response += f"• Symbols: {', '.join(symbols[:3])}{'...' if len(symbols) > 3 else ''}\n"
+                    response += f"\n"
+
+                response += "\nUse `/signal_config <channel-slug>` for details."
+                await self.telegram_api.send_message(chat_id, response)
+                return {"success": True}
+
+            # Show specific channel config
+            channel_stmt = (
+                select(SignalChannel)
+                .where(SignalChannel.slug == channel_slug)
+            )
+            channel = (await db.execute(channel_stmt)).scalar_one_or_none()
+
+            if not channel:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    f"🚫 Channel `{channel_slug}` not found."
+                )
+                return {"success": False, "error": "channel_not_found"}
+
+            # Get subscription
+            sub_stmt = (
+                select(SignalSubscription)
+                .where(SignalSubscription.user_id == connection.user_id)
+                .where(SignalSubscription.channel_id == channel.id)
+            )
+            subscription = (await db.execute(sub_stmt)).scalar_one_or_none()
+
+            if not subscription:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    f"🚫 You're not subscribed to `{channel_slug}`.\n\nUse `/signals subscribe {channel_slug}`"
+                )
+                return {"success": False, "error": "not_subscribed"}
+
+            config = channel.configuration or {}
+            timeframe = config.get("timeframe", "1h")
+            symbols = config.get("default_symbols", [])
+
+            response = f"📡 **{channel.name}** Configuration\n\n"
+            response += f"**Channel Settings:**\n"
+            response += f"• Slug: `{channel.slug}`\n"
+            response += f"• Risk Profile: {channel.risk_profile}\n"
+            response += f"• Cadence: Every {channel.cadence_minutes} minutes\n"
+            response += f"• Timeframe: {timeframe}\n"
+
+            if symbols:
+                response += f"• Symbols: {', '.join(symbols)}\n"
+            else:
+                response += f"• Symbols: Dynamic (top 20 traded pairs)\n"
+
+            response += f"\n**Your Subscription:**\n"
+            response += f"• Autopilot: {'✅ ON' if subscription.autopilot_enabled else '❌ OFF'}\n"
+            response += f"• Max daily signals: {subscription.max_daily_events}\n"
+            response += f"• Reserved credits: {subscription.reserved_credits}\n"
+            response += f"• Delivery: {', '.join(subscription.preferred_channels or ['telegram'])}\n"
+
+            response += f"\n**Configuration Commands:**\n"
+            response += f"• `/signal_symbols {channel_slug} BTC/USDT ETH/USDT` - Set custom symbols\n"
+            response += f"• `/signal_timeframe {channel_slug} 4h` - Change timeframe\n"
+            response += f"• `/signal_autopilot on {channel_slug}` - Enable autopilot\n"
+            response += f"• `/signal_history` - View past signals\n"
+
+            await self.telegram_api.send_message(chat_id, response)
+            return {"success": True}
+
+    async def _handle_signal_symbols_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
+        """Handle /signal_symbols command - Configure symbols for a channel."""
+        from sqlalchemy import select
+        from app.core.database import AsyncSessionLocal
+        from app.models.signal import SignalChannel, SignalSubscription
+        from app.models.telegram_integration import UserTelegramConnection
+
+        if len(args) < 2:
+            await self.telegram_api.send_message(
+                chat_id,
+                "Usage: `/signal_symbols <channel-slug> <symbols>`\n\n"
+                "Example: `/signal_symbols momentum-alpha BTC/USDT ETH/USDT SOL/USDT`"
+            )
+            return {"success": False, "error": "missing_args"}
+
+        channel_slug = args[0]
+        # Capture all symbols from args[1:], handling space-separated and comma-separated formats
+        symbols_str = ' '.join(args[1:])
+        symbols = [s.strip().upper() for s in symbols_str.replace(',', ' ').split() if s.strip()]
+
+        if not symbols:
+            await self.telegram_api.send_message(
+                chat_id,
+                "❌ No valid symbols provided. Use format like: BTC/USDT ETH/USDT"
+            )
+            return {"success": False, "error": "invalid_symbols"}
+
+        async with AsyncSessionLocal() as db:
+            # Get user connection
+            connection_stmt = select(UserTelegramConnection).where(
+                UserTelegramConnection.telegram_user_id == user_id
+            )
+            connection = (await db.execute(connection_stmt)).scalar_one_or_none()
+
+            if not connection or not connection.user_id:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "🔗 Please link your account first using /start"
+                )
+                return {"success": False, "error": "not_connected"}
+
+            # Get channel
+            channel_stmt = select(SignalChannel).where(SignalChannel.slug == channel_slug)
+            channel = (await db.execute(channel_stmt)).scalar_one_or_none()
+
+            if not channel:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    f"🚫 Channel `{channel_slug}` not found."
+                )
+                return {"success": False, "error": "channel_not_found"}
+
+            # Require active subscription and update per-subscription metadata
+            sub_stmt = (
+                select(SignalSubscription)
+                .where(SignalSubscription.user_id == connection.user_id)
+                .where(SignalSubscription.channel_id == channel.id)
+                .where(SignalSubscription.is_active.is_(True))
+            )
+            subscription = (await db.execute(sub_stmt)).scalar_one_or_none()
+            if not subscription:
+                await self.telegram_api.send_message(
+                    chat_id, f"🚫 You're not subscribed to `{channel_slug}`."
+                )
+                return {"success": False, "error": "not_subscribed"}
+
+            metadata = dict(subscription.metadata or {})
+            metadata["custom_symbols"] = symbols
+            subscription.metadata = metadata
+            await db.commit()
+
+            response = (
+                f"✅ **Symbols updated for {channel.name}**\n\n"
+                f"Symbols: {', '.join(symbols)}\n\n"
+                "Your deliveries for this channel will focus on these assets."
+            )
+
+            await self.telegram_api.send_message(chat_id, response)
+            return {"success": True}
+
+    async def _handle_signal_timeframe_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
+        """Handle /signal_timeframe command - Configure timeframe for a channel."""
+        from sqlalchemy import select
+        from app.core.database import AsyncSessionLocal
+        from app.models.signal import SignalChannel, SignalSubscription
+        from app.models.telegram_integration import UserTelegramConnection
+
+        if len(args) < 2:
+            await self.telegram_api.send_message(
+                chat_id,
+                "Usage: `/signal_timeframe <channel-slug> <timeframe>`\n\n"
+                "Valid timeframes: 5m, 15m, 1h, 4h, 1d\n"
+                "Example: `/signal_timeframe momentum-alpha 4h`"
+            )
+            return {"success": False, "error": "missing_args"}
+
+        channel_slug = args[0]
+        timeframe = args[1].lower()
+
+        valid_timeframes = ["5m", "15m", "1h", "4h", "1d"]
+        if timeframe not in valid_timeframes:
+            await self.telegram_api.send_message(
+                chat_id,
+                f"❌ Invalid timeframe: {timeframe}\n\nValid options: {', '.join(valid_timeframes)}"
+            )
+            return {"success": False, "error": "invalid_timeframe"}
+
+        async with AsyncSessionLocal() as db:
+            # Get user connection
+            connection_stmt = select(UserTelegramConnection).where(
+                UserTelegramConnection.telegram_user_id == user_id
+            )
+            connection = (await db.execute(connection_stmt)).scalar_one_or_none()
+
+            if not connection or not connection.user_id:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "🔗 Please link your account first using /start"
+                )
+                return {"success": False, "error": "not_connected"}
+
+            # Get channel
+            channel_stmt = select(SignalChannel).where(SignalChannel.slug == channel_slug)
+            channel = (await db.execute(channel_stmt)).scalar_one_or_none()
+
+            if not channel:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    f"🚫 Channel `{channel_slug}` not found."
+                )
+                return {"success": False, "error": "channel_not_found"}
+
+            # Require active subscription and update per-subscription metadata
+            sub_stmt = (
+                select(SignalSubscription)
+                .where(SignalSubscription.user_id == connection.user_id)
+                .where(SignalSubscription.channel_id == channel.id)
+                .where(SignalSubscription.is_active.is_(True))
+            )
+            subscription = (await db.execute(sub_stmt)).scalar_one_or_none()
+            if not subscription:
+                await self.telegram_api.send_message(
+                    chat_id, f"🚫 You're not subscribed to `{channel_slug}`."
+                )
+                return {"success": False, "error": "not_subscribed"}
+
+            metadata = dict(subscription.metadata or {})
+            metadata["timeframe_override"] = timeframe
+            subscription.metadata = metadata
+            await db.commit()
+
+            response = (
+                f"✅ **Timeframe updated for {channel.name}**\n\n"
+                f"Timeframe: {timeframe}\n\n"
+                "Your signals for this channel will use this candle timeframe."
+            )
+
+            await self.telegram_api.send_message(chat_id, response)
+            return {"success": True}
+
+    async def _handle_signal_autopilot_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
+        """Handle /signal_autopilot command - Toggle autopilot for signal subscriptions."""
+        from sqlalchemy import select
+        from app.core.database import AsyncSessionLocal
+        from app.models.signal import SignalChannel, SignalSubscription
+        from app.models.telegram_integration import UserTelegramConnection
+
+        if not args:
+            await self.telegram_api.send_message(
+                chat_id,
+                "Usage: `/signal_autopilot <on|off> [channel-slug]`\n\n"
+                "Toggle autopilot for all subscriptions or a specific channel.\n\n"
+                "Examples:\n"
+                "• `/signal_autopilot on` - Enable for all\n"
+                "• `/signal_autopilot off momentum-alpha` - Disable for one channel"
+            )
+            return {"success": False, "error": "missing_args"}
+
+        action = args[0].lower()
+        channel_slug = args[1] if len(args) > 1 else None
+
+        if action not in ["on", "off"]:
+            await self.telegram_api.send_message(
+                chat_id,
+                "❌ Invalid action. Use `on` or `off`."
+            )
+            return {"success": False, "error": "invalid_action"}
+
+        enabled = action == "on"
+
+        async with AsyncSessionLocal() as db:
+            # Get user connection
+            connection_stmt = select(UserTelegramConnection).where(
+                UserTelegramConnection.telegram_user_id == user_id
+            )
+            connection = (await db.execute(connection_stmt)).scalar_one_or_none()
+
+            if not connection or not connection.user_id:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "🔗 Please link your account first using /start"
+                )
+                return {"success": False, "error": "not_connected"}
+
+            if channel_slug:
+                # Update specific channel
+                channel_stmt = select(SignalChannel).where(SignalChannel.slug == channel_slug)
+                channel = (await db.execute(channel_stmt)).scalar_one_or_none()
+
+                if not channel:
+                    await self.telegram_api.send_message(
+                        chat_id,
+                        f"🚫 Channel `{channel_slug}` not found."
+                    )
+                    return {"success": False, "error": "channel_not_found"}
+
+                sub_stmt = (
+                    select(SignalSubscription)
+                    .where(SignalSubscription.user_id == connection.user_id)
+                    .where(SignalSubscription.channel_id == channel.id)
+                )
+                subscription = (await db.execute(sub_stmt)).scalar_one_or_none()
+
+                if not subscription:
+                    await self.telegram_api.send_message(
+                        chat_id,
+                        f"🚫 You're not subscribed to `{channel_slug}`."
+                    )
+                    return {"success": False, "error": "not_subscribed"}
+
+                subscription.autopilot_enabled = enabled
+                await db.commit()
+
+                response = f"✅ **Autopilot {'enabled' if enabled else 'disabled'} for {channel.name}**\n\n"
+                if enabled:
+                    response += "Signals will now be automatically executed when received."
+                else:
+                    response += "You'll need to manually acknowledge signals."
+
+                await self.telegram_api.send_message(chat_id, response)
+                return {"success": True}
+            else:
+                # Update all subscriptions
+                subs_stmt = (
+                    select(SignalSubscription)
+                    .where(SignalSubscription.user_id == connection.user_id)
+                    .where(SignalSubscription.is_active.is_(True))
+                )
+                subscriptions = (await db.execute(subs_stmt)).scalars().all()
+
+                if not subscriptions:
+                    await self.telegram_api.send_message(
+                        chat_id,
+                        "📡 No active signal subscriptions found."
+                    )
+                    return {"success": False, "error": "no_subscriptions"}
+
+                for subscription in subscriptions:
+                    subscription.autopilot_enabled = enabled
+
+                await db.commit()
+
+                response = f"✅ **Autopilot {'enabled' if enabled else 'disabled'} for all subscriptions**\n\n"
+                response += f"Updated {len(subscriptions)} channel(s).\n\n"
+                if enabled:
+                    response += "All signals will now be automatically executed."
+                else:
+                    response += "You'll need to manually acknowledge all signals."
+
+                await self.telegram_api.send_message(chat_id, response)
+                return {"success": True}
+
+    async def _handle_signal_history_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
+        """Handle /signal_history command - Show past signals and performance."""
+        from sqlalchemy import select
+        from app.core.database import AsyncSessionLocal
+        from app.models.telegram_integration import UserTelegramConnection
+        from app.services.signal_performance_service import signal_performance_service
+
+        limit = int(args[0]) if args and args[0].isdigit() else 10
+        limit = min(limit, 50)  # Cap at 50
+
+        async with AsyncSessionLocal() as db:
+            # Get user connection
+            connection_stmt = select(UserTelegramConnection).where(
+                UserTelegramConnection.telegram_user_id == user_id
+            )
+            connection = (await db.execute(connection_stmt)).scalar_one_or_none()
+
+            if not connection or not connection.user_id:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "🔗 Please link your account first using /start"
+                )
+                return {"success": False, "error": "not_connected"}
+
+            # Get signal history
+            history = await signal_performance_service.get_user_signal_history(
+                db, connection.user_id, limit=limit
+            )
+
+            if not history:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "📡 No signal history found.\n\nSubscribe to channels using /signals"
+                )
+                return {"success": True}
+
+            response = f"📊 **Your Last {len(history)} Signals**\n\n"
+
+            for item in history[:10]:  # Show top 10 in message
+                symbol = item.get("symbol", "N/A")
+                action = item.get("action", "N/A")
+                outcome = item.get("outcome", "pending")
+                profit_pct = item.get("profit_pct")
+                channel_name = item.get("channel_name", "Unknown")
+
+                if outcome == "win":
+                    emoji = "✅"
+                    outcome_text = f"+{profit_pct:.2f}%" if profit_pct else "WIN"
+                elif outcome == "loss":
+                    emoji = "❌"
+                    outcome_text = f"{profit_pct:.2f}%" if profit_pct else "LOSS"
+                elif outcome == "pending":
+                    emoji = "⏳"
+                    outcome_text = "PENDING"
+                else:
+                    emoji = "⏭️"
+                    outcome_text = outcome.upper()
+
+                response += f"{emoji} **{symbol}** {action}\n"
+                response += f"  {channel_name} • {outcome_text}\n\n"
+
+            if len(history) > 10:
+                response += f"\n_Showing 10 of {len(history)} signals. Use web dashboard for full history._"
+
+            await self.telegram_api.send_message(chat_id, response)
+            return {"success": True}
+
+    async def _handle_signal_performance_command(self, chat_id: str, user_id: str, args: List[str]) -> Dict[str, Any]:
+        """Handle /signal_performance command - Show channel performance metrics."""
+        from sqlalchemy import select
+        from app.core.database import AsyncSessionLocal
+        from app.models.signal import SignalChannel
+        from app.models.telegram_integration import UserTelegramConnection
+        from app.services.signal_performance_service import signal_performance_service
+
+        channel_slug = args[0] if args else None
+
+        async with AsyncSessionLocal() as db:
+            # Get user connection
+            connection_stmt = select(UserTelegramConnection).where(
+                UserTelegramConnection.telegram_user_id == user_id
+            )
+            connection = (await db.execute(connection_stmt)).scalar_one_or_none()
+
+            if not connection or not connection.user_id:
+                await self.telegram_api.send_message(
+                    chat_id,
+                    "🔗 Please link your account first using /start"
+                )
+                return {"success": False, "error": "not_connected"}
+
+            if channel_slug:
+                # Show specific channel performance
+                channel_stmt = select(SignalChannel).where(SignalChannel.slug == channel_slug)
+                channel = (await db.execute(channel_stmt)).scalar_one_or_none()
+
+                if not channel:
+                    await self.telegram_api.send_message(
+                        chat_id,
+                        f"🚫 Channel `{channel_slug}` not found."
+                    )
+                    return {"success": False, "error": "channel_not_found"}
+
+                perf = await signal_performance_service.get_channel_performance(
+                    db, channel.id, days=30
+                )
+
+                response = f"📊 **{perf.channel_name} Performance** (30 days)\n\n"
+                response += f"**Overview:**\n"
+                response += f"• Total Signals: {perf.total_signals}\n"
+                response += f"• Completed: {perf.completed_signals}\n"
+                response += f"• Pending: {perf.pending_count}\n"
+                response += f"• Win Rate: {perf.win_rate:.1f}%\n"
+                response += f"• Quality Score: {perf.quality_score:.0f}/100\n\n"
+
+                response += f"**Returns:**\n"
+                response += f"• Avg Profit: {perf.avg_profit_pct:+.2f}%\n"
+                response += f"• Avg Win: +{perf.avg_win_pct:.2f}%\n"
+                response += f"• Avg Loss: {perf.avg_loss_pct:.2f}%\n"
+                response += f"• Best Trade: +{perf.best_signal_pct:.2f}%\n"
+                response += f"• Worst Trade: {perf.worst_signal_pct:.2f}%\n"
+
+                await self.telegram_api.send_message(chat_id, response)
+                return {"success": True}
+            else:
+                # Show all channels performance
+                performances = await signal_performance_service.get_all_channel_performance(
+                    db, days=30
+                )
+
+                if not performances:
+                    await self.telegram_api.send_message(
+                        chat_id,
+                        "📊 No performance data available yet."
+                    )
+                    return {"success": True}
+
+                response = "📊 **Signal Performance** (30 days)\n\n"
+
+                for perf in performances[:5]:  # Top 5
+                    response += f"**{perf.channel_name}**\n"
+                    response += f"• Win Rate: {perf.win_rate:.1f}% ({perf.win_count}W/{perf.loss_count}L)\n"
+                    response += f"• Quality Score: {perf.quality_score:.0f}/100\n"
+                    response += f"• Avg Profit: {perf.avg_profit_pct:+.2f}%\n\n"
+
+                response += f"\nUse `/signal_performance <channel-slug>` for details."
+
+                await self.telegram_api.send_message(chat_id, response)
+                return {"success": True}
+
     def _format_portfolio_response(self, portfolio_result: Dict[str, Any]) -> str:
         """Format portfolio data for Telegram display."""
         
@@ -951,6 +1806,78 @@ Current settings are optimized for safety and comprehensive analysis. 🛡️
         response_parts.append(f"\n📊 Use /risk for detailed analysis")
         
         return "\n".join(response_parts)
+
+    async def _render_signal_overview(
+        self,
+        db,
+        user,
+        connection,
+    ) -> str:
+        """Build a Markdown formatted overview of signal channels and preferences."""
+
+        from app.services.signal_channel_service import signal_channel_service
+
+        channel_dicts = await signal_channel_service.list_channels(db, user)
+        lines: List[str] = ["📡 **Signal Intelligence Channels**", ""]
+
+        for channel_data in channel_dicts:
+            subscription = channel_data.get("active_subscription")
+            slug = channel_data["slug"]
+            name = channel_data["name"]
+            risk = channel_data["risk_profile"].title()
+            cadence = channel_data["cadence_minutes"]
+            if subscription and subscription.get("is_active"):
+                preferred = subscription.get("preferred_channels") or ["telegram"]
+                last_event_raw = subscription.get("last_event_at")
+                last_event = "—"
+                if last_event_raw:
+                    try:
+                        last_event_dt = datetime.fromisoformat(last_event_raw)
+                        last_event = last_event_dt.strftime("%Y-%m-%d %H:%M UTC")
+                    except ValueError:
+                        last_event = last_event_raw
+
+                lines.extend(
+                    [
+                        f"✅ *{name}* (`{slug}`) — {risk}, {cadence}m cadence",
+                        "    • Delivery: " + ", ".join(preferred),
+                        "    • Reserved credits: " + str(subscription.get("reserved_credits", 0)),
+                        "    • Last signal: " + last_event,
+                    ]
+                )
+            else:
+                min_credits = channel_data["min_credit_balance"]
+                autopilot = "Yes" if channel_data.get("autopilot_supported") else "No"
+                lines.extend(
+                    [
+                        f"➕ *{name}* (`{slug}`) — {risk}, {cadence}m cadence",
+                        f"    • Minimum credits: {min_credits} | Autopilot ready: {autopilot}",
+                    ]
+                )
+
+        preferences = dict(connection.signal_preferences or {})
+        frequency = preferences.get("frequency_minutes")
+        strategies = preferences.get("strategies", [])
+        allocation = preferences.get("default_allocation")
+
+        lines.extend(
+            [
+                "",
+                "⚙️ *Telegram Delivery Settings*",
+                "• Frequency override: "
+                + (f"every {frequency} minutes" if frequency else "platform default"),
+                "• Strategy focus: "
+                + (", ".join(strategies) if strategies else "all subscribed channels"),
+                "• Default allocation: "
+                + (f"{allocation}" if allocation is not None else "channel recommendation"),
+                "",
+                "🛠️ *Commands*",
+                "/signals subscribe <slug> | /signals unsubscribe <slug>",
+                "/signalsettings frequency <minutes> | strategies <slug,slug> | allocation <units>",
+            ]
+        )
+
+        return "\n".join(lines)
     
     async def _format_market_response(self, symbol: str, market_result: Dict[str, Any]) -> str:
         """Format market data for Telegram display."""
@@ -1462,3 +2389,4 @@ telegram_commander_service = TelegramCommanderService()
 async def get_telegram_commander_service() -> TelegramCommanderService:
     """Dependency injection for FastAPI."""
     return telegram_commander_service
+

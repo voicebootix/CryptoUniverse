@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field(..., env="SECRET_KEY", description="Secret key for JWT")
     ENCRYPTION_KEY: str = Field(default="", env="ENCRYPTION_KEY", description="Key for encrypting sensitive data like API keys")
     DEBUG_TOKEN: Optional[str] = Field(default=None, env="DEBUG_TOKEN", description="Optional token for accessing debug endpoints in production")
+    SIGNALS_WEBHOOK_SECRET: Optional[str] = Field(
+        default=None,
+        env="SIGNALS_WEBHOOK_SECRET",
+        description="HMAC secret for signal delivery webhook callbacks",
+    )
     
     # JWT settings
     JWT_ALGORITHM: str = Field(default="HS256", description="JWT signing algorithm")

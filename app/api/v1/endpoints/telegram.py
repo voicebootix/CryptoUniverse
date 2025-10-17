@@ -83,6 +83,9 @@ class TelegramConnectionRequest(BaseModel):
     enable_voice_commands: bool = False
     daily_trade_limit: int = 10
     max_trade_amount: int = 1000
+    signal_frequency_minutes: int = 30
+    signal_strategies: Optional[List[str]] = None
+    default_signal_allocation: float = 1.0
     
     @field_validator('daily_trade_limit')
     @classmethod
@@ -98,6 +101,20 @@ class TelegramConnectionRequest(BaseModel):
             raise ValueError("Max trade amount must be between $100 and $50,000")
         return v
 
+    @field_validator('signal_frequency_minutes')
+    @classmethod
+    def validate_signal_frequency(cls, v):
+        if v < 5 or v > 1440:
+            raise ValueError("Signal frequency must be between 5 minutes and 1440 minutes")
+        return v
+
+    @field_validator('default_signal_allocation')
+    @classmethod
+    def validate_signal_allocation(cls, v):
+        if v <= 0 or v > 10:
+            raise ValueError("Default signal allocation must be between 0 and 10 units")
+        return v
+
 
 class TelegramConnectionResponse(BaseModel):
     connection_id: str
@@ -109,6 +126,7 @@ class TelegramConnectionResponse(BaseModel):
     notifications_enabled: bool
     auth_token: str
     setup_instructions: str
+    signal_preferences: Dict[str, Any]
 
 
 class TelegramMessageRequest(BaseModel):
@@ -202,7 +220,12 @@ async def connect_telegram_account(
             max_trade_amount_usd=request.max_trade_amount,
             auth_token=auth_token,
             auth_expires_at=auth_expires,
-            allowed_commands=_get_default_allowed_commands(request.enable_trading)
+            allowed_commands=_get_default_allowed_commands(request.enable_trading),
+            signal_preferences={
+                "frequency_minutes": request.signal_frequency_minutes,
+                "strategies": request.signal_strategies or [],
+                "default_allocation": request.default_signal_allocation,
+            },
         )
         
         db.add(connection)
@@ -228,7 +251,8 @@ async def connect_telegram_account(
             trading_enabled=request.enable_trading,
             notifications_enabled=request.enable_notifications,
             auth_token=auth_token,
-            setup_instructions=setup_instructions
+            setup_instructions=setup_instructions,
+            signal_preferences=connection.signal_preferences,
         )
         
     except HTTPException:
