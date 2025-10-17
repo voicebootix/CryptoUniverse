@@ -285,13 +285,16 @@ class DatabaseManager:
                 execution_time = time.time() - start_time
                 
                 # Track query performance with bounded tracking
+                # Each query gets a fixed-size sliding window using collections.deque(maxlen)
+                # This prevents unbounded memory growth while maintaining recent performance data
                 if len(self._query_times) < self._max_tracked_queries:
                     if query_name not in self._query_times:
-                        # Use deque with maxlen for fixed-size sliding window
+                        # Create new deque with fixed maxlen for this query
                         self._query_times[query_name] = collections.deque(maxlen=self._max_timings_per_query)
+                    # Append timing - deque automatically maintains maxlen (drops oldest when full)
                     self._query_times[query_name].append(execution_time)
                 elif query_name in self._query_times:
-                    # Only track if already being tracked
+                    # Only track if already being tracked - deque automatically maintains maxlen
                     self._query_times[query_name].append(execution_time)
                 
                 # Note: Slow query warnings are handled by engine-level event handlers
