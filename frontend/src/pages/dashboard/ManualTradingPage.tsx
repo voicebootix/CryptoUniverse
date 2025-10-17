@@ -49,7 +49,7 @@ import { useAIConsensus } from '@/hooks/useAIConsensus';
 import { useCredits } from '@/hooks/useCredits';
 import { useChatStore, ChatMode } from '@/store/chatStore';
 import PhaseProgressVisualizer, { ExecutionPhase } from '@/components/trading/PhaseProgressVisualizer';
-import { PHASE_CONFIG, PhaseData } from '@/constants/trading';
+import { PHASE_CONFIG, PhaseData, AIPersonality, PERSONALITY_CONFIG } from '@/constants/trading';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { apiClient } from '@/lib/api/client';
 
@@ -115,6 +115,93 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   customNotes: ''
 };
 
+const PERSONA_STORAGE_KEY = 'manual-trading-persona-selection';
+const TOUR_STORAGE_KEY = 'manual-trading-tour-v1';
+
+type TourStepId = 'hero' | 'persona' | 'trade' | 'workflow' | 'summary' | 'insights';
+
+interface PersonaPreset {
+  trade: Partial<ManualTradeRequest>;
+  workflow: Partial<WorkflowConfig>;
+  headline: string;
+  subline: string;
+}
+
+const PERSONA_PRESETS: Record<AIPersonality, PersonaPreset> = {
+  [AIPersonality.CONSERVATIVE]: {
+    trade: {
+      orderType: 'limit',
+      leverage: 1,
+      stopLoss: 2,
+      takeProfit: 3,
+      amount: 750
+    },
+    workflow: {
+      confidence: 90,
+      timeframe: '4h',
+      includeRiskMetrics: true,
+      aiModels: 'cost_optimized',
+      rebalanceThreshold: 2
+    },
+    headline: 'Protect capital first with tight guardrails.',
+    subline: 'High-confidence entries, conservative sizing, and full risk telemetry.'
+  },
+  [AIPersonality.BALANCED]: {
+    trade: {
+      orderType: 'market',
+      leverage: 2,
+      stopLoss: 3,
+      takeProfit: 6,
+      amount: 1000
+    },
+    workflow: {
+      confidence: 80,
+      timeframe: '1h',
+      includeRiskMetrics: true,
+      aiModels: 'all',
+      rebalanceThreshold: 4
+    },
+    headline: 'Blend growth and safety for daily compounding.',
+    subline: 'Balanced AI mix with protective stops and dynamic rebalancing.'
+  },
+  [AIPersonality.AGGRESSIVE]: {
+    trade: {
+      orderType: 'market',
+      leverage: 3,
+      stopLoss: 4,
+      takeProfit: 9,
+      amount: 1500
+    },
+    workflow: {
+      confidence: 72,
+      timeframe: '30m',
+      includeRiskMetrics: false,
+      aiModels: 'gpt4_claude',
+      rebalanceThreshold: 6
+    },
+    headline: 'Chase momentum with rapid-fire consensus.',
+    subline: 'Favors quicker timeframes and looser guardrails for stronger signals.'
+  },
+  [AIPersonality.DEGEN]: {
+    trade: {
+      orderType: 'market',
+      leverage: 5,
+      stopLoss: 6,
+      takeProfit: 15,
+      amount: 2000
+    },
+    workflow: {
+      confidence: 65,
+      timeframe: '15m',
+      includeRiskMetrics: false,
+      aiModels: 'gpt4_claude',
+      rebalanceThreshold: 8
+    },
+    headline: 'Speculative bursts with high tolerance for volatility.',
+    subline: 'Maximizes leverage and keeps safeguards minimal—use with caution.'
+  }
+};
+
 const ONBOARDING_STEPS: Array<{ title: string; description: string }> = [
   {
     title: '1. Sync with AI consensus',
@@ -129,6 +216,55 @@ const ONBOARDING_STEPS: Array<{ title: string; description: string }> = [
     description: 'Populate the trade form with AI guidance, then add optional risk controls before sending the order.'
   }
 ];
+
+const TOUR_STEPS: Array<{ id: TourStepId; title: string; description: string }> = [
+  {
+    id: 'hero',
+    title: 'Welcome to the control center',
+    description: 'Track AI connectivity, exchange status, and credits at a glance before taking action.'
+  },
+  {
+    id: 'persona',
+    title: 'Pick a persona preset',
+    description: 'Load trade and workflow defaults that mirror your preferred risk appetite in one click.'
+  },
+  {
+    id: 'trade',
+    title: 'Fine-tune orders',
+    description: 'Use the guided trade form with optional guardrails before routing through the AI execution stack.'
+  },
+  {
+    id: 'workflow',
+    title: 'Stream the AI workflow',
+    description: 'Kick off opportunity scans, validations, or rebalancing with the same phases the chat interface runs.'
+  },
+  {
+    id: 'summary',
+    title: 'Read the AI headline',
+    description: 'Every workflow ends with a plain-language recommendation and confidence score ready to apply.'
+  },
+  {
+    id: 'insights',
+    title: 'Review structured insights',
+    description: 'Dive into the AI logbook with parsed payloads or expand for the raw execution context.'
+  }
+];
+
+interface SpotlightArea {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+const formatPercentValue = (value: number): string => {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return '—';
+  }
+
+  const normalized = Math.abs(value) <= 1 ? value * 100 : value;
+  return formatPercentage(normalized);
+};
 
 const MAX_INSIGHT_PREVIEW_ENTRIES = 8;
 
@@ -290,10 +426,33 @@ const ManualTradingPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('trade');
   const [aiInsights, setAiInsights] = useState<Array<{ id: string; title: string; payload: any; function: string; timestamp: string }>>([]);
   const [guidedMode, setGuidedMode] = useState(true);
+  const [selectedPersona, setSelectedPersona] = useState<AIPersonality | 'custom'>('custom');
+  const [tourActive, setTourActive] = useState(false);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
+  const [tourSpotlight, setTourSpotlight] = useState<SpotlightArea | null>(null);
+  const [tourTooltipPosition, setTourTooltipPosition] = useState<{ top: number; left: number } | null>(null);
 
   const streamingControllerRef = useRef<AbortController | null>(null);
   const manualSessionRef = useRef<string | null>(null);
   const initializingSessionPromiseRef = useRef<Promise<void> | null>(null);
+  const heroRef = useRef<HTMLDivElement | null>(null);
+  const personaRef = useRef<HTMLDivElement | null>(null);
+  const tradeFormRef = useRef<HTMLDivElement | null>(null);
+  const workflowRef = useRef<HTMLDivElement | null>(null);
+  const summaryRef = useRef<HTMLDivElement | null>(null);
+  const insightsRef = useRef<HTMLDivElement | null>(null);
+
+  const stepRefs = useMemo(
+    () => ({
+      hero: heroRef,
+      persona: personaRef,
+      trade: tradeFormRef,
+      workflow: workflowRef,
+      summary: summaryRef,
+      insights: insightsRef
+    }),
+    []
+  ) as Record<TourStepId, React.RefObject<HTMLDivElement>>;
 
   const availableSymbols = useMemo(() => {
     const symbols = new Set<string>();
@@ -318,6 +477,342 @@ const ManualTradingPage: React.FC = () => {
       .map((symbol) => symbol.trim())
       .filter((symbol) => symbol.length > 0);
   }, [workflowConfig.targetSymbolsText]);
+
+  const activePersonaLabel = useMemo(() => {
+    if (selectedPersona === 'custom') {
+      return 'Custom parameters';
+    }
+    return PERSONALITY_CONFIG[selectedPersona].name;
+  }, [selectedPersona]);
+
+  const applyPersonaPreset = useCallback(
+    (personality: AIPersonality, options?: { silent?: boolean; persist?: boolean }) => {
+      const preset = PERSONA_PRESETS[personality];
+      if (!preset) {
+        return;
+      }
+
+      setTradeForm((prev) => ({ ...prev, ...preset.trade }));
+      setWorkflowConfig((prev) => ({ ...prev, ...preset.workflow }));
+
+      if (!options?.silent) {
+        const persona = PERSONALITY_CONFIG[personality];
+        toast({
+          title: `${persona.emoji} ${persona.name} preset loaded`,
+          description: preset.subline,
+          variant: 'default'
+        });
+      }
+
+      if (options?.persist !== false && typeof window !== 'undefined') {
+        localStorage.setItem(PERSONA_STORAGE_KEY, personality);
+      }
+
+      setSelectedPersona(personality);
+    },
+    [toast]
+  );
+
+  const handlePersonaReset = useCallback(() => {
+    setSelectedPersona('custom');
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(PERSONA_STORAGE_KEY, 'custom');
+    }
+
+    toast({
+      title: 'Custom configuration active',
+      description: 'You can now fine-tune every parameter without preset overrides.',
+      variant: 'default'
+    });
+  }, [toast]);
+
+  const handlePersonaSelect = useCallback(
+    (personality: AIPersonality) => {
+      applyPersonaPreset(personality);
+    },
+    [applyPersonaPreset]
+  );
+
+  const startTour = useCallback(() => {
+    setTourStepIndex(0);
+    setTourActive(true);
+  }, []);
+
+  const completeTour = useCallback(() => {
+    setTourActive(false);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(TOUR_STORAGE_KEY, 'seen');
+    }
+  }, []);
+
+  const skipTour = useCallback(() => {
+    completeTour();
+  }, [completeTour]);
+
+  const goToNextTourStep = useCallback(() => {
+    setTourStepIndex((previous) => {
+      if (previous >= TOUR_STEPS.length - 1) {
+        completeTour();
+        return previous;
+      }
+      return previous + 1;
+    });
+  }, [completeTour]);
+
+  const goToPreviousTourStep = useCallback(() => {
+    setTourStepIndex((previous) => Math.max(0, previous - 1));
+  }, []);
+
+  const updateSpotlight = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const step = TOUR_STEPS[tourStepIndex];
+    if (!step) {
+      return;
+    }
+
+    const element = stepRefs[step.id]?.current;
+
+    if (!element) {
+      setTourSpotlight(null);
+      setTourTooltipPosition({
+        top: window.scrollY + 120,
+        left: 24
+      });
+      return;
+    }
+
+    const rect = element.getBoundingClientRect();
+    const top = rect.top + window.scrollY;
+    const left = rect.left + window.scrollX;
+    const width = rect.width;
+    const height = rect.height;
+
+    setTourSpotlight({ top, left, width, height });
+
+    const tooltipWidth = 320;
+    const viewportWidth = window.innerWidth;
+    const tooltipLeft = Math.min(
+      Math.max(left, 24),
+      Math.max(24, viewportWidth - tooltipWidth - 24)
+    );
+
+    setTourTooltipPosition({
+      top: top + height + 24,
+      left: tooltipLeft
+    });
+  }, [stepRefs, tourStepIndex]);
+
+  const getRecommendationTone = useCallback((recommendation: string) => {
+    const normalized = recommendation?.toLowerCase?.() || '';
+
+    if (normalized.includes('buy') || normalized.includes('long')) {
+      return 'bg-emerald-500/70';
+    }
+
+    if (normalized.includes('sell') || normalized.includes('short')) {
+      return 'bg-rose-500/70';
+    }
+
+    if (normalized.includes('rebalance') || normalized.includes('hedge')) {
+      return 'bg-amber-500/70';
+    }
+
+    return 'bg-blue-500/70';
+  }, []);
+
+  const aiSummaryHeadlines = useMemo(() => {
+    if (!aiSummary) {
+      return [] as string[];
+    }
+
+    const statements: string[] = [];
+    const actionData = aiSummary.actionData || {};
+    const rawSymbol = actionData.symbol || actionData.asset || actionData.pair || actionData.ticker;
+    const symbol = typeof rawSymbol === 'string' ? rawSymbol.toUpperCase() : '';
+    const directionValue = actionData.action || actionData.side || aiSummary.intent;
+
+    if (symbol && typeof directionValue === 'string') {
+      const direction = directionValue.toUpperCase();
+      const confidenceSuffix = typeof aiSummary.confidence === 'number'
+        ? ` with ${aiSummary.confidence.toFixed(1)}% confidence`
+        : '';
+      statements.push(`${direction} ${symbol}${confidenceSuffix} based on AI consensus.`);
+    } else if (typeof aiSummary.confidence === 'number') {
+      statements.push(`AI consensus confidence at ${aiSummary.confidence.toFixed(1)}%.`);
+    }
+
+    const addPriceHeadline = (value: unknown, label: string) => {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        statements.push(`${label} ${formatCurrency(value)}.`);
+      }
+    };
+
+    const addPercentHeadline = (value: unknown, label: string) => {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        statements.push(`${label} ${formatPercentValue(value)}.`);
+      }
+    };
+
+    addPriceHeadline(actionData.price ?? actionData.entry_price ?? actionData.entry, 'Target entry around');
+    addPriceHeadline(actionData.take_profit ?? actionData.target ?? actionData.takeProfit, 'Upside target near');
+    addPriceHeadline(actionData.stop_loss ?? actionData.stopLoss, 'Protective stop near');
+
+    addPercentHeadline(actionData.stop_loss_pct ?? actionData.stopLossPct, 'Max drawdown capped at');
+    addPercentHeadline(actionData.position_size_pct ?? actionData.positionSizePct, 'Position size set to');
+    addPercentHeadline(actionData.rebalance_target, 'Rebalance target at');
+
+    const analysis = aiSummary.aiAnalysis;
+    if (Array.isArray(analysis?.key_points)) {
+      analysis.key_points.forEach((point: unknown) => {
+        if (typeof point === 'string' && point.trim().length > 0) {
+          statements.push(point.trim());
+        }
+      });
+    } else if (typeof analysis?.summary === 'string' && analysis.summary.trim().length > 0) {
+      statements.push(analysis.summary.trim());
+    }
+
+    if (statements.length === 0 && typeof aiSummary.content === 'string') {
+      const sanitized = aiSummary.content.replace(/\s+/g, ' ').trim();
+      if (sanitized.length > 0) {
+        sanitized
+          .split(/(?<=[.!?])\s+/)
+          .slice(0, 2)
+          .forEach((sentence) => {
+            if (sentence && sentence.trim().length > 0) {
+              statements.push(sentence.trim());
+            }
+          });
+      }
+    }
+
+    return Array.from(new Set(statements.filter(Boolean)));
+  }, [aiSummary]);
+
+  const consensusTrendPoints = useMemo(() => {
+    if (!Array.isArray(consensusHistory)) {
+      return [] as Array<{ id: string; value: number; recommendation: string; time: string }>;
+    }
+
+    return consensusHistory.slice(-8).map((entry, index) => {
+      const numericValue = Number(entry.consensus);
+      const clampedValue = Number.isFinite(numericValue)
+        ? Math.max(0, Math.min(100, numericValue))
+        : 0;
+
+      return {
+        id: `${entry.timestamp || index}-${index}`,
+        value: clampedValue,
+        recommendation: entry.recommendation || 'HOLD',
+        time: entry.time || ''
+      };
+    });
+  }, [consensusHistory]);
+
+  const latestConsensus =
+    consensusTrendPoints.length > 0 ? consensusTrendPoints[consensusTrendPoints.length - 1] : null;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const stored = localStorage.getItem(PERSONA_STORAGE_KEY) as AIPersonality | 'custom' | null;
+    if (stored && stored !== 'custom') {
+      applyPersonaPreset(stored, { silent: true, persist: false });
+    } else if (stored === 'custom') {
+      setSelectedPersona('custom');
+    } else {
+      applyPersonaPreset(AIPersonality.BALANCED, { silent: true, persist: false });
+    }
+  }, [applyPersonaPreset]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const hasSeenTour = localStorage.getItem(TOUR_STORAGE_KEY);
+    if (!hasSeenTour) {
+      const timer = window.setTimeout(() => {
+        setTourStepIndex(0);
+        setTourActive(true);
+      }, 800);
+
+      return () => window.clearTimeout(timer);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!tourActive) {
+      setTourSpotlight(null);
+      setTourTooltipPosition(null);
+      return;
+    }
+
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const raf = window.requestAnimationFrame(updateSpotlight);
+    return () => window.cancelAnimationFrame(raf);
+  }, [tourActive, tourStepIndex, updateSpotlight]);
+
+  useEffect(() => {
+    if (!tourActive || typeof window === 'undefined') {
+      return;
+    }
+
+    const handleChange = () => updateSpotlight();
+    window.addEventListener('resize', handleChange);
+    window.addEventListener('scroll', handleChange, true);
+
+    return () => {
+      window.removeEventListener('resize', handleChange);
+      window.removeEventListener('scroll', handleChange, true);
+    };
+  }, [tourActive, updateSpotlight]);
+
+  useEffect(() => {
+    if (!tourActive || typeof window === 'undefined') {
+      return;
+    }
+
+    const step = TOUR_STEPS[tourStepIndex];
+    const element = stepRefs[step.id]?.current;
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    }
+  }, [tourActive, tourStepIndex, stepRefs]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    if (!tourActive) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [tourActive]);
+
+  useEffect(() => {
+    if (!tourActive || typeof window === 'undefined') {
+      return;
+    }
+
+    const timer = window.setTimeout(() => updateSpotlight(), 120);
+    return () => window.clearTimeout(timer);
+  }, [tourActive, guidedMode, aiSummary, aiSummaryHeadlines.length, aiInsights.length, activeTab, updateSpotlight]);
 
   const ensureSessionId = useCallback(async () => {
     if (manualSessionRef.current) {
@@ -968,15 +1463,70 @@ const ManualTradingPage: React.FC = () => {
     }
   }, [isStreaming, activeTab]);
 
+  const currentTourStep = TOUR_STEPS[tourStepIndex];
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Manual Trading Control Center</h1>
-          <p className="text-muted-foreground">
-            Execute trades, rebalancing, and AI-driven actions with full transparency into every phase.
-          </p>
+    <>
+      {tourActive && currentTourStep && (
+        <div className="fixed inset-0 z-[60]">
+          <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" />
+          {tourSpotlight && (
+            <div
+              className="pointer-events-none absolute rounded-xl border-2 border-primary shadow-[0_0_0_9999px_rgba(15,23,42,0.55)] transition-all duration-200"
+              style={{
+                top: Math.max(12, tourSpotlight.top - 16),
+                left: Math.max(12, tourSpotlight.left - 16),
+                width: tourSpotlight.width + 32,
+                height: tourSpotlight.height + 32
+              }}
+            />
+          )}
+          <div
+            className="pointer-events-auto absolute z-[61] max-w-sm rounded-lg border bg-background p-5 shadow-xl"
+            style={{
+              top:
+                tourTooltipPosition?.top ??
+                (typeof window !== 'undefined' ? window.scrollY + 120 : 120),
+              left: tourTooltipPosition?.left ?? 24
+            }}
+          >
+            <div className="space-y-2">
+              <Badge variant="outline" className="text-xs uppercase tracking-wide">
+                Guided walkthrough
+              </Badge>
+              <h3 className="text-lg font-semibold">{currentTourStep.title}</h3>
+              <p className="text-sm text-muted-foreground">{currentTourStep.description}</p>
+            </div>
+            <div className="mt-4 flex items-center justify-between gap-2">
+              <Button variant="ghost" size="sm" onClick={skipTour}>
+                Skip
+              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={goToPreviousTourStep}
+                  disabled={tourStepIndex === 0}
+                >
+                  Back
+                </Button>
+                <Button size="sm" onClick={goToNextTourStep}>
+                  {tourStepIndex >= TOUR_STEPS.length - 1 ? 'Finish' : 'Next'}
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
+      )}
+
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+        <div ref={heroRef} className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Manual Trading Control Center</h1>
+            <p className="text-muted-foreground">
+              Execute trades, rebalancing, and AI-driven actions with full transparency into every phase.
+            </p>
+          </div>
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant="outline" className="gap-1">
             <Radio className="h-3 w-3" />
@@ -1007,38 +1557,110 @@ const ManualTradingPage: React.FC = () => {
             <Switch id="guided-mode-toggle" checked={guidedMode} onCheckedChange={setGuidedMode} />
           </div>
         </div>
-      </div>
+        </div>
 
-      {guidedMode && (
-        <Alert variant="warning" className="border-dashed border-warning/50 bg-warning/5">
-          <div className="flex items-start gap-3">
-            <Lightbulb className="mt-1 h-4 w-4 text-warning" />
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <AlertTitle className="flex items-center gap-2 text-sm font-semibold">
-                  <HelpCircle className="h-4 w-4" />
-                  Quick start for first-time operators
-                </AlertTitle>
+        {guidedMode && (
+          <Alert variant="warning" className="border-dashed border-warning/50 bg-warning/5">
+            <div className="flex items-start gap-3">
+              <Lightbulb className="mt-1 h-4 w-4 text-warning" />
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <AlertTitle className="flex items-center gap-2 text-sm font-semibold">
+                    <HelpCircle className="h-4 w-4" />
+                    Quick start for first-time operators
+                  </AlertTitle>
+                </div>
+                <AlertDescription>
+                  <ol className="space-y-2 text-sm">
+                    {ONBOARDING_STEPS.map((step) => (
+                      <li key={step.title} className="flex gap-2">
+                        <span className="font-semibold text-foreground">{step.title}</span>
+                        <span className="text-muted-foreground">{step.description}</span>
+                      </li>
+                    ))}
+                  </ol>
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-xs text-muted-foreground">
+                      Switch off guided mode above once you are comfortable working without the onboarding tips.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        startTour();
+                      }}
+                    >
+                      Replay walkthrough
+                    </Button>
+                  </div>
+                </AlertDescription>
               </div>
-              <AlertDescription>
-                <ol className="space-y-2 text-sm">
-                  {ONBOARDING_STEPS.map((step) => (
-                    <li key={step.title} className="flex gap-2">
-                      <span className="font-semibold text-foreground">{step.title}</span>
-                      <span className="text-muted-foreground">{step.description}</span>
-                    </li>
-                  ))}
-                </ol>
-                <p className="mt-3 text-xs text-muted-foreground">
-                  Switch off guided mode above once you are comfortable working without the onboarding tips.
-                </p>
-              </AlertDescription>
             </div>
-          </div>
-        </Alert>
-      )}
+          </Alert>
+        )}
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <Card ref={personaRef} className="border-dashed border-primary/40 bg-primary/5">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Compass className="h-4 w-4" />
+              Persona presets
+            </CardTitle>
+            <CardDescription>
+              Load workflow and trade defaults that mirror the AI personas available in the chat experience.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {Object.entries(PERSONALITY_CONFIG).map(([key, persona]) => {
+                const personaKey = key as AIPersonality;
+                const preset = PERSONA_PRESETS[personaKey];
+                const isActive = selectedPersona === personaKey;
+
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => handlePersonaSelect(personaKey)}
+                    className={`group flex h-full flex-col justify-between rounded-lg border p-4 text-left transition ${
+                      isActive
+                        ? 'border-primary bg-primary/10 shadow-lg'
+                        : 'border-border/70 hover:border-primary/70 hover:bg-primary/5'
+                    }`}
+                  >
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-lg font-semibold">
+                          {persona.emoji} {persona.name}
+                        </span>
+                        <Badge variant={isActive ? 'default' : 'outline'} className="text-xs">
+                          {persona.riskLevel} risk
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{preset.headline}</p>
+                    </div>
+                    <div className="mt-4 flex items-center justify-between text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      <span>Target {formatPercentage(persona.dailyTargetPct)}</span>
+                      <span>Drawdown {formatPercentage(persona.maxDrawdownPct)}</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+              <span>Current preset: {activePersonaLabel}</span>
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={startTour}>
+                  Show tour
+                </Button>
+                <Button variant="secondary" size="sm" onClick={handlePersonaReset}>
+                  Custom setup
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="trade">Execute Trade</TabsTrigger>
           <TabsTrigger value="workflow">AI Workflow</TabsTrigger>
@@ -1048,7 +1670,7 @@ const ManualTradingPage: React.FC = () => {
 
         <TabsContent value="trade" className="space-y-6">
           <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
+            <Card ref={tradeFormRef} className="lg:col-span-2">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Target className="h-5 w-5" />
@@ -1369,7 +1991,7 @@ const ManualTradingPage: React.FC = () => {
 
         <TabsContent value="workflow" className="space-y-6">
           <div className="grid gap-6 xl:grid-cols-3">
-            <Card className="xl:col-span-2">
+            <Card ref={workflowRef} className="xl:col-span-2">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Brain className="h-5 w-5" />
@@ -1602,30 +2224,85 @@ const ManualTradingPage: React.FC = () => {
             </div>
           </div>
 
-          {aiSummary && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Brain className="h-4 w-4" />
-                  AI Recommendation Summary
-                </CardTitle>
-                <CardDescription>Final consensus from the AI workflow with actionable context.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+          <Card ref={summaryRef}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Brain className="h-4 w-4" />
+                AI Recommendation Summary
+              </CardTitle>
+              <CardDescription>Final consensus from the AI workflow with actionable context.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {aiSummaryHeadlines.length > 0 ? (
+                <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-4">
+                  <h4 className="flex items-center gap-2 text-sm font-semibold text-primary">
+                    <Sparkles className="h-4 w-4" />
+                    Key takeaways
+                  </h4>
+                  <ul className="space-y-2 text-sm text-foreground">
+                    {aiSummaryHeadlines.map((headline) => (
+                      <li key={headline} className="flex items-start gap-2">
+                        <CheckCircle className="mt-0.5 h-4 w-4 text-primary" />
+                        <span>{headline}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <div className="rounded-md border border-dashed border-muted-foreground/40 bg-muted/10 p-4 text-sm text-muted-foreground">
+                  Run the live AI workflow to produce a consensus headline and actionable checklist.
+                </div>
+              )}
+
+              {consensusTrendPoints.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Consensus trend</span>
+                    {latestConsensus && (
+                      <Badge variant="outline">
+                        {latestConsensus.recommendation} · {latestConsensus.value.toFixed(0)}%
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex h-24 items-end gap-1 rounded-md border border-border/60 bg-muted/20 p-2">
+                    {consensusTrendPoints.map((point) => (
+                      <div
+                        key={point.id}
+                        className={`flex-1 rounded-t ${getRecommendationTone(point.recommendation)}`}
+                        style={{ height: `${Math.max(6, point.value)}%` }}
+                        title={`${point.recommendation} · ${point.value.toFixed(0)}%`}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex justify-between text-[10px] text-muted-foreground">
+                    <span>{consensusTrendPoints[0]?.time}</span>
+                    <span>{consensusTrendPoints[consensusTrendPoints.length - 1]?.time}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                  {aiSummary.confidence && (
+                  {typeof aiSummary?.confidence === 'number' && (
                     <Badge variant="outline">Confidence {aiSummary.confidence.toFixed(1)}%</Badge>
                   )}
-                  {aiSummary.intent && <Badge variant="outline">Intent {aiSummary.intent}</Badge>}
-                  {aiSummary.requiresApproval && <Badge variant="outline">Requires Approval</Badge>}
+                  {aiSummary?.intent && <Badge variant="outline">Intent {aiSummary.intent}</Badge>}
+                  {aiSummary?.requiresApproval && <Badge variant="outline">Requires Approval</Badge>}
                 </div>
-
                 <ScrollArea className="h-40 rounded-md border p-4 text-sm">
-                  <pre className="whitespace-pre-wrap text-muted-foreground">{aiSummary.content}</pre>
+                  {aiSummary?.content ? (
+                    <pre className="whitespace-pre-wrap text-muted-foreground">{aiSummary.content}</pre>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      No narrative summary yet. Launch a workflow or refresh consensus to populate this section.
+                    </p>
+                  )}
                 </ScrollArea>
+              </div>
 
-                {aiSummary.actionData && (
-                  <div className="rounded-lg border bg-muted/40 p-4 text-sm">
+              <div className="rounded-lg border bg-muted/40 p-4 text-sm">
+                {aiSummary?.actionData ? (
+                  <>
                     <h4 className="mb-2 font-semibold">Suggested Action</h4>
                     <div className="grid gap-2 md:grid-cols-2">
                       {Object.entries(aiSummary.actionData).map(([key, value]) => (
@@ -1635,33 +2312,45 @@ const ManualTradingPage: React.FC = () => {
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </>
+                ) : (
+                  <p className="text-muted-foreground">
+                    When the AI produces trade instructions they will appear here with structured fields you can apply instantly.
+                  </p>
                 )}
+              </div>
 
-                <div className="flex flex-wrap gap-3">
-                  <Button variant="outline" onClick={applyAiRecommendationToTrade}>
-                    <Settings className="mr-2 h-4 w-4" />
-                    Apply to Trade Form
-                  </Button>
-                  <Button onClick={() => handleConsensusAction('decision')}>
-                    <Brain className="mr-2 h-4 w-4" />
-                    Refresh Consensus
-                  </Button>
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  variant="outline"
+                  onClick={applyAiRecommendationToTrade}
+                  disabled={!aiSummary?.actionData}
+                >
+                  <Settings className="mr-2 h-4 w-4" />
+                  Apply to Trade Form
+                </Button>
+                <Button onClick={() => handleConsensusAction('decision')} disabled={workflowDisabled}>
+                  <Brain className="mr-2 h-4 w-4" />
+                  Refresh Consensus
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card ref={insightsRef}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Sparkles className="h-4 w-4" />
+                AI Insights Feed
+              </CardTitle>
+              <CardDescription>Recent consensus calls and data pulls driven by manual requests.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {aiInsights.length === 0 ? (
+                <div className="rounded-md border border-dashed border-muted-foreground/40 bg-muted/10 p-4 text-sm text-muted-foreground">
+                  No AI insights logged yet. Trigger scans, validations, or final consensus runs to populate this feed.
                 </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {aiInsights.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Sparkles className="h-4 w-4" />
-                  AI Insights Feed
-                </CardTitle>
-                <CardDescription>Recent consensus calls and data pulls driven by manual requests.</CardDescription>
-              </CardHeader>
-              <CardContent>
+              ) : (
                 <ScrollArea className="max-h-64 pr-2">
                   <div className="space-y-3 text-sm">
                     {aiInsights.map((insight) => {
@@ -1698,9 +2387,9 @@ const ManualTradingPage: React.FC = () => {
                     })}
                   </div>
                 </ScrollArea>
-              </CardContent>
-            </Card>
-          )}
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="strategies" className="space-y-6">
@@ -1926,7 +2615,8 @@ const ManualTradingPage: React.FC = () => {
         </TabsContent>
       </Tabs>
     </motion.div>
-  );
+  </>
+);
 };
 
 export default ManualTradingPage;
