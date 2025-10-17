@@ -1150,10 +1150,28 @@ const ManualTradingPage: React.FC = () => {
   ]);
 
   const handleTradeSubmit = useCallback(async () => {
-    if (!tradeForm.symbol || !tradeForm.amount) {
+    if (!tradeForm.symbol || tradeForm.amount === undefined || tradeForm.amount <= 0) {
       toast({
         title: 'Missing Information',
-        description: 'Please provide at least a symbol and trade amount.',
+        description: 'Provide a symbol and a positive trade amount.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    if (tradeForm.orderType !== 'market' && (tradeForm.price === undefined || tradeForm.price <= 0)) {
+      toast({
+        title: 'Price required',
+        description: 'Limit/Stop orders require a positive price.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    if (tradeForm.leverage !== undefined && tradeForm.leverage <= 0) {
+      toast({
+        title: 'Invalid leverage',
+        description: 'Leverage must be a positive number.',
         variant: 'destructive'
       });
       return;
