@@ -21,7 +21,10 @@ import {
   ListTree,
   Radio,
   ChartSpline,
-  Equal
+  Equal,
+  Compass,
+  HelpCircle,
+  Lightbulb
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,6 +39,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useUser } from '@/store/authStore';
 import { useExchanges } from '@/hooks/useExchanges';
 import { useStrategies } from '@/hooks/useStrategies';
@@ -108,6 +113,107 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   rebalanceThreshold: 5,
   strategyId: 'manual',
   customNotes: ''
+};
+
+const ONBOARDING_STEPS: Array<{ title: string; description: string }> = [
+  {
+    title: '1. Sync with AI consensus',
+    description: 'Start with the Live AI Workflow to gather recommendations and surface any portfolio alerts.'
+  },
+  {
+    title: '2. Review suggested actions',
+    description: 'Use the AI Recommendation Summary and Insights feed to validate strategy alignment and risk checks.'
+  },
+  {
+    title: '3. Execute with guardrails',
+    description: 'Populate the trade form with AI guidance, then add optional risk controls before sending the order.'
+  }
+];
+
+const MAX_INSIGHT_PREVIEW_ENTRIES = 8;
+
+interface InsightEntry {
+  label: string;
+  value: string;
+}
+
+const formatInsightValue = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return '—';
+  }
+  if (typeof value === 'number') {
+    return Number.isInteger(value)
+      ? value.toLocaleString()
+      : value.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  }
+  if (typeof value === 'boolean') {
+    return value ? 'Yes' : 'No';
+  }
+  const stringValue = String(value);
+  return stringValue.length > 64 ? `${stringValue.slice(0, 61)}…` : stringValue;
+};
+
+const extractInsightEntries = (payload: any, path: string[] = []): InsightEntry[] => {
+  if (payload === null || payload === undefined) {
+    return [
+      {
+        label: path.length ? path.join(' › ') : 'value',
+        value: '—'
+      }
+    ];
+  }
+
+  if (Array.isArray(payload)) {
+    if (payload.length === 0) {
+      return [
+        {
+          label: path.length ? path.join(' › ') : 'value',
+          value: 'Empty'
+        }
+      ];
+    }
+
+    return payload.flatMap((item, index) =>
+      typeof item === 'object' && item !== null
+        ? extractInsightEntries(item, [...path, `#${index + 1}`])
+        : [
+            {
+              label: [...path, `#${index + 1}`].join(' › '),
+              value: formatInsightValue(item)
+            }
+          ]
+    );
+  }
+
+  if (typeof payload === 'object') {
+    const entries = Object.entries(payload as Record<string, unknown>);
+    if (entries.length === 0) {
+      return [
+        {
+          label: path.length ? path.join(' › ') : 'value',
+          value: 'Empty'
+        }
+      ];
+    }
+
+    return entries.flatMap(([key, value]) =>
+      typeof value === 'object' && value !== null
+        ? extractInsightEntries(value, [...path, key])
+        : [
+            {
+              label: [...path, key].join(' › '),
+              value: formatInsightValue(value)
+            }
+          ]
+    );
+  }
+
+  return [
+    {
+      label: path.length ? path.join(' › ') : 'value',
+      value: formatInsightValue(payload)
+    }
+  ];
 };
 
 const ManualTradingPage: React.FC = () => {
@@ -183,6 +289,7 @@ const ManualTradingPage: React.FC = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [activeTab, setActiveTab] = useState('trade');
   const [aiInsights, setAiInsights] = useState<Array<{ id: string; title: string; payload: any; function: string; timestamp: string }>>([]);
+  const [guidedMode, setGuidedMode] = useState(true);
 
   const streamingControllerRef = useRef<AbortController | null>(null);
   const manualSessionRef = useRef<string | null>(null);
@@ -887,8 +994,49 @@ const ManualTradingPage: React.FC = () => {
             <Zap className="h-3 w-3" />
             {creditsLoading ? 'Loading credits…' : `${balance.available_credits} credits`}
           </Badge>
+          <div className="flex items-center gap-3 rounded-md border border-border/60 px-3 py-2">
+            <Compass className="hidden h-4 w-4 text-muted-foreground sm:block" />
+            <div className="space-y-0.5">
+              <Label htmlFor="guided-mode-toggle" className="text-sm font-medium leading-none">
+                Guided mode
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Surface onboarding tips for manual workflows.
+              </p>
+            </div>
+            <Switch id="guided-mode-toggle" checked={guidedMode} onCheckedChange={setGuidedMode} />
+          </div>
         </div>
       </div>
+
+      {guidedMode && (
+        <Alert variant="warning" className="border-dashed border-warning/50 bg-warning/5">
+          <div className="flex items-start gap-3">
+            <Lightbulb className="mt-1 h-4 w-4 text-warning" />
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <AlertTitle className="flex items-center gap-2 text-sm font-semibold">
+                  <HelpCircle className="h-4 w-4" />
+                  Quick start for first-time operators
+                </AlertTitle>
+              </div>
+              <AlertDescription>
+                <ol className="space-y-2 text-sm">
+                  {ONBOARDING_STEPS.map((step) => (
+                    <li key={step.title} className="flex gap-2">
+                      <span className="font-semibold text-foreground">{step.title}</span>
+                      <span className="text-muted-foreground">{step.description}</span>
+                    </li>
+                  ))}
+                </ol>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Switch off guided mode above once you are comfortable working without the onboarding tips.
+                </p>
+              </AlertDescription>
+            </div>
+          </div>
+        </Alert>
+      )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
         <TabsList className="grid w-full grid-cols-4">
@@ -914,6 +1062,11 @@ const ManualTradingPage: React.FC = () => {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Trading Pair</Label>
+                    {guidedMode && (
+                      <p className="text-xs text-muted-foreground">
+                        Match the pair to the assets you are analyzing in the AI workflow.
+                      </p>
+                    )}
                     {availableSymbols.length ? (
                       <Select
                         value={tradeForm.symbol}
@@ -941,6 +1094,11 @@ const ManualTradingPage: React.FC = () => {
 
                   <div className="space-y-2">
                     <Label>Action</Label>
+                    {guidedMode && (
+                      <p className="text-xs text-muted-foreground">
+                        Choose whether you want the AI to express a long or short bias.
+                      </p>
+                    )}
                     <Select
                       value={tradeForm.action}
                       onValueChange={(value) => setTradeForm((prev) => ({ ...prev, action: value as 'buy' | 'sell' }))}
@@ -957,6 +1115,11 @@ const ManualTradingPage: React.FC = () => {
 
                   <div className="space-y-2">
                     <Label>Order Type</Label>
+                    {guidedMode && (
+                      <p className="text-xs text-muted-foreground">
+                        Market orders execute instantly; limit and stop orders require a price target.
+                      </p>
+                    )}
                     <Select
                       value={tradeForm.orderType}
                       onValueChange={(value) => setTradeForm((prev) => ({ ...prev, orderType: value as ManualTradeRequest['orderType'] }))}
@@ -974,6 +1137,11 @@ const ManualTradingPage: React.FC = () => {
 
                   <div className="space-y-2">
                     <Label>Exchange Routing</Label>
+                    {guidedMode && (
+                      <p className="text-xs text-muted-foreground">
+                        Stay on auto for AI venue selection or pick a specific connected exchange.
+                      </p>
+                    )}
                     <Select
                       value={tradeForm.exchange}
                       onValueChange={(value) => setTradeForm((prev) => ({ ...prev, exchange: value }))}
@@ -998,6 +1166,11 @@ const ManualTradingPage: React.FC = () => {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Amount (USD)</Label>
+                    {guidedMode && (
+                      <p className="text-xs text-muted-foreground">
+                        Size the trade by notional value; AI validations will flag exposure limits automatically.
+                      </p>
+                    )}
                     <Input
                       type="number"
                       value={tradeForm.amount}
@@ -1011,6 +1184,11 @@ const ManualTradingPage: React.FC = () => {
                   {tradeForm.orderType !== 'market' && (
                     <div className="space-y-2">
                       <Label>Limit / Stop Price</Label>
+                      {guidedMode && (
+                        <p className="text-xs text-muted-foreground">
+                          Provide the trigger price you want the order to respect.
+                        </p>
+                      )}
                       <Input
                         type="number"
                         value={tradeForm.price ?? ''}
@@ -1026,36 +1204,71 @@ const ManualTradingPage: React.FC = () => {
                   )}
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Stop Loss (%)</Label>
-                    <Input
-                      type="number"
-                      value={tradeForm.stopLoss ?? ''}
-                      onChange={(event) =>
-                        setTradeForm((prev) => ({
-                          ...prev,
-                          stopLoss: event.target.value ? Number(event.target.value) : undefined
-                        }))
-                      }
-                      placeholder="Optional stop loss"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Take Profit (%)</Label>
-                    <Input
-                      type="number"
-                      value={tradeForm.takeProfit ?? ''}
-                      onChange={(event) =>
-                        setTradeForm((prev) => ({
-                          ...prev,
-                          takeProfit: event.target.value ? Number(event.target.value) : undefined
-                        }))
-                      }
-                      placeholder="Optional take profit"
-                    />
-                  </div>
-                </div>
+                <Accordion
+                  key={guidedMode ? 'guided-risk' : 'expert-risk'}
+                  type="single"
+                  collapsible
+                  defaultValue={guidedMode ? undefined : 'advanced-risk'}
+                  className="rounded-md border"
+                >
+                  <AccordionItem value="advanced-risk">
+                    <AccordionTrigger className="px-4 text-sm font-medium">
+                      Advanced risk controls (optional)
+                    </AccordionTrigger>
+                    <AccordionContent className="px-4 pb-4">
+                      <div className="grid gap-4 md:grid-cols-3">
+                        <div className="space-y-2">
+                          <Label>Stop Loss (%)</Label>
+                          <Input
+                            type="number"
+                            value={tradeForm.stopLoss ?? ''}
+                            onChange={(event) =>
+                              setTradeForm((prev) => ({
+                                ...prev,
+                                stopLoss: event.target.value ? Number(event.target.value) : undefined
+                              }))
+                            }
+                            placeholder="Optional stop loss"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Take Profit (%)</Label>
+                          <Input
+                            type="number"
+                            value={tradeForm.takeProfit ?? ''}
+                            onChange={(event) =>
+                              setTradeForm((prev) => ({
+                                ...prev,
+                                takeProfit: event.target.value ? Number(event.target.value) : undefined
+                              }))
+                            }
+                            placeholder="Optional take profit"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Leverage</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={tradeForm.leverage ?? ''}
+                            onChange={(event) =>
+                              setTradeForm((prev) => ({
+                                ...prev,
+                                leverage: event.target.value ? Number(event.target.value) : undefined
+                              }))
+                            }
+                            placeholder="Optional leverage"
+                          />
+                        </div>
+                      </div>
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        These safeguards travel with your order so the execution service can mirror the same guardrails used in
+                        the automated chat workflows.
+                      </p>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
 
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -1451,18 +1664,38 @@ const ManualTradingPage: React.FC = () => {
               <CardContent>
                 <ScrollArea className="max-h-64 pr-2">
                   <div className="space-y-3 text-sm">
-                    {aiInsights.map((insight) => (
-                      <div key={insight.id} className="rounded-md border p-3">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>{new Date(insight.timestamp).toLocaleTimeString()}</span>
-                          <Badge variant="outline">{insight.function}</Badge>
+                    {aiInsights.map((insight) => {
+                      const entries = extractInsightEntries(insight.payload);
+                      const previewEntries = entries.slice(0, MAX_INSIGHT_PREVIEW_ENTRIES);
+                      return (
+                        <div key={insight.id} className="rounded-md border p-3">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>{new Date(insight.timestamp).toLocaleTimeString()}</span>
+                            <Badge variant="outline">{insight.function}</Badge>
+                          </div>
+                          <h4 className="mt-1 font-semibold">{insight.title}</h4>
+                          <div className="mt-2 space-y-1 text-xs sm:text-sm">
+                            {previewEntries.map((entry, index) => (
+                              <div
+                                key={`${insight.id}-${entry.label}-${index}`}
+                                className="flex items-start justify-between gap-3 rounded border border-dashed border-border/60 px-2 py-1"
+                              >
+                                <span className="text-muted-foreground">{entry.label}</span>
+                                <span className="font-medium text-right">{entry.value}</span>
+                              </div>
+                            ))}
+                          </div>
+                          {entries.length > previewEntries.length && (
+                            <details className="mt-2 text-xs">
+                              <summary className="cursor-pointer text-primary">View full payload</summary>
+                              <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap text-muted-foreground">
+                                {JSON.stringify(insight.payload, null, 2)}
+                              </pre>
+                            </details>
+                          )}
                         </div>
-                        <h4 className="mt-1 font-semibold">{insight.title}</h4>
-                        <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-muted-foreground">
-                          {JSON.stringify(insight.payload, null, 2)}
-                        </pre>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </ScrollArea>
               </CardContent>
