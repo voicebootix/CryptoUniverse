@@ -4447,7 +4447,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 # Create new OpportunityResult with pro-level enhancements
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="funding_arbitrage_pro",
+                    opportunity_type="funding_arbitrage_pro",
                     confidence_score=min(95, opp.confidence_score + 15),
                     metadata={
                         **opp.metadata,
@@ -4481,7 +4481,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="market_making_pro",
+                    opportunity_type="market_making_pro",
                     confidence_score=min(95, opp.confidence_score + 10),
                     metadata={
                         **opp.metadata,
@@ -4515,7 +4515,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="scalping_engine",
+                    opportunity_type="scalping_engine",
                     confidence_score=min(95, opp.confidence_score + 5),
                     metadata={
                         **opp.metadata,
@@ -4549,7 +4549,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="swing_navigator",
+                    opportunity_type="swing_navigator",
                     estimated_timeframe="4h",  # Swing trading timeframe
                     confidence_score=min(90, opp.confidence_score + 5),
                     metadata={
@@ -4584,7 +4584,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="position_manager",
+                    opportunity_type="position_manager",
                     confidence_score=min(95, opp.confidence_score + 10),
                     metadata={
                         **opp.metadata,
@@ -4618,7 +4618,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="risk_guardian",
+                    opportunity_type="risk_guardian",
                     confidence_score=min(98, opp.confidence_score + 15),
                     metadata={
                         **opp.metadata,
@@ -4652,7 +4652,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="portfolio_optimizer",
+                    opportunity_type="portfolio_optimizer",
                     confidence_score=min(95, opp.confidence_score + 10),
                     metadata={
                         **opp.metadata,
@@ -4686,7 +4686,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="strategy_analytics",
+                    opportunity_type="strategy_analytics",
                     confidence_score=min(90, opp.confidence_score + 5),
                     metadata={
                         **opp.metadata,
@@ -4720,7 +4720,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="momentum_trader",
+                    opportunity_type="momentum_trader",
                     confidence_score=min(95, opp.confidence_score + 10),
                     metadata={
                         **opp.metadata,
@@ -4754,7 +4754,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="mean_reversion_pro",
+                    opportunity_type="mean_reversion_pro",
                     confidence_score=min(95, opp.confidence_score + 15),
                     metadata={
                         **opp.metadata,
@@ -4788,7 +4788,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="breakout_hunter",
+                    opportunity_type="breakout_hunter",
                     confidence_score=min(95, opp.confidence_score + 10),
                     metadata={
                         **opp.metadata,
@@ -4822,7 +4822,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="algorithmic_suite",
+                    opportunity_type="algorithmic_suite",
                     confidence_score=min(95, opp.confidence_score + 10),
                     metadata={
                         **opp.metadata,
@@ -4856,7 +4856,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="pairs_trader",
+                    opportunity_type="pairs_trader",
                     confidence_score=min(95, opp.confidence_score + 10),
                     metadata={
                         **opp.metadata,
@@ -4890,7 +4890,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="statistical_arbitrage_pro",
+                    opportunity_type="statistical_arbitrage_pro",
                     confidence_score=min(95, opp.confidence_score + 15),
                     metadata={
                         **opp.metadata,
@@ -4924,7 +4924,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="market_maker",
+                    opportunity_type="market_maker",
                     confidence_score=min(95, opp.confidence_score + 10),
                     metadata={
                         **opp.metadata,
@@ -4958,7 +4958,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="scalping_engine_pro",
+                    opportunity_type="scalping_engine_pro",
                     confidence_score=min(98, opp.confidence_score + 15),
                     metadata={
                         **opp.metadata,
@@ -4992,7 +4992,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             for opp in base_opportunities:
                 enhanced_opp = dataclasses.replace(
                     opp,
-                    strategy_type="swing_navigator_pro",
+                    opportunity_type="swing_navigator_pro",
                     estimated_timeframe="4h",  # Swing trading timeframe
                     confidence_score=min(95, opp.confidence_score + 15),
                     metadata={
