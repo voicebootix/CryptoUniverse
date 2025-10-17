@@ -1763,15 +1763,15 @@ class UnifiedChatService(LoggerMixin):
         charge_context: Optional[Dict[str, Any]] = None
 
         try:
-        # Step 1: Analyze intent using ChatAI (fast)
-        intent_analysis = await self._analyze_intent_unified(message, session.context)
-        
-        # Debug logging for opportunity discovery
-        if "opportunit" in message.lower() or "find" in message.lower():
-            self.logger.info("Opportunity-related message detected", 
-                           message=message,
-                           detected_intent=intent_analysis.get("intent"),
-                           confidence=intent_analysis.get("confidence"))
+            # Step 1: Analyze intent using ChatAI (fast)
+            intent_analysis = await self._analyze_intent_unified(message, session.context)
+            
+            # Debug logging for opportunity discovery
+            if "opportunit" in message.lower() or "find" in message.lower():
+                self.logger.info("Opportunity-related message detected", 
+                               message=message,
+                               detected_intent=intent_analysis.get("intent"),
+                               confidence=intent_analysis.get("confidence"))
 
             # Step 2: Check requirements (credits, strategies, etc.)
             requirements_check = await self._check_requirements(
