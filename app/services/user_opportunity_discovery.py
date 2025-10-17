@@ -1034,16 +1034,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         """Build user's opportunity discovery profile based on their strategy portfolio and credits."""
         
         try:
-            # Get user's strategy portfolio
-            portfolio_result = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
+            # DIRECT FIX: Use admin snapshot first for admin users (proven working method)
+            admin_snapshot = await strategy_marketplace_service.get_admin_portfolio_snapshot(user_id)
+            if admin_snapshot and admin_snapshot.get("success"):
+                portfolio_result = admin_snapshot
+            else:
+                # Fallback to regular portfolio method for non-admin users
+                portfolio_result = await strategy_marketplace_service.get_user_strategy_portfolio(user_id)
 
-            if (
-                (not portfolio_result.get("success"))
-                or not portfolio_result.get("active_strategies")
-            ):
-                admin_snapshot = await strategy_marketplace_service.get_admin_portfolio_snapshot(user_id)
-                if admin_snapshot:
-                    portfolio_result = admin_snapshot
+                if (
+                    (not portfolio_result.get("success"))
+                    or not portfolio_result.get("active_strategies")
+                ):
+                    admin_snapshot = await strategy_marketplace_service.get_admin_portfolio_snapshot(user_id)
+                    if admin_snapshot:
+                        portfolio_result = admin_snapshot
 
             if not portfolio_result.get("success"):
                 # Default profile for users with no strategies
@@ -4163,6 +4168,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _get_user_portfolio(self, user_id: str) -> Dict[str, Any]:
         """Get user's portfolio with active strategies."""
         try:
+            # DIRECT FIX: Use the working admin snapshot approach for admin users
+            # This bypasses the failing service calls and uses the proven working method
+            admin_snapshot = await strategy_marketplace_service.get_admin_portfolio_snapshot(user_id)
+            if admin_snapshot and admin_snapshot.get("success"):
+                self.logger.info("Using admin portfolio snapshot for user", user_id=user_id)
+                return admin_snapshot
+            
+            # Fallback to cached method for non-admin users
             portfolio_result = await self._get_user_portfolio_cached(user_id)
 
             # Check if portfolio fetch was successful and has active strategies
@@ -4174,7 +4187,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 # If user has no strategies, fall back to admin snapshot
                 self.logger.info("User has no active strategies, falling back to admin snapshot", user_id=user_id)
 
-            # Fallback to admin snapshot for users without strategies
+            # Final fallback to admin snapshot for users without strategies
             admin_snapshot = await strategy_marketplace_service.get_admin_portfolio_snapshot(user_id)
             if admin_snapshot and admin_snapshot.get("success"):
                 self.logger.info("Using admin portfolio snapshot for user", user_id=user_id)
