@@ -3188,17 +3188,32 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         if len(closes) >= 5:
             momentum = (closes[-1] - closes[-5]) / closes[-5]
             if momentum > 0.02:  # 2% positive momentum
+                # Get portfolio position information
+                held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+                desired_qty = 0.2
+                
+                # Only BUY if we don't already have a position
+                if held_qty > 0:
+                    return None
+                    
+                # Check if we have enough cash
+                required_cash = latest_price * desired_qty
+                if available_cash < required_cash:
+                    return None
+                
                 return {
                     "signal": {
                         "action": "BUY",
-                        "quantity": 0.2,
+                        "quantity": desired_qty,
                         "price": latest_price,
                         "confidence": 0.65
                     },
                     "indicators": {
                         "momentum_pct": momentum * 100,
                         "funding_rate": 0.01,
-                        "arbitrage_opportunity": True
+                        "arbitrage_opportunity": True,
+                        "held_quantity": held_qty,
+                        "available_cash": available_cash
                     }
                 }
         return None
@@ -3218,18 +3233,31 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         portfolio_value = portfolio_snapshot.get('current_value', 10000)
         position_value = latest_price * 0.1  # Assume 10% position
         
+        # Get portfolio position information
+        held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+        
         if position_value > portfolio_value * 0.2:  # Position too large
+            # Only SELL if we have a position to sell
+            if held_qty <= 0:
+                return None
+                
+            quantity = min(0.05, held_qty)
+            if quantity <= 0:
+                return None
+                
             return {
                 "signal": {
                     "action": "SELL",  # Hedge by reducing position
-                    "quantity": 0.05,
+                    "quantity": quantity,
                     "price": latest_price,
                     "confidence": 0.8
                 },
                 "indicators": {
                     "portfolio_value": portfolio_value,
                     "position_value": position_value,
-                    "hedge_ratio": 0.5
+                    "hedge_ratio": 0.5,
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
                 }
             }
         return None
@@ -3253,17 +3281,32 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         sharpe_ratio = avg_return / volatility if volatility > 0 else 0
         
         if sharpe_ratio > 1.0:  # Good risk-adjusted return
+            # Get portfolio position information
+            held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+            desired_qty = 0.2
+            
+            # Only BUY if we don't already have a position
+            if held_qty > 0:
+                return None
+                
+            # Check if we have enough cash
+            required_cash = latest_price * desired_qty
+            if available_cash < required_cash:
+                return None
+            
             return {
                 "signal": {
                     "action": "BUY",
-                    "quantity": 0.2,
+                    "quantity": desired_qty,
                     "price": latest_price,
                     "confidence": 0.75
                 },
                 "indicators": {
                     "sharpe_ratio": sharpe_ratio,
                     "avg_return": avg_return,
-                    "volatility": volatility
+                    "volatility": volatility,
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
                 }
             }
         return None
@@ -3284,17 +3327,31 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         drawdown = (max_price - latest_price) / max_price
         
         if drawdown > 0.1:  # 10% drawdown
+            # Get portfolio position information
+            held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+            desired_qty = 0.1
+            
+            # Only SELL if we have a position to sell
+            if held_qty <= 0:
+                return None
+                
+            quantity = min(desired_qty, held_qty)
+            if quantity <= 0:
+                return None
+            
             return {
                 "signal": {
                     "action": "SELL",  # Risk reduction
-                    "quantity": 0.1,
+                    "quantity": quantity,
                     "price": latest_price,
                     "confidence": 0.9
                 },
                 "indicators": {
                     "drawdown_pct": drawdown * 100,
                     "max_price": max_price,
-                    "risk_level": "HIGH"
+                    "risk_level": "HIGH",
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
                 }
             }
         return None
@@ -3313,17 +3370,32 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         volatility = self._calculate_backtest_volatility(closes)
         
         if volatility > 0.4:  # High volatility
+            # Get portfolio position information
+            held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+            desired_qty = 0.15
+            
+            # Only BUY if we don't already have a position
+            if held_qty > 0:
+                return None
+                
+            # Check if we have enough cash
+            required_cash = latest_price * desired_qty
+            if available_cash < required_cash:
+                return None
+            
             return {
                 "signal": {
                     "action": "BUY",
-                    "quantity": 0.15,
+                    "quantity": desired_qty,
                     "price": latest_price,
                     "confidence": 0.7
                 },
                 "indicators": {
                     "volatility": volatility,
                     "volatility_threshold": 0.4,
-                    "strategy": "volatility_breakout"
+                    "strategy": "volatility_breakout",
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
                 }
             }
         return None
@@ -3343,17 +3415,32 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         recent_trend = (closes[-1] - closes[-10]) / closes[-10] if len(closes) >= 10 else 0
         
         if recent_trend > 0.05:  # Positive sentiment
+            # Get portfolio position information
+            held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+            desired_qty = 0.1
+            
+            # Only BUY if we don't already have a position
+            if held_qty > 0:
+                return None
+                
+            # Check if we have enough cash
+            required_cash = latest_price * desired_qty
+            if available_cash < required_cash:
+                return None
+            
             return {
                 "signal": {
                     "action": "BUY",
-                    "quantity": 0.1,
+                    "quantity": desired_qty,
                     "price": latest_price,
                     "confidence": 0.6
                 },
                 "indicators": {
                     "sentiment_score": 0.7,
                     "trend_strength": recent_trend * 100,
-                    "news_impact": "positive"
+                    "news_impact": "positive",
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
                 }
             }
         return None
@@ -3373,32 +3460,57 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         short_ma = sum(closes[-5:]) / 5
         long_ma = sum(closes[-20:]) / 20
         
+        # Get portfolio position information
+        held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+        desired_qty = 0.25
+        
         if short_ma > long_ma * 1.02:  # Uptrend
+            # BUY signal - only if we don't already have a position
+            if held_qty > 0:
+                return None
+                
+            # Check if we have enough cash
+            required_cash = latest_price * desired_qty
+            if available_cash < required_cash:
+                return None
+            
             return {
                 "signal": {
                     "action": "BUY",
-                    "quantity": 0.25,
+                    "quantity": desired_qty,
                     "price": latest_price,
                     "confidence": 0.8
                 },
                 "indicators": {
                     "short_ma": short_ma,
                     "long_ma": long_ma,
-                    "trend": "uptrend"
+                    "trend": "uptrend",
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
                 }
             }
         elif short_ma < long_ma * 0.98:  # Downtrend
+            # SELL signal - only if we have a position to sell
+            if held_qty <= 0:
+                return None
+                
+            quantity = min(desired_qty, held_qty)
+            if quantity <= 0:
+                return None
+            
             return {
                 "signal": {
                     "action": "SELL",
-                    "quantity": 0.25,
+                    "quantity": quantity,
                     "price": latest_price,
                     "confidence": 0.8
                 },
                 "indicators": {
                     "short_ma": short_ma,
                     "long_ma": long_ma,
-                    "trend": "downtrend"
+                    "trend": "downtrend",
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
                 }
             }
         return None
@@ -3427,10 +3539,33 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         
         if signal_strength >= 2:
             action = "BUY" if rsi > 60 else "SELL"
+            
+            # Get portfolio position information
+            held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+            desired_qty = 0.2
+            
+            if action == "BUY":
+                # Only BUY if we don't already have a position
+                if held_qty > 0:
+                    return None
+                    
+                # Check if we have enough cash
+                required_cash = latest_price * desired_qty
+                if available_cash < required_cash:
+                    return None
+            else:  # SELL
+                # Only SELL if we have a position to sell
+                if held_qty <= 0:
+                    return None
+                    
+                desired_qty = min(desired_qty, held_qty)
+                if desired_qty <= 0:
+                    return None
+            
             return {
                 "signal": {
                     "action": action,
-                    "quantity": 0.2,
+                    "quantity": desired_qty,
                     "price": latest_price,
                     "confidence": 0.8
                 },
@@ -3438,7 +3573,9 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                     "rsi": rsi,
                     "macd_trend": macd_trend,
                     "signal_strength": signal_strength,
-                    "analytics_score": 0.8
+                    "analytics_score": 0.8,
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
                 }
             }
         return None
@@ -3466,10 +3603,23 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         if momentum > 0: score += 1
         
         if score >= 2:
+            # Get portfolio position information
+            held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+            desired_qty = 0.2
+            
+            # Only BUY if we don't already have a position
+            if held_qty > 0:
+                return None
+                
+            # Check if we have enough cash
+            required_cash = latest_price * desired_qty
+            if available_cash < required_cash:
+                return None
+            
             return {
                 "signal": {
                     "action": "BUY",
-                    "quantity": 0.2,
+                    "quantity": desired_qty,
                     "price": latest_price,
                     "confidence": 0.75
                 },
@@ -3477,7 +3627,9 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                     "algorithmic_score": score,
                     "volatility": volatility,
                     "rsi": rsi,
-                    "momentum": momentum
+                    "momentum": momentum,
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
                 }
             }
         return None
@@ -3505,10 +3657,23 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         if macd_trend == "BULLISH": complexity_score += 1
         
         if complexity_score >= 2:
+            # Get portfolio position information
+            held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+            desired_qty = 0.3
+            
+            # Only BUY if we don't already have a position
+            if held_qty > 0:
+                return None
+                
+            # Check if we have enough cash
+            required_cash = latest_price * desired_qty
+            if available_cash < required_cash:
+                return None
+            
             return {
                 "signal": {
                     "action": "BUY",
-                    "quantity": 0.3,
+                    "quantity": desired_qty,
                     "price": latest_price,
                     "confidence": 0.85
                 },
@@ -3517,7 +3682,9 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                     "rsi": rsi,
                     "volatility": volatility,
                     "macd_trend": macd_trend,
-                    "strategy_type": "complex_multi_factor"
+                    "strategy_type": "complex_multi_factor",
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
                 }
             }
         return None
@@ -3539,17 +3706,42 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             momentum = (closes[-1] - closes[-5]) / closes[-5]
             if abs(momentum) > 0.01:  # 1% movement
                 action = "BUY" if momentum > 0 else "SELL"
+                
+                # Get portfolio position information
+                held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+                desired_qty = 0.1
+                
+                if action == "BUY":
+                    # Only BUY if we don't already have a position
+                    if held_qty > 0:
+                        return None
+                        
+                    # Check if we have enough cash
+                    required_cash = latest_price * desired_qty
+                    if available_cash < required_cash:
+                        return None
+                else:  # SELL
+                    # Only SELL if we have a position to sell
+                    if held_qty <= 0:
+                        return None
+                        
+                    desired_qty = min(desired_qty, held_qty)
+                    if desired_qty <= 0:
+                        return None
+                
                 return {
                     "signal": {
                         "action": action,
-                        "quantity": 0.1,
+                        "quantity": desired_qty,
                         "price": latest_price,
                         "confidence": 0.5
                     },
                     "indicators": {
                         "momentum": momentum,
                         "strategy": strategy_func,
-                        "generic_signal": True
+                        "generic_signal": True,
+                        "held_quantity": held_qty,
+                        "available_cash": available_cash
                     }
                 }
         return None

@@ -4166,10 +4166,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             portfolio_result = await self._get_user_portfolio_cached(user_id)
 
             # Check if portfolio fetch was successful and has active strategies
-            if portfolio_result.get("success") and portfolio_result.get("active_strategies") is not None:
+            if portfolio_result.get("success"):
                 active_strategies = portfolio_result.get("active_strategies", [])
                 # If user has strategies, return their portfolio
-                if active_strategies:
+                if active_strategies:  # Check if list is not empty
                     return portfolio_result
                 # If user has no strategies, fall back to admin snapshot
                 self.logger.info("User has no active strategies, falling back to admin snapshot", user_id=user_id)
