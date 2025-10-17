@@ -47,7 +47,16 @@ class ChatMemoryService:
         try:
             return uuid.UUID(str(value))
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"{field_name} must be a valid UUID") from exc
+            # Generate a new UUID for invalid session IDs to prevent crashes
+            if field_name == "session_id":
+                logger.warning(
+                    "Invalid session_id provided, generating new UUID",
+                    invalid_session_id=str(value),
+                    error=str(exc)
+                )
+                return uuid.uuid4()
+            else:
+                raise ValueError(f"{field_name} must be a valid UUID") from exc
 
     @staticmethod
     def _normalize_message_type(message_type: Any) -> str:
