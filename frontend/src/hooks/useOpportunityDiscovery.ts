@@ -100,7 +100,6 @@ export const useOpportunityDiscovery = (
   const refreshInterval = options.refreshInterval ?? DEFAULT_REFRESH_INTERVAL;
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fetchScanStatusRef = useRef<FetchScanStatusFn | null>(null);
-  const mountedRef = useRef<boolean>(false);
 
   const isOnboarded = useMemo(() => Boolean(userStatus?.onboarding_status?.onboarded), [userStatus]);
   const hasActiveScan = useMemo(() => isScanning, [isScanning]);
@@ -315,24 +314,23 @@ export const useOpportunityDiscovery = (
   }, [activeScanId, fetchScanResults, fetchScanStatus, fetchUserStatus]);
 
   useEffect(() => {
-    if (mountedRef.current) {
+    fetchUserStatus();
+    fetchScanResults(DEFAULT_SCAN_ID, { suppressErrors: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!activeScanId) {
+      clearPollTimer();
       return;
     }
 
-    mountedRef.current = true;
-
-    fetchUserStatus();
-    fetchScanResults(DEFAULT_SCAN_ID, { suppressErrors: true });
-
-    if (activeScanId) {
-      startStatusPolling(activeScanId);
-    }
+    startStatusPolling(activeScanId);
 
     return () => {
-      mountedRef.current = false;
       clearPollTimer();
     };
-  }, [activeScanId, clearPollTimer, fetchScanResults, fetchUserStatus, startStatusPolling]);
+  }, [activeScanId, clearPollTimer, startStatusPolling]);
 
   useEffect(() => {
     if (!options.autoRefresh) {
