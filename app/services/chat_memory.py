@@ -47,16 +47,7 @@ class ChatMemoryService:
         try:
             return uuid.UUID(str(value))
         except (TypeError, ValueError) as exc:
-            # Generate a new UUID for invalid session IDs to prevent crashes
-            if field_name == "session_id":
-                logger.warning(
-                    "Invalid session_id provided, generating new UUID",
-                    invalid_session_id=str(value),
-                    error=str(exc)
-                )
-                return uuid.uuid4()
-            else:
-                raise ValueError(f"{field_name} must be a valid UUID") from exc
+            raise ValueError(f"{field_name} must be a valid UUID") from exc
 
     @staticmethod
     def _normalize_message_type(message_type: Any) -> str:
@@ -431,44 +422,29 @@ class ChatMemoryService:
             Conversation context dictionary
         """
         try:
-            # Validate and coerce session_id to UUID
-            try:
-                session_uuid = self._coerce_uuid(session_id, "session_id")
-            except ValueError as e:
-                logger.warning(
-                    "Invalid session_id in get_conversation_context, returning empty context",
-                    session_id=session_id,
-                    error=str(e)
-                )
-                return {}
-            
             async for db in get_database():
                 # Get session information
                 stmt = select(ChatSession).filter(
-                    ChatSession.session_id == session_uuid
+                    ChatSession.session_id == session_id
                 )
                 result = await db.execute(stmt)
                 session = result.scalar_one_or_none()
                 
                 if not session:
-                    logger.warning(
-                        "Session not found in get_conversation_context",
-                        session_id=str(session_uuid)
-                    )
                     return {}
                 
                 context_window = context_window or self.context_window_size
                 
                 # Get recent messages
                 msg_stmt = select(ChatMessage).filter(
-                    ChatMessage.session_id == session_uuid
+                    ChatMessage.session_id == session_id
                 ).order_by(desc(ChatMessage.timestamp)).limit(context_window)
                 msg_result = await db.execute(msg_stmt)
                 recent_messages = msg_result.scalars().all()
                 
                 # Get session summaries
                 sum_stmt = select(ChatSessionSummary).filter(
-                    ChatSessionSummary.session_id == session_uuid
+                    ChatSessionSummary.session_id == session_id
                 ).order_by(desc(ChatSessionSummary.created_at)).limit(3)
                 sum_result = await db.execute(sum_stmt)
                 summaries = sum_result.scalars().all()

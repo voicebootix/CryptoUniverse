@@ -205,8 +205,8 @@ class KrakenNonceManager:
                         
                         new_nonce = await self._redis.eval(
                             lua_script, 
-                            [self._nonce_key], 
-                            [str(current_time_ms), '3600']
+                            keys=[self._nonce_key], 
+                            args=[str(current_time_ms), '3600']
                         )
                         new_nonce = int(new_nonce)
                         
