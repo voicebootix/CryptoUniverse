@@ -482,7 +482,6 @@ const ManualTradingPage: React.FC = () => {
             }
 
             if (data.type === 'complete') {
-              controller.abort();
               setIsStreaming(false);
               streamingControllerRef.current = null;
               handlePhaseUpdate(data.metadata?.phase || 'completed', data.content || 'Workflow completed.');
@@ -507,7 +506,6 @@ const ManualTradingPage: React.FC = () => {
             }
 
             if (data.type === 'error') {
-              controller.abort();
               setIsStreaming(false);
               streamingControllerRef.current = null;
               pushWorkflowLog('error', data.error || 'AI workflow encountered an error.');
