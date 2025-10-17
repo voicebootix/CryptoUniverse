@@ -98,7 +98,8 @@ export const useOpportunityDiscovery = (
 
   const pollInterval = options.pollInterval ?? DEFAULT_POLL_INTERVAL;
   const refreshInterval = options.refreshInterval ?? DEFAULT_REFRESH_INTERVAL;
-  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fetchScanStatusRef = useRef<FetchScanStatusFn | null>(null);
   const mountedRef = useRef<boolean>(false);
 
   const isOnboarded = useMemo(() => Boolean(userStatus?.onboarding_status?.onboarded), [userStatus]);
@@ -139,6 +140,17 @@ export const useOpportunityDiscovery = (
     }
   }, []);
 
+  const startStatusPolling = useCallback<(scanId: string) => void>((scanId: string) => {
+    clearPollTimer();
+
+    pollTimerRef.current = setInterval(() => {
+      fetchScanStatusRef.current?.(scanId).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : 'Failed to poll scan status';
+        setError(message);
+      });
+    }, pollInterval);
+  }, [clearPollTimer, pollInterval]);
+
   const fetchScanResults = useCallback<FetchScanResultsFn>(async (
     scanId: string | null = null,
     { suppressErrors = false }: { suppressErrors?: boolean } = {}
@@ -167,6 +179,7 @@ export const useOpportunityDiscovery = (
     } catch (err) {
       if (err instanceof OpportunityApiError) {
         if (err.code === 'SCAN_IN_PROGRESS') {
+          startStatusPolling(scanId ?? DEFAULT_SCAN_ID);
           setIsScanning(true);
           return;
         }
@@ -185,7 +198,7 @@ export const useOpportunityDiscovery = (
         setError(message);
       }
     }
-  }, [activeScanId, updateScanState]);
+  }, [activeScanId, startStatusPolling, updateScanState]);
 
   const fetchScanStatus = useCallback<FetchScanStatusFn>(async (scanId: string) => {
     try {
@@ -229,16 +242,9 @@ export const useOpportunityDiscovery = (
     }
   }, [activeScanId, clearPollTimer, fetchScanResults, updateScanState]);
 
-  const startStatusPolling = useCallback((scanId: string) => {
-    clearPollTimer();
-
-    pollTimerRef.current = setInterval(() => {
-      fetchScanStatus(scanId).catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : 'Failed to poll scan status';
-        setError(message);
-      });
-    }, pollInterval);
-  }, [clearPollTimer, fetchScanStatus, pollInterval]);
+  useEffect(() => {
+    fetchScanStatusRef.current = fetchScanStatus;
+  }, [fetchScanStatus]);
 
   const discoverOpportunities = useCallback(async (
     payload: OpportunityDiscoveryRequest = {}
