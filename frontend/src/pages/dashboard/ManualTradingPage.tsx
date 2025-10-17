@@ -776,16 +776,83 @@ const ManualTradingPage: React.FC = () => {
     }
 
     const proposal = aiSummary.actionData;
+    const validActions: ManualTradeRequest['action'][] = ['buy', 'sell'];
+    const validOrderTypes: ManualTradeRequest['orderType'][] = ['market', 'limit', 'stop'];
+
+    const normalizeString = (value: unknown) => {
+      if (typeof value !== 'string') {
+        return undefined;
+      }
+
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    };
+
+    const normalizeEnum = <T extends string>(value: unknown, allowed: readonly T[]): T | undefined => {
+      if (typeof value !== 'string') {
+        return undefined;
+      }
+
+      const normalized = value.trim().toLowerCase();
+      return allowed.includes(normalized as T) ? (normalized as T) : undefined;
+    };
+
+    const parsePositiveNumber = (value: unknown): number | undefined => {
+      if (typeof value === 'number') {
+        return Number.isFinite(value) && value > 0 ? value : undefined;
+      }
+
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+
+        if (!trimmed) {
+          return undefined;
+        }
+
+        const parsed = Number(trimmed);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+      }
+
+      return undefined;
+    };
+
+    const proposedAction = normalizeEnum<ManualTradeRequest['action']>(proposal.action, validActions);
+    const proposedOrderType = normalizeEnum<ManualTradeRequest['orderType']>(proposal.order_type, validOrderTypes);
+
+    if (proposal.action && !proposedAction) {
+      toast({
+        title: 'Invalid AI Recommendation',
+        description: `AI returned invalid action: ${proposal.action}`,
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    if (proposal.order_type && !proposedOrderType) {
+      toast({
+        title: 'Invalid AI Recommendation',
+        description: `AI returned invalid order type: ${proposal.order_type}`,
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    const amount = parsePositiveNumber(proposal.amount);
+    const price = parsePositiveNumber(proposal.price);
+    const stopLoss = parsePositiveNumber(proposal.stop_loss);
+    const takeProfit = parsePositiveNumber(proposal.take_profit);
+    const leverage = parsePositiveNumber(proposal.leverage);
+
     setTradeForm((prev) => ({
       ...prev,
-      symbol: proposal.symbol || prev.symbol,
-      action: (proposal.action || prev.action || 'buy') as 'buy' | 'sell',
-      amount: Number(proposal.amount || prev.amount),
-      orderType: (proposal.order_type || prev.orderType || 'market') as ManualTradeRequest['orderType'],
-      price: proposal.price ? Number(proposal.price) : prev.price,
-      stopLoss: proposal.stop_loss ? Number(proposal.stop_loss) : prev.stopLoss,
-      takeProfit: proposal.take_profit ? Number(proposal.take_profit) : prev.takeProfit,
-      leverage: proposal.leverage ? Number(proposal.leverage) : prev.leverage
+      symbol: normalizeString(proposal.symbol) || prev.symbol,
+      action: proposedAction || prev.action || 'buy',
+      amount: amount ?? prev.amount,
+      orderType: proposedOrderType || prev.orderType || 'market',
+      price: price ?? prev.price,
+      stopLoss: stopLoss ?? prev.stopLoss,
+      takeProfit: takeProfit ?? prev.takeProfit,
+      leverage: leverage ?? prev.leverage
     }));
 
     toast({
