@@ -139,3 +139,48 @@ async def test_statistical_arbitrage_dynamic_universe(monkeypatch):
     assert analysis["universe"] == ["ETH", "AVAX"], analysis
     assert analysis["universe_analysis"]["exchanges_scanned"] == ["kraken", "binance"]
     assert analysis["opportunities"], "expected stat-arb opportunities to be generated"
+
+
+@pytest.mark.asyncio
+async def test_perpetual_funding_info_varies_by_exchange(monkeypatch):
+    monkeypatch.setattr(
+        trading_strategies_service,
+        "_estimate_daily_volatility",
+        AsyncMock(return_value=0.12),
+    )
+
+    binance_info = await trading_strategies_service._get_perpetual_funding_info("BTCUSDT", "binance")
+    bybit_info = await trading_strategies_service._get_perpetual_funding_info("BTCUSDT", "bybit")
+
+    assert binance_info["current_funding_rate"] != bybit_info["current_funding_rate"]
+    assert isinstance(binance_info["funding_interval"], (int, float))
+    assert binance_info["funding_interval"] > 0
+
+
+@pytest.mark.asyncio
+async def test_funding_arbitrage_produces_cross_exchange_opportunities(monkeypatch):
+    monkeypatch.setattr(
+        trading_strategies_service,
+        "_estimate_daily_volatility",
+        AsyncMock(return_value=0.12),
+    )
+
+    result = await trading_strategies_service.funding_arbitrage(
+        symbols="BTC,ETH",
+        exchanges="binance,bybit,kraken",
+        min_funding_rate=0.002,
+        user_id="opportunity-tester",
+    )
+
+    analysis = result["funding_arbitrage_analysis"]
+    assert analysis["opportunities"], "expected funding opportunities to be generated"
+
+    cross_exchange = [
+        opportunity
+        for opportunity in analysis["opportunities"]
+        if opportunity["type"] == "CROSS_EXCHANGE_FUNDING_ARBITRAGE"
+    ]
+    assert cross_exchange, "expected cross-exchange funding arbitrage opportunities"
+
+    for opportunity in analysis["opportunities"]:
+        assert opportunity["daily_yield_estimate"] >= 0
