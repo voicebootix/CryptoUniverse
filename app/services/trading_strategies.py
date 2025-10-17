@@ -3002,21 +3002,61 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         bid_price = latest_price - spread / 2
         ask_price = latest_price + spread / 2
         
-        # Simple market making logic
-        return {
-            "signal": {
-                "action": "BUY",  # Place bid
-                "quantity": 0.2,
-                "price": bid_price,
-                "confidence": 0.6
-            },
-            "indicators": {
-                "bid_price": bid_price,
-                "ask_price": ask_price,
-                "spread": spread,
-                "market_making_spread_pct": 0.1
+        # Get portfolio position information
+        held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+        desired_qty = 0.2
+        max_position_size = 1.0  # Maximum position size for market making
+        
+        # Market making logic based on portfolio state
+        if held_qty == 0 and available_cash > 0:
+            # No position - place a bid (BUY)
+            max_affordable_qty = available_cash / ask_price if ask_price > 0 else 0
+            quantity = min(desired_qty, max_affordable_qty, max_position_size)
+            
+            if quantity <= 0:
+                return None
+                
+            return {
+                "signal": {
+                    "action": "BUY",
+                    "quantity": quantity,
+                    "price": bid_price,  # Place bid at bid_price
+                    "confidence": 0.6
+                },
+                "indicators": {
+                    "bid_price": bid_price,
+                    "ask_price": ask_price,
+                    "spread": spread,
+                    "market_making_spread_pct": 0.1,
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
+                }
             }
-        }
+        elif held_qty > 0:
+            # Have position - place an ask (SELL)
+            quantity = min(desired_qty, held_qty)
+            
+            if quantity <= 0:
+                return None
+                
+            return {
+                "signal": {
+                    "action": "SELL",
+                    "quantity": quantity,
+                    "price": ask_price,  # Place ask at ask_price
+                    "confidence": 0.6
+                },
+                "indicators": {
+                    "bid_price": bid_price,
+                    "ask_price": ask_price,
+                    "spread": spread,
+                    "market_making_spread_pct": 0.1,
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
+                }
+            }
+        
+        return None
 
     def _generate_backtest_futures_signal(
         self,
@@ -3032,32 +3072,57 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         # Futures trading with leverage consideration
         rsi = self._calculate_backtest_rsi(closes)
         
+        # Get portfolio position information
+        held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+        desired_qty = 0.3  # Higher quantity for futures
+        leverage = 5.0
+        
         if rsi > 70:  # Overbought
+            # SELL signal - only if we have a position to sell
+            if held_qty <= 0:
+                return None
+            quantity = min(desired_qty, held_qty)
+            if quantity <= 0:
+                return None
+                
             return {
                 "signal": {
                     "action": "SELL",
-                    "quantity": 0.3,  # Higher quantity for futures
+                    "quantity": quantity,
                     "price": latest_price,
                     "confidence": 0.8
                 },
                 "indicators": {
                     "rsi": rsi,
-                    "leverage": 5.0,
-                    "futures_type": "perpetual"
+                    "leverage": leverage,
+                    "futures_type": "perpetual",
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
                 }
             }
         elif rsi < 30:  # Oversold
+            # BUY signal - only if we don't already have a position
+            if held_qty > 0:
+                return None
+            # For futures, we need to consider margin requirements
+            margin_required = (latest_price * desired_qty) / leverage
+            if available_cash < margin_required:
+                return None
+                
             return {
                 "signal": {
                     "action": "BUY",
-                    "quantity": 0.3,
+                    "quantity": desired_qty,
                     "price": latest_price,
                     "confidence": 0.8
                 },
                 "indicators": {
                     "rsi": rsi,
-                    "leverage": 5.0,
-                    "futures_type": "perpetual"
+                    "leverage": leverage,
+                    "futures_type": "perpetual",
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash,
+                    "margin_required": margin_required
                 }
             }
         return None
@@ -3076,18 +3141,34 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         # Options strategy simulation
         volatility = self._calculate_backtest_volatility(closes)
         
+        # Get portfolio position information
+        held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+        desired_qty = 0.1
+        strike_price = latest_price * 1.05
+        
         if volatility > 0.3:  # High volatility
+            # BUY signal - only if we don't already have a position
+            if held_qty > 0:
+                return None
+            # For options, we need to consider premium cost
+            premium_cost = latest_price * desired_qty * 0.1  # 10% of underlying price as premium estimate
+            if available_cash < premium_cost:
+                return None
+                
             return {
                 "signal": {
                     "action": "BUY",
-                    "quantity": 0.1,
+                    "quantity": desired_qty,
                     "price": latest_price,
                     "confidence": 0.7
                 },
                 "indicators": {
                     "volatility": volatility,
                     "options_type": "call",
-                    "strike_price": latest_price * 1.05
+                    "strike_price": strike_price,
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash,
+                    "premium_cost": premium_cost
                 }
             }
         return None

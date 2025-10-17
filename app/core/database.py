@@ -349,7 +349,7 @@ async def get_database() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             import structlog
             logger = structlog.get_logger()
-            logger.error("Database operation failed", error=str(e))
+            logger.exception("Database operation failed", error=str(e))
             raise
         finally:
             await session.close()
@@ -389,7 +389,7 @@ async def get_database_transaction():
                 await session.rollback()
                 import structlog
                 logger = structlog.get_logger()
-                logger.error("Database transaction failed", error=str(e))
+                logger.exception("Database transaction failed", error=str(e))
                 raise
             finally:
                 await session.close()
