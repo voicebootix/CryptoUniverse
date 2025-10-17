@@ -178,7 +178,7 @@ export const useOpportunityDiscovery = (
     } catch (err) {
       if (err instanceof OpportunityApiError) {
         if (err.code === 'SCAN_IN_PROGRESS') {
-          startStatusPolling(scanId ?? DEFAULT_SCAN_ID);
+          startStatusPolling(effectiveScanId ?? scanId ?? DEFAULT_SCAN_ID);
           setIsScanning(true);
           return;
         }
