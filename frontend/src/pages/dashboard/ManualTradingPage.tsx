@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import type { ComponentProps } from 'react';
 import { motion } from 'framer-motion';
 import {
   TrendingUp,
@@ -20,7 +21,7 @@ import {
   Sparkles,
   ListTree,
   Radio,
-  ChartSpline,
+  LineChart,
   Equal
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -44,7 +45,7 @@ import { useAIConsensus } from '@/hooks/useAIConsensus';
 import { useCredits } from '@/hooks/useCredits';
 import { useChatStore, ChatMode } from '@/store/chatStore';
 import PhaseProgressVisualizer, { ExecutionPhase } from '@/components/trading/PhaseProgressVisualizer';
-import { PHASE_CONFIG, PhaseData } from '@/constants/trading';
+import { PHASE_CONFIG } from '@/constants/trading';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { apiClient } from '@/lib/api/client';
 
@@ -179,7 +180,8 @@ const ManualTradingPage: React.FC = () => {
   const [streamingContent, setStreamingContent] = useState('');
   const [aiSummary, setAiSummary] = useState<ManualWorkflowSummary | null>(null);
   const [currentPhase, setCurrentPhase] = useState<ExecutionPhase>(ExecutionPhase.IDLE);
-  const [phaseHistory, setPhaseHistory] = useState<PhaseData[]>([]);
+  type PhaseHistoryEntry = ComponentProps<typeof PhaseProgressVisualizer>['phaseHistory'][number];
+  const [phaseHistory, setPhaseHistory] = useState<PhaseHistoryEntry[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [activeTab, setActiveTab] = useState('trade');
   const [aiInsights, setAiInsights] = useState<Array<{ id: string; title: string; payload: any; function: string; timestamp: string }>>([]);
@@ -254,20 +256,22 @@ const ManualTradingPage: React.FC = () => {
 
   const appendPhase = useCallback((phase: ExecutionPhase, detail?: string) => {
     setPhaseHistory((prev) => {
-      const IconComponent = PHASE_CONFIG[phase].icon;
-      const baseDetails = PHASE_CONFIG[phase].details || [];
+      const { icon: PhaseIcon, details: configDetails = [], progress: _progress, ...phaseConfig } = PHASE_CONFIG[phase];
+      const baseDetails = Array.isArray(configDetails) ? configDetails : [];
       const newDetails = detail ? [detail] : [];
 
       const existingIndex = prev.findIndex((item) => item.phase === phase);
       if (existingIndex >= 0) {
         const updated = [...prev];
-        const existingDetails = updated[existingIndex].details || baseDetails;
+        const existingDetails = updated[existingIndex].details ?? baseDetails;
         const mergedDetails = newDetails.length
           ? Array.from(new Set([...(existingDetails || []), ...newDetails]))
           : existingDetails;
+
         updated[existingIndex] = {
           ...updated[existingIndex],
-          icon: IconComponent,
+          ...phaseConfig,
+          icon: <PhaseIcon className="h-4 w-4" />,
           details: mergedDetails
         };
         return updated;
@@ -276,11 +280,8 @@ const ManualTradingPage: React.FC = () => {
       return [
         ...prev,
         {
-          phase,
-          title: PHASE_CONFIG[phase].title,
-          description: PHASE_CONFIG[phase].description,
-          icon: IconComponent,
-          color: PHASE_CONFIG[phase].color,
+          ...phaseConfig,
+          icon: <PhaseIcon className="h-4 w-4" />,
           details: newDetails.length ? [...baseDetails, ...newDetails] : baseDetails
         }
       ];
@@ -446,7 +447,7 @@ const ManualTradingPage: React.FC = () => {
           Accept: 'text/event-stream'
         },
         signal: controller.signal,
-        onopen: (response) => {
+        onopen: async (response) => {
           if (!response.ok) {
             pushWorkflowLog('error', `Failed to start workflow: HTTP ${response.status}`);
             throw new Error(`HTTP ${response.status}`);
@@ -907,6 +908,7 @@ const ManualTradingPage: React.FC = () => {
   }, [fetchPortfolio, fetchStatus, fetchMarketData, fetchRecentTrades, connectWebSocket]);
 
   const workflowDisabled = isStreaming || isAnalyzing;
+  const isConnectionOpen = connectionStatus?.toLowerCase() === 'open';
 
   useEffect(() => {
     if (!connectionStatus) {
@@ -914,13 +916,12 @@ const ManualTradingPage: React.FC = () => {
     }
 
     const normalizedStatus = connectionStatus.toLowerCase();
-    const message =
-      connectionStatus === 'OPEN'
-        ? 'AI consensus channel connected.'
-        : `AI consensus connection ${normalizedStatus}.`;
+    const message = isConnectionOpen
+      ? 'AI consensus channel connected.'
+      : `AI consensus connection ${normalizedStatus}.`;
 
     pushWorkflowLog('info', message);
-  }, [connectionStatus, pushWorkflowLog]);
+  }, [connectionStatus, isConnectionOpen, pushWorkflowLog]);
 
   useEffect(() => {
     if (isStreaming && activeTab !== 'workflow') {
@@ -940,7 +941,7 @@ const ManualTradingPage: React.FC = () => {
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant="outline" className="gap-1">
             <Radio className="h-3 w-3" />
-            {connectionStatus === 'OPEN' ? 'AI live' : 'AI idle'}
+            {isConnectionOpen ? 'AI live' : 'AI idle'}
           </Badge>
           <Badge variant="outline" className="gap-1">
             <ListTree className="h-3 w-3" />
@@ -1426,7 +1427,7 @@ const ManualTradingPage: React.FC = () => {
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-base">
-                    <ChartSpline className="h-4 w-4" />
+                    <LineChart className="h-4 w-4" />
                     AI Workflow Logs
                   </CardTitle>
                 </CardHeader>
@@ -1484,7 +1485,7 @@ const ManualTradingPage: React.FC = () => {
                     <div className="grid gap-2 md:grid-cols-2">
                       {Object.entries(aiSummary.actionData).map(([key, value]) => (
                         <div key={key} className="flex items-center justify-between">
-                          <span className="text-muted-foreground">{key.replaceAll('_', ' ')}</span>
+                          <span className="text-muted-foreground">{key.replace(/_/g, ' ')}</span>
                           <span className="font-medium">{typeof value === 'number' ? value.toString() : String(value)}</span>
                         </div>
                       ))}
