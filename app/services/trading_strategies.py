@@ -2822,19 +2822,55 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         if len(closes) >= 3:
             price_change = (closes[-1] - closes[-3]) / closes[-3]
             if abs(price_change) > 0.002:  # 0.2% movement
-                action = "BUY" if price_change > 0 else "SELL"
-                return {
-                    "signal": {
-                        "action": action,
-                        "quantity": 0.05,  # Smaller position for scalping
-                        "price": latest_price,
-                        "confidence": 0.6
-                    },
-                    "indicators": {
-                        "price_change_pct": price_change * 100,
-                        "scalping_threshold": 0.2
+                # Get portfolio position information
+                positions = portfolio_snapshot.get("positions", {})
+                position_info = positions.get(symbol, {}) if isinstance(positions, dict) else {}
+                held_qty = float(position_info.get("quantity", 0) or 0)
+                available_cash = float(portfolio_snapshot.get("cash", 0) or 0)
+                desired_qty = 0.05  # Smaller position for scalping
+
+                if price_change > 0:
+                    # BUY signal - only if we don't already have a position
+                    if held_qty > 0:
+                        return None
+                    quantity = min(desired_qty, available_cash / latest_price if latest_price > 0 else 0)
+                    if quantity <= 0:
+                        return None
+                    return {
+                        "signal": {
+                            "action": "BUY",
+                            "quantity": quantity,
+                            "price": latest_price,
+                            "confidence": 0.6
+                        },
+                        "indicators": {
+                            "price_change_pct": price_change * 100,
+                            "scalping_threshold": 0.2,
+                            "held_quantity": held_qty,
+                            "available_cash": available_cash
+                        }
                     }
-                }
+                else:
+                    # SELL signal - only if we have a position to sell
+                    if held_qty <= 0:
+                        return None
+                    quantity = min(desired_qty, held_qty)
+                    if quantity <= 0:
+                        return None
+                    return {
+                        "signal": {
+                            "action": "SELL",
+                            "quantity": quantity,
+                            "price": latest_price,
+                            "confidence": 0.6
+                        },
+                        "indicators": {
+                            "price_change_pct": price_change * 100,
+                            "scalping_threshold": 0.2,
+                            "held_quantity": held_qty,
+                            "available_cash": available_cash
+                        }
+                    }
         return None
 
     def _generate_backtest_pairs_signal(
@@ -2854,25 +2890,47 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         
         if std_dev > 0:
             z_score = (latest_price - mean_price) / std_dev
+            
+            # Get portfolio position information
+            positions = portfolio_snapshot.get("positions", {})
+            position_info = positions.get(symbol, {}) if isinstance(positions, dict) else {}
+            held_qty = float(position_info.get("quantity", 0) or 0)
+            available_cash = float(portfolio_snapshot.get("cash", 0) or 0)
+            desired_qty = 0.1
+            
             if z_score > 2:  # Overbought
+                # SELL signal - only if we have a position to sell
+                if held_qty <= 0:
+                    return None
+                quantity = min(desired_qty, held_qty)
+                if quantity <= 0:
+                    return None
                 return {
                     "signal": {
                         "action": "SELL",
-                        "quantity": 0.1,
+                        "quantity": quantity,
                         "price": latest_price,
                         "confidence": 0.7
                     },
                     "indicators": {
                         "z_score": z_score,
                         "mean_price": mean_price,
-                        "std_dev": std_dev
+                        "std_dev": std_dev,
+                        "held_quantity": held_qty,
+                        "available_cash": available_cash
                     }
                 }
             elif z_score < -2:  # Oversold
+                # BUY signal - only if we don't already have a position
+                if held_qty > 0:
+                    return None
+                quantity = min(desired_qty, available_cash / latest_price if latest_price > 0 else 0)
+                if quantity <= 0:
+                    return None
                 return {
                     "signal": {
                         "action": "BUY",
-                        "quantity": 0.1,
+                        "quantity": quantity,
                         "price": latest_price,
                         "confidence": 0.7
                     },
@@ -2901,17 +2959,29 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         
         if abs(price_deviation) > 0.05:  # 5% deviation
             action = "SELL" if price_deviation > 0 else "BUY"
+            desired_qty = 0.15
+            
+            # Get portfolio position information
+            held_qty, available_cash = self._get_portfolio_position_info(symbol, portfolio_snapshot)
+            
+            # Validate trading signal
+            validated_qty = self._validate_trading_signal(action, desired_qty, held_qty, available_cash, latest_price)
+            if validated_qty is None or validated_qty <= 0:
+                return None
+                
             return {
                 "signal": {
                     "action": action,
-                    "quantity": 0.15,
+                    "quantity": validated_qty,
                     "price": latest_price,
                     "confidence": 0.75
                 },
                 "indicators": {
                     "mean_price": mean_price,
                     "deviation_pct": price_deviation * 100,
-                    "arbitrage_threshold": 5.0
+                    "arbitrage_threshold": 5.0,
+                    "held_quantity": held_qty,
+                    "available_cash": available_cash
                 }
             }
         return None
@@ -3415,6 +3485,32 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         mean_return = sum(returns) / len(returns)
         variance = sum((r - mean_return) ** 2 for r in returns) / len(returns)
         return variance ** 0.5
+
+    def _get_portfolio_position_info(self, symbol: str, portfolio_snapshot: Dict[str, Any]) -> tuple[float, float]:
+        """Get portfolio position information for a symbol."""
+        positions = portfolio_snapshot.get("positions", {})
+        position_info = positions.get(symbol, {}) if isinstance(positions, dict) else {}
+        held_qty = float(position_info.get("quantity", 0) or 0)
+        available_cash = float(portfolio_snapshot.get("cash", 0) or 0)
+        return held_qty, available_cash
+
+    def _validate_trading_signal(self, action: str, quantity: float, held_qty: float, 
+                                available_cash: float, latest_price: float) -> Optional[float]:
+        """Validate and adjust trading signal based on portfolio constraints."""
+        if action == "BUY":
+            # Only BUY if we don't already have a position
+            if held_qty > 0:
+                return None
+            # Calculate quantity based on available cash
+            max_affordable = available_cash / latest_price if latest_price > 0 else 0
+            return min(quantity, max_affordable) if max_affordable > 0 else None
+        elif action == "SELL":
+            # Only SELL if we have a position to sell
+            if held_qty <= 0:
+                return None
+            # Don't sell more than we have
+            return min(quantity, held_qty) if held_qty > 0 else None
+        return None
 
     async def _execute_derivatives_strategy(
         self,

@@ -6,6 +6,7 @@ for the multi-tenant cryptocurrency trading platform.
 """
 
 import asyncio
+import collections
 import logging
 import os
 import ssl
@@ -212,6 +213,7 @@ class DatabaseManager:
         self._query_times = {}  # Track query performance
         self._slow_query_threshold = 0.5  # Align with engine-level semantics (0.5s)
         self._max_tracked_queries = 1000  # Bounded tracking to prevent memory growth
+        self._max_timings_per_query = 100  # Fixed-size sliding window per query
     
     async def connect(self) -> None:
         """Connect to database."""
@@ -285,7 +287,8 @@ class DatabaseManager:
                 # Track query performance with bounded tracking
                 if len(self._query_times) < self._max_tracked_queries:
                     if query_name not in self._query_times:
-                        self._query_times[query_name] = []
+                        # Use deque with maxlen for fixed-size sliding window
+                        self._query_times[query_name] = collections.deque(maxlen=self._max_timings_per_query)
                     self._query_times[query_name].append(execution_time)
                 elif query_name in self._query_times:
                     # Only track if already being tracked
