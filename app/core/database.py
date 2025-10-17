@@ -6,6 +6,7 @@ for the multi-tenant cryptocurrency trading platform.
 """
 
 import asyncio
+import collections
 import logging
 import os
 import ssl
@@ -86,16 +87,30 @@ execution_options = {"compiled_cache": {}}  # Enable query compilation cache
 if "postgresql" in async_db_url:
     execution_options["isolation_level"] = "READ_COMMITTED"
 
+# ENTERPRISE: Use QueuePool for production performance
+poolclass = QueuePool if "postgresql" in async_db_url else NullPool
+
+# Build engine kwargs conditionally based on pool type
+engine_kwargs = {
+    "url": async_db_url,
+    "poolclass": poolclass,
+    "echo": getattr(settings, 'DATABASE_ECHO', False),
+    "future": True,
+    "execution_options": execution_options,
+}
+
+# Only add QueuePool-specific parameters for PostgreSQL
+if poolclass == QueuePool:
+    engine_kwargs.update({
+        "pool_size": 20,          # Base number of connections
+        "max_overflow": 30,       # Additional connections when needed
+        "pool_timeout": 30,       # Timeout for getting connection
+        "pool_pre_ping": True,    # ENTERPRISE: Health check connections
+        "pool_recycle": 1800,     # PRODUCTION: Recycle connections (30 min)
+    })
+
 engine = create_async_engine(
-    async_db_url,
-    poolclass=NullPool,   # ASYNC COMPATIBLE: Required for async engines
-    # NullPool doesn't support pool_size, max_overflow, pool_timeout parameters
-    pool_pre_ping=True,   # ENTERPRISE: Health check connections
-    pool_recycle=1800,    # PRODUCTION: Faster recycle for cloud (30 min)
-    echo=getattr(settings, 'DATABASE_ECHO', False),
-    future=True,
-    # ENTERPRISE: Production performance settings
-    execution_options=execution_options,
+    **engine_kwargs,
     # PRODUCTION: Optimized settings for asyncpg driver
     connect_args={
         "command_timeout": 30,  # Command timeout in seconds
@@ -195,6 +210,10 @@ class DatabaseManager:
     
     def __init__(self):
         self._engine = engine
+        self._query_times = {}  # Track query performance
+        self._slow_query_threshold = 0.5  # Align with engine-level semantics (0.5s)
+        self._max_tracked_queries = 1000  # Bounded tracking to prevent memory growth
+        self._max_timings_per_query = 100  # Fixed-size sliding window per query
     
     async def connect(self) -> None:
         """Connect to database."""
@@ -250,6 +269,68 @@ class DatabaseManager:
     def transaction(self):
         """Start a database transaction."""
         return self._engine.begin()
+    
+    async def execute_with_monitoring(self, query, values=None, query_name="unknown"):
+        """Execute query with performance monitoring."""
+        import time
+        start_time = time.time()
+        
+        try:
+            async with self._engine.begin() as conn:
+                if values:
+                    result = await conn.execute(text(query), values)
+                else:
+                    result = await conn.execute(text(query))
+                
+                execution_time = time.time() - start_time
+                
+                # Track query performance with bounded tracking
+                # Each query gets a fixed-size sliding window using collections.deque(maxlen)
+                # This prevents unbounded memory growth while maintaining recent performance data
+                if len(self._query_times) < self._max_tracked_queries:
+                    if query_name not in self._query_times:
+                        # Create new deque with fixed maxlen for this query
+                        self._query_times[query_name] = collections.deque(maxlen=self._max_timings_per_query)
+                    # Append timing - deque automatically maintains maxlen (drops oldest when full)
+                    self._query_times[query_name].append(execution_time)
+                elif query_name in self._query_times:
+                    # Only track if already being tracked - deque automatically maintains maxlen
+                    self._query_times[query_name].append(execution_time)
+                
+                # Note: Slow query warnings are handled by engine-level event handlers
+                # to avoid duplication. This method focuses on performance tracking.
+                
+                return result
+                
+        except Exception as e:
+            execution_time = time.time() - start_time
+            import structlog
+            logger = structlog.get_logger()
+            logger.exception(
+                "Database query failed",
+                query_name=query_name,
+                execution_time=execution_time,
+                query_preview=query[:100] + "..." if len(query) > 100 else query
+            )
+            raise
+    
+    def get_query_performance_stats(self):
+        """Get query performance statistics."""
+        stats = {}
+        for query_name, times in self._query_times.items():
+            if times:
+                stats[query_name] = {
+                    "count": len(times),
+                    "avg_time": sum(times) / len(times),
+                    "min_time": min(times),
+                    "max_time": max(times),
+                    "slow_queries": len([t for t in times if t > self._slow_query_threshold])
+                }
+        return stats
+    
+    def reset_performance_stats(self):
+        """Reset query performance statistics."""
+        self._query_times.clear()
 
 
 # Database manager instance
@@ -271,7 +352,7 @@ async def get_database() -> AsyncGenerator[AsyncSession, None]:
             await session.rollback()
             import structlog
             logger = structlog.get_logger()
-            logger.error("Database operation failed", error=str(e))
+            logger.exception("Database operation failed", error=str(e))
             raise
         finally:
             await session.close()
@@ -311,7 +392,7 @@ async def get_database_transaction():
                 await session.rollback()
                 import structlog
                 logger = structlog.get_logger()
-                logger.error("Database transaction failed", error=str(e))
+                logger.exception("Database transaction failed", error=str(e))
                 raise
             finally:
                 await session.close()

@@ -73,9 +73,9 @@ class UnifiedStrategyService(LoggerMixin):
         self._ai_strategy_catalog = self._load_ai_strategy_catalog()
 
     def _load_ai_strategy_catalog(self) -> Dict[str, Dict[str, Any]]:
-        """Load AI strategy catalog with enterprise metadata"""
+        """Load AI strategy catalog with enterprise metadata - All 35 strategies"""
         return {
-            # Core AI Strategies
+            # Core AI Strategies (14 original)
             "risk_management": {
                 "name": "AI Risk Management",
                 "category": "Risk Management",
@@ -112,28 +112,52 @@ class UnifiedStrategyService(LoggerMixin):
                 "performance_tier": "professional",
                 "compliance_verified": True
             },
-            "futures_arbitrage": {
-                "name": "AI Futures Arbitrage",
-                "category": "Arbitrage",
-                "description": "Cross-exchange arbitrage opportunities detection",
-                "risk_level": "low",
-                "min_capital": 10000,
-                "credit_cost_monthly": 60,
-                "supported_exchanges": ["binance", "okx", "bybit"],
+            "spot_mean_reversion": {
+                "name": "AI Spot Mean Reversion",
+                "category": "Mean Reversion",
+                "description": "AI-powered mean reversion strategies for spot markets",
+                "risk_level": "medium",
+                "min_capital": 3000,
+                "credit_cost_monthly": 40,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["15m", "1h", "4h"],
+                "performance_tier": "professional",
+                "compliance_verified": True
+            },
+            "spot_breakout_strategy": {
+                "name": "AI Spot Breakout",
+                "category": "Breakout Trading",
+                "description": "AI-driven breakout detection and trading strategies",
+                "risk_level": "high",
+                "min_capital": 4000,
+                "credit_cost_monthly": 45,
+                "supported_exchanges": ["binance", "kucoin"],
+                "timeframes": ["5m", "15m", "1h"],
+                "performance_tier": "professional",
+                "compliance_verified": True
+            },
+            "scalping_strategy": {
+                "name": "AI Scalping",
+                "category": "Scalping",
+                "description": "High-frequency scalping strategies with AI optimization",
+                "risk_level": "high",
+                "min_capital": 5000,
+                "credit_cost_monthly": 50,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
                 "timeframes": ["1m", "5m"],
                 "performance_tier": "enterprise",
                 "compliance_verified": True
             },
-            "options_strategies": {
-                "name": "AI Options Strategies",
-                "category": "Derivatives",
-                "description": "Sophisticated options strategies with volatility analysis",
-                "risk_level": "high",
-                "min_capital": 15000,
-                "credit_cost_monthly": 75,
-                "supported_exchanges": ["deribit", "okx"],
-                "timeframes": ["1h", "4h", "1d"],
-                "performance_tier": "enterprise",
+            "pairs_trading": {
+                "name": "AI Pairs Trading",
+                "category": "Statistical Trading",
+                "description": "Correlated pairs trading with AI signal generation",
+                "risk_level": "medium",
+                "min_capital": 5000,
+                "credit_cost_monthly": 40,
+                "supported_exchanges": ["binance", "kucoin"],
+                "timeframes": ["1h", "4h"],
+                "performance_tier": "professional",
                 "compliance_verified": True
             },
             "statistical_arbitrage": {
@@ -160,16 +184,90 @@ class UnifiedStrategyService(LoggerMixin):
                 "performance_tier": "enterprise",
                 "compliance_verified": True
             },
-            "pairs_trading": {
-                "name": "AI Pairs Trading",
-                "category": "Statistical Trading",
-                "description": "Correlated pairs trading with AI signal generation",
-                "risk_level": "medium",
+            "futures_trade": {
+                "name": "AI Futures Trading",
+                "category": "Futures Trading",
+                "description": "AI-powered futures trading with leverage management",
+                "risk_level": "high",
+                "min_capital": 10000,
+                "credit_cost_monthly": 60,
+                "supported_exchanges": ["binance", "okx", "bybit"],
+                "timeframes": ["5m", "15m", "1h"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "options_trade": {
+                "name": "AI Options Trading",
+                "category": "Options Trading",
+                "description": "Advanced options strategies with AI risk management",
+                "risk_level": "very_high",
+                "min_capital": 15000,
+                "credit_cost_monthly": 75,
+                "supported_exchanges": ["deribit", "okx"],
+                "timeframes": ["1h", "4h", "1d"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "funding_arbitrage": {
+                "name": "AI Funding Arbitrage",
+                "category": "Arbitrage",
+                "description": "Cross-exchange funding rate arbitrage opportunities",
+                "risk_level": "low",
                 "min_capital": 5000,
-                "credit_cost_monthly": 40,
-                "supported_exchanges": ["binance", "kucoin"],
-                "timeframes": ["1h", "4h"],
+                "credit_cost_monthly": 35,
+                "supported_exchanges": ["binance", "okx", "bybit"],
+                "timeframes": ["8h", "1d"],
                 "performance_tier": "professional",
+                "compliance_verified": True
+            },
+            "hedge_position": {
+                "name": "AI Hedge Position",
+                "category": "Hedging",
+                "description": "Intelligent hedging strategies for portfolio protection",
+                "risk_level": "low",
+                "min_capital": 8000,
+                "credit_cost_monthly": 45,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["1h", "4h", "1d"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "complex_strategy": {
+                "name": "AI Complex Strategy",
+                "category": "Multi-Strategy",
+                "description": "Complex multi-strategy AI trading system",
+                "risk_level": "medium",
+                "min_capital": 12000,
+                "credit_cost_monthly": 70,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["15m", "1h", "4h"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            
+            # Additional AI Strategies (21 new)
+            "futures_arbitrage": {
+                "name": "AI Futures Arbitrage",
+                "category": "Arbitrage",
+                "description": "Cross-exchange futures arbitrage opportunities detection",
+                "risk_level": "low",
+                "min_capital": 10000,
+                "credit_cost_monthly": 60,
+                "supported_exchanges": ["binance", "okx", "bybit"],
+                "timeframes": ["1m", "5m"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "options_strategies": {
+                "name": "AI Options Strategies",
+                "category": "Derivatives",
+                "description": "Sophisticated options strategies with volatility analysis",
+                "risk_level": "high",
+                "min_capital": 15000,
+                "credit_cost_monthly": 75,
+                "supported_exchanges": ["deribit", "okx"],
+                "timeframes": ["1h", "4h", "1d"],
+                "performance_tier": "enterprise",
                 "compliance_verified": True
             },
             "volatility_trading": {
@@ -194,6 +292,210 @@ class UnifiedStrategyService(LoggerMixin):
                 "supported_exchanges": ["binance", "kucoin"],
                 "timeframes": ["5m", "15m", "1h"],
                 "performance_tier": "professional",
+                "compliance_verified": True
+            },
+            "funding_arbitrage_pro": {
+                "name": "AI Funding Arbitrage Pro",
+                "category": "Arbitrage",
+                "description": "Advanced funding arbitrage with multi-exchange optimization",
+                "risk_level": "low",
+                "min_capital": 8000,
+                "credit_cost_monthly": 50,
+                "supported_exchanges": ["binance", "okx", "bybit", "kucoin"],
+                "timeframes": ["1h", "4h", "8h"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "market_making_pro": {
+                "name": "AI Market Making Pro",
+                "category": "Market Making",
+                "description": "Advanced market making with dynamic spread management",
+                "risk_level": "low",
+                "min_capital": 30000,
+                "credit_cost_monthly": 100,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["1m", "5m"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "scalping_engine": {
+                "name": "AI Scalping Engine",
+                "category": "Scalping",
+                "description": "High-performance scalping engine with microsecond execution",
+                "risk_level": "very_high",
+                "min_capital": 8000,
+                "credit_cost_monthly": 60,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["1m", "5m"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "swing_navigator": {
+                "name": "AI Swing Navigator",
+                "category": "Swing Trading",
+                "description": "AI-powered swing trading with trend analysis",
+                "risk_level": "medium",
+                "min_capital": 4000,
+                "credit_cost_monthly": 45,
+                "supported_exchanges": ["binance", "kucoin"],
+                "timeframes": ["4h", "1d"],
+                "performance_tier": "professional",
+                "compliance_verified": True
+            },
+            "position_manager": {
+                "name": "AI Position Manager",
+                "category": "Position Management",
+                "description": "Intelligent position sizing and risk management",
+                "risk_level": "low",
+                "min_capital": 6000,
+                "credit_cost_monthly": 40,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["15m", "1h", "4h"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "risk_guardian": {
+                "name": "AI Risk Guardian",
+                "category": "Risk Management",
+                "description": "Advanced risk monitoring and protection system",
+                "risk_level": "low",
+                "min_capital": 2000,
+                "credit_cost_monthly": 35,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["1m", "5m", "15m"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "portfolio_optimizer": {
+                "name": "AI Portfolio Optimizer",
+                "category": "Portfolio Management",
+                "description": "Advanced portfolio optimization with ML algorithms",
+                "risk_level": "medium",
+                "min_capital": 8000,
+                "credit_cost_monthly": 55,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["1h", "4h", "1d"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "strategy_analytics": {
+                "name": "AI Strategy Analytics",
+                "category": "Analytics",
+                "description": "Comprehensive strategy performance analytics and insights",
+                "risk_level": "low",
+                "min_capital": 3000,
+                "credit_cost_monthly": 30,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["1h", "4h", "1d"],
+                "performance_tier": "professional",
+                "compliance_verified": True
+            },
+            "momentum_trader": {
+                "name": "AI Momentum Trader",
+                "category": "Momentum Trading",
+                "description": "Advanced momentum trading with trend following",
+                "risk_level": "high",
+                "min_capital": 5000,
+                "credit_cost_monthly": 50,
+                "supported_exchanges": ["binance", "kucoin"],
+                "timeframes": ["5m", "15m", "1h"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "mean_reversion_pro": {
+                "name": "AI Mean Reversion Pro",
+                "category": "Mean Reversion",
+                "description": "Professional mean reversion with advanced statistics",
+                "risk_level": "medium",
+                "min_capital": 6000,
+                "credit_cost_monthly": 50,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["15m", "1h", "4h"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "breakout_hunter": {
+                "name": "AI Breakout Hunter",
+                "category": "Breakout Trading",
+                "description": "Advanced breakout detection with pattern recognition",
+                "risk_level": "high",
+                "min_capital": 6000,
+                "credit_cost_monthly": 55,
+                "supported_exchanges": ["binance", "kucoin"],
+                "timeframes": ["5m", "15m", "1h"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "algorithmic_suite": {
+                "name": "AI Algorithmic Suite",
+                "category": "Multi-Strategy",
+                "description": "Comprehensive algorithmic trading suite",
+                "risk_level": "medium",
+                "min_capital": 15000,
+                "credit_cost_monthly": 80,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["5m", "15m", "1h", "4h"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "pairs_trader": {
+                "name": "AI Pairs Trader",
+                "category": "Statistical Trading",
+                "description": "Advanced pairs trading with cointegration analysis",
+                "risk_level": "medium",
+                "min_capital": 7000,
+                "credit_cost_monthly": 50,
+                "supported_exchanges": ["binance", "kucoin"],
+                "timeframes": ["1h", "4h"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "statistical_arbitrage_pro": {
+                "name": "AI Statistical Arbitrage Pro",
+                "category": "Statistical Trading",
+                "description": "Professional statistical arbitrage with ML enhancement",
+                "risk_level": "medium",
+                "min_capital": 12000,
+                "credit_cost_monthly": 70,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["15m", "1h", "4h"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "market_maker": {
+                "name": "AI Market Maker",
+                "category": "Market Making",
+                "description": "Professional market making with advanced algorithms",
+                "risk_level": "low",
+                "min_capital": 25000,
+                "credit_cost_monthly": 90,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["1m", "5m"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "scalping_engine_pro": {
+                "name": "AI Scalping Engine Pro",
+                "category": "Scalping",
+                "description": "Ultra-high frequency scalping with microsecond precision",
+                "risk_level": "very_high",
+                "min_capital": 12000,
+                "credit_cost_monthly": 80,
+                "supported_exchanges": ["binance", "kucoin", "okx"],
+                "timeframes": ["1m", "5m"],
+                "performance_tier": "enterprise",
+                "compliance_verified": True
+            },
+            "swing_navigator_pro": {
+                "name": "AI Swing Navigator Pro",
+                "category": "Swing Trading",
+                "description": "Advanced swing trading with predictive analytics",
+                "risk_level": "medium",
+                "min_capital": 6000,
+                "credit_cost_monthly": 60,
+                "supported_exchanges": ["binance", "kucoin"],
+                "timeframes": ["4h", "1d"],
+                "performance_tier": "enterprise",
                 "compliance_verified": True
             }
         }

@@ -524,6 +524,14 @@ class DynamicExchangeDiscovery:
         """Cache discovery results in Redis."""
         
         try:
+            # Ensure Redis client is initialized
+            if self.redis_client is None:
+                await self.async_init()
+            
+            if self.redis_client is None:
+                logger.warning("Redis client not available, skipping cache")
+                return
+                
             await self.redis_client.set(
                 "exchange_discovery_results",
                 json.dumps(results, default=str),
@@ -533,7 +541,7 @@ class DynamicExchangeDiscovery:
             logger.debug("Cached exchange discovery results")
             
         except Exception as e:
-            logger.warning(f"Failed to cache discovery results", error=str(e))
+            logger.warning("Failed to cache discovery results", error=str(e))
     
     async def get_available_exchanges(self, 
                                     capabilities: Optional[List[str]] = None,
