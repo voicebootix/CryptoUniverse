@@ -108,10 +108,16 @@ const AIMoneyManager: React.FC = () => {
         }
       });
 
-      if (response.data.success) {
-        setSessionId(response.data.data.session_id);
+      const { success, session_id: newSessionId, message } = response.data ?? {};
+
+      if (success && newSessionId) {
+        setSessionId(newSessionId);
+        return;
       }
+
+      throw new Error(message || 'Missing chat session id in response');
     } catch (error) {
+      console.error('Failed to initialize chat session', error);
       toast({
         title: "Connection Error",
         description: "Failed to initialize chat session",
