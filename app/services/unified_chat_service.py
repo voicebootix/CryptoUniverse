@@ -1615,17 +1615,15 @@ class UnifiedChatService(LoggerMixin):
         if not user_id:
             return False
 
-        normalized_id = str(user_id)
         try:
-            parsed_uuid = uuid.UUID(str(user_id))
+            parsed_id: Union[uuid.UUID, str] = uuid.UUID(str(user_id))
         except (ValueError, TypeError, AttributeError):
-            parsed_id = normalized_id
-        else:
-            parsed_id = parsed_uuid
-            normalized_id = str(parsed_uuid)
+            parsed_id = str(user_id)
+
+        cache_key = str(parsed_id)
 
         now = time.monotonic()
-        cache_entry = self._admin_role_cache.get(normalized_id)
+        cache_entry = self._admin_role_cache.get(cache_key)
         if cache_entry and cache_entry[0] > now:
             return cache_entry[1]
 
@@ -1638,12 +1636,12 @@ class UnifiedChatService(LoggerMixin):
         except SQLAlchemyError as exc:
             self.logger.warning(
                 "Admin role lookup failed",
-                user_id=normalized_id,
+                user_id=cache_key,
                 error=str(exc),
                 exception=exc,
             )
 
-        self._admin_role_cache[normalized_id] = (now + 300.0, is_admin)
+        self._admin_role_cache[cache_key] = (now + 300.0, is_admin)
         return is_admin
 
     def _schedule_portfolio_optimization_refresh(
