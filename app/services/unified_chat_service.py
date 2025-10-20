@@ -208,6 +208,7 @@ class UnifiedChatService(LoggerMixin):
         self._opportunity_refresh_poll_interval = 2.0
         self._opportunity_refresh_max_wait = 90.0
         self._admin_role_cache: Dict[str, Tuple[float, bool]] = {}
+        self._admin_role_cache_max_entries = 1024
 
         # Personality system from conversational AI
         self.personalities = self._initialize_personalities()
@@ -1611,6 +1612,28 @@ class UnifiedChatService(LoggerMixin):
 
         return summary
 
+    def _prune_admin_role_cache(self, now: float) -> None:
+        if not self._admin_role_cache:
+            return
+
+        expired_keys = [
+            key for key, (expiry, _) in self._admin_role_cache.items() if expiry <= now
+        ]
+        for key in expired_keys:
+            self._admin_role_cache.pop(key, None)
+
+        excess = len(self._admin_role_cache) - self._admin_role_cache_max_entries
+        if excess <= 0:
+            return
+
+        for key, _ in sorted(
+            self._admin_role_cache.items(), key=lambda item: item[1][0]
+        ):
+            if excess <= 0:
+                break
+            self._admin_role_cache.pop(key, None)
+            excess -= 1
+
     async def _is_admin_user(self, user_id: str) -> bool:
         if not user_id:
             return False
@@ -1623,6 +1646,8 @@ class UnifiedChatService(LoggerMixin):
         cache_key = str(parsed_id)
 
         now = time.monotonic()
+        self._prune_admin_role_cache(now)
+
         cache_entry = self._admin_role_cache.get(cache_key)
         if cache_entry and cache_entry[0] > now:
             return cache_entry[1]
@@ -1641,7 +1666,8 @@ class UnifiedChatService(LoggerMixin):
                 exception=exc,
             )
 
-        self._admin_role_cache[cache_key] = (now + 300.0, is_admin)
+        expiry = time.monotonic() + 300.0
+        self._admin_role_cache[cache_key] = (expiry, is_admin)
         return is_admin
 
     def _schedule_portfolio_optimization_refresh(
