@@ -31,6 +31,8 @@ PUBLIC_PATHS = {
     "/api/v1/auth/oauth/callback",
     "/api/v1/health",
     "/api/v1/status",
+    "/api/v1/diagnostics/test-layers",
+    "/api/v1/diagnostics/test-login-flow",
     "/api/v1/telegram/webhook",  # Telegram webhook endpoint
     "/health",
     "/",
@@ -117,6 +119,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 "/api/v1/trading/ws",  # WebSocket endpoint
                 "/api/v1/telegram/webhook",  # Telegram webhook endpoint
                 "/api/v1/unified-chat/stream",  # SSE streaming endpoint (uses query param auth)
+                "/api/v1/diagnostics/",  # Public diagnostics endpoints
                 "/vite.svg",  # Static assets
                 "/login"  # Login page
             ])):

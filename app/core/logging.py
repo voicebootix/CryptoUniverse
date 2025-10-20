@@ -7,7 +7,10 @@ for development environments.
 
 import logging
 import sys
-from typing import Any, Dict, List, Optional
+from collections import deque
+from datetime import datetime
+from threading import Lock
+from typing import Any, Deque, Dict, List, Optional
 import json
 
 import structlog
@@ -19,6 +22,37 @@ import logging.handlers
 from app.core.config import get_settings
 
 settings = get_settings()
+
+_LOG_BUFFER_SIZE = getattr(settings, "ADMIN_LOG_BUFFER_SIZE", 500)
+_LOG_BUFFER: Deque[Dict[str, Any]] = deque(maxlen=_LOG_BUFFER_SIZE)
+_LOG_BUFFER_LOCK = Lock()
+
+
+def _sanitize_for_buffer(value: Any) -> Any:
+    """Safely convert log values for JSON serialization."""
+
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _sanitize_for_buffer(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_sanitize_for_buffer(v) for v in value]
+    return str(value)
+
+
+def _capture_event(_: Any, __: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Structlog processor that stores events in an in-memory ring buffer."""
+
+    try:
+        serialized_event = {k: _sanitize_for_buffer(v) for k, v in event_dict.items()}
+        with _LOG_BUFFER_LOCK:
+            _LOG_BUFFER.append(serialized_event)
+    except Exception:
+        # Never let diagnostics capture interfere with logging
+        pass
+    return event_dict
 
 
 def configure_logging(log_level: str = "INFO", environment: str = "development") -> None:
@@ -44,6 +78,7 @@ def configure_logging(log_level: str = "INFO", environment: str = "development")
         structlog.stdlib.add_log_level,
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.TimeStamper(fmt="iso"),
+        _capture_event,
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),
@@ -86,9 +121,19 @@ def configure_logging(log_level: str = "INFO", environment: str = "development")
             processor=structlog.dev.ConsoleRenderer()
         ))
         logging.getLogger().addHandler(rotating_handler)
-        
+
         # Set root level to WARNING
         logging.getLogger().setLevel(logging.WARNING)
+
+
+def get_recent_logs(limit: int = 100) -> List[Dict[str, Any]]:
+    """Return the most recent structured log events captured in memory."""
+
+    if limit <= 0:
+        return []
+
+    with _LOG_BUFFER_LOCK:
+        return list(_LOG_BUFFER)[-limit:]
 
 
 class LoggerMixin:
