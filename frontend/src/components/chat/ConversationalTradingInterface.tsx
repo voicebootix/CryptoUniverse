@@ -712,7 +712,7 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
                       <ul className="space-y-1 text-[0.7rem] text-muted-foreground">
                         {progressTimeline.map((update, index) => (
                           <li
-                            key={update.stage || `${index}-${update.timestamp || 'progress'}`}
+                            key={`${index}-${update.stage || 'stage'}-${update.timestamp ?? 'progress'}`}
                             className="flex items-center justify-between gap-2"
                           >
                             <span className="truncate" title={update.message}>
