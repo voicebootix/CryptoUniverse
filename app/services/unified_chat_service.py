@@ -2604,13 +2604,28 @@ class UnifiedChatService(LoggerMixin):
                 discovery_result = None
 
             if discovery_result is None:
-                discovery_result = self._get_placeholder_opportunities(user_id)
-                await self._cache_opportunities(
-                    user_id,
-                    discovery_result,
-                    partial=True,
-                )
-                await self._start_opportunity_discovery_refresh(user_id)
+                # For chat interface, wait for real opportunity discovery to complete
+                self.logger.info("No cached opportunities found, running fresh discovery", user_id=user_id)
+                try:
+                    discovery_result = await self.opportunity_discovery.discover_opportunities_for_user(
+                        user_id=user_id,
+                        force_refresh=True,
+                        include_strategy_recommendations=True,
+                    )
+                    await self._cache_opportunities(
+                        user_id,
+                        discovery_result,
+                        partial=False,
+                    )
+                except Exception as exc:
+                    self.logger.error("Opportunity discovery failed, using fallback", 
+                                    user_id=user_id, error=str(exc))
+                    discovery_result = self._get_placeholder_opportunities(user_id)
+                    await self._cache_opportunities(
+                        user_id,
+                        discovery_result,
+                        partial=True,
+                    )
             else:
                 metadata = discovery_result.get("metadata") or {}
                 scan_state = metadata.get("scan_state") or discovery_result.get("scan_state")
@@ -2618,7 +2633,23 @@ class UnifiedChatService(LoggerMixin):
                 partial = scan_state in {"pending", "partial"} or not opportunities_list
 
                 if partial:
-                    await self._start_opportunity_discovery_refresh(user_id)
+                    # For chat interface, wait for completion instead of background refresh
+                    self.logger.info("Partial opportunities found, running fresh discovery", user_id=user_id)
+                    try:
+                        discovery_result = await self.opportunity_discovery.discover_opportunities_for_user(
+                            user_id=user_id,
+                            force_refresh=True,
+                            include_strategy_recommendations=True,
+                        )
+                        await self._cache_opportunities(
+                            user_id,
+                            discovery_result,
+                            partial=False,
+                        )
+                    except Exception as exc:
+                        self.logger.error("Opportunity discovery refresh failed", 
+                                        user_id=user_id, error=str(exc))
+                        # Keep existing partial data
                 else:
                     await self._cache_opportunities(
                         user_id,
