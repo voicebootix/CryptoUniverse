@@ -27,6 +27,8 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.exc import DatabaseError, SQLAlchemyError
 
+from cachetools import TTLCache
+
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
 from app.core.database import AsyncSessionLocal, get_database_session
@@ -207,8 +209,7 @@ class UnifiedChatService(LoggerMixin):
         self._opportunity_background_lock = asyncio.Lock()
         self._opportunity_refresh_poll_interval = 2.0
         self._opportunity_refresh_max_wait = 90.0
-        self._admin_role_cache: Dict[str, Tuple[float, bool]] = {}
-        self._admin_role_cache_max_entries = 1024
+        self._admin_role_cache: TTLCache[str, bool] = TTLCache(maxsize=1024, ttl=300)
 
         # Personality system from conversational AI
         self.personalities = self._initialize_personalities()
@@ -1511,6 +1512,55 @@ class UnifiedChatService(LoggerMixin):
 
         return latest_payload
 
+    async def _handle_failed_opportunity_scan(
+        self,
+        session: ChatSession,
+        failed_payload: Dict[str, Any],
+        context_data: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        metadata = failed_payload.get("metadata") or {}
+        failure_message = metadata.get("message") or failed_payload.get("message")
+
+        self.logger.error(
+            "Opportunity discovery scan failed",
+            user_id=session.user_id,
+            message=failure_message,
+        )
+
+        try:
+            fallback_payload = await self._get_cached_opportunities(session.user_id)
+        except Exception as exc:
+            self.logger.error(
+                "Failed to load fallback opportunities after scan failure",
+                user_id=session.user_id,
+                error=str(exc),
+                exception=exc,
+            )
+            fallback_payload = None
+
+        if (
+            fallback_payload
+            and fallback_payload is not failed_payload
+            and not self._is_placeholder_opportunity(fallback_payload)
+        ):
+            fallback_metadata = fallback_payload.get("metadata") or {}
+            fallback_state = fallback_metadata.get("scan_state") or fallback_payload.get("scan_state")
+            if fallback_state != "failed":
+                context_data["opportunities"] = fallback_payload
+                return None
+
+        error_message = (
+            failure_message
+            or "Opportunity scan failed to complete. Please try again in a moment."
+        )
+
+        return {
+            "success": False,
+            "error": error_message,
+            "session_id": session.session_id,
+            "timestamp": datetime.now(timezone.utc),
+        }
+
     def _summarize_opportunity_entry(self, opportunity: Dict[str, Any]) -> Dict[str, Any]:
         metadata = opportunity.get("metadata") or {}
 
@@ -1612,28 +1662,6 @@ class UnifiedChatService(LoggerMixin):
 
         return summary
 
-    def _prune_admin_role_cache(self, now: float) -> None:
-        if not self._admin_role_cache:
-            return
-
-        expired_keys = [
-            key for key, (expiry, _) in self._admin_role_cache.items() if expiry <= now
-        ]
-        for key in expired_keys:
-            self._admin_role_cache.pop(key, None)
-
-        excess = len(self._admin_role_cache) - self._admin_role_cache_max_entries
-        if excess <= 0:
-            return
-
-        for key, _ in sorted(
-            self._admin_role_cache.items(), key=lambda item: item[1][0]
-        ):
-            if excess <= 0:
-                break
-            self._admin_role_cache.pop(key, None)
-            excess -= 1
-
     async def _is_admin_user(self, user_id: str) -> bool:
         if not user_id:
             return False
@@ -1645,12 +1673,9 @@ class UnifiedChatService(LoggerMixin):
 
         cache_key = str(parsed_id)
 
-        now = time.monotonic()
-        self._prune_admin_role_cache(now)
-
-        cache_entry = self._admin_role_cache.get(cache_key)
-        if cache_entry and cache_entry[0] > now:
-            return cache_entry[1]
+        cached_value = self._admin_role_cache.get(cache_key)
+        if cached_value is not None:
+            return cached_value
 
         is_admin = False
         try:
@@ -1666,8 +1691,7 @@ class UnifiedChatService(LoggerMixin):
                 exception=exc,
             )
 
-        expiry = time.monotonic() + 300.0
-        self._admin_role_cache[cache_key] = (expiry, is_admin)
+        self._admin_role_cache[cache_key] = is_admin
         return is_admin
 
     def _schedule_portfolio_optimization_refresh(
@@ -3045,48 +3069,13 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
             scan_state = metadata.get("scan_state") or fresh_payload.get("scan_state")
 
             if scan_state == "failed":
-                self.logger.error(
-                    "Opportunity discovery scan failed",
-                    user_id=session.user_id,
-                    message=metadata.get("message") or fresh_payload.get("message"),
+                failure_result = await self._handle_failed_opportunity_scan(
+                    session,
+                    fresh_payload,
+                    context_data,
                 )
-
-                try:
-                    fallback_payload = await self._get_cached_opportunities(session.user_id)
-                except Exception as exc:
-                    self.logger.error(
-                        "Failed to load fallback opportunities after scan failure",
-                        user_id=session.user_id,
-                        error=str(exc),
-                        exception=exc,
-                    )
-                    fallback_payload = None
-                if (
-                    fallback_payload
-                    and fallback_payload is not fresh_payload
-                    and not self._is_placeholder_opportunity(fallback_payload)
-                ):
-                    fallback_metadata = fallback_payload.get("metadata") or {}
-                    fallback_state = fallback_metadata.get("scan_state") or fallback_payload.get("scan_state")
-                    if fallback_state != "failed":
-                        context_data["opportunities"] = fallback_payload
-                    else:
-                        fallback_payload = None
-                else:
-                    fallback_payload = None
-
-                if fallback_payload is None:
-                    failure_message = metadata.get("message") or fresh_payload.get("message")
-                    error_message = (
-                        failure_message
-                        or "Opportunity scan failed to complete. Please try again in a moment."
-                    )
-                    return {
-                        "success": False,
-                        "error": error_message,
-                        "session_id": session.session_id,
-                        "timestamp": datetime.now(timezone.utc),
-                    }
+                if failure_result is not None:
+                    return failure_result
 
         # Build the prompt with real data
         prompt = self._build_response_prompt(message, intent, context_data)
@@ -3353,6 +3342,36 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                     opportunities = latest_payload
                 else:
                     context_data["opportunities"] = opportunities
+
+            metadata = opportunities.get("metadata") or {}
+            scan_state = metadata.get("scan_state") or opportunities.get("scan_state")
+            if scan_state == "failed":
+                failure_result = await self._handle_failed_opportunity_scan(
+                    session,
+                    opportunities,
+                    context_data,
+                )
+                if failure_result is not None:
+                    yield {
+                        "type": "error",
+                        "content": failure_result["error"],
+                        "timestamp": failure_result["timestamp"].isoformat(),
+                    }
+                    if charge_request and user_id and charge_context:
+                        try:
+                            await self._refund_chat_charge(
+                                user_id,
+                                charge_context,
+                                "Opportunity discovery scan failed before streaming response",
+                            )
+                        except Exception:
+                            self.logger.warning(
+                                "Failed to refund chat charge after streaming scan failure",
+                                intent=str(intent),
+                                user_id=user_id,
+                            )
+                    return
+                opportunities = context_data.get("opportunities", opportunities)
         
         personality = self.personalities[session.trading_mode]
 

@@ -23,6 +23,7 @@ httpx==0.25.2
 
 # Background tasks - Redis only
 redis==5.0.1
+cachetools==5.3.2
 
 # Production server
 gunicorn==21.2.0
