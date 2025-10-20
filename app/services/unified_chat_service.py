@@ -13,6 +13,7 @@ NO MOCKS, NO PLACEHOLDERS - Only real data and services.
 import asyncio
 import json
 import copy
+import math
 import re
 import uuid
 import time
@@ -24,7 +25,7 @@ from enum import Enum
 
 import structlog
 from sqlalchemy import select
-from sqlalchemy.exc import DatabaseError
+from sqlalchemy.exc import DatabaseError, SQLAlchemyError
 
 from app.core.config import get_settings
 from app.core.logging import LoggerMixin
@@ -1518,6 +1519,21 @@ class UnifiedChatService(LoggerMixin):
         target_range = metadata.get("target_price_range") or metadata.get("target_range")
         stop_range = metadata.get("stop_loss_range") or metadata.get("stop_range")
 
+        confidence_value: Optional[float] = None
+        raw_confidence = opportunity.get("confidence_score")
+        if isinstance(raw_confidence, (int, float, Decimal)) and not isinstance(
+            raw_confidence, bool
+        ):
+            try:
+                normalized_confidence = float(raw_confidence)
+            except (TypeError, ValueError):
+                normalized_confidence = None
+            else:
+                if normalized_confidence is not None and math.isfinite(normalized_confidence):
+                    if normalized_confidence <= 1:
+                        normalized_confidence *= 100.0
+                    confidence_value = round(normalized_confidence, 1)
+
         return {
             "title": metadata.get("headline")
             or metadata.get("title")
@@ -1525,11 +1541,7 @@ class UnifiedChatService(LoggerMixin):
             "symbol": opportunity.get("symbol"),
             "risk_level": opportunity.get("risk_level"),
             "timeframe": opportunity.get("estimated_timeframe"),
-            "confidence": (
-                round(float(opportunity.get("confidence_score")) * 100, 1)
-                if isinstance(opportunity.get("confidence_score"), (int, float, Decimal))
-                else None
-            ),
+            "confidence": confidence_value,
             "profit_potential": self._safe_float(opportunity.get("profit_potential_usd"), None),
             "required_capital": self._safe_float(opportunity.get("required_capital_usd"), None),
             "entry_price": self._safe_float(entry_price, None),
@@ -1592,26 +1604,35 @@ class UnifiedChatService(LoggerMixin):
         if not user_id:
             return False
 
-        cache_entry = self._admin_role_cache.get(user_id)
+        normalized_id = str(user_id)
+        try:
+            parsed_uuid = uuid.UUID(str(user_id))
+        except (ValueError, TypeError, AttributeError):
+            parsed_id = normalized_id
+        else:
+            parsed_id = parsed_uuid
+            normalized_id = str(parsed_uuid)
+
         now = time.monotonic()
+        cache_entry = self._admin_role_cache.get(normalized_id)
         if cache_entry and cache_entry[0] > now:
             return cache_entry[1]
 
-        try:
-            parsed_id = uuid.UUID(str(user_id))
-        except (ValueError, TypeError):
-            parsed_id = user_id
-
+        is_admin = False
         try:
             async with get_database_session() as db:
                 result = await db.execute(select(User.role).where(User.id == parsed_id))
                 role = result.scalar_one_or_none()
                 is_admin = role == UserRole.ADMIN
-        except Exception as exc:  # pragma: no cover - defensive guard
-            self.logger.debug("Admin role lookup failed", error=str(exc), user_id=user_id)
-            is_admin = False
+        except SQLAlchemyError as exc:
+            self.logger.warning(
+                "Admin role lookup failed",
+                user_id=normalized_id,
+                error=str(exc),
+                exception=exc,
+            )
 
-        self._admin_role_cache[user_id] = (now + 300.0, is_admin)
+        self._admin_role_cache[normalized_id] = (now + 300.0, is_admin)
         return is_admin
 
     def _schedule_portfolio_optimization_refresh(
