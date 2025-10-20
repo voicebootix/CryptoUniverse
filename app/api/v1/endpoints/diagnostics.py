@@ -18,6 +18,24 @@ from app.services.rate_limit import rate_limiter
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 
+_SENSITIVE_HEADERS = {
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "proxy-authorization",
+}
+
+
+def _sanitize_headers(headers) -> Dict[str, str]:
+    """Return a copy of headers with sensitive values redacted."""
+    sanitized: Dict[str, str] = {}
+    for name, value in headers.items():
+        if name.lower() in _SENSITIVE_HEADERS:
+            sanitized[name] = "[REDACTED]"
+        else:
+            sanitized[name] = value
+    return sanitized
+
 
 
 @router.get("/test-layers")
@@ -35,7 +53,7 @@ async def test_middleware_layers(request: Request):
     results = {
         "timestamp": datetime.utcnow().isoformat(),
         "client_ip": request.client.host if request.client else "unknown",
-        "headers_received": dict(request.headers),
+        "headers_received": _sanitize_headers(request.headers),
         "layers": {},
         "timing": {},
     }
