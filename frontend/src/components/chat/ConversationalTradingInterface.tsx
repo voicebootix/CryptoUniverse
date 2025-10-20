@@ -79,6 +79,13 @@ interface Message extends ExtendedChatMessage {
   // Additional fields if needed
 }
 
+interface StreamProgressUpdate {
+  stage: string;
+  message: string;
+  percent?: number;
+  timestamp?: string;
+}
+
 // Use shared constants
 const phaseConfig = PHASE_CONFIG;
 const personalityConfig = PERSONALITY_CONFIG;
@@ -167,7 +174,64 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
   const [profileSubmitting, setProfileSubmitting] = useState(false);
   // Remove WebSocket connection state since we're using REST API
   const [isConnected] = useState(true); // Always connected via REST API
-  
+
+  const streamingProgressUpdates = useMemo<StreamProgressUpdate[]>(() => {
+    const streamingMessage = [...baseMessages]
+      .reverse()
+      .find((message) =>
+        Array.isArray(message.metadata?.progress_updates) &&
+        (message.metadata.progress_updates as StreamProgressUpdate[]).length > 0
+      );
+
+    if (!streamingMessage) {
+      return [];
+    }
+
+    const updates = streamingMessage.metadata?.progress_updates as StreamProgressUpdate[];
+    return updates
+      .filter((update): update is StreamProgressUpdate =>
+        Boolean(update && typeof update === 'object' && 'message' in update)
+      )
+      .map((update) => ({
+        ...update,
+        percent:
+          typeof update.percent === 'number'
+            ? Math.max(0, Math.min(100, Math.round(update.percent)))
+            : undefined,
+        timestamp: update.timestamp || streamingMessage.timestamp,
+      }))
+      .sort((a, b) => {
+        const aTime = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const bTime = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return aTime - bTime;
+      });
+  }, [baseMessages]);
+
+  const latestProgressUpdate = useMemo(() => {
+    if (streamingProgressUpdates.length === 0) {
+      return null;
+    }
+    return streamingProgressUpdates[streamingProgressUpdates.length - 1];
+  }, [streamingProgressUpdates]);
+
+  const progressPercent = useMemo(() => {
+    for (let i = streamingProgressUpdates.length - 1; i >= 0; i -= 1) {
+      const update = streamingProgressUpdates[i];
+      if (typeof update.percent === 'number') {
+        return update.percent;
+      }
+    }
+    return undefined;
+  }, [streamingProgressUpdates]);
+
+  const progressTimeline = useMemo(() => {
+    if (streamingProgressUpdates.length === 0) {
+      return [];
+    }
+    const limit = 6;
+    return streamingProgressUpdates.slice(-limit);
+  }, [streamingProgressUpdates]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const user = useAuthStore((state) => state.user);
@@ -629,11 +693,39 @@ const ConversationalTradingInterface: React.FC<ConversationalTradingInterfacePro
                       <div className="w-2 h-2 bg-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
                     </div>
                     <span className="text-sm text-muted-foreground">
-                      {currentPhase !== ExecutionPhase.IDLE 
-                        ? `Processing ${phaseConfig[currentPhase].title}...`
-                        : 'AI is thinking...'}
+                      {latestProgressUpdate?.message
+                        || (currentPhase !== ExecutionPhase.IDLE
+                          ? `Processing ${phaseConfig[currentPhase].title}...`
+                          : 'AI is thinking...')}
                     </span>
                   </div>
+                  {progressTimeline.length > 0 && (
+                    <div className="mt-2 space-y-2">
+                      {typeof progressPercent === 'number' && (
+                        <div className="h-1.5 bg-primary/20 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all duration-300"
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
+                      )}
+                      <ul className="space-y-1 text-[0.7rem] text-muted-foreground">
+                        {progressTimeline.map((update, index) => (
+                          <li
+                            key={`${index}-${update.stage || 'stage'}-${update.timestamp ?? 'progress'}`}
+                            className="flex items-center justify-between gap-2"
+                          >
+                            <span className="truncate" title={update.message}>
+                              {update.message}
+                            </span>
+                            {typeof update.percent === 'number' && (
+                              <span className="text-foreground font-medium">{update.percent}%</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
