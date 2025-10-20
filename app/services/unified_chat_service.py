@@ -1473,12 +1473,23 @@ class UnifiedChatService(LoggerMixin):
         if not self._is_placeholder_opportunity(initial_payload):
             return initial_payload
 
-        deadline = time.monotonic() + max(5.0, self._opportunity_refresh_max_wait)
+        # Enforce minimum 5-second wait even if max_wait is configured shorter
+        effective_wait = max(5.0, self._opportunity_refresh_max_wait)
+        deadline = time.monotonic() + effective_wait
         latest_payload = initial_payload
 
         while time.monotonic() < deadline:
             await asyncio.sleep(self._opportunity_refresh_poll_interval)
-            candidate = await self._get_cached_opportunities(user_id)
+            try:
+                candidate = await self._get_cached_opportunities(user_id)
+            except Exception as exc:
+                self.logger.debug(
+                    "Cache fetch failed during opportunity wait",
+                    error=str(exc),
+                    user_id=user_id,
+                    exception=exc,
+                )
+                continue
             if candidate is None:
                 continue
 
@@ -2995,20 +3006,68 @@ User's current context:
 Respond naturally to their {intent.value} request using the provided real data.
 IMPORTANT: Use only the real data provided. Never make up numbers or placeholder data."""
 
-        # Build the prompt with real data
-        prompt = self._build_response_prompt(message, intent, context_data)
-        
-        # Generate response using ChatAI
         if (
             intent == ChatIntent.OPPORTUNITY_DISCOVERY
             and session.user_id
             and isinstance(context_data.get("opportunities"), dict)
         ):
-            context_data["opportunities"] = await self._wait_for_opportunity_completion(
+            fresh_payload = await self._wait_for_opportunity_completion(
                 session.user_id,
                 context_data["opportunities"],
             )
+            context_data["opportunities"] = fresh_payload
 
+            metadata = fresh_payload.get("metadata") or {}
+            scan_state = metadata.get("scan_state") or fresh_payload.get("scan_state")
+
+            if scan_state == "failed":
+                self.logger.error(
+                    "Opportunity discovery scan failed",
+                    user_id=session.user_id,
+                    message=metadata.get("message") or fresh_payload.get("message"),
+                )
+
+                try:
+                    fallback_payload = await self._get_cached_opportunities(session.user_id)
+                except Exception as exc:
+                    self.logger.error(
+                        "Failed to load fallback opportunities after scan failure",
+                        user_id=session.user_id,
+                        error=str(exc),
+                        exception=exc,
+                    )
+                    fallback_payload = None
+                if (
+                    fallback_payload
+                    and fallback_payload is not fresh_payload
+                    and not self._is_placeholder_opportunity(fallback_payload)
+                ):
+                    fallback_metadata = fallback_payload.get("metadata") or {}
+                    fallback_state = fallback_metadata.get("scan_state") or fallback_payload.get("scan_state")
+                    if fallback_state != "failed":
+                        context_data["opportunities"] = fallback_payload
+                    else:
+                        fallback_payload = None
+                else:
+                    fallback_payload = None
+
+                if fallback_payload is None:
+                    failure_message = metadata.get("message") or fresh_payload.get("message")
+                    error_message = (
+                        failure_message
+                        or "Opportunity scan failed to complete. Please try again in a moment."
+                    )
+                    return {
+                        "success": False,
+                        "error": error_message,
+                        "session_id": session.session_id,
+                        "timestamp": datetime.now(timezone.utc),
+                    }
+
+        # Build the prompt with real data
+        prompt = self._build_response_prompt(message, intent, context_data)
+
+        # Generate response using ChatAI
         response = await self.chat_ai.generate_response(
             prompt=prompt,
             system_message=system_message,
@@ -3229,17 +3288,35 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
 
                     while time.monotonic() < deadline:
                         await asyncio.sleep(self._opportunity_refresh_poll_interval)
-                        candidate = await self._get_cached_opportunities(user_id)
+                        try:
+                            candidate = await self._get_cached_opportunities(user_id)
+                        except Exception as exc:
+                            self.logger.debug(
+                                "Failed to fetch cached opportunities during streaming poll",
+                                error=str(exc),
+                                user_id=user_id,
+                                exception=exc,
+                            )
+                            continue
                         if candidate is None:
                             continue
 
                         latest_payload = candidate
 
-                        progress_update = self._build_opportunity_progress_event(
-                            user_id,
-                            candidate,
-                            last_signature,
-                        )
+                        try:
+                            progress_update = self._build_opportunity_progress_event(
+                                user_id,
+                                candidate,
+                                last_signature,
+                            )
+                        except Exception as exc:
+                            self.logger.debug(
+                                "Failed to build progress event",
+                                error=str(exc),
+                                user_id=user_id,
+                                exception=exc,
+                            )
+                            progress_update = None
 
                         if progress_update:
                             event, last_signature = progress_update
