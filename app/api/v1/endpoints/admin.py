@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_database
+from app.core.logging import get_recent_logs
 from app.api.v1.endpoints.auth import get_current_user, require_role
 from app.models.user import User, UserRole, UserStatus, UserProfile
 from app.models.tenant import Tenant
@@ -3102,13 +3103,22 @@ async def get_system_logs(
                     if len(logs) >= lines:
                         break
         else:
-            # No log file found - return in-memory logs from structlog if available
-            logs.append({
-                "timestamp": datetime.utcnow().isoformat(),
-                "level": "WARNING",
-                "event": "No log file found. Check RENDER_LOG_PATH environment variable.",
-                "log_paths_checked": log_file_paths
-            })
+            # No log file found - return in-memory logs captured from stdout
+            in_memory_logs = get_recent_logs(lines * 2)
+            for log_entry in in_memory_logs:
+                if service and service.lower() not in str(log_entry.get('event', '')).lower():
+                    continue
+                if level and log_entry.get('level', '').upper() != level.upper():
+                    continue
+                logs.append(log_entry)
+
+            if not logs:
+                logs.append({
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "level": "WARNING",
+                    "event": "No log file found. Streaming recent in-memory logs returned zero entries.",
+                    "log_paths_checked": log_file_paths
+                })
 
         return {
             "success": True,

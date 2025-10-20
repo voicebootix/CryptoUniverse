@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     BASE_URL: str = Field(default="https://cryptouniverse.onrender.com", description="Base URL for the application")
     FRONTEND_URL: str = Field(default="https://cryptouniverse-frontend.onrender.com", description="Frontend URL for redirects")
     ALLOWED_HOSTS: str = Field(default="localhost,127.0.0.1", env="ALLOWED_HOSTS", description="Allowed hosts for the application (comma-separated or JSON list)")
+    ADMIN_LOG_BUFFER_SIZE: int = Field(default=500, env="ADMIN_LOG_BUFFER_SIZE", description="Number of log entries to retain in memory for diagnostics")
     
     # Security settings
     SECRET_KEY: str = Field(..., env="SECRET_KEY", description="Secret key for JWT")

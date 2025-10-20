@@ -15,7 +15,7 @@ from app.api.v1.endpoints import (
     auth, trading, admin, exchanges, strategies, credits,
     telegram, paper_trading, unified_chat, market_analysis, api_keys, ai_consensus,
     password_reset, health, opportunity_discovery, admin_testing, ab_testing, admin_strategy_access,
-    signals, unified_strategies, risk
+    signals, unified_strategies, risk, diagnostics
 )
 
 logger = structlog.get_logger(__name__)
@@ -38,6 +38,7 @@ api_router.include_router(market_analysis.router, prefix="/market", tags=["Marke
 api_router.include_router(signals.router, tags=["Signal Intelligence"])
 api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
 api_router.include_router(admin_testing.router, tags=["Admin Testing"])  # Admin testing endpoints
+api_router.include_router(diagnostics.router, prefix="/diagnostics", tags=["Diagnostics"])
 # Unified chat - single source of truth
 api_router.include_router(unified_chat.router, prefix="/chat", tags=["Unified Chat"])
 api_router.include_router(risk.router, prefix="/risk", tags=["Risk Management"])
