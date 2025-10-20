@@ -57,7 +57,7 @@ from app.services.user_onboarding_service import user_onboarding_service
 from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
 
 # Models
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.models.trading import TradingStrategy, Trade, Position
 from app.models.credit import CreditAccount, CreditTransactionType
 from app.models.analytics import PerformanceMetric, MetricType
@@ -206,6 +206,7 @@ class UnifiedChatService(LoggerMixin):
         self._opportunity_background_lock = asyncio.Lock()
         self._opportunity_refresh_poll_interval = 2.0
         self._opportunity_refresh_max_wait = 90.0
+        self._admin_role_cache: Dict[str, Tuple[float, bool]] = {}
 
         # Personality system from conversational AI
         self.personalities = self._initialize_personalities()
@@ -1436,6 +1437,182 @@ class UnifiedChatService(LoggerMixin):
             "background_scan": True,
         }
         return placeholder
+
+    @staticmethod
+    def _is_placeholder_opportunity(payload: Optional[Dict[str, Any]]) -> bool:
+        if not payload:
+            return True
+
+        opportunities = payload.get("opportunities") or []
+        metadata = payload.get("metadata") or {}
+        scan_state = metadata.get("scan_state") or payload.get("scan_state") or "pending"
+
+        if scan_state in {"complete", "cached", "finished", "failed"}:
+            return False
+
+        if opportunities:
+            return False
+
+        background_scan = payload.get("background_scan", False)
+        message = (metadata.get("message") or payload.get("message") or "").strip()
+        default_message = "Scanning your active strategies for new opportunities"
+
+        return background_scan or message.lower().startswith(default_message.lower())
+
+    async def _wait_for_opportunity_completion(
+        self,
+        user_id: str,
+        initial_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Wait for the background discovery to finish and return the freshest payload."""
+
+        if not user_id:
+            return initial_payload
+
+        if not self._is_placeholder_opportunity(initial_payload):
+            return initial_payload
+
+        deadline = time.monotonic() + max(5.0, self._opportunity_refresh_max_wait)
+        latest_payload = initial_payload
+
+        while time.monotonic() < deadline:
+            await asyncio.sleep(self._opportunity_refresh_poll_interval)
+            candidate = await self._get_cached_opportunities(user_id)
+            if candidate is None:
+                continue
+
+            latest_payload = candidate
+
+            if not self._is_placeholder_opportunity(candidate):
+                break
+
+        if self._is_placeholder_opportunity(latest_payload):
+            # Mark payload as timeout so downstream code can surface a helpful message
+            latest_payload = copy.deepcopy(latest_payload)
+            metadata = latest_payload.setdefault("metadata", {})
+            metadata["scan_state"] = metadata.get("scan_state") or "timeout"
+            metadata["message"] = metadata.get("message") or (
+                "Opportunity scan is still running in the background. Please try again in a moment."
+            )
+            latest_payload["scan_state"] = latest_payload.get("scan_state") or "timeout"
+
+        return latest_payload
+
+    def _summarize_opportunity_entry(self, opportunity: Dict[str, Any]) -> Dict[str, Any]:
+        metadata = opportunity.get("metadata") or {}
+
+        def _coerce_str_list(value: Any) -> List[str]:
+            if not value:
+                return []
+            if isinstance(value, list):
+                return [str(item) for item in value if str(item).strip()]
+            if isinstance(value, str):
+                return [value]
+            if isinstance(value, dict):
+                return [str(v) for v in value.values() if str(v).strip()]
+            return []
+
+        entry_price = opportunity.get("entry_price")
+        exit_price = opportunity.get("exit_price")
+        entry_range = metadata.get("entry_price_range")
+        target_range = metadata.get("target_price_range") or metadata.get("target_range")
+        stop_range = metadata.get("stop_loss_range") or metadata.get("stop_range")
+
+        return {
+            "title": metadata.get("headline")
+            or metadata.get("title")
+            or f"{opportunity.get('symbol', '')} • {opportunity.get('opportunity_type', 'Opportunity').replace('_', ' ').title()}",
+            "symbol": opportunity.get("symbol"),
+            "risk_level": opportunity.get("risk_level"),
+            "timeframe": opportunity.get("estimated_timeframe"),
+            "confidence": (
+                round(float(opportunity.get("confidence_score")) * 100, 1)
+                if isinstance(opportunity.get("confidence_score"), (int, float, Decimal))
+                else None
+            ),
+            "profit_potential": self._safe_float(opportunity.get("profit_potential_usd"), None),
+            "required_capital": self._safe_float(opportunity.get("required_capital_usd"), None),
+            "entry_price": self._safe_float(entry_price, None),
+            "exit_price": self._safe_float(exit_price, None),
+            "entry_range": entry_range,
+            "target_range": target_range,
+            "stop_range": stop_range,
+            "action_items": _coerce_str_list(
+                metadata.get("action_plan")
+                or metadata.get("recommended_actions")
+                or metadata.get("next_steps")
+            ),
+            "notes": _coerce_str_list(metadata.get("insights") or metadata.get("notes")),
+            "discovered_at": opportunity.get("discovered_at"),
+        }
+
+    def _prepare_opportunity_summary(self, payload: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not isinstance(payload, dict):
+            return None
+
+        opportunities = payload.get("opportunities") or []
+        metadata = payload.get("metadata") or {}
+
+        grouped: Dict[str, Dict[str, Any]] = {}
+        for opportunity in opportunities:
+            strategy_name = (
+                opportunity.get("strategy_name")
+                or opportunity.get("strategy_id")
+                or "Strategy"
+            )
+            normalized = strategy_name.replace("_", " ").title()
+            grouped.setdefault(
+                normalized,
+                {
+                    "name": normalized,
+                    "opportunity_count": 0,
+                    "opportunities": [],
+                },
+            )
+            grouped[normalized]["opportunity_count"] += 1
+            grouped[normalized]["opportunities"].append(
+                self._summarize_opportunity_entry(opportunity)
+            )
+
+        summary = {
+            "scan_state": metadata.get("scan_state") or payload.get("scan_state"),
+            "message": metadata.get("message") or payload.get("message"),
+            "total_opportunities": len(opportunities),
+            "strategies": list(grouped.values()),
+            "generated_at": metadata.get("generated_at"),
+        }
+
+        filtered_out = payload.get("filtered_out")
+        if isinstance(filtered_out, int):
+            summary["filtered_out"] = filtered_out
+
+        return summary
+
+    async def _is_admin_user(self, user_id: str) -> bool:
+        if not user_id:
+            return False
+
+        cache_entry = self._admin_role_cache.get(user_id)
+        now = time.monotonic()
+        if cache_entry and cache_entry[0] > now:
+            return cache_entry[1]
+
+        try:
+            parsed_id = uuid.UUID(str(user_id))
+        except (ValueError, TypeError):
+            parsed_id = user_id
+
+        try:
+            async with get_database_session() as db:
+                result = await db.execute(select(User.role).where(User.id == parsed_id))
+                role = result.scalar_one_or_none()
+                is_admin = role == UserRole.ADMIN
+        except Exception as exc:  # pragma: no cover - defensive guard
+            self.logger.debug("Admin role lookup failed", error=str(exc), user_id=user_id)
+            is_admin = False
+
+        self._admin_role_cache[user_id] = (now + 300.0, is_admin)
+        return is_admin
 
     def _schedule_portfolio_optimization_refresh(
         self,
@@ -2801,6 +2978,16 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
         prompt = self._build_response_prompt(message, intent, context_data)
         
         # Generate response using ChatAI
+        if (
+            intent == ChatIntent.OPPORTUNITY_DISCOVERY
+            and session.user_id
+            and isinstance(context_data.get("opportunities"), dict)
+        ):
+            context_data["opportunities"] = await self._wait_for_opportunity_completion(
+                session.user_id,
+                context_data["opportunities"],
+            )
+
         response = await self.chat_ai.generate_response(
             prompt=prompt,
             system_message=system_message,
@@ -3012,6 +3199,38 @@ IMPORTANT: Use only the real data provided. Never make up numbers or placeholder
                 },
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
+
+            if user_id:
+                last_signature: Optional[Tuple[Any, ...]] = None
+                if self._is_placeholder_opportunity(opportunities):
+                    deadline = time.monotonic() + max(5.0, self._opportunity_refresh_max_wait)
+                    latest_payload = opportunities
+
+                    while time.monotonic() < deadline:
+                        await asyncio.sleep(self._opportunity_refresh_poll_interval)
+                        candidate = await self._get_cached_opportunities(user_id)
+                        if candidate is None:
+                            continue
+
+                        latest_payload = candidate
+
+                        progress_update = self._build_opportunity_progress_event(
+                            user_id,
+                            candidate,
+                            last_signature,
+                        )
+
+                        if progress_update:
+                            event, last_signature = progress_update
+                            yield event
+
+                        if not self._is_placeholder_opportunity(candidate):
+                            break
+
+                    context_data["opportunities"] = latest_payload
+                    opportunities = latest_payload
+                else:
+                    context_data["opportunities"] = opportunities
         
         personality = self.personalities[session.trading_mode]
 
@@ -3116,7 +3335,32 @@ Respond naturally using ONLY the real data provided."""
 
         yield {
             "type": "complete",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "intent": intent.value if hasattr(intent, "value") else str(intent),
+            "context": {
+                key: context_data.get(key)
+                for key in [
+                    "opportunities",
+                    "portfolio_optimization",
+                    "user_config",
+                    "market_risk",
+                ]
+                if key in context_data
+            },
+            "metadata": {
+                "personality": personality["name"],
+                "progress_snapshot": self._opportunity_progress.get(session.user_id),
+                "opportunity_summary": self._prepare_opportunity_summary(
+                    context_data.get("opportunities")
+                )
+                if intent == ChatIntent.OPPORTUNITY_DISCOVERY
+                else None,
+                "admin_access": (
+                    await self._is_admin_user(session.user_id)
+                    if intent == ChatIntent.OPPORTUNITY_DISCOVERY
+                    else False
+                ),
+            },
         }
     
     def _build_response_prompt(

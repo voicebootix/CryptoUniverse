@@ -140,6 +140,22 @@ export const useChatStore = create<ChatState>()(
         }));
 
         try {
+          const mergeProgressUpdates = (existing: any[] | undefined, update: any) => {
+            const safeExisting = Array.isArray(existing) ? existing : [];
+            if (!update) {
+              return safeExisting;
+            }
+
+            const index = safeExisting.findIndex((item) => item.stage === update.stage);
+            if (index >= 0) {
+              const next = [...safeExisting];
+              next[index] = { ...next[index], ...update };
+              return next;
+            }
+
+            return [...safeExisting, update];
+          };
+
           // Import API client dynamically to avoid circular dependencies
           const { apiClient } = await import('@/lib/api/client');
 
@@ -250,8 +266,39 @@ export const useChatStore = create<ChatState>()(
                 switch (data.type) {
                   case 'processing':
                   case 'progress': {
-                    // Optional: Update UI with progress message
-                    console.log('[SSE] Progress:', data.content || data.progress?.message);
+                    const progressPayload = data.progress;
+                    const progressMessage = data.content || progressPayload?.message || 'Processing...';
+                    console.log('[SSE] Progress:', progressMessage);
+
+                    if (progressPayload) {
+                      const progressUpdate = {
+                        stage: progressPayload.stage || `stage-${Date.now()}`,
+                        message: progressMessage,
+                        percent: typeof progressPayload.percent === 'number'
+                          ? Math.max(0, Math.min(100, Math.round(progressPayload.percent)))
+                          : undefined,
+                        timestamp: data.timestamp || new Date().toISOString()
+                      };
+
+                      streamMetadata = {
+                        ...streamMetadata,
+                        progress_updates: mergeProgressUpdates(streamMetadata.progress_updates, progressUpdate)
+                      };
+
+                      set((state) => ({
+                        messages: state.messages.map(msg =>
+                          msg.id === streamingMessageId
+                            ? {
+                                ...msg,
+                                metadata: {
+                                  ...(msg.metadata || {}),
+                                  progress_updates: mergeProgressUpdates(msg.metadata?.progress_updates, progressUpdate)
+                                }
+                              }
+                            : msg
+                        )
+                      }));
+                    }
                     break;
                   }
 
@@ -322,11 +369,17 @@ export const useChatStore = create<ChatState>()(
                               confidence: data.confidence || streamMetadata.confidence,
                               metadata: {
                                 ...streamMetadata,
+                                ...(data.metadata || {}),
                                 streaming: false,
                                 intent: data.intent || streamMetadata.intent,
                                 requires_approval: data.requires_approval,
                                 decision_id: data.decision_id,
-                                ai_analysis: data.ai_analysis
+                                ai_analysis: data.ai_analysis,
+                                context: data.context || streamMetadata.context,
+                                progress_updates: mergeProgressUpdates(
+                                  streamMetadata.progress_updates,
+                                  null
+                                )
                               }
                             }
                           : msg

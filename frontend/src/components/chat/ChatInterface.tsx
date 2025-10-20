@@ -31,7 +31,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
-import { formatCurrency, formatPercentage } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 import { apiClient } from '@/lib/api/client';
 import type { AxiosError } from 'axios';
 
@@ -49,6 +49,46 @@ interface ChatInterfaceProps {
   className?: string;
   isExpanded?: boolean;
   onToggleExpand?: () => void;
+}
+
+interface StreamProgressEvent {
+  stage: string;
+  message: string;
+  percent?: number;
+  timestamp?: string;
+}
+
+interface OpportunitySummaryOpportunity {
+  title: string;
+  symbol?: string;
+  risk_level?: string;
+  timeframe?: string;
+  confidence?: number;
+  profit_potential?: number | null;
+  required_capital?: number | null;
+  entry_price?: number | null;
+  exit_price?: number | null;
+  entry_range?: string | null;
+  target_range?: string | null;
+  stop_range?: string | null;
+  action_items?: string[];
+  notes?: string[];
+  discovered_at?: string;
+}
+
+interface OpportunitySummaryStrategy {
+  name: string;
+  opportunity_count: number;
+  opportunities: OpportunitySummaryOpportunity[];
+}
+
+interface OpportunitySummary {
+  scan_state?: string;
+  message?: string;
+  total_opportunities?: number;
+  generated_at?: string;
+  filtered_out?: number;
+  strategies?: OpportunitySummaryStrategy[];
 }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({
@@ -258,8 +298,33 @@ Just chat with me naturally! How can I help you manage your crypto investments t
 
   // State for streaming progress
   const [streamProgress, setStreamProgress] = useState<string | null>(null);
+  const [streamProgressPercent, setStreamProgressPercent] = useState<number>(0);
+  const [progressEvents, setProgressEvents] = useState<StreamProgressEvent[]>([]);
   const [currentStreamingMessageId, setCurrentStreamingMessageId] = useState<string | null>(null);
   const abortStreamRef = useRef<(() => void) | null>(null);
+  const progressEventsRef = useRef<StreamProgressEvent[]>([]);
+
+  const mergeProgressEvents = useCallback(
+    (existing: StreamProgressEvent[] = [], update: StreamProgressEvent): StreamProgressEvent[] => {
+      const list = Array.isArray(existing) ? [...existing] : [];
+      const index = list.findIndex((item) => item.stage === update.stage);
+      if (index >= 0) {
+        list[index] = { ...list[index], ...update };
+        return list;
+      }
+      return [...list, update];
+    },
+    []
+  );
+
+  const pushProgressEvent = useCallback(
+    (update: StreamProgressEvent) => {
+      const merged = mergeProgressEvents(progressEventsRef.current, update);
+      progressEventsRef.current = merged;
+      setProgressEvents(merged);
+    },
+    [mergeProgressEvents]
+  );
 
   const sendMessage = useCallback(async () => {
     const messageToSend = inputValue.trim();
@@ -284,6 +349,9 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     setInputValue('');
     setIsLoading(true);
     setStreamProgress('Connecting...');
+    setStreamProgressPercent(0);
+    progressEventsRef.current = [];
+    setProgressEvents([]);
 
     const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const streamingMessageId = `streaming-${requestId}`;
@@ -333,15 +401,72 @@ Just chat with me naturally! How can I help you manage your crypto investments t
           const data = JSON.parse(event.data);
           
           switch (data.type) {
-            case 'processing':
-              setStreamProgress(data.content || 'Processing...');
+            case 'processing': {
+              const progressMessage = data.content || 'Processing...';
+              setStreamProgress(progressMessage);
+              const processingUpdate: StreamProgressEvent = {
+                stage: 'processing',
+                message: progressMessage,
+                percent: 5,
+                timestamp: data.timestamp || new Date().toISOString(),
+              };
+              pushProgressEvent(processingUpdate);
+              setStreamProgressPercent((current) => (current > 5 ? current : 5));
+              setMessages(prev => prev.map(msg =>
+                msg.id === streamingMessageId
+                  ? {
+                      ...msg,
+                      metadata: {
+                        ...(msg.metadata || {}),
+                        progress_updates: mergeProgressEvents(
+                          (msg.metadata?.progress_updates as StreamProgressEvent[]) || [],
+                          processingUpdate
+                        ),
+                      },
+                    }
+                  : msg
+              ));
               break;
-              
-            case 'progress':
-              if (data.progress) {
-                setStreamProgress(data.progress.message || 'Processing...');
+            }
+
+            case 'progress': {
+              const progressPayload = data.progress;
+              const progressMessage = progressPayload?.message || 'Processing...';
+              setStreamProgress(progressMessage);
+
+              if (progressPayload) {
+                const progressUpdate: StreamProgressEvent = {
+                  stage: progressPayload.stage || `stage-${Date.now()}`,
+                  message: progressMessage,
+                  percent:
+                    typeof progressPayload.percent === 'number'
+                      ? Math.max(0, Math.min(100, Math.round(progressPayload.percent)))
+                      : undefined,
+                  timestamp: data.timestamp || new Date().toISOString(),
+                };
+
+                pushProgressEvent(progressUpdate);
+                if (typeof progressUpdate.percent === 'number') {
+                  setStreamProgressPercent(progressUpdate.percent);
+                }
+
+                setMessages(prev => prev.map(msg =>
+                  msg.id === streamingMessageId
+                    ? {
+                        ...msg,
+                        metadata: {
+                          ...(msg.metadata || {}),
+                          progress_updates: mergeProgressEvents(
+                            (msg.metadata?.progress_updates as StreamProgressEvent[]) || [],
+                            progressUpdate
+                          ),
+                        },
+                      }
+                    : msg
+                ));
               }
               break;
+            }
               
             case 'response':
             case 'chunk':
@@ -358,32 +483,51 @@ Just chat with me naturally! How can I help you manage your crypto investments t
               }
               break;
               
-            case 'complete':
+            case 'complete': {
               streamCompleted = true;
               eventSource.close();
               setIsLoading(false);
               setStreamProgress(null);
+              setStreamProgressPercent(0);
               setCurrentStreamingMessageId(null);
+              const finalProgress = progressEventsRef.current;
+              progressEventsRef.current = [];
+              setProgressEvents([]);
               pendingMessageRef.current = null;
               pendingRequestIdRef.current = null;
-              
-              // Finalize the message
-              setMessages(prev => 
-                prev.map(msg => 
+
+              setMessages(prev =>
+                prev.map(msg =>
                   msg.id === streamingMessageId
-                    ? { ...msg, metadata: { ...msg.metadata, streaming: false } }
+                    ? {
+                        ...msg,
+                        content: fullContent,
+                        intent: data.intent || msg.intent,
+                        confidence: data.confidence ?? msg.confidence,
+                        metadata: {
+                          ...(msg.metadata || {}),
+                          ...(data.metadata || {}),
+                          streaming: false,
+                          context: data.context || msg.metadata?.context,
+                          progress_updates: finalProgress,
+                        },
+                      }
                     : msg
                 )
               );
               break;
+            }
               
             case 'error':
               streamCompleted = true;
               eventSource.close();
               setIsLoading(false);
               setStreamProgress(null);
+              setStreamProgressPercent(0);
               setCurrentStreamingMessageId(null);
-              
+              progressEventsRef.current = [];
+              setProgressEvents([]);
+
               // Remove streaming message and show error
               setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
               
@@ -403,13 +547,16 @@ Just chat with me naturally! How can I help you manage your crypto investments t
       
       eventSource.onerror = (error) => {
         if (streamCompleted) return;
-        
+
         console.error('SSE connection error:', error);
         eventSource.close();
         setIsLoading(false);
         setStreamProgress(null);
+        setStreamProgressPercent(0);
         setCurrentStreamingMessageId(null);
-        
+        progressEventsRef.current = [];
+        setProgressEvents([]);
+
         // Remove streaming message
         setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
         
@@ -456,7 +603,10 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         eventSource.close();
         setIsLoading(false);
         setStreamProgress(null);
+        setStreamProgressPercent(0);
         setCurrentStreamingMessageId(null);
+        progressEventsRef.current = [];
+        setProgressEvents([]);
       };
       
     } catch (error) {
@@ -469,7 +619,10 @@ Just chat with me naturally! How can I help you manage your crypto investments t
       });
       setIsLoading(false);
       setStreamProgress(null);
+      setStreamProgressPercent(0);
       setCurrentStreamingMessageId(null);
+      progressEventsRef.current = [];
+      setProgressEvents([]);
       pendingMessageRef.current = null;
       pendingRequestIdRef.current = null;
     }
@@ -477,6 +630,8 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     buildErrorMessage,
     inputValue,
     isLoading,
+    mergeProgressEvents,
+    pushProgressEvent,
     pushSystemMessage,
     sessionId,
     toast,
@@ -589,8 +744,145 @@ Just chat with me naturally! How can I help you manage your crypto investments t
       );
     }
 
+    const opportunitySummary = metadata?.opportunity_summary || metadata?.opportunitySummary;
+    if (opportunitySummary) {
+      return (
+        <div className="space-y-4">
+          {content && (
+            <div dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br/>') }} />
+          )}
+          {renderOpportunitySummary(opportunitySummary as OpportunitySummary)}
+        </div>
+      );
+    }
+
     // Default formatting with line breaks
     return <div dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br/>') }} />;
+  };
+
+  const renderOpportunitySummary = (summary: OpportunitySummary) => {
+    if (!summary) return null;
+    const strategies = summary.strategies || [];
+
+    return (
+      <div className="space-y-4 border border-primary/20 bg-primary/5 rounded-lg p-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-primary" />
+            <span className="font-semibold text-sm">Opportunity scan</span>
+          </div>
+          <Badge variant="outline" className="text-xs capitalize">
+            {summary.scan_state ? summary.scan_state.replace(/_/g, ' ') : 'in progress'}
+          </Badge>
+        </div>
+        {summary.message && (
+          <p className="text-xs text-muted-foreground">{summary.message}</p>
+        )}
+        {typeof summary.filtered_out === 'number' && summary.filtered_out > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Filtered out {summary.filtered_out} ideas that did not match your profile.
+          </p>
+        )}
+
+        {strategies.length === 0 ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <AlertTriangle className="h-4 w-4 text-amber-500" />
+            No actionable opportunities were returned from this scan.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {strategies.map((strategy) => {
+              const strategyOpportunities = strategy.opportunities || [];
+              return (
+                <div
+                  key={strategy.name}
+                  className="rounded-lg border border-primary/15 bg-background p-3 space-y-3"
+                >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2">
+                    <Target className="h-4 w-4 text-primary" />
+                    <span className="font-semibold text-sm">{strategy.name}</span>
+                  </div>
+                  <Badge variant="secondary" className="text-xs">
+                    {strategy.opportunity_count ?? strategy.opportunities.length} opportunities
+                  </Badge>
+                </div>
+
+                <div className="space-y-3">
+                  {strategyOpportunities.map((opportunity, index) => (
+                    <div
+                      key={`${strategy.name}-${index}`}
+                      className="rounded-md border border-primary/10 bg-primary/5 p-3 space-y-2"
+                    >
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">{opportunity.title}</p>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            {opportunity.symbol && (
+                              <span className="font-semibold text-foreground">{opportunity.symbol}</span>
+                            )}
+                            {opportunity.risk_level && (
+                              <span>• {opportunity.risk_level.toUpperCase()}</span>
+                            )}
+                            {opportunity.timeframe && <span>• {opportunity.timeframe}</span>}
+                          </div>
+                        </div>
+                        {typeof opportunity.confidence === 'number' && (
+                          <Badge className={opportunity.confidence >= 75 ? 'bg-green-600' : 'bg-amber-500'}>
+                            {opportunity.confidence.toFixed(0)}% confidence
+                          </Badge>
+                        )}
+                      </div>
+
+                      <div className="grid gap-2 sm:grid-cols-2 text-xs text-muted-foreground">
+                        {typeof opportunity.profit_potential === 'number' && (
+                          <div className="flex items-center gap-1 text-green-600">
+                            <DollarSign className="h-3 w-3" />
+                            <span>Potential {formatCurrency(opportunity.profit_potential)}</span>
+                          </div>
+                        )}
+                        {typeof opportunity.required_capital === 'number' && (
+                          <div>Capital {formatCurrency(opportunity.required_capital)}</div>
+                        )}
+                        {opportunity.entry_range && <div>Entry range: {opportunity.entry_range}</div>}
+                        {typeof opportunity.entry_price === 'number' && !opportunity.entry_range && (
+                          <div>Entry price: {formatCurrency(opportunity.entry_price)}</div>
+                        )}
+                        {opportunity.target_range && <div>Targets: {opportunity.target_range}</div>}
+                        {typeof opportunity.exit_price === 'number' && !opportunity.target_range && (
+                          <div>Target price: {formatCurrency(opportunity.exit_price)}</div>
+                        )}
+                        {opportunity.stop_range && <div>Stops: {opportunity.stop_range}</div>}
+                      </div>
+
+                      {opportunity.action_items && opportunity.action_items.length > 0 && (
+                        <div className="space-y-1 text-sm text-foreground">
+                          {opportunity.action_items.map((item, actionIndex) => (
+                            <div key={actionIndex} className="flex items-start gap-2">
+                              <CheckCircle className="h-3 w-3 text-primary mt-0.5" />
+                              <span>{item}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {opportunity.notes && opportunity.notes.length > 0 && (
+                        <div className="text-xs text-muted-foreground space-y-1">
+                          {opportunity.notes.map((note, noteIndex) => (
+                            <p key={noteIndex}>• {note}</p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -657,10 +949,15 @@ Just chat with me naturally! How can I help you manage your crypto investments t
                           : 'bg-muted'
                       }`}
                     >
-                      <div className="text-sm">
+                      <div className="text-sm space-y-3">
+                        {message.metadata?.admin_access && (
+                          <Badge variant="secondary" className="text-[0.6rem] uppercase tracking-wide">
+                            Admin strategy access
+                          </Badge>
+                        )}
                         {formatMessageContent(message.content, message.metadata)}
                       </div>
-                      
+
                       <div className="flex items-center justify-between mt-2 gap-2">
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">
@@ -722,7 +1019,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
                   <Loader className="h-4 w-4 animate-spin text-primary" />
                 </div>
-                <div className="bg-muted rounded-lg px-4 py-3 min-w-[200px]">
+                <div className="bg-muted rounded-lg px-4 py-3 min-w-[220px] space-y-2">
                   <div className="flex items-center gap-2">
                     <div className="flex space-x-1">
                       <div className="w-2 h-2 bg-primary/60 rounded-full animate-bounce"></div>
@@ -733,6 +1030,28 @@ Just chat with me naturally! How can I help you manage your crypto investments t
                       {streamProgress || 'AI is thinking...'}
                     </span>
                   </div>
+                  {(progressEvents.length > 0 || streamProgressPercent > 0) && (
+                    <div className="space-y-2">
+                      <div className="h-1.5 bg-primary/20 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-all duration-300"
+                          style={{ width: `${Math.max(0, Math.min(streamProgressPercent ?? 0, 100))}%` }}
+                        />
+                      </div>
+                      <ul className="space-y-1 text-[0.7rem] text-muted-foreground">
+                        {progressEvents.map((event) => (
+                          <li key={event.stage} className="flex items-center justify-between gap-2">
+                            <span className="truncate" title={event.message}>
+                              {event.message}
+                            </span>
+                            {typeof event.percent === 'number' && (
+                              <span className="text-foreground font-medium">{event.percent}%</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
