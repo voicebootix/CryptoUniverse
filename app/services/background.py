@@ -768,7 +768,7 @@ class BackgroundServiceManager(LoggerMixin):
                 try:
                     # Use SCAN to avoid blocking Redis with KEYS command
                     has_active_users = False
-                    async for key in self.redis.scan_iter(match="autonomous_active:*", count=10):
+                    async for _ in self.redis.scan_iter(match="autonomous_active:*", count=10):
                         has_active_users = True
                         active_users_count += 1
 
