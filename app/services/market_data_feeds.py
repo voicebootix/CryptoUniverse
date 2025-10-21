@@ -29,6 +29,26 @@ settings = get_settings()
 logger = structlog.get_logger(__name__)
 
 
+# Custom exceptions for market data operations
+class MarketDataError(Exception):
+    """Base exception for market data operations."""
+    pass
+
+
+class MarketDataRateLimitError(MarketDataError):
+    """Raised when API rate limit is exceeded."""
+    def __init__(self, message: str = "Rate limit exceeded", retry_after: Optional[int] = None):
+        self.retry_after = retry_after
+        super().__init__(message)
+
+
+class MarketDataBatchFetchError(MarketDataError):
+    """Raised when batch price fetching fails after all retries."""
+    def __init__(self, message: str, attempts: int = 0):
+        self.attempts = attempts
+        super().__init__(message)
+
+
 class MarketDataFeeds:
     """Real market data feeds using free APIs."""
     
@@ -1221,30 +1241,36 @@ class MarketDataFeeds:
                     error = result.get("error", "Unknown error")
                     if "429" in str(error) or "Rate limit" in str(error):
                         # Rate limit hit - raise to trigger backoff
-                        raise Exception(f"429: {error}")
+                        raise MarketDataRateLimitError(f"Rate limit exceeded: {error}")
 
-                    # Other error - retry with exponential backoff
-                    if attempt < max_retries - 1:
-                        delay = 2 ** attempt
-                        await asyncio.sleep(delay)
-                        continue
-                    else:
-                        # Final attempt failed
-                        raise Exception(f"Batch fetch failed after {max_retries} attempts: {error}")
+                # Other error - retry with exponential backoff
+                if attempt < max_retries - 1:
+                    delay = 2 ** attempt
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    # Final attempt failed
+                    raise MarketDataBatchFetchError(
+                        f"Batch fetch failed after {max_retries} attempts: {error}",
+                        attempts=max_retries
+                    )
+            except MarketDataRateLimitError:
+                # Re-raise rate limit errors immediately without retry
+                raise
+            except MarketDataBatchFetchError:
+                # Re-raise batch fetch errors immediately
+                raise
             except Exception as e:
-                if "429" in str(e):
-                    # Re-raise rate limit errors immediately
-                    raise
-
                 if attempt < max_retries - 1:
                     delay = 2 ** attempt
                     logger.warning(f"Batch fetch attempt {attempt + 1} failed, retrying in {delay}s", error=str(e))
                     await asyncio.sleep(delay)
                 else:
-                    # Final attempt - raise error
-                    raise
-
-        return {}
+                    # Final attempt - raise as batch fetch error
+                    raise MarketDataBatchFetchError(
+                        f"Batch fetch failed after {max_retries} attempts: {str(e)}",
+                        attempts=max_retries
+                    )
 
     async def _get_stale_price(self, symbol: str) -> Optional[float]:
         """Get cached/stale price from Redis as fallback."""

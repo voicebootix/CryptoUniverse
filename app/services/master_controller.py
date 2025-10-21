@@ -2105,6 +2105,11 @@ class MasterSystemController(LoggerMixin):
     
     async def run_global_autonomous_cycle(self):
         """Run autonomous trading cycle for all active users."""
+        # Initialize metrics for diagnostic logging
+        total_opportunities_discovered = 0
+        users_processed = 0
+        cycle_start_time = datetime.utcnow()
+
         try:
             # ENTERPRISE REDIS RESILIENCE
             redis_client = await self._ensure_redis()
@@ -2122,7 +2127,7 @@ class MasterSystemController(LoggerMixin):
 
             if global_stop:
                 self.logger.warning("Global emergency stop active - skipping autonomous cycle")
-                return
+                return {"opportunities_discovered": 0, "users_processed": 0, "status": "stopped"}
 
             user_ids: List[str] = []
             if redis_client:
@@ -2143,7 +2148,7 @@ class MasterSystemController(LoggerMixin):
 
             if len(user_ids) == 0:
                 self.logger.debug("No active autonomous users - skipping cycle")
-                return
+                return {"opportunities_discovered": 0, "users_processed": 0, "status": "idle"}
 
             for user_id in user_ids:
 
@@ -2228,10 +2233,38 @@ class MasterSystemController(LoggerMixin):
                     continue
                 
                 # Run enhanced trading cycle for this user
-                await self._run_user_autonomous_cycle(user_id, config)
-                
+                user_result = await self._run_user_autonomous_cycle(user_id, config)
+                users_processed += 1
+
+                # Extract opportunity metrics from Phase 1 results
+                if isinstance(user_result, dict) and user_result.get("success"):
+                    phase_1 = user_result.get("phases", {}).get("phase_1", {})
+                    opportunities = phase_1.get("opportunities_found", 0)
+                    total_opportunities_discovered += opportunities
+
         except Exception as e:
             self.logger.error("Global autonomous cycle failed", error=str(e))
+
+        # Calculate cycle metrics
+        cycle_duration_ms = (datetime.utcnow() - cycle_start_time).total_seconds() * 1000
+
+        # Log comprehensive autonomous operation metrics
+        self.logger.info(
+            "🔍 Autonomous Operation Metrics",
+            users_processed=users_processed,
+            opportunities_discovered=total_opportunities_discovered,
+            cycle_duration_ms=cycle_duration_ms,
+            avg_opportunities_per_user=total_opportunities_discovered / max(users_processed, 1),
+            timestamp=datetime.utcnow().isoformat()
+        )
+
+        # Return metrics for diagnostic logging
+        return {
+            "opportunities_discovered": total_opportunities_discovered,
+            "users_processed": users_processed,
+            "cycle_duration_ms": cycle_duration_ms,
+            "status": "completed"
+        }
     
     async def _run_user_autonomous_cycle(self, user_id: str, config: Dict):
         """
@@ -3245,20 +3278,31 @@ class MasterSystemController(LoggerMixin):
                     depth="comprehensive",
                     user_id=user_id
                 )
-                
+
                 phase_1_time = (time.time() - phase_1_start) * 1000
+                opportunities_found = len(market_data.get("assessment", {}).get("arbitrage_opportunities", []))
+                symbols_analyzed = len(market_data.get("assessment", {}).get("technical_analysis", {}))
+
                 pipeline_result["phases"]["phase_1"] = {
                     "status": "completed",
                     "service": "market_analysis",
                     "execution_time_ms": phase_1_time,
-                    "opportunities_found": len(market_data.get("assessment", {}).get("arbitrage_opportunities", [])),
-                    "symbols_analyzed": len(market_data.get("assessment", {}).get("technical_analysis", {}))
+                    "opportunities_found": opportunities_found,
+                    "symbols_analyzed": symbols_analyzed,
+                    "scan_timestamp": datetime.utcnow().isoformat()
                 }
-                
-                self.logger.info("✅ Phase 1 Completed", 
-                               cycle_id=cycle_id, 
-                               execution_time_ms=phase_1_time,
-                               opportunities=pipeline_result["phases"]["phase_1"]["opportunities_found"])
+
+                # Log detailed opportunity scan metrics for diagnostics
+                self.logger.info(
+                    "✅ Phase 1 Completed - Opportunity Scan",
+                    cycle_id=cycle_id,
+                    user_id=user_id,
+                    execution_time_ms=phase_1_time,
+                    opportunities_found=opportunities_found,
+                    symbols_analyzed=symbols_analyzed,
+                    scan_mode="dynamic_discovery" if symbols_str == "SMART_ADAPTIVE" else "targeted",
+                    timestamp=datetime.utcnow().isoformat()
+                )
                 
             except Exception as e:
                 self.logger.exception("❌ Phase 1 Failed", cycle_id=cycle_id)
