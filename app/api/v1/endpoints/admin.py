@@ -34,7 +34,6 @@ from app.models.strategy_submission import StrategySubmission, StrategyStatus
 from app.models.signal import SignalDeliveryLog, SignalEvent, SignalSubscription, SignalChannel
 from app.models.copy_trading import StrategyPublisher
 from app.services.master_controller import MasterSystemController
-from app.services.background import BackgroundServiceManager
 from app.services.rate_limit import rate_limiter
 from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
 from app.services.strategy_submission_service import strategy_submission_service
@@ -46,7 +45,9 @@ router = APIRouter()
 
 # Initialize services
 master_controller = MasterSystemController()
-background_manager = BackgroundServiceManager()
+
+# Import the shared background_manager instance from main.py (started in lifespan)
+from main import background_manager
 
 
 # ---------------------------------------------------------------------------
