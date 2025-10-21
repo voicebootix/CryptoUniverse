@@ -8,8 +8,8 @@ import aiohttp
 import os
 
 async def fix_webhook():
-    bot_token = os.getenv('TELEGRAM_BOT_TOKEN', '8302604205:AAFHfxC-_lmgB_RdupqgCHS-wKmCT4tBpio')
-    webhook_url = "https://cryptouniverse.onrender.com/api/v1/telegram/webhook"
+    bot_token = os.getenv('TELEGRAM_BOT_TOKEN', 'your-telegram-bot-token')
+    webhook_url = "https://your-domain.com/api/v1/telegram/webhook"
     
     print("🔧 Fixing Telegram webhook configuration...")
     

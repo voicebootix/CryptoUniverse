@@ -8,7 +8,7 @@ import aiohttp
 import os
 
 async def clear_updates():
-    bot_token = os.getenv('TELEGRAM_BOT_TOKEN', '8302604205:AAFHfxC-_lmgB_RdupqgCHS-wKmCT4tBpio')
+    bot_token = os.getenv('TELEGRAM_BOT_TOKEN', 'your-telegram-bot-token')
     
     print("🧹 Clearing pending Telegram updates...")
     
