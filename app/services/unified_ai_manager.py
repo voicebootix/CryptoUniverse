@@ -1064,7 +1064,18 @@ class UnifiedAIManager(LoggerMixin):
                 "greeting": "greeting",
             }
             mapped = raw_mapping.get(normalized_raw, normalized_raw)
-            candidates[mapped] = max(candidates.get(mapped, 0.0), 0.7)
+
+            if mapped == "general_query":
+                # Preserve keyword-based intents when the chat engine falls back to
+                # "general_query". This prevents greetings like "hi" from being
+                # misrouted away from the greeting templates simply because the
+                # legacy classifier could not determine a more specific intent.
+                if not candidates:
+                    candidates[mapped] = max(candidates.get(mapped, 0.0), 0.7)
+                else:
+                    candidates[mapped] = max(candidates.get(mapped, 0.0), 0.35)
+            else:
+                candidates[mapped] = max(candidates.get(mapped, 0.0), 0.7)
 
         recent_intents: List[str] = []
         if context:
