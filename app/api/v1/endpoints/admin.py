@@ -3160,6 +3160,7 @@ async def get_background_services_detailed(
     - Last execution times
     - Error counts
     - Configuration intervals
+    - Service effectiveness metrics (e.g., symbols discovered, signals sent, users synced)
     """
     await rate_limiter.check_rate_limit(
         key="admin:background_services",
@@ -3183,10 +3184,15 @@ async def get_background_services_detailed(
         for service_name in background_manager.intervals.keys():
             try:
                 detail = await background_manager.get_service_status(service_name)
+
+                # Get service effectiveness metrics
+                metrics = await background_manager.get_service_metrics(service_name)
+
                 service_details[service_name] = {
                     "status": services_health.get(service_name, "not_started"),
                     "interval_seconds": background_manager.intervals.get(service_name, 0),
-                    "details": detail
+                    "details": detail,
+                    "metrics": metrics  # Include effectiveness metrics
                 }
             except Exception as e:
                 service_details[service_name] = {

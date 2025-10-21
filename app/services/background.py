@@ -404,7 +404,41 @@ class BackgroundServiceManager(LoggerMixin):
             "interval": self.intervals.get(service, 0),
             "last_run": getattr(task, 'last_run', None)
         }
-    
+
+    async def _track_service_metrics(self, service_name: str, metrics: Dict[str, Any]):
+        """Track service effectiveness metrics in Redis for diagnostic visibility."""
+        if not self.redis:
+            return
+
+        try:
+            metrics_data = {
+                **metrics,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            await self.redis.setex(
+                f"service_metrics:{service_name}",
+                600,  # 10 minute TTL
+                json.dumps(metrics_data)
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to track metrics for {service_name}", error=str(e))
+
+    async def get_service_metrics(self, service_name: str) -> Optional[Dict[str, Any]]:
+        """Get service effectiveness metrics from Redis."""
+        if not self.redis:
+            return None
+
+        try:
+            metrics_json = await self.redis.get(f"service_metrics:{service_name}")
+            if metrics_json:
+                if isinstance(metrics_json, bytes):
+                    metrics_json = metrics_json.decode()
+                return json.loads(metrics_json)
+        except Exception as e:
+            self.logger.warning(f"Failed to get metrics for {service_name}", error=str(e))
+
+        return None
+
     # Background Service Implementations
     async def _health_monitor_service(self):
         """Monitor system health and alert on issues."""
@@ -628,6 +662,12 @@ class BackgroundServiceManager(LoggerMixin):
             )
             self.logger.info("Signal dispatch cycle complete", deliveries=total_deliveries)
 
+        # Track service effectiveness metrics
+        await self._track_service_metrics("signal_dispatch", {
+            "signals_sent": total_deliveries,
+            "last_dispatch_time": datetime.utcnow().isoformat()
+        })
+
     async def _is_signal_dispatch_allowed(self) -> bool:
         if not self.redis:
             return True
@@ -814,13 +854,26 @@ class BackgroundServiceManager(LoggerMixin):
                 
                 # Sync market data for discovered symbols using real APIs
                 await market_data_feeds.sync_market_data_batch(symbols_list)
-                
-                self.logger.debug(f"Market data sync completed for {len(symbols_list)} discovered symbols", 
+
+                # Track service effectiveness metrics
+                await self._track_service_metrics("market_data_sync", {
+                    "symbols_discovered": len(symbols_list),
+                    "sample_symbols": symbols_list[:10] if symbols_list else [],
+                    "last_sync_time": datetime.utcnow().isoformat()
+                })
+
+                self.logger.debug(f"Market data sync completed for {len(symbols_list)} discovered symbols",
                                 symbols=symbols_list[:10] if symbols_list else [])
-                
+
             except Exception as e:
                 self.logger.error("Market data sync error", error=str(e))
-            
+                # Track error in metrics
+                await self._track_service_metrics("market_data_sync", {
+                    "symbols_discovered": 0,
+                    "error": str(e),
+                    "last_sync_time": datetime.utcnow().isoformat()
+                })
+
             await asyncio.sleep(self.intervals["market_data_sync"])
     
     async def _discover_active_trading_symbols(self) -> List[str]:
@@ -1216,20 +1269,22 @@ class BackgroundServiceManager(LoggerMixin):
                             ExchangeAccount.trading_enabled == True
                         )
                     )
-                    
+
                     result = await db.execute(stmt)
                     user_ids = [row[0] for row in result.fetchall()]
-                    
+
                     self.logger.debug(f"Syncing balances for {len(user_ids)} users with active exchanges")
-                    
+
                     # Sync balances for each user using your existing system
+                    successful_syncs = 0
                     for user_id in user_ids:
                         try:
                             # Use your existing exchange balance fetching
                             from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
                             portfolio_data = await get_user_portfolio_from_exchanges(str(user_id), db)
-                            
+
                             if portfolio_data.get("success"):
+                                successful_syncs += 1
                                 # Update cached portfolio data in Redis for real-time access
                                 if self.redis:
                                     await self.redis.setex(
@@ -1237,11 +1292,18 @@ class BackgroundServiceManager(LoggerMixin):
                                         300,  # 5 minute cache
                                         json.dumps(portfolio_data, default=str)
                                     )
-                            
+
                         except Exception as e:
                             self.logger.warning(f"Balance sync failed for user {user_id}", error=str(e))
                             continue
-                
+
+                    # Track service effectiveness metrics
+                    await self._track_service_metrics("balance_sync", {
+                        "users_synced": successful_syncs,
+                        "total_users": len(user_ids),
+                        "last_sync_time": datetime.utcnow().isoformat()
+                    })
+
                 self.logger.debug("Balance sync cycle completed")
                 
             except Exception as e:
