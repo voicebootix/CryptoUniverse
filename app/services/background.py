@@ -865,9 +865,8 @@ class BackgroundServiceManager(LoggerMixin):
             
             # Deduplicate and normalize
             all_discovered_symbols = {sym.upper() for sym in all_discovered_symbols}
-            
-            self.logger.info(f"Discovered {len(all_discovered_symbols)} active trading symbols")
-            return all_discovered_symbols
+
+            self.logger.info(f"Discovered {len(all_discovered_symbols)} active trading symbols from market analysis")
         except Exception as e:
             self.logger.exception("Market analysis discovery failed")
         
