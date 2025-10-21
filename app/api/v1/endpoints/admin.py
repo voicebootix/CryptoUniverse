@@ -34,7 +34,6 @@ from app.models.strategy_submission import StrategySubmission, StrategyStatus
 from app.models.signal import SignalDeliveryLog, SignalEvent, SignalSubscription, SignalChannel
 from app.models.copy_trading import StrategyPublisher
 from app.services.master_controller import MasterSystemController
-from app.services.background import BackgroundServiceManager
 from app.services.rate_limit import rate_limiter
 from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
 from app.services.strategy_submission_service import strategy_submission_service
@@ -46,7 +45,9 @@ router = APIRouter()
 
 # Initialize services
 master_controller = MasterSystemController()
-background_manager = BackgroundServiceManager()
+
+# Note: background_manager is imported lazily inside functions to avoid circular import
+# (main.py -> router.py -> admin.py -> main.py)
 
 
 # ---------------------------------------------------------------------------
@@ -1347,6 +1348,9 @@ async def get_system_overview(
     )
     
     try:
+        # Lazy import to avoid circular dependency
+        from main import background_manager
+
         # Get system metrics
         system_status = await master_controller.get_global_system_status()
         background_status = await background_manager.health_check()
@@ -2747,6 +2751,9 @@ async def emergency_stop_all_trading(
 async def restart_background_services():
     """Restart background services after configuration change."""
     try:
+        # Lazy import to avoid circular dependency
+        from main import background_manager
+
         await background_manager.stop_all()
         await asyncio.sleep(2)
         await background_manager.start_all()
@@ -3162,6 +3169,9 @@ async def get_background_services_detailed(
     )
 
     try:
+        # Lazy import to avoid circular dependency
+        from main import background_manager
+
         # Get health check from background manager
         services_health = await background_manager.health_check()
 
