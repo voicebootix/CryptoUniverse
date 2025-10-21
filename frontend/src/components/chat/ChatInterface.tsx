@@ -252,9 +252,36 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     }
   };
 
+  const buildWebSocketUrl = useCallback((activeSessionId: string): string => {
+    if (!activeSessionId) {
+      return '';
+    }
+
+    const path = `/chat/ws/${activeSessionId}`;
+    const baseURL = apiClient.defaults.baseURL;
+
+    if (baseURL) {
+      try {
+        const parsed = new URL(baseURL, window.location.origin);
+        const protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+        const basePath = parsed.pathname.replace(/\/$/, '');
+        return `${protocol}//${parsed.host}${basePath}${path}`;
+      } catch (error) {
+        console.error('Failed to build WebSocket URL from API base', error);
+      }
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/api/v1${path}`;
+  }, []);
+
+  const websocketEndpoint = useMemo(() => (
+    sessionId ? buildWebSocketUrl(sessionId) : ''
+  ), [buildWebSocketUrl, sessionId]);
+
   // Use the shared WebSocket hook with proper authentication and reconnection
   const { lastMessage, connectionStatus, sendMessage: sendWsMessage } = useWebSocket(
-    sessionId ? `/api/v1/chat/ws/${sessionId}` : '',
+    websocketEndpoint,
     {
       onOpen: () => {
         console.log('🔌 WebSocket connected for chat');
@@ -277,7 +304,25 @@ Just chat with me naturally! How can I help you manage your crypto investments t
             metadata: data.metadata
           };
 
-          setMessages(prev => [...prev, newMessage]);
+          setMessages(prev => {
+            const alreadyExists = prev.some(msg => msg.id === newMessage.id);
+            if (alreadyExists) {
+              return prev;
+            }
+            if (currentStreamingMessageId) {
+              return prev.map(msg =>
+                msg.id === currentStreamingMessageId
+                  ? { ...newMessage, id: msg.id }
+                  : msg
+              );
+            }
+            return [...prev, newMessage];
+          });
+          setCurrentStreamingMessageId(null);
+          progressEventsRef.current = [];
+          setProgressEvents([]);
+          setStreamProgress(null);
+          setStreamProgressPercent(0);
           finalizePendingRequest();
         } else if (data.type === 'connection_established') {
           // Chat connection established
@@ -301,40 +346,76 @@ Just chat with me naturally! How can I help you manage your crypto investments t
   const [streamProgressPercent, setStreamProgressPercent] = useState<number>(0);
   const [progressEvents, setProgressEvents] = useState<StreamProgressEvent[]>([]);
   const [currentStreamingMessageId, setCurrentStreamingMessageId] = useState<string | null>(null);
-  const abortStreamRef = useRef<(() => void) | null>(null);
   const progressEventsRef = useRef<StreamProgressEvent[]>([]);
 
-  const mergeProgressEvents = useCallback(
-    (existing: StreamProgressEvent[] = [], update: StreamProgressEvent): StreamProgressEvent[] => {
-      const list = Array.isArray(existing) ? [...existing] : [];
-      const index = list.findIndex((item) => item.stage === update.stage);
-      if (index >= 0) {
-        list[index] = { ...list[index], ...update };
-        return list;
-      }
-      return [...list, update];
-    },
-    []
-  );
+  const sendRestMessage = useCallback(async (
+    messageToSend: string,
+    requestId: string,
+    placeholderId: string
+  ) => {
+    if (!sessionId) {
+      return;
+    }
 
-  const pushProgressEvent = useCallback(
-    (update: StreamProgressEvent) => {
-      const merged = mergeProgressEvents(progressEventsRef.current, update);
-      progressEventsRef.current = merged;
-      setProgressEvents(merged);
-    },
-    [mergeProgressEvents]
-  );
+    try {
+      const response = await apiClient.post('/chat/message', {
+        message: messageToSend,
+        session_id: sessionId,
+        mode: 'trading',
+      });
+
+      if (response.data?.success) {
+        const assistantMessage: ChatMessage = {
+          id: response.data.message_id,
+          content: response.data.content,
+          type: 'assistant',
+          timestamp: response.data.timestamp || new Date().toISOString(),
+          intent: response.data.intent,
+          confidence: response.data.confidence,
+          metadata: response.data.metadata,
+        };
+
+        setMessages(prev => {
+          const hasPlaceholder = prev.some(msg => msg.id === placeholderId);
+          if (hasPlaceholder) {
+            return prev.map(msg =>
+              msg.id === placeholderId ? { ...assistantMessage, id: msg.id } : msg
+            );
+          }
+          return [...prev, assistantMessage];
+        });
+      } else {
+        throw new Error(response.data?.detail || 'Chat service unavailable');
+      }
+    } catch (error) {
+      const friendlyMessage = buildErrorMessage(error);
+      setMessages(prev => prev.filter(msg => msg.id !== placeholderId));
+      pushSystemMessage(friendlyMessage);
+      toast({
+        title: 'Message Failed',
+        description: friendlyMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      finalizePendingRequest();
+      setStreamProgress(null);
+      setStreamProgressPercent(0);
+      setCurrentStreamingMessageId(null);
+      progressEventsRef.current = [];
+      setProgressEvents([]);
+    }
+  }, [
+    buildErrorMessage,
+    finalizePendingRequest,
+    setMessages,
+    pushSystemMessage,
+    sessionId,
+    toast,
+  ]);
 
   const sendMessage = useCallback(async () => {
     const messageToSend = inputValue.trim();
-    console.log('🚀 SEND MESSAGE CALLED!', { messageToSend, isLoading, sessionId });
     if (!messageToSend || isLoading || !sessionId) {
-      console.log('❌ SEND MESSAGE BLOCKED:', {
-        noInput: !messageToSend,
-        isLoading,
-        noSession: !sessionId
-      });
       return;
     }
 
@@ -342,274 +423,56 @@ Just chat with me naturally! How can I help you manage your crypto investments t
       id: Date.now().toString(),
       content: messageToSend,
       type: 'user',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
 
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
-    setStreamProgress('Connecting...');
-    setStreamProgressPercent(0);
+    setStreamProgress('Processing your request...');
+    setStreamProgressPercent(10);
     progressEventsRef.current = [];
     setProgressEvents([]);
 
     const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const streamingMessageId = `streaming-${requestId}`;
-    setCurrentStreamingMessageId(streamingMessageId);
+    const placeholderId = `assistant-${requestId}`;
+    const placeholderMessage: ChatMessage = {
+      id: placeholderId,
+      content: '🤖 The AI assistant is preparing a detailed response...',
+      type: 'assistant',
+      timestamp: new Date().toISOString(),
+      metadata: { streaming: true },
+    };
+
+    setMessages(prev => [...prev, placeholderMessage]);
+    setCurrentStreamingMessageId(placeholderId);
     pendingMessageRef.current = messageToSend;
     pendingRequestIdRef.current = requestId;
 
+    const invokeRest = async () => {
+      await sendRestMessage(messageToSend, requestId, placeholderId);
+    };
+
     try {
-      // Use Server-Sent Events (SSE) for streaming response
-      console.log('📡 Using SSE streaming for real-time response');
-      
-      const token = localStorage.getItem('auth_token');
-      const baseURL = apiClient.defaults.baseURL || '';
-      
-      // Build SSE URL
-      const params = new URLSearchParams({
-        message: messageToSend,
-        session_id: sessionId,
-        conversation_mode: 'live_trading'
-      });
-      
-      // Add token for authentication (EventSource doesn't support custom headers)
-      if (token && token.trim().length > 0) {
-        params.append('token', token);
-      }
-      
-      const url = `${baseURL}/unified-chat/stream?${params.toString()}`;
-      
-      // Create EventSource for SSE
-      const eventSource = new EventSource(url);
-      
-      let fullContent = '';
-      let streamCompleted = false;
-      
-      // Create placeholder message for streaming content
-      const streamingMessage: ChatMessage = {
-        id: streamingMessageId,
-        content: '',
-        type: 'assistant',
-        timestamp: new Date().toISOString(),
-        metadata: { streaming: true }
-      };
-      setMessages(prev => [...prev, streamingMessage]);
-      
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          switch (data.type) {
-            case 'processing': {
-              const progressMessage = data.content || 'Processing...';
-              setStreamProgress(progressMessage);
-              const processingUpdate: StreamProgressEvent = {
-                stage: 'processing',
-                message: progressMessage,
-                percent: 5,
-                timestamp: data.timestamp || new Date().toISOString(),
-              };
-              pushProgressEvent(processingUpdate);
-              setStreamProgressPercent((current) => (current > 5 ? current : 5));
-              setMessages(prev => prev.map(msg =>
-                msg.id === streamingMessageId
-                  ? {
-                      ...msg,
-                      metadata: {
-                        ...(msg.metadata || {}),
-                        progress_updates: mergeProgressEvents(
-                          (msg.metadata?.progress_updates as StreamProgressEvent[]) || [],
-                          processingUpdate
-                        ),
-                      },
-                    }
-                  : msg
-              ));
-              break;
-            }
-
-            case 'progress': {
-              const progressPayload = data.progress;
-              const progressMessage = progressPayload?.message || 'Processing...';
-              setStreamProgress(progressMessage);
-
-              if (progressPayload) {
-                const progressUpdate: StreamProgressEvent = {
-                  stage: progressPayload.stage || `stage-${Date.now()}`,
-                  message: progressMessage,
-                  percent:
-                    typeof progressPayload.percent === 'number'
-                      ? Math.max(0, Math.min(100, Math.round(progressPayload.percent)))
-                      : undefined,
-                  timestamp: data.timestamp || new Date().toISOString(),
-                };
-
-                pushProgressEvent(progressUpdate);
-                if (typeof progressUpdate.percent === 'number') {
-                  setStreamProgressPercent(progressUpdate.percent);
-                }
-
-                setMessages(prev => prev.map(msg =>
-                  msg.id === streamingMessageId
-                    ? {
-                        ...msg,
-                        metadata: {
-                          ...(msg.metadata || {}),
-                          progress_updates: mergeProgressEvents(
-                            (msg.metadata?.progress_updates as StreamProgressEvent[]) || [],
-                            progressUpdate
-                          ),
-                        },
-                      }
-                    : msg
-                ));
-              }
-              break;
-            }
-              
-            case 'response':
-            case 'chunk':
-              if (data.content) {
-                fullContent += data.content;
-                // Update the streaming message with accumulated content
-                setMessages(prev => 
-                  prev.map(msg => 
-                    msg.id === streamingMessageId
-                      ? { ...msg, content: fullContent }
-                      : msg
-                  )
-                );
-              }
-              break;
-              
-            case 'complete': {
-              streamCompleted = true;
-              eventSource.close();
-              setIsLoading(false);
-              setStreamProgress(null);
-              setStreamProgressPercent(0);
-              setCurrentStreamingMessageId(null);
-              const finalProgress = progressEventsRef.current;
-              progressEventsRef.current = [];
-              setProgressEvents([]);
-              pendingMessageRef.current = null;
-              pendingRequestIdRef.current = null;
-
-              setMessages(prev =>
-                prev.map(msg =>
-                  msg.id === streamingMessageId
-                    ? {
-                        ...msg,
-                        content: fullContent,
-                        intent: data.intent || msg.intent,
-                        confidence: data.confidence ?? msg.confidence,
-                        metadata: {
-                          ...(msg.metadata || {}),
-                          ...(data.metadata || {}),
-                          streaming: false,
-                          context: data.context || msg.metadata?.context,
-                          progress_updates: finalProgress,
-                        },
-                      }
-                    : msg
-                )
-              );
-              break;
-            }
-              
-            case 'error':
-              streamCompleted = true;
-              eventSource.close();
-              setIsLoading(false);
-              setStreamProgress(null);
-              setStreamProgressPercent(0);
-              setCurrentStreamingMessageId(null);
-              progressEventsRef.current = [];
-              setProgressEvents([]);
-
-              // Remove streaming message and show error
-              setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
-              
-              const errorMessage = data.error || 'An error occurred while processing your request.';
-              pushSystemMessage(errorMessage);
-              toast({
-                title: 'Error',
-                description: errorMessage,
-                variant: 'destructive',
-              });
-              break;
-          }
-        } catch (error) {
-          console.error('Failed to parse SSE data:', error);
-        }
-      };
-      
-      eventSource.onerror = (error) => {
-        if (streamCompleted) return;
-
-        console.error('SSE connection error:', error);
-        eventSource.close();
-        setIsLoading(false);
-        setStreamProgress(null);
-        setStreamProgressPercent(0);
-        setCurrentStreamingMessageId(null);
-        progressEventsRef.current = [];
-        setProgressEvents([]);
-
-        // Remove streaming message
-        setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
-        
-        // Fallback to regular API
-        console.log('⏰ SSE failed, falling back to regular API');
-        
-        apiClient.post('/unified-chat/message', {
+      if (isConnected) {
+        sendWsMessage({
+          type: 'chat_message',
           message: messageToSend,
           session_id: sessionId,
-          conversation_mode: 'live_trading',
-          stream: false
-        })
-        .then(response => {
-          if (response.data.success) {
-            const assistantMessage: ChatMessage = {
-              id: response.data.message_id,
-              content: response.data.content,
-              type: 'assistant',
-              timestamp: response.data.timestamp,
-              intent: response.data.intent,
-              confidence: response.data.confidence,
-              metadata: response.data.metadata
-            };
-            setMessages(prev => [...prev, assistantMessage]);
-          }
-        })
-        .catch(fallbackError => {
-          const friendlyMessage = buildErrorMessage(fallbackError);
-          pushSystemMessage(friendlyMessage);
-          toast({
-            title: 'Message Failed',
-            description: friendlyMessage,
-            variant: 'destructive',
-          });
-        })
-        .finally(() => {
-          pendingMessageRef.current = null;
-          pendingRequestIdRef.current = null;
+          request_id: requestId,
         });
-      };
-      
-      // Store abort function
-      abortStreamRef.current = () => {
-        eventSource.close();
-        setIsLoading(false);
-        setStreamProgress(null);
-        setStreamProgressPercent(0);
-        setCurrentStreamingMessageId(null);
-        progressEventsRef.current = [];
-        setProgressEvents([]);
-      };
-      
+
+        fallbackTimerRef.current = setTimeout(() => {
+          if (pendingRequestIdRef.current === requestId) {
+            void invokeRest();
+          }
+        }, 8000);
+      } else {
+        await invokeRest();
+      }
     } catch (error) {
+      clearFallbackTimer();
+      setMessages(prev => prev.filter(msg => msg.id !== placeholderId));
       const friendlyMessage = buildErrorMessage(error);
       pushSystemMessage(friendlyMessage);
       toast({
@@ -617,23 +480,25 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         description: friendlyMessage,
         variant: 'destructive',
       });
-      setIsLoading(false);
       setStreamProgress(null);
       setStreamProgressPercent(0);
       setCurrentStreamingMessageId(null);
       progressEventsRef.current = [];
       setProgressEvents([]);
+      setIsLoading(false);
       pendingMessageRef.current = null;
       pendingRequestIdRef.current = null;
     }
   }, [
     buildErrorMessage,
+    clearFallbackTimer,
     inputValue,
+    isConnected,
     isLoading,
-    mergeProgressEvents,
-    pushProgressEvent,
-    pushSystemMessage,
+    sendRestMessage,
+    sendWsMessage,
     sessionId,
+    setMessages,
     toast,
   ]);
 

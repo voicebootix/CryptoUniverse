@@ -17,7 +17,7 @@ import sqlalchemy
 from sqlalchemy import MetaData, event, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
-from sqlalchemy.pool import NullPool, QueuePool
+from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 
@@ -87,20 +87,21 @@ execution_options = {"compiled_cache": {}}  # Enable query compilation cache
 if "postgresql" in async_db_url:
     execution_options["isolation_level"] = "READ_COMMITTED"
 
-# ENTERPRISE: Use QueuePool for production performance
-poolclass = QueuePool if "postgresql" in async_db_url else NullPool
-
 # Build engine kwargs conditionally based on pool type
 engine_kwargs = {
     "url": async_db_url,
-    "poolclass": poolclass,
     "echo": getattr(settings, 'DATABASE_ECHO', False),
     "future": True,
     "execution_options": execution_options,
 }
 
-# Only add QueuePool-specific parameters for PostgreSQL
-if poolclass == QueuePool:
+# Only configure pooling options for PostgreSQL connections.
+# SQLAlchemy's async engine automatically wraps QueuePool in an async-compatible
+# adapter, so we rely on the default when talking to Postgres. Passing the sync
+# QueuePool class directly raises an ArgumentError, which prevented the backend
+# from starting. For non-Postgres databases (primarily SQLite in development),
+# we explicitly disable pooling via NullPool to avoid stale connections.
+if "postgresql" in async_db_url:
     engine_kwargs.update({
         "pool_size": 20,          # Base number of connections
         "max_overflow": 30,       # Additional connections when needed
@@ -108,6 +109,8 @@ if poolclass == QueuePool:
         "pool_pre_ping": True,    # ENTERPRISE: Health check connections
         "pool_recycle": 1800,     # PRODUCTION: Recycle connections (30 min)
     })
+else:
+    engine_kwargs["poolclass"] = NullPool
 
 engine = create_async_engine(
     **engine_kwargs,

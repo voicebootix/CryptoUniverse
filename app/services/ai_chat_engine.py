@@ -96,9 +96,9 @@ class EnhancedAIChatEngine(LoggerMixin):
         self.ai_consensus = None
         self.master_controller = None
         self.trade_executor = None
-        self.market_analysis = None
+        self.market_analysis = market_analysis
         self.trading_strategies = None
-        self.portfolio_risk = None
+        self.portfolio_risk = portfolio_risk
         self.chat_adapters = None
         self.redis = None  # Redis client for autonomous mode checks
         
@@ -127,6 +127,15 @@ class EnhancedAIChatEngine(LoggerMixin):
                 self.trade_executor = TradeExecutionService()
             if self.market_analysis is None:
                 self.market_analysis = MarketAnalysisService()
+            if self.portfolio_risk is None:
+                try:
+                    self.portfolio_risk = PortfolioRiskService()
+                except Exception as risk_error:
+                    self.logger.warning(
+                        "Portfolio risk service failed to initialize",
+                        error=str(risk_error)
+                    )
+                    self.portfolio_risk = None
             if self.chat_adapters is None:
                 self.chat_adapters = ChatServiceAdapters()
             if self.redis is None:
@@ -184,14 +193,14 @@ class EnhancedAIChatEngine(LoggerMixin):
                 r'\b(auto.*mode|autonomous.*mode)\b'
             ]
         }
-        
+
         # System prompts for different intents
         self.system_prompts = {
-            ChatIntent.GENERAL_QUERY: """You are CryptoUniverse AI, a sophisticated cryptocurrency money manager. 
+            ChatIntent.GENERAL_QUERY: """You are CryptoUniverse AI, a sophisticated cryptocurrency money manager.
             Provide helpful, accurate information about cryptocurrency trading, markets, and portfolio management.
             Be professional, concise, and actionable in your responses. Always consider the user's conversation history.""",
-            
-            ChatIntent.PORTFOLIO_ANALYSIS: """You are analyzing a cryptocurrency portfolio with full conversation context. 
+
+            ChatIntent.PORTFOLIO_ANALYSIS: """You are analyzing a cryptocurrency portfolio with full conversation context.
             Provide detailed insights about portfolio performance, allocation, risk metrics, and optimization suggestions.
             Include specific recommendations for improvement based on previous conversations and user preferences.""",
             
@@ -211,11 +220,39 @@ class EnhancedAIChatEngine(LoggerMixin):
             Analyze current risk exposure, potential threats, and provide specific risk mitigation strategies.
             Consider the user's risk tolerance and previous risk discussions.""",
             
-            ChatIntent.REBALANCING: """You are optimizing portfolio allocation with conversation memory. 
-            Analyze current allocation, market conditions, and provide specific rebalancing recommendations 
+            ChatIntent.REBALANCING: """You are optimizing portfolio allocation with conversation memory.
+            Analyze current allocation, market conditions, and provide specific rebalancing recommendations
             with clear rationale and execution steps. Consider previous rebalancing discussions."""
         }
-    
+
+    async def _get_portfolio_risk_status(self, user_id: str) -> Dict[str, Any]:
+        """Safely retrieve portfolio risk information for a user."""
+
+        if not user_id or user_id == "unknown":
+            return {"status": "unknown_user"}
+
+        # Ensure supporting services are ready before attempting to access them
+        await self._ensure_services()
+
+        if not self.portfolio_risk:
+            return {
+                "status": "service_unavailable",
+                "error": "portfolio_risk_service_unavailable"
+            }
+
+        try:
+            return await self.portfolio_risk.get_portfolio_status(user_id)
+        except Exception as error:
+            self.logger.error(
+                "Portfolio risk lookup failed",
+                error=str(error),
+                user_id=user_id
+            )
+            return {
+                "status": "service_unavailable",
+                "error": str(error)
+            }
+
     async def start_chat_session(self, user_id: str, session_type: str = "general") -> str:
         """Start a new chat session with persistent memory."""
         try:
@@ -605,15 +642,11 @@ I encountered an error during the 5-phase execution. The trade was not completed
         try:
             # First get portfolio risk assessment using real service
             user_id = context.get("session_context", {}).get("user_id")
-            
+
             portfolio_status = {}
-            if self.portfolio_risk and user_id and user_id != "unknown":
-                try:
-                    portfolio_status = await self.portfolio_risk.get_portfolio_status(user_id)
-                except Exception as e:
-                    self.logger.error("Portfolio risk assessment failed", error=str(e))
-                    portfolio_status = {"status": "service_unavailable", "error": str(e)}
-            
+            if user_id:
+                portfolio_status = await self._get_portfolio_risk_status(user_id)
+
             # Then get AI consensus on the combined analysis
             consensus = await self.ai_consensus.consensus_decision(
                 decision_request=json.dumps({
@@ -1094,10 +1127,29 @@ I encountered an error during the 5-phase execution. The trade was not completed
         """Handle portfolio analysis using REAL portfolio service."""
         
         try:
-            # Use real portfolio service
-            portfolio = await self.chat_adapters.get_portfolio_summary(user_id)
-            risk_analysis = await self.portfolio_risk.get_portfolio_status(user_id)
-            
+            # Use real portfolio service when available
+            portfolio = {}
+            if self.chat_adapters:
+                try:
+                    portfolio = await self.chat_adapters.get_portfolio_summary(user_id)
+                except Exception as adapter_error:
+                    self.logger.error(
+                        "Portfolio summary retrieval failed",
+                        error=str(adapter_error),
+                        user_id=user_id
+                    )
+                    portfolio = {
+                        "status": "service_unavailable",
+                        "error": str(adapter_error)
+                    }
+            else:
+                portfolio = {
+                    "status": "service_unavailable",
+                    "error": "portfolio_adapter_unavailable"
+                }
+
+            risk_analysis = await self._get_portfolio_risk_status(user_id)
+
             # AI analyzes real portfolio data
             analysis_prompt = f"""
             REAL PORTFOLIO DATA:
@@ -1232,8 +1284,8 @@ You currently have **0 active trading strategies**.
         
         try:
             # Use real risk assessment service
-            risk_data = await self.portfolio_risk.get_portfolio_status(user_id)
-            
+            risk_data = await self._get_portfolio_risk_status(user_id)
+
             risk_prompt = f"""
             REAL RISK ANALYSIS:
             {json.dumps(risk_data, indent=2)}
