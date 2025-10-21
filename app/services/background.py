@@ -810,9 +810,12 @@ class BackgroundServiceManager(LoggerMixin):
                         timeout=300  # 5 minute timeout
                     )
 
-                    # Initialize variables with safe defaults before extracting from result
+                    # Initialize all variables with safe defaults before extracting from result
+                    # to prevent UnboundLocalError if cycle_result is not a dict
                     users_processed = 0
+                    opportunities_discovered = 0
                     cycle_duration_ms = 0
+                    # active_users_count already initialized at start of while loop (line 750)
 
                     # Extract opportunity count from result if available
                     if isinstance(cycle_result, dict):
