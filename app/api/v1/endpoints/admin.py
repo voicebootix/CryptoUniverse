@@ -46,8 +46,8 @@ router = APIRouter()
 # Initialize services
 master_controller = MasterSystemController()
 
-# Import the shared background_manager instance from main.py (started in lifespan)
-from main import background_manager
+# Note: background_manager is imported lazily inside functions to avoid circular import
+# (main.py -> router.py -> admin.py -> main.py)
 
 
 # ---------------------------------------------------------------------------
@@ -1348,6 +1348,9 @@ async def get_system_overview(
     )
     
     try:
+        # Lazy import to avoid circular dependency
+        from main import background_manager
+
         # Get system metrics
         system_status = await master_controller.get_global_system_status()
         background_status = await background_manager.health_check()
@@ -2748,6 +2751,9 @@ async def emergency_stop_all_trading(
 async def restart_background_services():
     """Restart background services after configuration change."""
     try:
+        # Lazy import to avoid circular dependency
+        from main import background_manager
+
         await background_manager.stop_all()
         await asyncio.sleep(2)
         await background_manager.start_all()
@@ -3163,6 +3169,9 @@ async def get_background_services_detailed(
     )
 
     try:
+        # Lazy import to avoid circular dependency
+        from main import background_manager
+
         # Get health check from background manager
         services_health = await background_manager.health_check()
 
