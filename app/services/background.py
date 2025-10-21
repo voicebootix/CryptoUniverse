@@ -383,7 +383,7 @@ class BackgroundServiceManager(LoggerMixin):
         """Get detailed status for specific service."""
         if service not in self.tasks:
             return {"status": "not_found"}
-        
+
         task = self.tasks[service]
         return {
             "status": "running" if not task.done() else "stopped",
@@ -392,7 +392,41 @@ class BackgroundServiceManager(LoggerMixin):
             "interval": self.intervals.get(service, 0),
             "last_run": getattr(task, 'last_run', None)
         }
-    
+
+    async def _track_service_metrics(self, service_name: str, metrics: Dict[str, Any]):
+        """Track service effectiveness metrics in Redis for diagnostic visibility."""
+        if not self.redis:
+            return
+
+        try:
+            metrics_data = {
+                **metrics,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            await self.redis.setex(
+                f"service_metrics:{service_name}",
+                600,  # 10 minute TTL
+                json.dumps(metrics_data)
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to track metrics for {service_name}", error=str(e))
+
+    async def get_service_metrics(self, service_name: str) -> Optional[Dict[str, Any]]:
+        """Get service effectiveness metrics from Redis."""
+        if not self.redis:
+            return None
+
+        try:
+            metrics_json = await self.redis.get(f"service_metrics:{service_name}")
+            if metrics_json:
+                if isinstance(metrics_json, bytes):
+                    metrics_json = metrics_json.decode()
+                return json.loads(metrics_json)
+        except Exception as e:
+            self.logger.warning(f"Failed to get metrics for {service_name}", error=str(e))
+
+        return None
+
     # Background Service Implementations
     async def _health_monitor_service(self):
         """Monitor system health and alert on issues."""
@@ -802,12 +836,25 @@ class BackgroundServiceManager(LoggerMixin):
                 
                 # Sync market data for discovered symbols using real APIs
                 await market_data_feeds.sync_market_data_batch(symbols_list)
-                
-                self.logger.debug(f"Market data sync completed for {len(symbols_list)} discovered symbols", 
+
+                # Track service effectiveness metrics
+                await self._track_service_metrics("market_data_sync", {
+                    "symbols_discovered": len(symbols_list),
+                    "sample_symbols": symbols_list[:10] if symbols_list else [],
+                    "last_sync_time": datetime.utcnow().isoformat()
+                })
+
+                self.logger.debug(f"Market data sync completed for {len(symbols_list)} discovered symbols",
                                 symbols=symbols_list[:10] if symbols_list else [])
-                
+
             except Exception as e:
                 self.logger.error("Market data sync error", error=str(e))
+                # Track error in metrics
+                await self._track_service_metrics("market_data_sync", {
+                    "symbols_discovered": 0,
+                    "error": str(e),
+                    "last_sync_time": datetime.utcnow().isoformat()
+                })
             
             await asyncio.sleep(self.intervals["market_data_sync"])
     
