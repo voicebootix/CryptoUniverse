@@ -252,9 +252,36 @@ Just chat with me naturally! How can I help you manage your crypto investments t
     }
   };
 
+  const buildWebSocketUrl = useCallback((activeSessionId: string): string => {
+    if (!activeSessionId) {
+      return '';
+    }
+
+    const path = `/chat/ws/${activeSessionId}`;
+    const baseURL = apiClient.defaults.baseURL;
+
+    if (baseURL) {
+      try {
+        const parsed = new URL(baseURL, window.location.origin);
+        const protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+        const basePath = parsed.pathname.replace(/\/$/, '');
+        return `${protocol}//${parsed.host}${basePath}${path}`;
+      } catch (error) {
+        console.error('Failed to build WebSocket URL from API base');
+      }
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}/api/v1${path}`;
+  }, []);
+
+  const websocketEndpoint = useMemo(() => (
+    sessionId ? buildWebSocketUrl(sessionId) : ''
+  ), [buildWebSocketUrl, sessionId]);
+
   // Use the shared WebSocket hook with proper authentication and reconnection
   const { lastMessage, connectionStatus, sendMessage: sendWsMessage } = useWebSocket(
-    sessionId ? `/api/v1/chat/ws/${sessionId}` : '',
+    websocketEndpoint,
     {
       onOpen: () => {
         console.log('🔌 WebSocket connected for chat');
@@ -267,18 +294,199 @@ Just chat with me naturally! How can I help you manage your crypto investments t
       onMessage: (data) => {
         console.log('📨 WebSocket message received:', data);
         if (data.type === 'chat_response') {
-          const newMessage: ChatMessage = {
-            id: data.message_id,
-            content: data.content,
+          clearFallbackTimer();
+
+          const chunkPayload = (data && typeof data === 'object' && 'chunk' in data)
+            ? (data.chunk as Record<string, any>)
+            : undefined;
+          const chunk = (chunkPayload && typeof chunkPayload === 'object') ? chunkPayload : data;
+          const timestamp = (chunk && typeof chunk === 'object' && 'timestamp' in chunk)
+            ? chunk.timestamp
+            : data.timestamp;
+
+          if (chunk && typeof chunk === 'object' && ('type' in chunk || 'content' in chunk || 'progress' in chunk)) {
+            const chunkType = typeof chunk.type === 'string'
+              ? chunk.type
+              : (chunk.progress ? 'progress' : 'response');
+
+            const normalizedTimestamp = typeof timestamp === 'string'
+              ? timestamp
+              : new Date().toISOString();
+
+            const stagePercentDefaults: Record<string, number> = {
+              thinking: 5,
+              analyzing: 15,
+              gathering_data: 25,
+              processing: 45,
+            };
+
+            if (chunkType === 'processing' || chunkType === 'thinking' || chunkType === 'analyzing' || chunkType === 'gathering_data') {
+              const message = typeof chunk.content === 'string' && chunk.content.trim().length > 0
+                ? chunk.content
+                : 'Processing your request...';
+              const stage = typeof chunk.stage === 'string' && chunk.stage.trim().length > 0
+                ? chunk.stage
+                : chunkType;
+              const defaultPercent = stagePercentDefaults[chunkType];
+              const percentValue = typeof chunk.percent === 'number'
+                ? chunk.percent
+                : typeof chunk.progress?.percent === 'number'
+                  ? chunk.progress.percent
+                  : defaultPercent;
+              handleProgressUpdate(message, percentValue, stage, normalizedTimestamp);
+              return;
+            }
+
+            if (chunkType === 'progress') {
+              const progressPayload = chunk.progress ?? {};
+              const stage = typeof progressPayload.stage === 'string' && progressPayload.stage.trim().length > 0
+                ? progressPayload.stage
+                : (typeof chunk.stage === 'string' && chunk.stage.trim().length > 0
+                  ? chunk.stage
+                  : `stage-${Date.now()}`);
+              const message = typeof progressPayload.message === 'string' && progressPayload.message.trim().length > 0
+                ? progressPayload.message
+                : (typeof chunk.content === 'string' && chunk.content.trim().length > 0
+                  ? chunk.content
+                  : 'Processing your request...');
+              const percentValue = typeof progressPayload.percent === 'number'
+                ? progressPayload.percent
+                : undefined;
+              handleProgressUpdate(message, percentValue, stage, normalizedTimestamp);
+              return;
+            }
+
+            if (chunkType === 'response' || chunkType === 'chunk' || chunkType === 'persona_enriched') {
+              const shouldReplaceContent = chunkType === 'persona_enriched' && Boolean(chunk.replaces_previous);
+              if (typeof chunk.content === 'string') {
+                if (shouldReplaceContent) {
+                  streamingContentRef.current = chunk.content;
+                } else {
+                  streamingContentRef.current = `${streamingContentRef.current}${chunk.content}`;
+                }
+              }
+
+              updateStreamingMessage(prev => ({
+                ...prev,
+                content: streamingContentRef.current || prev.content,
+                metadata: {
+                  ...(prev.metadata || {}),
+                  ...(chunk.metadata || {}),
+                  streaming: true,
+                  personality: chunk.personality ?? prev.metadata?.personality,
+                  persona_enriched: chunkType === 'persona_enriched' ? true : prev.metadata?.persona_enriched,
+                },
+                timestamp: normalizedTimestamp,
+              }));
+
+              setStreamProgress('Generating a detailed response...');
+              setStreamProgressPercent(prev => (prev >= 70 ? prev : 70));
+              return;
+            }
+
+            if (chunkType === 'action_required') {
+              const content = typeof chunk.content === 'string' && chunk.content.trim().length > 0
+                ? chunk.content
+                : 'This action requires your confirmation. Would you like to proceed?';
+              const actionMessage: ChatMessage = {
+                id: chunk.decision_id ? `action-${chunk.decision_id}` : `action-${Date.now()}`,
+                content,
+                type: 'system',
+                timestamp: normalizedTimestamp,
+                metadata: {
+                  ...(chunk.metadata || {}),
+                  action: chunk.action,
+                  decision_id: chunk.decision_id,
+                },
+              };
+              setMessages(prev => [...prev, actionMessage]);
+              setStreamProgress(content);
+              setStreamProgressPercent(prev => (prev >= 85 ? prev : 85));
+              return;
+            }
+
+            if (chunkType === 'error') {
+              const errorMessage = typeof chunk.content === 'string' && chunk.content.trim().length > 0
+                ? chunk.content
+                : typeof chunk.error === 'string' && chunk.error.trim().length > 0
+                  ? chunk.error
+                  : 'An error occurred while processing your request. Please try again.';
+
+              if (currentStreamingMessageId) {
+                setMessages(prev => prev.filter(msg => msg.id !== currentStreamingMessageId));
+              }
+
+              finalizePendingRequest();
+              setStreamProgress(null);
+              setStreamProgressPercent(0);
+              setCurrentStreamingMessageId(null);
+              progressEventsRef.current = [];
+              setProgressEvents([]);
+              streamingContentRef.current = '';
+
+              pushSystemMessage(errorMessage);
+              toast({
+                title: 'Message Failed',
+                description: errorMessage,
+                variant: 'destructive',
+              });
+              return;
+            }
+
+            if (chunkType === 'complete') {
+              finalizeStreamingMessage(chunk, data);
+              return;
+            }
+
+            // Fallback for any other chunk types with content
+            if (typeof chunk.content === 'string' && chunk.content.trim().length > 0) {
+              streamingContentRef.current = `${streamingContentRef.current}${chunk.content}`;
+              updateStreamingMessage(prev => ({
+                ...prev,
+                content: streamingContentRef.current,
+                metadata: {
+                  ...(prev.metadata || {}),
+                  streaming: true,
+                },
+                timestamp: normalizedTimestamp,
+              }));
+              setStreamProgress('Generating a detailed response...');
+              setStreamProgressPercent(prev => (prev >= 70 ? prev : 70));
+              return;
+            }
+
+            // If we reach here and received an unknown chunk type, log for debugging
+            console.debug('Unhandled chat chunk', chunk);
+            return;
+          }
+
+          // Non-chunk payloads fallback to treating as complete assistant message
+          const fallbackMessage: ChatMessage = {
+            id: data.message_id || `assistant-${Date.now()}`,
+            content: typeof data.content === 'string' ? data.content : '',
             type: 'assistant',
-            timestamp: data.timestamp,
+            timestamp: typeof data.timestamp === 'string' ? data.timestamp : new Date().toISOString(),
             intent: data.intent,
             confidence: data.confidence,
-            metadata: data.metadata
+            metadata: data.metadata,
           };
 
-          setMessages(prev => [...prev, newMessage]);
-          finalizePendingRequest();
+          if (currentStreamingMessageId) {
+            streamingContentRef.current = fallbackMessage.content;
+            updateStreamingMessage(prev => ({
+              ...fallbackMessage,
+              id: prev.id,
+              metadata: {
+                ...(fallbackMessage.metadata || {}),
+                streaming: false,
+                progress_updates: progressEventsRef.current,
+              },
+            }));
+          } else {
+            setMessages(prev => [...prev, fallbackMessage]);
+          }
+
+          finalizeStreamingMessage(data, data);
         } else if (data.type === 'connection_established') {
           // Chat connection established
         }
@@ -301,8 +509,8 @@ Just chat with me naturally! How can I help you manage your crypto investments t
   const [streamProgressPercent, setStreamProgressPercent] = useState<number>(0);
   const [progressEvents, setProgressEvents] = useState<StreamProgressEvent[]>([]);
   const [currentStreamingMessageId, setCurrentStreamingMessageId] = useState<string | null>(null);
-  const abortStreamRef = useRef<(() => void) | null>(null);
   const progressEventsRef = useRef<StreamProgressEvent[]>([]);
+  const streamingContentRef = useRef<string>('');
 
   const mergeProgressEvents = useCallback(
     (existing: StreamProgressEvent[] = [], update: StreamProgressEvent): StreamProgressEvent[] => {
@@ -322,19 +530,221 @@ Just chat with me naturally! How can I help you manage your crypto investments t
       const merged = mergeProgressEvents(progressEventsRef.current, update);
       progressEventsRef.current = merged;
       setProgressEvents(merged);
+
+      if (!currentStreamingMessageId) {
+        return;
+      }
+
+      setMessages(prev => prev.map(msg => {
+        if (msg.id !== currentStreamingMessageId) {
+          return msg;
+        }
+
+        const existingUpdates = Array.isArray(msg.metadata?.progress_updates)
+          ? (msg.metadata.progress_updates as StreamProgressEvent[])
+          : [];
+
+        return {
+          ...msg,
+          metadata: {
+            ...(msg.metadata || {}),
+            progress_updates: mergeProgressEvents(existingUpdates, update),
+          },
+        };
+      }));
     },
-    [mergeProgressEvents]
+    [currentStreamingMessageId, mergeProgressEvents, setMessages]
   );
+
+  const updateStreamingMessage = useCallback(
+    (updater: (prev: ChatMessage) => ChatMessage) => {
+      if (!currentStreamingMessageId) {
+        return;
+      }
+      setMessages(prev => prev.map(msg => (
+        msg.id === currentStreamingMessageId ? updater(msg) : msg
+      )));
+    },
+    [currentStreamingMessageId]
+  );
+
+  const handleProgressUpdate = useCallback(
+    (
+      message: string,
+      percent: number | undefined,
+      stage: string,
+      timestamp?: string,
+    ) => {
+      const progressTimestamp = timestamp ?? new Date().toISOString();
+      setStreamProgress(message);
+
+      const event: StreamProgressEvent = {
+        stage,
+        message,
+        timestamp: progressTimestamp,
+      };
+
+      if (typeof percent === 'number' && !Number.isNaN(percent)) {
+        const bounded = Math.max(0, Math.min(100, Math.round(percent)));
+        event.percent = bounded;
+        setStreamProgressPercent(prev => (prev >= bounded ? prev : bounded));
+      }
+
+      pushProgressEvent(event);
+
+      updateStreamingMessage(prev => ({
+        ...prev,
+        metadata: {
+          ...(prev.metadata || {}),
+          streaming: true,
+        },
+      }));
+    },
+    [pushProgressEvent, setStreamProgress, setStreamProgressPercent, updateStreamingMessage]
+  );
+
+  const finalizeStreamingMessage = useCallback(
+    (finalChunk?: any, envelope?: any) => {
+      const resolvedTimestamp = typeof finalChunk?.timestamp === 'string'
+        ? finalChunk.timestamp
+        : typeof envelope?.timestamp === 'string'
+          ? envelope.timestamp
+          : new Date().toISOString();
+
+      if (currentStreamingMessageId) {
+        updateStreamingMessage(prev => {
+          const mergedMetadata = {
+            ...(prev.metadata || {}),
+            ...(finalChunk?.metadata || {}),
+            streaming: false,
+            progress_updates: progressEventsRef.current,
+          } as Record<string, any>;
+
+          if (finalChunk?.context) {
+            mergedMetadata.context = finalChunk.context;
+          }
+
+          return {
+            ...prev,
+            content: streamingContentRef.current || (typeof finalChunk?.content === 'string' ? finalChunk.content : prev.content),
+            intent: finalChunk?.intent ?? prev.intent,
+            confidence: typeof finalChunk?.confidence === 'number' ? finalChunk.confidence : prev.confidence,
+            metadata: mergedMetadata,
+            timestamp: resolvedTimestamp,
+          };
+        });
+      }
+
+      finalizePendingRequest();
+      setStreamProgress(null);
+      setStreamProgressPercent(0);
+      setCurrentStreamingMessageId(null);
+      progressEventsRef.current = [];
+      setProgressEvents([]);
+      streamingContentRef.current = '';
+    },
+    [
+      currentStreamingMessageId,
+      finalizePendingRequest,
+      setCurrentStreamingMessageId,
+      setProgressEvents,
+      setStreamProgress,
+      setStreamProgressPercent,
+      updateStreamingMessage,
+    ]
+  );
+
+  const sendRestMessage = useCallback(async (
+    messageToSend: string,
+    requestId: string,
+    placeholderId: string
+  ) => {
+    if (!sessionId) {
+      return;
+    }
+
+    const isRequestCurrent = () => pendingRequestIdRef.current === requestId;
+
+    if (!isRequestCurrent()) {
+      return;
+    }
+
+    try {
+      const response = await apiClient.post('/chat/message', {
+        message: messageToSend,
+        session_id: sessionId,
+        mode: 'trading',
+      });
+
+      if (!isRequestCurrent()) {
+        return;
+      }
+
+      if (response.data?.success) {
+        const assistantMessage: ChatMessage = {
+          id: response.data.message_id,
+          content: response.data.content,
+          type: 'assistant',
+          timestamp: response.data.timestamp || new Date().toISOString(),
+          intent: response.data.intent,
+          confidence: response.data.confidence,
+          metadata: response.data.metadata,
+        };
+
+        setMessages(prev => {
+          if (!isRequestCurrent()) {
+            return prev;
+          }
+
+          const hasPlaceholder = prev.some(msg => msg.id === placeholderId);
+          if (hasPlaceholder) {
+            return prev.map(msg =>
+              msg.id === placeholderId ? { ...assistantMessage, id: msg.id } : msg
+            );
+          }
+          return [...prev, assistantMessage];
+        });
+      } else {
+        throw new Error(response.data?.detail || 'Chat service unavailable');
+      }
+    } catch (error) {
+      if (isRequestCurrent()) {
+        const friendlyMessage = buildErrorMessage(error);
+        setMessages(prev => prev.filter(msg => msg.id !== placeholderId));
+        pushSystemMessage(friendlyMessage);
+        toast({
+          title: 'Message Failed',
+          description: friendlyMessage,
+          variant: 'destructive',
+        });
+      }
+    } finally {
+      if (isRequestCurrent()) {
+        finalizePendingRequest();
+        setStreamProgress(null);
+        setStreamProgressPercent(0);
+        setCurrentStreamingMessageId(null);
+        progressEventsRef.current = [];
+        setProgressEvents([]);
+        streamingContentRef.current = '';
+      }
+    }
+  }, [
+    buildErrorMessage,
+    finalizePendingRequest,
+    setCurrentStreamingMessageId,
+    setMessages,
+    pushSystemMessage,
+    sessionId,
+    setProgressEvents,
+    setStreamProgress,
+    setStreamProgressPercent,
+    toast,
+  ]);
 
   const sendMessage = useCallback(async () => {
     const messageToSend = inputValue.trim();
-    console.log('🚀 SEND MESSAGE CALLED!', { messageToSend, isLoading, sessionId });
     if (!messageToSend || isLoading || !sessionId) {
-      console.log('❌ SEND MESSAGE BLOCKED:', {
-        noInput: !messageToSend,
-        isLoading,
-        noSession: !sessionId
-      });
       return;
     }
 
@@ -342,274 +752,57 @@ Just chat with me naturally! How can I help you manage your crypto investments t
       id: Date.now().toString(),
       content: messageToSend,
       type: 'user',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
 
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
-    setStreamProgress('Connecting...');
-    setStreamProgressPercent(0);
+    setStreamProgress('Processing your request...');
+    setStreamProgressPercent(10);
     progressEventsRef.current = [];
     setProgressEvents([]);
 
     const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const streamingMessageId = `streaming-${requestId}`;
-    setCurrentStreamingMessageId(streamingMessageId);
+    const placeholderId = `assistant-${requestId}`;
+    const placeholderMessage: ChatMessage = {
+      id: placeholderId,
+      content: '🤖 The AI assistant is preparing a detailed response...',
+      type: 'assistant',
+      timestamp: new Date().toISOString(),
+      metadata: { streaming: true },
+    };
+
+    setMessages(prev => [...prev, placeholderMessage]);
+    setCurrentStreamingMessageId(placeholderId);
     pendingMessageRef.current = messageToSend;
     pendingRequestIdRef.current = requestId;
+    streamingContentRef.current = '';
+
+    const invokeRest = async () => {
+      await sendRestMessage(messageToSend, requestId, placeholderId);
+    };
 
     try {
-      // Use Server-Sent Events (SSE) for streaming response
-      console.log('📡 Using SSE streaming for real-time response');
-      
-      const token = localStorage.getItem('auth_token');
-      const baseURL = apiClient.defaults.baseURL || '';
-      
-      // Build SSE URL
-      const params = new URLSearchParams({
-        message: messageToSend,
-        session_id: sessionId,
-        conversation_mode: 'live_trading'
-      });
-      
-      // Add token for authentication (EventSource doesn't support custom headers)
-      if (token && token.trim().length > 0) {
-        params.append('token', token);
-      }
-      
-      const url = `${baseURL}/unified-chat/stream?${params.toString()}`;
-      
-      // Create EventSource for SSE
-      const eventSource = new EventSource(url);
-      
-      let fullContent = '';
-      let streamCompleted = false;
-      
-      // Create placeholder message for streaming content
-      const streamingMessage: ChatMessage = {
-        id: streamingMessageId,
-        content: '',
-        type: 'assistant',
-        timestamp: new Date().toISOString(),
-        metadata: { streaming: true }
-      };
-      setMessages(prev => [...prev, streamingMessage]);
-      
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          
-          switch (data.type) {
-            case 'processing': {
-              const progressMessage = data.content || 'Processing...';
-              setStreamProgress(progressMessage);
-              const processingUpdate: StreamProgressEvent = {
-                stage: 'processing',
-                message: progressMessage,
-                percent: 5,
-                timestamp: data.timestamp || new Date().toISOString(),
-              };
-              pushProgressEvent(processingUpdate);
-              setStreamProgressPercent((current) => (current > 5 ? current : 5));
-              setMessages(prev => prev.map(msg =>
-                msg.id === streamingMessageId
-                  ? {
-                      ...msg,
-                      metadata: {
-                        ...(msg.metadata || {}),
-                        progress_updates: mergeProgressEvents(
-                          (msg.metadata?.progress_updates as StreamProgressEvent[]) || [],
-                          processingUpdate
-                        ),
-                      },
-                    }
-                  : msg
-              ));
-              break;
-            }
-
-            case 'progress': {
-              const progressPayload = data.progress;
-              const progressMessage = progressPayload?.message || 'Processing...';
-              setStreamProgress(progressMessage);
-
-              if (progressPayload) {
-                const progressUpdate: StreamProgressEvent = {
-                  stage: progressPayload.stage || `stage-${Date.now()}`,
-                  message: progressMessage,
-                  percent:
-                    typeof progressPayload.percent === 'number'
-                      ? Math.max(0, Math.min(100, Math.round(progressPayload.percent)))
-                      : undefined,
-                  timestamp: data.timestamp || new Date().toISOString(),
-                };
-
-                pushProgressEvent(progressUpdate);
-                if (typeof progressUpdate.percent === 'number') {
-                  setStreamProgressPercent(progressUpdate.percent);
-                }
-
-                setMessages(prev => prev.map(msg =>
-                  msg.id === streamingMessageId
-                    ? {
-                        ...msg,
-                        metadata: {
-                          ...(msg.metadata || {}),
-                          progress_updates: mergeProgressEvents(
-                            (msg.metadata?.progress_updates as StreamProgressEvent[]) || [],
-                            progressUpdate
-                          ),
-                        },
-                      }
-                    : msg
-                ));
-              }
-              break;
-            }
-              
-            case 'response':
-            case 'chunk':
-              if (data.content) {
-                fullContent += data.content;
-                // Update the streaming message with accumulated content
-                setMessages(prev => 
-                  prev.map(msg => 
-                    msg.id === streamingMessageId
-                      ? { ...msg, content: fullContent }
-                      : msg
-                  )
-                );
-              }
-              break;
-              
-            case 'complete': {
-              streamCompleted = true;
-              eventSource.close();
-              setIsLoading(false);
-              setStreamProgress(null);
-              setStreamProgressPercent(0);
-              setCurrentStreamingMessageId(null);
-              const finalProgress = progressEventsRef.current;
-              progressEventsRef.current = [];
-              setProgressEvents([]);
-              pendingMessageRef.current = null;
-              pendingRequestIdRef.current = null;
-
-              setMessages(prev =>
-                prev.map(msg =>
-                  msg.id === streamingMessageId
-                    ? {
-                        ...msg,
-                        content: fullContent,
-                        intent: data.intent || msg.intent,
-                        confidence: data.confidence ?? msg.confidence,
-                        metadata: {
-                          ...(msg.metadata || {}),
-                          ...(data.metadata || {}),
-                          streaming: false,
-                          context: data.context || msg.metadata?.context,
-                          progress_updates: finalProgress,
-                        },
-                      }
-                    : msg
-                )
-              );
-              break;
-            }
-              
-            case 'error':
-              streamCompleted = true;
-              eventSource.close();
-              setIsLoading(false);
-              setStreamProgress(null);
-              setStreamProgressPercent(0);
-              setCurrentStreamingMessageId(null);
-              progressEventsRef.current = [];
-              setProgressEvents([]);
-
-              // Remove streaming message and show error
-              setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
-              
-              const errorMessage = data.error || 'An error occurred while processing your request.';
-              pushSystemMessage(errorMessage);
-              toast({
-                title: 'Error',
-                description: errorMessage,
-                variant: 'destructive',
-              });
-              break;
-          }
-        } catch (error) {
-          console.error('Failed to parse SSE data:', error);
-        }
-      };
-      
-      eventSource.onerror = (error) => {
-        if (streamCompleted) return;
-
-        console.error('SSE connection error:', error);
-        eventSource.close();
-        setIsLoading(false);
-        setStreamProgress(null);
-        setStreamProgressPercent(0);
-        setCurrentStreamingMessageId(null);
-        progressEventsRef.current = [];
-        setProgressEvents([]);
-
-        // Remove streaming message
-        setMessages(prev => prev.filter(msg => msg.id !== streamingMessageId));
-        
-        // Fallback to regular API
-        console.log('⏰ SSE failed, falling back to regular API');
-        
-        apiClient.post('/unified-chat/message', {
+      if (isConnected) {
+        sendWsMessage({
+          type: 'chat_message',
           message: messageToSend,
           session_id: sessionId,
-          conversation_mode: 'live_trading',
-          stream: false
-        })
-        .then(response => {
-          if (response.data.success) {
-            const assistantMessage: ChatMessage = {
-              id: response.data.message_id,
-              content: response.data.content,
-              type: 'assistant',
-              timestamp: response.data.timestamp,
-              intent: response.data.intent,
-              confidence: response.data.confidence,
-              metadata: response.data.metadata
-            };
-            setMessages(prev => [...prev, assistantMessage]);
-          }
-        })
-        .catch(fallbackError => {
-          const friendlyMessage = buildErrorMessage(fallbackError);
-          pushSystemMessage(friendlyMessage);
-          toast({
-            title: 'Message Failed',
-            description: friendlyMessage,
-            variant: 'destructive',
-          });
-        })
-        .finally(() => {
-          pendingMessageRef.current = null;
-          pendingRequestIdRef.current = null;
+          request_id: requestId,
         });
-      };
-      
-      // Store abort function
-      abortStreamRef.current = () => {
-        eventSource.close();
-        setIsLoading(false);
-        setStreamProgress(null);
-        setStreamProgressPercent(0);
-        setCurrentStreamingMessageId(null);
-        progressEventsRef.current = [];
-        setProgressEvents([]);
-      };
-      
+
+        fallbackTimerRef.current = setTimeout(() => {
+          if (pendingRequestIdRef.current === requestId) {
+            void invokeRest();
+          }
+        }, 8000);
+      } else {
+        await invokeRest();
+      }
     } catch (error) {
+      clearFallbackTimer();
+      setMessages(prev => prev.filter(msg => msg.id !== placeholderId));
       const friendlyMessage = buildErrorMessage(error);
       pushSystemMessage(friendlyMessage);
       toast({
@@ -617,23 +810,26 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         description: friendlyMessage,
         variant: 'destructive',
       });
-      setIsLoading(false);
       setStreamProgress(null);
       setStreamProgressPercent(0);
       setCurrentStreamingMessageId(null);
       progressEventsRef.current = [];
       setProgressEvents([]);
+      setIsLoading(false);
       pendingMessageRef.current = null;
       pendingRequestIdRef.current = null;
+      streamingContentRef.current = '';
     }
   }, [
     buildErrorMessage,
+    clearFallbackTimer,
     inputValue,
+    isConnected,
     isLoading,
-    mergeProgressEvents,
-    pushProgressEvent,
-    pushSystemMessage,
+    sendRestMessage,
+    sendWsMessage,
     sessionId,
+    setMessages,
     toast,
   ]);
 
