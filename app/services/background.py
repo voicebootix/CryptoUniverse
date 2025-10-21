@@ -404,7 +404,41 @@ class BackgroundServiceManager(LoggerMixin):
             "interval": self.intervals.get(service, 0),
             "last_run": getattr(task, 'last_run', None)
         }
-    
+
+    async def _track_service_metrics(self, service_name: str, metrics: Dict[str, Any]):
+        """Track service effectiveness metrics in Redis for diagnostic visibility."""
+        if not self.redis:
+            return
+
+        try:
+            metrics_data = {
+                **metrics,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            await self.redis.setex(
+                f"service_metrics:{service_name}",
+                600,  # 10 minute TTL
+                json.dumps(metrics_data)
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to track metrics for {service_name}", error=str(e))
+
+    async def get_service_metrics(self, service_name: str) -> Optional[Dict[str, Any]]:
+        """Get service effectiveness metrics from Redis."""
+        if not self.redis:
+            return None
+
+        try:
+            metrics_json = await self.redis.get(f"service_metrics:{service_name}")
+            if metrics_json:
+                if isinstance(metrics_json, bytes):
+                    metrics_json = metrics_json.decode()
+                return json.loads(metrics_json)
+        except Exception as e:
+            self.logger.warning(f"Failed to get metrics for {service_name}", error=str(e))
+
+        return None
+
     # Background Service Implementations
     async def _health_monitor_service(self):
         """Monitor system health and alert on issues."""
@@ -620,6 +654,12 @@ class BackgroundServiceManager(LoggerMixin):
                 except Exception as e:
                     self.logger.warning("Failed to release lock atomically", error=str(e))
 
+        # Track service effectiveness metrics
+        await self._track_service_metrics("signal_dispatch", {
+            "signals_delivered": total_deliveries,
+            "last_dispatch_time": datetime.utcnow().isoformat()
+        })
+
         if total_deliveries:
             system_monitoring_service.record_metric(
                 "signal_dispatch_deliveries",
@@ -627,6 +667,8 @@ class BackgroundServiceManager(LoggerMixin):
                 {"timestamp": datetime.utcnow().isoformat()},
             )
             self.logger.info("Signal dispatch cycle complete", deliveries=total_deliveries)
+        else:
+            self.logger.debug("Signal dispatch cycle complete - no deliveries needed")
 
     async def _is_signal_dispatch_allowed(self) -> bool:
         if not self.redis:
@@ -814,12 +856,25 @@ class BackgroundServiceManager(LoggerMixin):
                 
                 # Sync market data for discovered symbols using real APIs
                 await market_data_feeds.sync_market_data_batch(symbols_list)
-                
-                self.logger.debug(f"Market data sync completed for {len(symbols_list)} discovered symbols", 
+
+                # Track service effectiveness metrics
+                await self._track_service_metrics("market_data_sync", {
+                    "symbols_discovered": len(symbols_list),
+                    "sample_symbols": symbols_list[:10] if symbols_list else [],
+                    "last_sync_time": datetime.utcnow().isoformat()
+                })
+
+                self.logger.debug(f"Market data sync completed for {len(symbols_list)} discovered symbols",
                                 symbols=symbols_list[:10] if symbols_list else [])
-                
+
             except Exception as e:
-                self.logger.error("Market data sync error", error=str(e))
+                self.logger.exception("Market data sync error")
+                # Track error in metrics
+                await self._track_service_metrics("market_data_sync", {
+                    "symbols_discovered": 0,
+                    "error": str(e),
+                    "last_sync_time": datetime.utcnow().isoformat()
+                })
             
             await asyncio.sleep(self.intervals["market_data_sync"])
     
@@ -865,9 +920,9 @@ class BackgroundServiceManager(LoggerMixin):
             
             # Deduplicate and normalize
             all_discovered_symbols = {sym.upper() for sym in all_discovered_symbols}
-            
-            self.logger.info(f"Discovered {len(all_discovered_symbols)} active trading symbols")
-            return all_discovered_symbols
+
+            self.logger.info(f"Discovered {len(all_discovered_symbols)} active trading symbols from market analysis")
+            # Don't return yet - continue to fallback mechanisms if needed
         except Exception as e:
             self.logger.exception("Market analysis discovery failed")
         
@@ -1220,16 +1275,20 @@ class BackgroundServiceManager(LoggerMixin):
                     
                     result = await db.execute(stmt)
                     user_ids = [row[0] for row in result.fetchall()]
-                    
+
                     self.logger.debug(f"Syncing balances for {len(user_ids)} users with active exchanges")
-                    
+
+                    # Track synced users
+                    users_synced = 0
+                    sync_errors = 0
+
                     # Sync balances for each user using your existing system
                     for user_id in user_ids:
                         try:
                             # Use your existing exchange balance fetching
                             from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
                             portfolio_data = await get_user_portfolio_from_exchanges(str(user_id), db)
-                            
+
                             if portfolio_data.get("success"):
                                 # Update cached portfolio data in Redis for real-time access
                                 if self.redis:
@@ -1238,12 +1297,24 @@ class BackgroundServiceManager(LoggerMixin):
                                         300,  # 5 minute cache
                                         json.dumps(portfolio_data, default=str)
                                     )
-                            
+                                users_synced += 1
+                            else:
+                                sync_errors += 1
+
                         except Exception as e:
                             self.logger.warning(f"Balance sync failed for user {user_id}", error=str(e))
+                            sync_errors += 1
                             continue
-                
-                self.logger.debug("Balance sync cycle completed")
+
+                    # Track service effectiveness metrics
+                    await self._track_service_metrics("balance_sync", {
+                        "users_synced": users_synced,
+                        "sync_errors": sync_errors,
+                        "total_users": len(user_ids),
+                        "last_sync_time": datetime.utcnow().isoformat()
+                    })
+
+                    self.logger.debug("Balance sync cycle completed")
                 
             except Exception as e:
                 self.logger.error("Balance sync error", error=str(e))
