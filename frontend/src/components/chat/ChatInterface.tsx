@@ -267,7 +267,7 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         const basePath = parsed.pathname.replace(/\/$/, '');
         return `${protocol}//${parsed.host}${basePath}${path}`;
       } catch (error) {
-        console.error('Failed to build WebSocket URL from API base', error);
+        console.error('Failed to build WebSocket URL from API base');
       }
     }
 
