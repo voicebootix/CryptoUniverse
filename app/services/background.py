@@ -749,7 +749,6 @@ class BackgroundServiceManager(LoggerMixin):
         while self.running:
             active_users_count = 0
             opportunities_discovered = 0
-            cycle_success = False
 
             try:
                 # Check if Redis is available first
@@ -822,8 +821,6 @@ class BackgroundServiceManager(LoggerMixin):
                         opportunities_discovered = cycle_result.get("opportunities_discovered", 0)
                         users_processed = cycle_result.get("users_processed", 0)
                         cycle_duration_ms = cycle_result.get("cycle_duration_ms", 0)
-
-                    cycle_success = True
 
                     # Track successful cycle metrics with enhanced opportunity scan details
                     await self._track_service_metrics("autonomous_cycles", {
