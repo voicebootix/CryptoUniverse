@@ -1294,15 +1294,15 @@ class BackgroundServiceManager(LoggerMixin):
                             sync_errors += 1
                             continue
 
-                # Track service effectiveness metrics
-                await self._track_service_metrics("balance_sync", {
-                    "users_synced": users_synced,
-                    "sync_errors": sync_errors,
-                    "total_users": len(user_ids),
-                    "last_sync_time": datetime.utcnow().isoformat()
-                })
+                    # Track service effectiveness metrics
+                    await self._track_service_metrics("balance_sync", {
+                        "users_synced": users_synced,
+                        "sync_errors": sync_errors,
+                        "total_users": len(user_ids),
+                        "last_sync_time": datetime.utcnow().isoformat()
+                    })
 
-                self.logger.debug("Balance sync cycle completed")
+                    self.logger.debug("Balance sync cycle completed")
                 
             except Exception as e:
                 self.logger.error("Balance sync error", error=str(e))
