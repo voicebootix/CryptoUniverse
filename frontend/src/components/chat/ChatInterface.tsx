@@ -663,12 +663,22 @@ Just chat with me naturally! How can I help you manage your crypto investments t
       return;
     }
 
+    const isRequestCurrent = () => pendingRequestIdRef.current === requestId;
+
+    if (!isRequestCurrent()) {
+      return;
+    }
+
     try {
       const response = await apiClient.post('/chat/message', {
         message: messageToSend,
         session_id: sessionId,
         mode: 'trading',
       });
+
+      if (!isRequestCurrent()) {
+        return;
+      }
 
       if (response.data?.success) {
         const assistantMessage: ChatMessage = {
@@ -682,6 +692,10 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         };
 
         setMessages(prev => {
+          if (!isRequestCurrent()) {
+            return prev;
+          }
+
           const hasPlaceholder = prev.some(msg => msg.id === placeholderId);
           if (hasPlaceholder) {
             return prev.map(msg =>
@@ -694,29 +708,37 @@ Just chat with me naturally! How can I help you manage your crypto investments t
         throw new Error(response.data?.detail || 'Chat service unavailable');
       }
     } catch (error) {
-      const friendlyMessage = buildErrorMessage(error);
-      setMessages(prev => prev.filter(msg => msg.id !== placeholderId));
-      pushSystemMessage(friendlyMessage);
-      toast({
-        title: 'Message Failed',
-        description: friendlyMessage,
-        variant: 'destructive',
-      });
+      if (isRequestCurrent()) {
+        const friendlyMessage = buildErrorMessage(error);
+        setMessages(prev => prev.filter(msg => msg.id !== placeholderId));
+        pushSystemMessage(friendlyMessage);
+        toast({
+          title: 'Message Failed',
+          description: friendlyMessage,
+          variant: 'destructive',
+        });
+      }
     } finally {
-      finalizePendingRequest();
-      setStreamProgress(null);
-      setStreamProgressPercent(0);
-      setCurrentStreamingMessageId(null);
-      progressEventsRef.current = [];
-      setProgressEvents([]);
-      streamingContentRef.current = '';
+      if (isRequestCurrent()) {
+        finalizePendingRequest();
+        setStreamProgress(null);
+        setStreamProgressPercent(0);
+        setCurrentStreamingMessageId(null);
+        progressEventsRef.current = [];
+        setProgressEvents([]);
+        streamingContentRef.current = '';
+      }
     }
   }, [
     buildErrorMessage,
     finalizePendingRequest,
+    setCurrentStreamingMessageId,
     setMessages,
     pushSystemMessage,
     sessionId,
+    setProgressEvents,
+    setStreamProgress,
+    setStreamProgressPercent,
     toast,
   ]);
 
