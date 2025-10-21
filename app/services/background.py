@@ -810,6 +810,10 @@ class BackgroundServiceManager(LoggerMixin):
                         timeout=300  # 5 minute timeout
                     )
 
+                    # Initialize variables with safe defaults before extracting from result
+                    users_processed = 0
+                    cycle_duration_ms = 0
+
                     # Extract opportunity count from result if available
                     if isinstance(cycle_result, dict):
                         opportunities_discovered = cycle_result.get("opportunities_discovered", 0)
