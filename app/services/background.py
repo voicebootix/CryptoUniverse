@@ -757,71 +757,140 @@ class BackgroundServiceManager(LoggerMixin):
     async def _autonomous_cycles_service(self):
         """Manage autonomous trading cycles for all users."""
         self.logger.info(" Autonomous cycles service started")
-        
+
         while self.running:
+            active_users_count = 0
+            opportunities_discovered = 0
+
             try:
                 # Check if Redis is available first
                 if not self.redis:
                     self.logger.warning("Redis unavailable - skipping autonomous cycle")
+                    # Track error in metrics
+                    await self._track_service_metrics("autonomous_cycles", {
+                        "active_users": 0,
+                        "opportunities_discovered": 0,
+                        "error": "Redis unavailable",
+                        "last_cycle_time": datetime.utcnow().isoformat()
+                    })
                     await asyncio.sleep(300)  # Wait 5 minutes before trying again
                     continue
-                
+
                 # Check if any users are actually active (using non-blocking SCAN)
                 try:
                     # Use SCAN to avoid blocking Redis with KEYS command
                     has_active_users = False
-                    async for key in self.redis.scan_iter(match="autonomous_active:*", count=10):
+                    async for _ in self.redis.scan_iter(match="autonomous_active:*", count=10):
                         has_active_users = True
-                        break  # Short-circuit as soon as we find any matching key
-                    
+                        active_users_count += 1
+
                     if not has_active_users:
                         self.logger.debug("No active autonomous users - skipping cycle")
+                        # Track metrics for idle state
+                        await self._track_service_metrics("autonomous_cycles", {
+                            "active_users": 0,
+                            "opportunities_discovered": 0,
+                            "status": "idle",
+                            "last_cycle_time": datetime.utcnow().isoformat()
+                        })
                         await asyncio.sleep(60)  # Short wait when no active users
                         continue
-                        
+
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
                     self.logger.warning("Failed to check autonomous users", error=str(e))
+                    # Track error in metrics
+                    await self._track_service_metrics("autonomous_cycles", {
+                        "active_users": 0,
+                        "opportunities_discovered": 0,
+                        "error": f"User scan failed: {str(e)}",
+                        "last_cycle_time": datetime.utcnow().isoformat()
+                    })
                     await asyncio.sleep(60)
                     continue
-                
+
                 # Import and run autonomous cycles
                 try:
                     from app.services.master_controller import MasterSystemController
                     master_controller = MasterSystemController()
-                    
+
                     # Add timeout to prevent hanging
-                    await asyncio.wait_for(
+                    cycle_result = await asyncio.wait_for(
                         master_controller.run_global_autonomous_cycle(),
                         timeout=300  # 5 minute timeout
                     )
-                    
+
+                    # Initialize all variables with safe defaults before extracting from result
+                    # to prevent UnboundLocalError if cycle_result is not a dict
+                    users_processed = 0
+                    opportunities_discovered = 0
+                    cycle_duration_ms = 0
+                    # active_users_count already initialized at start of while loop (line 750)
+
+                    # Extract opportunity count from result if available
+                    if isinstance(cycle_result, dict):
+                        opportunities_discovered = cycle_result.get("opportunities_discovered", 0)
+                        users_processed = cycle_result.get("users_processed", 0)
+                        cycle_duration_ms = cycle_result.get("cycle_duration_ms", 0)
+
+                    # Track successful cycle metrics with enhanced opportunity scan details
+                    await self._track_service_metrics("autonomous_cycles", {
+                        "active_users": active_users_count,
+                        "users_processed": users_processed,
+                        "opportunities_discovered": opportunities_discovered,
+                        "avg_opportunities_per_user": round(opportunities_discovered / max(users_processed, 1), 2),
+                        "cycle_duration_ms": cycle_duration_ms,
+                        "status": "success",
+                        "last_cycle_time": datetime.utcnow().isoformat()
+                    })
+
                 except ImportError:
                     self.logger.warning("Master controller not available for autonomous cycles")
+                    # Track error in metrics
+                    await self._track_service_metrics("autonomous_cycles", {
+                        "active_users": active_users_count,
+                        "opportunities_discovered": 0,
+                        "error": "Master controller not available",
+                        "last_cycle_time": datetime.utcnow().isoformat()
+                    })
                     await asyncio.sleep(300)  # Wait 5 minutes before retrying
                     continue
-                    
+
                 except asyncio.TimeoutError:
                     self.logger.exception("Autonomous cycle timed out - this indicates a hanging operation")
+                    # Track timeout error in metrics
+                    await self._track_service_metrics("autonomous_cycles", {
+                        "active_users": active_users_count,
+                        "opportunities_discovered": 0,
+                        "error": "Cycle timeout (300s)",
+                        "last_cycle_time": datetime.utcnow().isoformat()
+                    })
                     await asyncio.sleep(60)  # Shorter wait after timeout
                     continue
-                
+
             except Exception as e:
                 # Re-raise cancellation errors immediately
                 if isinstance(e, asyncio.CancelledError):
                     raise
                 self.logger.exception("Autonomous cycles error")
+                # Track error in metrics
+                await self._track_service_metrics("autonomous_cycles", {
+                    "active_users": active_users_count,
+                    "opportunities_discovered": 0,
+                    "error": str(e),
+                    "last_cycle_time": datetime.utcnow().isoformat()
+                })
                 await asyncio.sleep(30)  # Short wait on error
                 continue
-            
+
             # ADAPTIVE CYCLE TIMING based on market conditions
             try:
                 next_interval = await self._calculate_adaptive_cycle_interval()
             except Exception as e:
                 self.logger.warning("Failed to calculate adaptive interval", error=str(e))
                 next_interval = 60  # Default to 1 minute
-                
+
             await asyncio.sleep(next_interval)
     
     async def _market_data_sync_service(self):

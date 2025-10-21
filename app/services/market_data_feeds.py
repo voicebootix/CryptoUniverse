@@ -29,6 +29,26 @@ settings = get_settings()
 logger = structlog.get_logger(__name__)
 
 
+# Custom exceptions for market data operations
+class MarketDataError(Exception):
+    """Base exception for market data operations."""
+    pass
+
+
+class MarketDataRateLimitError(MarketDataError):
+    """Raised when API rate limit is exceeded."""
+    def __init__(self, message: str = "Rate limit exceeded", retry_after: Optional[int] = None):
+        self.retry_after = retry_after
+        super().__init__(message)
+
+
+class MarketDataBatchFetchError(MarketDataError):
+    """Raised when batch price fetching fails after all retries."""
+    def __init__(self, message: str, attempts: int = 0):
+        self.attempts = attempts
+        super().__init__(message)
+
+
 class MarketDataFeeds:
     """Real market data feeds using free APIs."""
     
@@ -1204,6 +1224,79 @@ class MarketDataFeeds:
         except Exception as e:
             return {"success": False, "error": str(e)}
     
+    async def _fetch_batch_with_retries(self, batch: List[str], max_retries: int = 3) -> Dict[str, float]:
+        """Fetch prices for a batch of symbols with retry logic."""
+        for attempt in range(max_retries):
+            try:
+                # Use existing get_multiple_prices method for batch fetching
+                result = await self.get_multiple_prices(batch)
+
+                if result.get("success"):
+                    # Extract price values from the result
+                    prices = {}
+                    for symbol, data in result.get("data", {}).items():
+                        prices[symbol] = float(data.get("price", 0))
+                    return prices
+                else:
+                    error = result.get("error", "Unknown error")
+                    if "429" in str(error) or "Rate limit" in str(error):
+                        # Rate limit hit - raise to trigger backoff
+                        raise MarketDataRateLimitError(f"Rate limit exceeded: {error}")
+
+                # Other error - retry with exponential backoff
+                if attempt < max_retries - 1:
+                    delay = 2 ** attempt
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    # Final attempt failed
+                    raise MarketDataBatchFetchError(
+                        f"Batch fetch failed after {max_retries} attempts: {error}",
+                        attempts=max_retries
+                    )
+            except MarketDataRateLimitError:
+                # Re-raise rate limit errors immediately without retry
+                raise
+            except MarketDataBatchFetchError:
+                # Re-raise batch fetch errors immediately
+                raise
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    delay = 2 ** attempt
+                    logger.warning(f"Batch fetch attempt {attempt + 1} failed, retrying in {delay}s", error=str(e))
+                    await asyncio.sleep(delay)
+                else:
+                    # Final attempt - raise as batch fetch error
+                    raise MarketDataBatchFetchError(
+                        f"Batch fetch failed after {max_retries} attempts: {str(e)}",
+                        attempts=max_retries
+                    )
+
+    async def _get_stale_price(self, symbol: str) -> Optional[float]:
+        """Get cached/stale price from Redis as fallback."""
+        if not self.redis:
+            return None
+
+        try:
+            # Try to get from Redis cache
+            cache_key = f"price:{symbol}"
+            cached_data = await self.redis.get(cache_key)
+
+            if cached_data:
+                # Use existing deserialize helper
+                price_data = self._deserialize_price_cache(cached_data)
+                if price_data and isinstance(price_data, dict):
+                    # Try to extract price from various possible structures
+                    if "price" in price_data:
+                        return float(price_data["price"])
+                    elif "data" in price_data and isinstance(price_data["data"], dict):
+                        return float(price_data["data"].get("price", 0))
+
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to get stale price for {symbol}", error=str(e))
+            return None
+
     async def sync_market_data_batch(self, symbols: List[str], batch_size: int = 50) -> Dict[str, float]:
         results = {}
         batches = [symbols[i:i+batch_size] for i in range(0, len(symbols), batch_size)]
