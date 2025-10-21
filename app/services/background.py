@@ -856,7 +856,7 @@ class BackgroundServiceManager(LoggerMixin):
                                 symbols=symbols_list[:10] if symbols_list else [])
 
             except Exception as e:
-                self.logger.error("Market data sync error", error=str(e))
+                self.logger.exception("Market data sync error")
                 # Track error in metrics
                 await self._track_service_metrics("market_data_sync", {
                     "symbols_discovered": 0,
