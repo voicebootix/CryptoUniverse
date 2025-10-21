@@ -29,7 +29,7 @@ class TelegramWebhookFixer:
             return False
         
         print(f"🔧 Fixing Telegram webhook configuration...")
-        print(f"   Bot Token: {self.bot_token[:10]}...")
+        print(f"   Bot Token: [REDACTED]")
         print(f"   Webhook URL: {self.webhook_url}")
         
         try:
