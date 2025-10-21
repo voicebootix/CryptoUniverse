@@ -21,18 +21,13 @@ The fix involves properly configuring the Telegram webhook with the correct sett
 
 ## Implementation
 
-### Option 1: Use the Fix Script
+### Quick Fix with curl (Recommended)
 ```bash
-python fix_telegram_webhook_config.py
-```
+# 1. Remove existing webhook
+curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/deleteWebhook?drop_pending_updates=true"
 
-### Option 2: Manual API Calls
-```bash
-# Remove existing webhook
-curl -X POST "https://api.telegram.org/bot{TOKEN}/deleteWebhook?drop_pending_updates=true"
-
-# Set proper webhook
-curl -X POST "https://api.telegram.org/bot{TOKEN}/setWebhook" \
+# 2. Set proper webhook
+curl -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://cryptouniverse.onrender.com/api/v1/telegram/webhook",
@@ -41,8 +36,13 @@ curl -X POST "https://api.telegram.org/bot{TOKEN}/setWebhook" \
     "drop_pending_updates": true
   }'
 
-# Verify webhook
-curl "https://api.telegram.org/bot{TOKEN}/getWebhookInfo"
+# 3. Verify webhook is working
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
+```
+
+### Alternative: Python Script
+```bash
+python fix_telegram_webhook_config.py
 ```
 
 ## Environment Variables Required
