@@ -383,12 +383,24 @@ class BackgroundServiceManager(LoggerMixin):
         """Get detailed status for specific service."""
         if service not in self.tasks:
             return {"status": "not_found"}
-        
+
         task = self.tasks[service]
+
+        # Only check exception if task is done and not cancelled
+        exception_info = None
+        if task.done() and not task.cancelled():
+            try:
+                exc = task.exception()
+                if exc:
+                    exception_info = str(exc)
+            except Exception:
+                # If exception() call itself fails, ignore it
+                pass
+
         return {
             "status": "running" if not task.done() else "stopped",
             "cancelled": task.cancelled(),
-            "exception": str(task.exception()) if task.exception() else None,
+            "exception": exception_info,
             "interval": self.intervals.get(service, 0),
             "last_run": getattr(task, 'last_run', None)
         }
