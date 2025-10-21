@@ -642,6 +642,12 @@ class BackgroundServiceManager(LoggerMixin):
                 except Exception as e:
                     self.logger.warning("Failed to release lock atomically", error=str(e))
 
+        # Track service effectiveness metrics
+        await self._track_service_metrics("signal_dispatch", {
+            "signals_delivered": total_deliveries,
+            "last_dispatch_time": datetime.utcnow().isoformat()
+        })
+
         if total_deliveries:
             system_monitoring_service.record_metric(
                 "signal_dispatch_deliveries",
@@ -649,6 +655,8 @@ class BackgroundServiceManager(LoggerMixin):
                 {"timestamp": datetime.utcnow().isoformat()},
             )
             self.logger.info("Signal dispatch cycle complete", deliveries=total_deliveries)
+        else:
+            self.logger.debug("Signal dispatch cycle complete - no deliveries needed")
 
     async def _is_signal_dispatch_allowed(self) -> bool:
         if not self.redis:
@@ -1255,16 +1263,20 @@ class BackgroundServiceManager(LoggerMixin):
                     
                     result = await db.execute(stmt)
                     user_ids = [row[0] for row in result.fetchall()]
-                    
+
                     self.logger.debug(f"Syncing balances for {len(user_ids)} users with active exchanges")
-                    
+
+                    # Track synced users
+                    users_synced = 0
+                    sync_errors = 0
+
                     # Sync balances for each user using your existing system
                     for user_id in user_ids:
                         try:
                             # Use your existing exchange balance fetching
                             from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
                             portfolio_data = await get_user_portfolio_from_exchanges(str(user_id), db)
-                            
+
                             if portfolio_data.get("success"):
                                 # Update cached portfolio data in Redis for real-time access
                                 if self.redis:
@@ -1273,11 +1285,23 @@ class BackgroundServiceManager(LoggerMixin):
                                         300,  # 5 minute cache
                                         json.dumps(portfolio_data, default=str)
                                     )
-                            
+                                users_synced += 1
+                            else:
+                                sync_errors += 1
+
                         except Exception as e:
                             self.logger.warning(f"Balance sync failed for user {user_id}", error=str(e))
+                            sync_errors += 1
                             continue
-                
+
+                # Track service effectiveness metrics
+                await self._track_service_metrics("balance_sync", {
+                    "users_synced": users_synced,
+                    "sync_errors": sync_errors,
+                    "total_users": len(user_ids),
+                    "last_sync_time": datetime.utcnow().isoformat()
+                })
+
                 self.logger.debug("Balance sync cycle completed")
                 
             except Exception as e:
