@@ -4381,7 +4381,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self.logger.debug("Error tracking failed", error=str(track_error))
 
     async def _track_scan_metrics(self, user_id: str, scan_id: str, opportunities_count: int, strategies_count: int, execution_time_ms: float, success: bool = True):
-        """Track user-initiated opportunity scan metrics for diagnostic monitoring."""
+        """Track user-initiated opportunity scan metrics for diagnostic monitoring.
+
+        Uses atomic Lua script to prevent race conditions during concurrent scan completions.
+        """
 
         try:
             if not self.redis:
@@ -4402,41 +4405,76 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             metrics_key = "service_metrics:user_initiated_scans"
             await self.redis.set(metrics_key, json.dumps(metrics_data), ex=3600)  # 1 hour TTL
 
-            # Also track daily statistics
+            # Atomic daily statistics update using Lua script to prevent race conditions
             stats_key = f"opportunity_scan_stats:{self._current_timestamp().strftime('%Y-%m-%d')}"
-            scan_stats = await self.redis.get(stats_key)
 
-            if scan_stats:
-                stats = json.loads(scan_stats)
-            else:
-                stats = {
-                    "total_scans": 0,
-                    "successful_scans": 0,
-                    "total_opportunities": 0,
-                    "total_strategies": 0,
-                    "avg_execution_time_ms": 0
+            # Lua script for atomic read-modify-write of daily stats
+            # Uses Redis hash for better atomicity and performance
+            lua_script = """
+                local stats_key = KEYS[1]
+                local opps_count = tonumber(ARGV[1])
+                local strats_count = tonumber(ARGV[2])
+                local exec_time = tonumber(ARGV[3])
+                local success_flag = tonumber(ARGV[4])
+                local ttl = tonumber(ARGV[5])
+
+                -- Increment counters atomically
+                redis.call('HINCRBY', stats_key, 'total_scans', 1)
+                if success_flag == 1 then
+                    redis.call('HINCRBY', stats_key, 'successful_scans', 1)
+                end
+                redis.call('HINCRBY', stats_key, 'total_opportunities', opps_count)
+                redis.call('HINCRBY', stats_key, 'total_strategies', strats_count)
+
+                -- Calculate running average atomically
+                local total_scans = tonumber(redis.call('HGET', stats_key, 'total_scans'))
+                local prev_avg = tonumber(redis.call('HGET', stats_key, 'avg_execution_time_ms') or '0')
+                local new_avg = (prev_avg * (total_scans - 1) + exec_time) / total_scans
+                redis.call('HSET', stats_key, 'avg_execution_time_ms', tostring(new_avg))
+
+                -- Set TTL
+                redis.call('EXPIRE', stats_key, ttl)
+
+                -- Return updated stats
+                return {
+                    redis.call('HGET', stats_key, 'total_scans'),
+                    redis.call('HGET', stats_key, 'successful_scans'),
+                    redis.call('HGET', stats_key, 'total_opportunities'),
+                    redis.call('HGET', stats_key, 'total_strategies'),
+                    redis.call('HGET', stats_key, 'avg_execution_time_ms')
                 }
+            """
 
-            stats["total_scans"] += 1
-            if success:
-                stats["successful_scans"] += 1
-            stats["total_opportunities"] += opportunities_count
-            stats["total_strategies"] += strategies_count
+            # Execute Lua script atomically
+            success_int = 1 if success else 0
+            ttl_seconds = 86400 * 7  # 7 days
 
-            # Calculate running average
-            prev_avg = stats["avg_execution_time_ms"]
-            stats["avg_execution_time_ms"] = (prev_avg * (stats["total_scans"] - 1) + execution_time_ms) / stats["total_scans"]
-
-            await self.redis.set(stats_key, json.dumps(stats), ex=86400 * 7)  # 7 days
+            result = await self.redis.eval(
+                lua_script,
+                1,  # number of keys
+                stats_key,  # KEYS[1]
+                opportunities_count,  # ARGV[1]
+                strategies_count,  # ARGV[2]
+                execution_time_ms,  # ARGV[3]
+                success_int,  # ARGV[4]
+                ttl_seconds  # ARGV[5]
+            )
 
             self.logger.info(
-                "📊 User-initiated scan metrics tracked",
+                "📊 User-initiated scan metrics tracked (atomic)",
                 scan_id=scan_id,
                 user_id=user_id,
                 opportunities=opportunities_count,
                 strategies=strategies_count,
                 execution_time_ms=execution_time_ms,
-                success=success
+                success=success,
+                daily_stats={
+                    "total_scans": result[0] if result else None,
+                    "successful_scans": result[1] if result else None,
+                    "total_opportunities": result[2] if result else None,
+                    "total_strategies": result[3] if result else None,
+                    "avg_execution_time_ms": result[4] if result else None
+                }
             )
 
         except Exception as track_error:
