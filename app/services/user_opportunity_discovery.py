@@ -994,6 +994,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # STEP 9: Cache results
             await self._cache_opportunities(user_id, final_response, user_profile)
 
+            # Track metrics for diagnostic monitoring
+            await self._track_scan_metrics(
+                user_id=user_id,
+                scan_id=scan_id,
+                opportunities_count=len(ranked_opportunities),
+                strategies_count=user_profile.active_strategy_count,
+                execution_time_ms=execution_time,
+                success=True
+            )
+
             self.logger.info("✅ ENTERPRISE User Opportunity Discovery Completed",
                            scan_id=scan_id,
                            user_id=user_id,
@@ -1012,13 +1022,23 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             error=str(e),
                             error_type=type(e).__name__,
                             exc_info=True)
-            
+
             # Track error metrics
             await self._track_error_metrics(user_id, scan_id, str(e), execution_time)
-            
+
+            # Track scan metrics with failure status
+            await self._track_scan_metrics(
+                user_id=user_id,
+                scan_id=scan_id,
+                opportunities_count=0,
+                strategies_count=0,
+                execution_time_ms=execution_time,
+                success=False
+            )
+
             # Provide graceful degradation - return limited opportunities if possible
             fallback_result = await self._provide_fallback_opportunities(user_id, scan_id)
-            
+
             return {
                 "success": False,
                 "error": f"Opportunity discovery failed: {str(e)}",
@@ -4330,21 +4350,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     
     async def _track_error_metrics(self, user_id: str, scan_id: str, error: str, execution_time: float):
         """Track error metrics for monitoring and alerting."""
-        
+
         try:
             if not self.redis:
                 return
-            
+
             # Increment error counters
             error_key = f"opportunity_discovery_errors:{self._current_timestamp().strftime('%Y-%m-%d')}"
             await self.redis.incr(error_key)
             await self.redis.expire(error_key, 86400 * 7)  # 7 days
-            
+
             # Track user-specific errors
             user_error_key = f"user_opportunity_errors:{user_id}"
             await self.redis.incr(user_error_key)
             await self.redis.expire(user_error_key, 86400)  # 24 hours
-            
+
             # Store error details for analysis
             error_details = {
                 "scan_id": scan_id,
@@ -4353,12 +4373,112 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 "execution_time_ms": execution_time,
                 "timestamp": self._current_timestamp().isoformat()
             }
-            
+
             error_log_key = f"opportunity_error_log:{scan_id}"
             await self.redis.set(error_log_key, json.dumps(error_details), ex=86400 * 3)  # 3 days
-            
+
         except Exception as track_error:
             self.logger.debug("Error tracking failed", error=str(track_error))
+
+    async def _track_scan_metrics(self, user_id: str, scan_id: str, opportunities_count: int, strategies_count: int, execution_time_ms: float, success: bool = True):
+        """Track user-initiated opportunity scan metrics for diagnostic monitoring.
+
+        Uses atomic Lua script to prevent race conditions during concurrent scan completions.
+        """
+
+        try:
+            if not self.redis:
+                return
+
+            # Store latest scan metrics in Redis for diagnostic endpoint
+            metrics_data = {
+                "scan_id": scan_id,
+                "user_id": user_id,
+                "opportunities_discovered": opportunities_count,
+                "strategies_scanned": strategies_count,
+                "execution_time_ms": execution_time_ms,
+                "success": success,
+                "timestamp": self._current_timestamp().isoformat()
+            }
+
+            # Store in Redis with key that diagnostic endpoint can read
+            metrics_key = "service_metrics:user_initiated_scans"
+            await self.redis.set(metrics_key, json.dumps(metrics_data), ex=3600)  # 1 hour TTL
+
+            # Atomic daily statistics update using Lua script to prevent race conditions
+            stats_key = f"opportunity_scan_stats:{self._current_timestamp().strftime('%Y-%m-%d')}"
+
+            # Lua script for atomic read-modify-write of daily stats
+            # Uses Redis hash for better atomicity and performance
+            lua_script = """
+                local stats_key = KEYS[1]
+                local opps_count = tonumber(ARGV[1])
+                local strats_count = tonumber(ARGV[2])
+                local exec_time = tonumber(ARGV[3])
+                local success_flag = tonumber(ARGV[4])
+                local ttl = tonumber(ARGV[5])
+
+                -- Increment counters atomically
+                redis.call('HINCRBY', stats_key, 'total_scans', 1)
+                if success_flag == 1 then
+                    redis.call('HINCRBY', stats_key, 'successful_scans', 1)
+                end
+                redis.call('HINCRBY', stats_key, 'total_opportunities', opps_count)
+                redis.call('HINCRBY', stats_key, 'total_strategies', strats_count)
+
+                -- Calculate running average atomically
+                local total_scans = tonumber(redis.call('HGET', stats_key, 'total_scans'))
+                local prev_avg = tonumber(redis.call('HGET', stats_key, 'avg_execution_time_ms') or '0')
+                local new_avg = (prev_avg * (total_scans - 1) + exec_time) / total_scans
+                redis.call('HSET', stats_key, 'avg_execution_time_ms', tostring(new_avg))
+
+                -- Set TTL
+                redis.call('EXPIRE', stats_key, ttl)
+
+                -- Return updated stats
+                return {
+                    redis.call('HGET', stats_key, 'total_scans'),
+                    redis.call('HGET', stats_key, 'successful_scans'),
+                    redis.call('HGET', stats_key, 'total_opportunities'),
+                    redis.call('HGET', stats_key, 'total_strategies'),
+                    redis.call('HGET', stats_key, 'avg_execution_time_ms')
+                }
+            """
+
+            # Execute Lua script atomically
+            success_int = 1 if success else 0
+            ttl_seconds = 86400 * 7  # 7 days
+
+            result = await self.redis.eval(
+                lua_script,
+                1,  # number of keys
+                stats_key,  # KEYS[1]
+                opportunities_count,  # ARGV[1]
+                strategies_count,  # ARGV[2]
+                execution_time_ms,  # ARGV[3]
+                success_int,  # ARGV[4]
+                ttl_seconds  # ARGV[5]
+            )
+
+            self.logger.info(
+                "📊 User-initiated scan metrics tracked (atomic)",
+                scan_id=scan_id,
+                user_id=user_id,
+                opportunities=opportunities_count,
+                strategies=strategies_count,
+                execution_time_ms=execution_time_ms,
+                success=success,
+                daily_stats={
+                    "total_scans": result[0] if result else None,
+                    "successful_scans": result[1] if result else None,
+                    "total_opportunities": result[2] if result else None,
+                    "total_strategies": result[3] if result else None,
+                    "avg_execution_time_ms": result[4] if result else None
+                }
+            )
+
+        except Exception as track_error:
+            self.logger.debug("Scan metrics tracking failed", error=str(track_error))
     
     async def _provide_fallback_opportunities(self, user_id: str, scan_id: str) -> Dict[str, Any]:
         """Provide fallback opportunities when main discovery fails."""

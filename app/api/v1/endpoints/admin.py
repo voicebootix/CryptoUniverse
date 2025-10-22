@@ -3200,10 +3200,23 @@ async def get_background_services_detailed(
                     "error": str(e)
                 }
 
+        # Add user-initiated scan metrics (not a background service, but tracked for diagnostics)
+        user_scan_metrics = None
+        try:
+            redis = background_manager.redis
+            if redis:
+                metrics_data = await redis.get("service_metrics:user_initiated_scans")
+                if metrics_data:
+                    import json
+                    user_scan_metrics = json.loads(metrics_data)
+        except Exception as e:
+            logger.debug(f"Failed to retrieve user-initiated scan metrics: {e}")
+
         return {
             "success": True,
             "uptime_hours": system_metrics.get("uptime_hours", 0),
             "services": service_details,
+            "user_initiated_scans": user_scan_metrics,  # Add user-initiated scan metrics
             "services_summary": {
                 "total": len(service_details),
                 "running": sum(1 for s in service_details.values() if s.get("status") == "running"),
