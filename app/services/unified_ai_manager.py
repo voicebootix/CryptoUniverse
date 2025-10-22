@@ -30,12 +30,19 @@ from app.services.chat_service_adapters_fixed import chat_adapters_fixed as chat
 from app.services.telegram_core import TelegramCommanderService, telegram_commander_service
 from app.services.websocket import manager
 from app.services.chat_memory import ChatMemoryService
+from app.services.unified_chat_service import (
+    unified_chat_service,
+    ConversationMode as ChatConversationMode,
+    InterfaceType as ChatInterfaceType,
+)
+from app.services.telegram_commander import TelegramConfig
 
 # Import actual service engines for routing
 from app.services.market_analysis_core import MarketAnalysisService
 from app.services.portfolio_risk_core import PortfolioRiskService
 from app.services.trading_strategies import TradingStrategiesService
 from app.services.strategy_marketplace_service import strategy_marketplace_service
+from app.services.user_opportunity_discovery import user_opportunity_discovery
 from app.services.conversation import (
     conversation_state_hydrator,
     unified_response_builder,
@@ -114,6 +121,7 @@ class UnifiedAIManager(LoggerMixin):
         self.trade_executor = TradeExecutionService()
         self.adapters = chat_adapters
         self.telegram_core = telegram_service or telegram_commander_service
+        self.chat_service = unified_chat_service
         
         # Enhanced memory service for conversation continuity
         self.memory_service = ChatMemoryService()
@@ -122,6 +130,7 @@ class UnifiedAIManager(LoggerMixin):
         self.market_analysis = MarketAnalysisService()
         self.portfolio_risk = PortfolioRiskService()
         self.trading_strategies = TradingStrategiesService()
+        self.opportunity_discovery = user_opportunity_discovery
         
         # Redis for state management - initialize properly for async usage
         self.redis = None
@@ -546,7 +555,11 @@ class UnifiedAIManager(LoggerMixin):
     
     async def handle_telegram_request(self, chat_id: str, user_id: str, message: str) -> Dict[str, Any]:
         """Handle Telegram requests through unified AI manager."""
-        
+
+        streaming_result = await self._try_stream_telegram_response(chat_id, user_id, message)
+        if streaming_result is not None:
+            return streaming_result
+
         # Process through unified system
         result = await self.process_user_request(
             user_id=user_id,
@@ -1064,7 +1077,18 @@ class UnifiedAIManager(LoggerMixin):
                 "greeting": "greeting",
             }
             mapped = raw_mapping.get(normalized_raw, normalized_raw)
-            candidates[mapped] = max(candidates.get(mapped, 0.0), 0.7)
+
+            if mapped == "general_query":
+                # Preserve keyword-based intents when the chat engine falls back to
+                # "general_query". This prevents greetings like "hi" from being
+                # misrouted away from the greeting templates simply because the
+                # legacy classifier could not determine a more specific intent.
+                if not candidates:
+                    candidates[mapped] = max(candidates.get(mapped, 0.0), 0.7)
+                else:
+                    candidates[mapped] = max(candidates.get(mapped, 0.0), 0.35)
+            else:
+                candidates[mapped] = max(candidates.get(mapped, 0.0), 0.7)
 
         recent_intents: List[str] = []
         if context:
@@ -1314,7 +1338,270 @@ class UnifiedAIManager(LoggerMixin):
                 "content": "I encountered an error formatting the response.",
                 "metadata": {"error": str(e)}
             }
-    
+
+    async def _try_stream_telegram_response(
+        self,
+        chat_id: str,
+        user_id: str,
+        message: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Attempt to stream a Telegram response using the unified chat service."""
+
+        if not getattr(settings, "enable_telegram_streaming", True):
+            return None
+
+        if not self.chat_service:
+            return None
+
+        session_id = f"telegram:{chat_id}"
+
+        try:
+            stream = await self.chat_service.process_message(
+                message=message,
+                user_id=user_id,
+                session_id=session_id,
+                interface=ChatInterfaceType.TELEGRAM,
+                conversation_mode=ChatConversationMode.LIVE_TRADING,
+                stream=True,
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "Telegram streaming unavailable, falling back to non-streaming response",
+                error=str(exc),
+                chat_id=chat_id,
+                user_id=user_id,
+            )
+            return None
+
+        if not hasattr(stream, "__anext__"):
+            return None
+
+        status_message_id: Optional[int] = None
+        last_status_text: Optional[str] = None
+        response_message_id: Optional[int] = None
+        response_buffer: str = ""
+        last_response_sent_length = 0
+        final_metadata: Optional[Dict[str, Any]] = None
+
+        async def _send_status(text: str) -> Optional[int]:
+            nonlocal status_message_id, last_status_text
+
+            sanitized = self._truncate_telegram_text(text)
+
+            if status_message_id and sanitized == last_status_text:
+                return status_message_id
+
+            if status_message_id:
+                try:
+                    edit_result = await self.telegram_core.telegram_api.edit_message_text(
+                        chat_id,
+                        status_message_id,
+                        sanitized,
+                    )
+                    if edit_result.get("success"):
+                        last_status_text = sanitized
+                        return status_message_id
+                except Exception as exc:
+                    self.logger.debug(
+                        "Failed to edit Telegram status message, sending a new one",
+                        error=str(exc),
+                        chat_id=chat_id,
+                    )
+
+            try:
+                send_result = await self.telegram_core.telegram_api.send_message(chat_id, sanitized)
+            except Exception as exc:
+                self.logger.warning(
+                    "Failed to send Telegram streaming status",
+                    error=str(exc),
+                    chat_id=chat_id,
+                )
+                return status_message_id
+
+            status_message_id = send_result.get("message_id")
+            last_status_text = sanitized
+            return status_message_id
+
+        async def _update_response(text: str, *, replace: bool = False) -> Optional[int]:
+            nonlocal response_message_id, response_buffer, last_response_sent_length
+
+            response_buffer = text if replace else response_buffer + text
+            truncated = self._truncate_telegram_text(response_buffer)
+
+            if response_message_id is None:
+                try:
+                    send_result = await self.telegram_core.telegram_api.send_message(chat_id, truncated)
+                except Exception as exc:
+                    self.logger.error(
+                        "Failed to send Telegram streaming response",
+                        error=str(exc),
+                        chat_id=chat_id,
+                    )
+                    return None
+
+                response_message_id = send_result.get("message_id")
+                last_response_sent_length = len(truncated)
+                return response_message_id
+
+            if replace or len(truncated) - last_response_sent_length >= 32 or truncated.endswith((".", "!", "?")):
+                try:
+                    await self.telegram_core.telegram_api.edit_message_text(
+                        chat_id,
+                        response_message_id,
+                        truncated,
+                    )
+                    last_response_sent_length = len(truncated)
+                except Exception as exc:
+                    self.logger.debug(
+                        "Failed to edit Telegram streaming response",
+                        error=str(exc),
+                        chat_id=chat_id,
+                    )
+                    try:
+                        send_result = await self.telegram_core.telegram_api.send_message(chat_id, truncated)
+                        response_message_id = send_result.get("message_id")
+                        last_response_sent_length = len(truncated)
+                    except Exception as send_exc:
+                        self.logger.error(
+                            "Failed to recover Telegram streaming response",
+                            error=str(send_exc),
+                            chat_id=chat_id,
+                        )
+
+            return response_message_id
+
+        try:
+            async for chunk in stream:
+                formatted = self._format_stream_chunk_for_telegram(chunk)
+                if not formatted:
+                    continue
+
+                chunk_metadata = formatted.get("metadata")
+                if chunk_metadata:
+                    final_metadata = chunk_metadata
+
+                mode = formatted["mode"]
+                text = formatted.get("text", "")
+
+                if mode == "status":
+                    await _send_status(text)
+                elif mode == "append":
+                    await _update_response(text)
+                elif mode == "replace":
+                    await _update_response(text, replace=True)
+                elif mode == "action":
+                    await self.telegram_core.telegram_api.send_message(chat_id, text)
+                elif mode == "error":
+                    await self.telegram_core.telegram_api.send_message(chat_id, text)
+                    return {"success": False, "error": text}
+                elif mode == "final-status":
+                    await _send_status(text)
+
+        except Exception as exc:
+            self.logger.warning(
+                "Telegram streaming failed mid-response",
+                error=str(exc),
+                chat_id=chat_id,
+                user_id=user_id,
+            )
+            return None
+
+        if response_buffer:
+            if response_message_id and len(response_buffer) > last_response_sent_length:
+                truncated = self._truncate_telegram_text(response_buffer)
+                try:
+                    await self.telegram_core.telegram_api.edit_message_text(
+                        chat_id,
+                        response_message_id,
+                        truncated,
+                    )
+                except Exception as exc:
+                    self.logger.debug(
+                        "Final Telegram stream update failed", error=str(exc), chat_id=chat_id
+                    )
+            return {
+                "success": True,
+                "response": self._truncate_telegram_text(response_buffer),
+                "streamed": True,
+                "metadata": final_metadata or {},
+            }
+
+        return None
+
+    def _format_stream_chunk_for_telegram(self, chunk: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Convert streaming chunk into Telegram-friendly instructions."""
+
+        chunk_type = (chunk or {}).get("type")
+
+        if chunk_type == "processing":
+            content = (chunk.get("content") or "").strip()
+            if not content:
+                return None
+            return {"mode": "status", "text": f"⏳ {content}"}
+
+        if chunk_type == "progress":
+            progress = chunk.get("progress") or {}
+            message = (progress.get("message") or "").strip()
+            if not message:
+                return None
+            stage = (progress.get("stage") or "").lower()
+            emoji = "📊" if "opportunit" in stage else "🔄"
+            percent = progress.get("percent")
+            try:
+                if percent is not None:
+                    percent_value = int(float(percent))
+                    message = f"{message} ({percent_value}% complete)"
+            except (TypeError, ValueError):
+                pass
+            return {"mode": "status", "text": f"{emoji} {message}"}
+
+        if chunk_type == "response":
+            content = chunk.get("content")
+            if not content:
+                return None
+            return {"mode": "append", "text": content}
+
+        if chunk_type == "persona_enriched":
+            content = chunk.get("content")
+            if not content:
+                return None
+            if chunk.get("replaces_previous"):
+                return {"mode": "replace", "text": content}
+            return {"mode": "append", "text": content}
+
+        if chunk_type == "action_required":
+            content = (chunk.get("content") or "This action requires confirmation.").strip()
+            decision_id = chunk.get("decision_id")
+            if decision_id:
+                content = f"{content}\nDecision ID: {decision_id}"
+            return {"mode": "action", "text": f"⚠️ {content}"}
+
+        if chunk_type == "error":
+            content = (chunk.get("content") or chunk.get("error") or "An unexpected error occurred.").strip()
+            return {"mode": "error", "text": f"❌ {content}"}
+
+        if chunk_type == "complete":
+            metadata = chunk.get("metadata")
+            return {
+                "mode": "final-status",
+                "text": "✅ Analysis complete.",
+                "metadata": metadata,
+            }
+
+        return None
+
+    def _truncate_telegram_text(self, text: str) -> str:
+        """Ensure Telegram messages stay within platform limits."""
+
+        if not text:
+            return ""
+
+        max_length = getattr(TelegramConfig, "MAX_MESSAGE_LENGTH", 4096)
+        if len(text) <= max_length:
+            return text
+
+        return text[: max_length - 20].rstrip() + "\n…"
+
     def _format_for_telegram(self, result: Dict[str, Any]) -> str:
         """Format response specifically for Telegram."""
 
@@ -1712,14 +1999,20 @@ class UnifiedAIManager(LoggerMixin):
             self.logger.info(f"Routing intent '{intent}' to actual service for user {user_id}")
 
             if "opportunity" in intent.lower() or "discover" in intent.lower():
-                # Route to market analysis for opportunity discovery
-                result = await self.market_analysis.market_inefficiency_scanner(
-                    symbols="BTC,ETH,BNB,SOL,ADA,XRP,DOT,AVAX,MATIC,LINK,UNI,ATOM",
-                    exchanges="all",
-                    scan_types="spread,volume,time",
-                    user_id=user_id
+                # Route to the enterprise opportunity discovery service so Telegram receives
+                # the rich opportunity payload rather than the generic market scanner stub.
+                await self.opportunity_discovery.async_init()
+                discovery_result = await self.opportunity_discovery.discover_opportunities_for_user(
+                    user_id,
+                    force_refresh=bool((context or {}).get("force_opportunity_refresh", False)),
+                    include_strategy_recommendations=False,
                 )
-                return {"service": "market_analysis", "method": "opportunity_discovery", "result": result}
+
+                return {
+                    "service": "opportunity_discovery",
+                    "method": "discover_opportunities_for_user",
+                    "result": discovery_result,
+                }
 
             elif "portfolio" in intent.lower():
                 # Route to portfolio risk service

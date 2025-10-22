@@ -194,13 +194,29 @@ class ResponseTemplates:
         service_result: Dict[str, Any],
         recommendation: Dict[str, Any],
     ) -> tuple[str, Dict[str, Any]]:
+        payload = service_result.get("result") if isinstance(service_result, dict) else service_result
         ranked = rank_opportunities(
-            service_result or recommendation,
+            payload or recommendation,
             risk_profile=state.risk_profile,
             portfolio_value=state.portfolio_value,
         )
 
         lines: List[str] = []
+        message_override: Optional[str] = None
+        scan_state: Optional[str] = None
+
+        if isinstance(payload, dict):
+            message_override = payload.get("message") or payload.get("metadata", {}).get("message")
+            scan_state = payload.get("scan_state") or payload.get("metadata", {}).get("scan_state")
+
+        metadata: Dict[str, Any] = {
+            "ranked_opportunities": [opp.to_dict() for opp in ranked],
+        }
+        if scan_state:
+            metadata["scan_state"] = scan_state
+        if message_override:
+            metadata.setdefault("message", message_override)
+
         if ranked:
             lines.append(
                 f"I'm tracking {len(ranked)} setups that fit your {state.risk_profile} profile."
@@ -220,14 +236,16 @@ class ResponseTemplates:
                 )
             lines.append(" ".join(highlights))
         else:
-            lines.append(
-                "I'm scanning live feeds but don't have a clean setup that matches your risk bands yet. I'll alert you as soon as one clears our filters."
-            )
+            if message_override:
+                lines.append(message_override)
+                if scan_state in {"pending", "partial"}:
+                    lines.append("I'll update you as soon as the scan finishes and the setups clear our filters.")
+            else:
+                lines.append(
+                    "I'm scanning live feeds but don't have a clean setup that matches your risk bands yet. I'll alert you as soon as one clears our filters."
+                )
 
         lines.append("Do you want me to reserve capital for one of these or widen the search?")
-        metadata = {
-            "ranked_opportunities": [opp.to_dict() for opp in ranked],
-        }
         return " ".join(lines), metadata
 
     def _greeting_response(
