@@ -1,4 +1,6 @@
 import os
+from dataclasses import dataclass, field
+from typing import Any, Dict, List
 
 import pytest
 
@@ -54,28 +56,43 @@ class _PassthroughPersona:
         return text
 
 
-class _DummyState:
-    risk_profile = "balanced"
-    portfolio = {"total_value": 0}
-    opportunities = []
-    trading_mode = "balanced"
-    credit = type("Credit", (), {  # pragma: no cover - simple struct
-        "available_credits": 0,
-        "profit_potential_usd": 0.0,
-        "credit_to_usd_ratio": 1.0,
-        "tier": "standard",
-    })()
-    strategies = type("Strategies", (), {
-        "active": [],
-        "marketplace_highlights": [],
-    })()
+@dataclass
+class _DummyCredit:
+    available_credits: int = 0
+    profit_potential_usd: float = 0.0
+    credit_to_usd_ratio: float = 1.0
+    tier: str = "standard"
 
-    def summarize_holdings(self, limit: int = 3):  # pragma: no cover - unused helper
+
+@dataclass
+class _DummyStrategies:
+    active: List[Dict[str, Any]] = field(default_factory=list)
+    marketplace_highlights: List[Dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class _DummyState:
+    total_value: float = 0.0
+    risk_profile: str = "balanced"
+    opportunities: List[Dict[str, Any]] = field(default_factory=list)
+    trading_mode: str = "balanced"
+    credit: _DummyCredit = field(default_factory=_DummyCredit)
+    strategies: _DummyStrategies = field(default_factory=_DummyStrategies)
+
+    def __post_init__(self) -> None:
+        self.portfolio: Dict[str, Any] = {"total_value": self.total_value}
+
+    def summarize_holdings(self, limit: int = 3):  # pragma: no cover - simple stub
         return []
 
     @property
-    def portfolio_value(self) -> float:  # pragma: no cover - deterministic
-        return float(self.portfolio.get("total_value", 0))
+    def portfolio_value(self) -> float:
+        return float(self.portfolio.get("total_value", 0.0))
+
+
+@pytest.fixture()
+def templates() -> ResponseTemplates:
+    return ResponseTemplates(persona=_PassthroughPersona())
 
 
 @pytest.mark.asyncio
@@ -133,8 +150,7 @@ async def test_opportunity_routing_uses_user_discovery(monkeypatch):
     assert result["result"]["opportunities"]
 
 
-def test_opportunity_response_returns_scan_message():
-    templates = ResponseTemplates(persona=_PassthroughPersona())
+def test_opportunity_response_returns_scan_message(templates):
     state = _DummyState()
     payload = {
         "message": "Opportunity scan started. Analyzing 3 strategies for opportunities...",
@@ -160,3 +176,85 @@ def test_opportunity_response_returns_scan_message():
     assert "Opportunity scan started" in render.content
     assert "update you" in render.content
     assert render.metadata["scan_state"] == "pending"
+
+
+def test_opportunity_response_highlights_ranked_setups(templates):
+    state = _DummyState(total_value=50_000)
+    payload = {
+        "scan_state": "complete",
+        "opportunities": [
+            {
+                "symbol": "BTC",
+                "direction": "long",
+                "win_probability": 0.62,
+                "risk_level": "medium",
+                "potential_usd": 1250.0,
+                "rationale": "breakout momentum",
+            },
+            {
+                "symbol": "ETH",
+                "direction": "swing",
+                "win_probability": 0.55,
+                "risk_level": "medium-low",
+                "potential_usd": 950.0,
+                "rationale": "volume expansion",
+            },
+        ],
+    }
+
+    render = templates.render(
+        intent="opportunity_discovery",
+        request="Opportunity scan",
+        recommendation={},
+        service_result={
+            "service": "opportunity_discovery",
+            "method": "discover_opportunities_for_user",
+            "result": payload,
+        },
+        state=state,
+        ai_analysis=None,
+        interface="telegram",
+        requires_approval=False,
+    )
+
+    assert "tracking 2 setups" in render.content
+    assert "BTC" in render.content
+    assert render.metadata["scan_state"] == "complete"
+    assert len(render.metadata["ranked_opportunities"]) == 2
+
+
+def test_greeting_template_includes_portfolio_value(templates):
+    state = _DummyState(total_value=3067.26)
+
+    render = templates.render(
+        intent="greeting",
+        request="Hi",
+        recommendation={},
+        service_result={},
+        state=state,
+        ai_analysis=None,
+        interface="telegram",
+        requires_approval=False,
+    )
+
+    assert "$3,067.26" in render.content
+    assert "Ask for your balance" in render.content
+
+
+def test_general_response_prompts_balance_sync_when_empty_portfolio(templates):
+    state = _DummyState(total_value=0)
+
+    render = templates.render(
+        intent="general_query",
+        request="Any updates?",
+        recommendation={},
+        service_result={},
+        state=state,
+        ai_analysis="All quiet for now.",
+        interface="telegram",
+        requires_approval=False,
+    )
+
+    assert "All quiet for now." in render.content
+    assert "sync balances" in render.content
+    assert render.metadata["raw_recommendation"] == {}
