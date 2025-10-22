@@ -51,6 +51,8 @@ import { apiClient } from '@/lib/api/client';
 import { AIConsensusCard } from '@/components/trading/AIConsensusCard';
 import { MarketContextCard } from '@/components/trading/MarketContextCard';
 import { AIUsageStats } from '@/components/trading/AIUsageStats';
+import { OpportunitiesDrawer } from '@/components/trading/opportunities';
+import type { OpportunitiesDrawerState, Opportunity } from '@/components/trading/opportunities';
 
 type ManualWorkflowType =
   | 'trade_validation'
@@ -190,6 +192,12 @@ const ManualTradingPage: React.FC = () => {
   const [aiInsights, setAiInsights] = useState<Array<{ id: string; title: string; payload: any; function: string; timestamp: string }>>([]);
   const [latestConsensusData, setLatestConsensusData] = useState<any>(null);
   const [marketContext, setMarketContext] = useState<any>(null);
+  const [opportunitiesDrawer, setOpportunitiesDrawer] = useState<OpportunitiesDrawerState>({
+    open: false,
+    data: null,
+    executing: new Set(),
+    validating: new Set()
+  });
 
   const streamingControllerRef = useRef<AbortController | null>(null);
   const manualSessionRef = useRef<string | null>(null);
@@ -621,8 +629,10 @@ const ManualTradingPage: React.FC = () => {
 
         switch (action) {
           case 'opportunity': {
-            pushWorkflowLog('info', `Scanning live opportunities for ${primarySymbol}.`);
-            const result = await analyzeOpportunity({
+            pushWorkflowLog('info', `Scanning opportunities across ${sanitizedTargetSymbols.length || 1} symbols...`);
+
+            // 1. Scan for opportunities
+            const scanResult = await analyzeOpportunity({
               symbol: primarySymbol,
               analysis_type: workflowConfig.type === 'opportunity_scan' ? 'opportunity' : 'technical',
               timeframe: workflowConfig.timeframe,
@@ -630,8 +640,126 @@ const ManualTradingPage: React.FC = () => {
               ai_models: workflowConfig.aiModels,
               include_risk_metrics: workflowConfig.includeRiskMetrics
             });
-            recordInsight('Opportunity Analysis', 'analyze_opportunity', result);
-            pushWorkflowLog('success', 'Opportunity analysis completed.');
+
+            pushWorkflowLog('info', `Found ${scanResult.opportunities?.length || 0} opportunities. Validating with AI consensus...`);
+
+            // 2. Batch validate all opportunities
+            const opportunities = scanResult.opportunities || [];
+            const validationResults = await Promise.allSettled(
+              opportunities.map((opp: any) =>
+                validateTrade({
+                  trade_data: {
+                    symbol: opp.symbol,
+                    action: opp.side,
+                    amount: opp.suggested_position_size,
+                    order_type: 'market',
+                    stop_loss: opp.stop_loss_percent,
+                    take_profit: opp.take_profit_percent,
+                    leverage: opp.leverage || 1,
+                    strategy: opp.strategy
+                  },
+                  confidence_threshold: workflowConfig.confidence,
+                  ai_models: workflowConfig.aiModels,
+                  execution_urgency: 'normal'
+                })
+              )
+            );
+
+            // 3. Split into validated vs non-validated
+            const validated: Opportunity[] = [];
+            const nonValidated: Opportunity[] = [];
+
+            opportunities.forEach((opp: any, idx: number) => {
+              const validation = validationResults[idx];
+              const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes from now
+
+              const opportunity: Opportunity = {
+                id: crypto.randomUUID(),
+                symbol: opp.symbol,
+                side: opp.side,
+                strategy: opp.strategy || 'Unknown',
+                confidence: opp.confidence || 0,
+                entry_price: opp.entry_price || 0,
+                stop_loss: opp.stop_loss || 0,
+                take_profit: opp.take_profit || 0,
+                suggested_position_size: opp.suggested_position_size || 0,
+                position_size_percent: opp.position_size_percent || 0,
+                max_risk: opp.max_risk || 0,
+                max_risk_percent: opp.max_risk_percent || 0,
+                potential_gain: opp.potential_gain || 0,
+                potential_gain_percent: opp.potential_gain_percent || 0,
+                risk_reward_ratio: opp.risk_reward_ratio || 0,
+                timeframe: opp.timeframe || workflowConfig.timeframe,
+                reasoning: opp.reasoning,
+                indicators: opp.indicators,
+                timestamp: new Date().toISOString(),
+                expires_at: expiresAt,
+                aiValidated: false,
+                validation: undefined,
+                validationReason: undefined
+              };
+
+              if (validation.status === 'fulfilled' && validation.value.approved) {
+                opportunity.aiValidated = true;
+                opportunity.validation = {
+                  approved: validation.value.approved,
+                  consensus_score: validation.value.consensus_score || 0,
+                  confidence: validation.value.confidence || 0,
+                  reason: validation.value.reason,
+                  model_responses: validation.value.model_responses,
+                  risk_assessment: validation.value.risk_assessment
+                };
+                validated.push(opportunity);
+              } else {
+                opportunity.validationReason = validation.status === 'fulfilled'
+                  ? validation.value.reason
+                  : 'Validation failed';
+                nonValidated.push(opportunity);
+              }
+            });
+
+            // 4. Calculate costs
+            const scanCost = opportunities.length * 1; // 1 credit per scan
+            const validationCost = opportunities.length * 2; // 2 credits per validation
+            const totalScanCost = scanCost + validationCost;
+
+            // 5. Show drawer with tiered results
+            setOpportunitiesDrawer({
+              open: true,
+              data: {
+                validated,
+                nonValidated,
+                totalCount: opportunities.length,
+                validatedCount: validated.length,
+                scanCost: totalScanCost,
+                executionCostPerTrade: 2
+              },
+              executing: new Set(),
+              validating: new Set()
+            });
+
+            // 6. Update consensus card with best validated opportunity
+            if (validated.length > 0) {
+              const best = validated[0];
+              setLatestConsensusData({
+                consensus_score: best.validation?.consensus_score || 0,
+                recommendation: best.side === 'buy' ? 'BUY' : 'SELL',
+                confidence_threshold_met: true,
+                model_responses: best.validation?.model_responses || [],
+                cost_summary: { total_cost: totalScanCost },
+                reasoning: best.reasoning || `Top opportunity from ${validated.length} validated`,
+                timestamp: new Date().toISOString()
+              });
+            }
+
+            // 7. Show toast
+            toast({
+              title: `✨ ${validated.length} AI-Validated Opportunities`,
+              description: `${opportunities.length} total found | ${validated.length} ready to execute`,
+            });
+
+            recordInsight('Opportunity Scan', 'analyze_opportunity', { validated: validated.length, total: opportunities.length });
+            pushWorkflowLog('success', `Found ${validated.length} validated, ${nonValidated.length} other opportunities`);
             break;
           }
           case 'validation': {
@@ -891,6 +1019,293 @@ const ManualTradingPage: React.FC = () => {
       }
     },
     [strategyActions, tradeForm.symbol, workflowConfig, recordInsight, pushWorkflowLog, creditActions]
+  );
+
+  // Opportunities Drawer Handlers
+  const handleExecuteOpportunity = useCallback(
+    async (opportunityId: string, positionSize: number) => {
+      try {
+        // Add to executing set
+        setOpportunitiesDrawer(prev => ({
+          ...prev,
+          executing: new Set([...prev.executing, opportunityId])
+        }));
+
+        // Find the opportunity
+        const opportunity = [
+          ...(opportunitiesDrawer.data?.validated || []),
+          ...(opportunitiesDrawer.data?.nonValidated || [])
+        ].find(opp => opp.id === opportunityId);
+
+        if (!opportunity) {
+          throw new Error('Opportunity not found');
+        }
+
+        pushWorkflowLog('info', `Executing trade for ${opportunity.symbol}...`);
+
+        // Execute the trade
+        const response = await apiClient.post('/trading/execute', {
+          symbol: opportunity.symbol,
+          action: opportunity.side,
+          amount: positionSize,
+          order_type: 'market',
+          price: opportunity.entry_price,
+          stop_loss: opportunity.stop_loss,
+          take_profit: opportunity.take_profit,
+          leverage: 1,
+          strategy_type: opportunity.strategy,
+          source: 'ai_opportunity'
+        });
+
+        pushWorkflowLog('success', `Trade executed: ${opportunity.side.toUpperCase()} ${opportunity.symbol}`);
+
+        toast({
+          title: 'Trade Executed',
+          description: `${opportunity.side.toUpperCase()} ${formatCurrency(positionSize)} of ${opportunity.symbol}`,
+          variant: 'default'
+        });
+
+        // Refresh data
+        creditActions.fetchBalance();
+        fetchPortfolio();
+        fetchRecentTrades();
+
+        // Remove from executing set
+        setOpportunitiesDrawer(prev => {
+          const newExecuting = new Set(prev.executing);
+          newExecuting.delete(opportunityId);
+          return { ...prev, executing: newExecuting };
+        });
+      } catch (error: any) {
+        console.error('Trade execution failed', error);
+        pushWorkflowLog('error', error?.response?.data?.detail || error?.message || 'Trade execution failed.');
+        toast({
+          title: 'Trade Execution Failed',
+          description: error?.response?.data?.detail || error?.message || 'Unable to execute trade.',
+          variant: 'destructive'
+        });
+
+        // Remove from executing set
+        setOpportunitiesDrawer(prev => {
+          const newExecuting = new Set(prev.executing);
+          newExecuting.delete(opportunityId);
+          return { ...prev, executing: newExecuting };
+        });
+      }
+    },
+    [opportunitiesDrawer.data, pushWorkflowLog, toast, creditActions, fetchPortfolio, fetchRecentTrades]
+  );
+
+  const handleBatchExecuteOpportunities = useCallback(
+    async (opportunityIds: string[]) => {
+      try {
+        // Add all to executing set
+        setOpportunitiesDrawer(prev => ({
+          ...prev,
+          executing: new Set([...prev.executing, ...opportunityIds])
+        }));
+
+        pushWorkflowLog('info', `Executing batch of ${opportunityIds.length} trades...`);
+
+        // Execute all trades in parallel
+        const results = await Promise.allSettled(
+          opportunityIds.map(async (id) => {
+            const opportunity = [
+              ...(opportunitiesDrawer.data?.validated || []),
+            ].find(opp => opp.id === id);
+
+            if (!opportunity) {
+              throw new Error(`Opportunity ${id} not found`);
+            }
+
+            return apiClient.post('/trading/execute', {
+              symbol: opportunity.symbol,
+              action: opportunity.side,
+              amount: opportunity.suggested_position_size,
+              order_type: 'market',
+              price: opportunity.entry_price,
+              stop_loss: opportunity.stop_loss,
+              take_profit: opportunity.take_profit,
+              leverage: 1,
+              strategy_type: opportunity.strategy,
+              source: 'ai_opportunity_batch'
+            });
+          })
+        );
+
+        // Count successes
+        const successCount = results.filter(r => r.status === 'fulfilled').length;
+        const failCount = results.length - successCount;
+
+        pushWorkflowLog('success', `Batch execution complete: ${successCount} successful, ${failCount} failed`);
+
+        toast({
+          title: 'Batch Execution Complete',
+          description: `${successCount} trades executed successfully${failCount > 0 ? `, ${failCount} failed` : ''}`,
+          variant: successCount > 0 ? 'default' : 'destructive'
+        });
+
+        // Refresh data
+        creditActions.fetchBalance();
+        fetchPortfolio();
+        fetchRecentTrades();
+
+        // Clear executing set
+        setOpportunitiesDrawer(prev => ({
+          ...prev,
+          executing: new Set()
+        }));
+      } catch (error: any) {
+        console.error('Batch execution failed', error);
+        pushWorkflowLog('error', error?.message || 'Batch execution failed.');
+        toast({
+          title: 'Batch Execution Failed',
+          description: error?.message || 'Unable to execute batch trades.',
+          variant: 'destructive'
+        });
+
+        // Clear executing set
+        setOpportunitiesDrawer(prev => ({
+          ...prev,
+          executing: new Set()
+        }));
+      }
+    },
+    [opportunitiesDrawer.data, pushWorkflowLog, toast, creditActions, fetchPortfolio, fetchRecentTrades]
+  );
+
+  const handleValidateOpportunity = useCallback(
+    async (opportunityId: string) => {
+      try {
+        // Add to validating set
+        setOpportunitiesDrawer(prev => ({
+          ...prev,
+          validating: new Set([...prev.validating, opportunityId])
+        }));
+
+        // Find the opportunity
+        const opportunity = opportunitiesDrawer.data?.nonValidated.find(opp => opp.id === opportunityId);
+
+        if (!opportunity) {
+          throw new Error('Opportunity not found');
+        }
+
+        pushWorkflowLog('info', `Validating ${opportunity.symbol} with AI consensus...`);
+
+        // Validate the trade
+        const result = await validateTrade({
+          trade_data: {
+            symbol: opportunity.symbol,
+            action: opportunity.side,
+            amount: opportunity.suggested_position_size,
+            order_type: 'market',
+            stop_loss: ((opportunity.entry_price - opportunity.stop_loss) / opportunity.entry_price) * 100,
+            take_profit: ((opportunity.take_profit - opportunity.entry_price) / opportunity.entry_price) * 100,
+            leverage: 1,
+            strategy: opportunity.strategy
+          },
+          confidence_threshold: workflowConfig.confidence,
+          ai_models: workflowConfig.aiModels,
+          execution_urgency: 'normal'
+        });
+
+        if (result.approved) {
+          // Move to validated
+          setOpportunitiesDrawer(prev => {
+            if (!prev.data) return prev;
+
+            const updatedOpportunity: Opportunity = {
+              ...opportunity,
+              aiValidated: true,
+              validation: {
+                approved: result.approved,
+                consensus_score: result.consensus_score || 0,
+                confidence: result.confidence || 0,
+                reason: result.reason,
+                model_responses: result.model_responses,
+                risk_assessment: result.risk_assessment
+              },
+              validationReason: undefined
+            };
+
+            return {
+              ...prev,
+              data: {
+                ...prev.data,
+                validated: [...prev.data.validated, updatedOpportunity],
+                nonValidated: prev.data.nonValidated.filter(opp => opp.id !== opportunityId),
+                validatedCount: prev.data.validatedCount + 1
+              },
+              validating: new Set([...prev.validating].filter(id => id !== opportunityId))
+            };
+          });
+
+          pushWorkflowLog('success', `${opportunity.symbol} validated successfully!`);
+          toast({
+            title: 'Opportunity Validated',
+            description: `${opportunity.symbol} passed AI consensus validation`,
+            variant: 'default'
+          });
+        } else {
+          pushWorkflowLog('warning', `${opportunity.symbol} did not pass validation`);
+          toast({
+            title: 'Validation Failed',
+            description: result.reason || 'Did not meet consensus threshold',
+            variant: 'destructive'
+          });
+
+          // Remove from validating set
+          setOpportunitiesDrawer(prev => {
+            const newValidating = new Set(prev.validating);
+            newValidating.delete(opportunityId);
+            return { ...prev, validating: newValidating };
+          });
+        }
+
+        creditActions.fetchBalance();
+      } catch (error: any) {
+        console.error('Validation failed', error);
+        pushWorkflowLog('error', error?.message || 'Validation failed.');
+        toast({
+          title: 'Validation Error',
+          description: error?.message || 'Unable to validate opportunity.',
+          variant: 'destructive'
+        });
+
+        // Remove from validating set
+        setOpportunitiesDrawer(prev => {
+          const newValidating = new Set(prev.validating);
+          newValidating.delete(opportunityId);
+          return { ...prev, validating: newValidating };
+        });
+      }
+    },
+    [opportunitiesDrawer.data, validateTrade, workflowConfig, pushWorkflowLog, toast, creditActions]
+  );
+
+  const handleApplyOpportunityToForm = useCallback(
+    (opportunity: Opportunity) => {
+      setTradeForm({
+        symbol: opportunity.symbol,
+        action: opportunity.side,
+        amount: opportunity.suggested_position_size,
+        orderType: 'market',
+        price: opportunity.entry_price,
+        stopLoss: ((opportunity.entry_price - opportunity.stop_loss) / opportunity.entry_price) * 100,
+        takeProfit: ((opportunity.take_profit - opportunity.entry_price) / opportunity.entry_price) * 100,
+        leverage: 1
+      });
+
+      // Switch to Execute Trade tab
+      setActiveTab('trade');
+
+      toast({
+        title: 'Applied to Form',
+        description: `${opportunity.symbol} parameters loaded into trade form`,
+        variant: 'default'
+      });
+    },
+    [toast]
   );
 
   useEffect(() => {
@@ -1876,6 +2291,18 @@ const ManualTradingPage: React.FC = () => {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Opportunities Drawer */}
+      <OpportunitiesDrawer
+        state={opportunitiesDrawer}
+        onClose={() => setOpportunitiesDrawer(prev => ({ ...prev, open: false }))}
+        onExecuteTrade={handleExecuteOpportunity}
+        onExecuteBatch={handleBatchExecuteOpportunities}
+        onValidateOpportunity={handleValidateOpportunity}
+        onApplyToForm={handleApplyOpportunityToForm}
+        availableCredits={balance.available_credits || 0}
+        portfolioValue={totalValue}
+      />
     </motion.div>
   );
 };
