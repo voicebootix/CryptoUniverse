@@ -110,7 +110,7 @@ export const AIConsensusCard: React.FC<AIConsensusCardProps> = ({
     if (!consensusData?.model_responses) return 0;
     const mainRecommendation = consensusData.recommendation;
     return consensusData.model_responses.filter(
-      (model) => model.recommendation === mainRecommendation
+      (model) => model.status === 'completed' && model.recommendation === mainRecommendation
     ).length;
   };
 
@@ -171,7 +171,7 @@ export const AIConsensusCard: React.FC<AIConsensusCardProps> = ({
   const config = RECOMMENDATION_CONFIG[recommendation];
   const confidenceData = getConfidenceLabel(consensusData.consensus_score);
   const agreementCount = getAgreementCount();
-  const totalModels = consensusData.model_responses?.length || 3;
+  const totalModels = consensusData.model_responses?.filter(m => m.status === 'completed').length || 3;
   const RecommendationIcon = config.icon;
 
   if (compact) {
@@ -189,7 +189,7 @@ export const AIConsensusCard: React.FC<AIConsensusCardProps> = ({
                   </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {formatPercentage(consensusData.consensus_score / 100)} Confidence
+                  {formatPercentage(consensusData.consensus_score)} Confidence
                 </p>
               </div>
             </div>
@@ -251,7 +251,7 @@ export const AIConsensusCard: React.FC<AIConsensusCardProps> = ({
                     <Progress value={model.confidence} className="h-2" />
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>Confidence</span>
-                      <span className="font-medium">{formatPercentage(model.confidence / 100)}</span>
+                      <span className="font-medium">{formatPercentage(model.confidence)}</span>
                     </div>
                   </div>
                   {model.reasoning && !compact && (
@@ -289,7 +289,7 @@ export const AIConsensusCard: React.FC<AIConsensusCardProps> = ({
                         {confidenceData.label}
                       </span>
                       <span className="text-muted-foreground">
-                        ({formatPercentage(consensusData.consensus_score / 100)})
+                        ({formatPercentage(consensusData.consensus_score)})
                       </span>
                     </div>
                   </div>

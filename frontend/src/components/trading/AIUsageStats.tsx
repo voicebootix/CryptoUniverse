@@ -265,7 +265,7 @@ export const AIUsageStats: React.FC<AIUsageStatsProps> = ({
                           'font-medium',
                           call.successRate >= 90 ? 'text-green-500' : call.successRate >= 70 ? 'text-yellow-500' : 'text-red-500'
                         )}>
-                          {formatPercentage(call.successRate / 100)} success
+                          {formatPercentage(call.successRate)} success
                         </span>
                       )}
                       <span className="text-muted-foreground">{formatCurrency(call.totalCost)}</span>

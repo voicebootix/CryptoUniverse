@@ -12,9 +12,3 @@ export { AIUsageStats } from './AIUsageStats';
 export { RiskCalculator } from './RiskCalculator';
 export { QuickActionBar } from './QuickActionBar';
 export { default as PhaseProgressVisualizer, ExecutionPhase } from './PhaseProgressVisualizer';
-
-// Type exports for convenience
-export type { default as AIConsensusData } from './AIConsensusCard';
-export type { default as MarketContextData } from './MarketContextCard';
-export type { default as AIUsageData } from './AIUsageStats';
-export type { default as RiskCalculatorData } from './RiskCalculator';

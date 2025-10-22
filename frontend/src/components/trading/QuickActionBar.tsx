@@ -23,6 +23,7 @@ interface QuickAction {
   description: string;
   icon: typeof Brain;
   color: string;
+  gradientFrom?: string;
   cost?: number;
   isLoading?: boolean;
   disabled?: boolean;
@@ -50,6 +51,7 @@ const DEFAULT_ACTIONS: QuickAction[] = [
     description: 'AI-powered market scanning across all exchanges',
     icon: Target,
     color: 'text-blue-500',
+    gradientFrom: 'from-blue-500',
     cost: 3,
     requiresCredits: true
   },
@@ -59,6 +61,7 @@ const DEFAULT_ACTIONS: QuickAction[] = [
     description: 'Multi-model consensus on current market conditions',
     icon: Brain,
     color: 'text-purple-500',
+    gradientFrom: 'from-purple-500',
     cost: 2,
     requiresCredits: true
   },
@@ -68,6 +71,7 @@ const DEFAULT_ACTIONS: QuickAction[] = [
     description: 'Verify trade parameters with AI consensus',
     icon: Sparkles,
     color: 'text-green-500',
+    gradientFrom: 'from-green-500',
     cost: 2,
     requiresCredits: true
   },
@@ -77,6 +81,7 @@ const DEFAULT_ACTIONS: QuickAction[] = [
     description: 'Comprehensive portfolio risk analysis',
     icon: Shield,
     color: 'text-yellow-500',
+    gradientFrom: 'from-yellow-500',
     cost: 2,
     requiresCredits: true
   },
@@ -86,6 +91,7 @@ const DEFAULT_ACTIONS: QuickAction[] = [
     description: 'AI-recommended portfolio rebalancing strategy',
     icon: Activity,
     color: 'text-orange-500',
+    gradientFrom: 'from-orange-500',
     cost: 3,
     requiresCredits: true
   },
@@ -95,6 +101,7 @@ const DEFAULT_ACTIONS: QuickAction[] = [
     description: 'Get final decision with highest confidence threshold',
     icon: Equal,
     color: 'text-indigo-500',
+    gradientFrom: 'from-indigo-500',
     cost: 4,
     requiresCredits: true
   }
@@ -264,7 +271,7 @@ export const QuickActionBar: React.FC<QuickActionBarProps> = ({
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <div className="h-1.5 flex-1 bg-muted rounded-full overflow-hidden">
                           <motion.div
-                            className={cn('h-full rounded-full', `bg-gradient-to-r from-${action.color.replace('text-', '')} to-primary`)}
+                            className={cn('h-full rounded-full bg-gradient-to-r', action.gradientFrom ?? 'from-primary', 'to-primary')}
                             initial={{ width: '0%' }}
                             animate={{ width: '100%' }}
                             transition={{ duration: 2, ease: 'easeInOut', repeat: Infinity }}

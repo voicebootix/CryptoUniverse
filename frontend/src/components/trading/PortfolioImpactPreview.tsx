@@ -284,20 +284,20 @@ export const PortfolioImpactPreview: React.FC<PortfolioImpactPreviewProps> = ({
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-muted-foreground">
-                          {formatPercentage(change.currentPercentage / 100)}
+                          {formatPercentage(change.currentPercentage)}
                         </span>
                         <span className="text-muted-foreground">→</span>
                         <span className={cn(
                           'font-medium',
                           change.change > 0 ? 'text-green-500' : 'text-red-500'
                         )}>
-                          {formatPercentage(change.projectedPercentage / 100)}
+                          {formatPercentage(change.projectedPercentage)}
                         </span>
                         <span className={cn(
                           'text-xs',
                           change.change > 0 ? 'text-green-500' : 'text-red-500'
                         )}>
-                          ({change.change > 0 ? '+' : ''}{formatPercentage(change.change / 100)})
+                          ({change.change > 0 ? '+' : ''}{formatPercentage(change.change)})
                         </span>
                       </div>
                     </div>
@@ -321,7 +321,7 @@ export const PortfolioImpactPreview: React.FC<PortfolioImpactPreviewProps> = ({
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="text-muted-foreground">{formatCurrency(position.value)}</span>
-                        <span className="font-medium">{formatPercentage(position.percentage / 100)}</span>
+                        <span className="font-medium">{formatPercentage(position.percentage)}</span>
                       </div>
                     </div>
                     <Progress value={position.percentage} className="h-2" />
