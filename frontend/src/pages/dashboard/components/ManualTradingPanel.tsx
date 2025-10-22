@@ -188,13 +188,29 @@ const ManualTradingPanel: React.FC<ManualTradingPanelProps> = ({
     const takeProfitPercent = parseFloat(takeProfit) || 0;
     const leverageValue = parseFloat(leverage) || 1;
 
-    // Calculate actual stop loss and take profit prices
-    const stopLossPrice = stopLossPercent > 0
-      ? entryPrice * (1 - stopLossPercent / 100)
-      : undefined;
-    const takeProfitPrice = takeProfitPercent > 0
-      ? entryPrice * (1 + takeProfitPercent / 100)
-      : undefined;
+    // Calculate actual stop loss and take profit prices (side-aware)
+    let stopLossPrice: number | undefined = undefined;
+    let takeProfitPrice: number | undefined = undefined;
+
+    if (stopLossPercent > 0) {
+      if (side === 'buy') {
+        // For BUY: stop loss is below entry price
+        stopLossPrice = entryPrice * (1 - stopLossPercent / 100);
+      } else {
+        // For SELL: stop loss is above entry price
+        stopLossPrice = entryPrice * (1 + stopLossPercent / 100);
+      }
+    }
+
+    if (takeProfitPercent > 0) {
+      if (side === 'buy') {
+        // For BUY: take profit is above entry price
+        takeProfitPrice = entryPrice * (1 + takeProfitPercent / 100);
+      } else {
+        // For SELL: take profit is below entry price
+        takeProfitPrice = entryPrice * (1 - takeProfitPercent / 100);
+      }
+    }
 
     return {
       portfolioValue,
@@ -205,7 +221,7 @@ const ManualTradingPanel: React.FC<ManualTradingPanelProps> = ({
       takeProfit: takeProfitPrice,
       leverage: leverageValue
     };
-  }, [amount, price, marketPrice, stopLoss, takeProfit, leverage, portfolioValue, availableBalance]);
+  }, [amount, price, marketPrice, stopLoss, takeProfit, leverage, portfolioValue, availableBalance, side]);
 
   return (
     <div className="space-y-4">

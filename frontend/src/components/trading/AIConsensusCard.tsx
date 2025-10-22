@@ -9,7 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
-interface AIModelResponse {
+export interface AIModelResponse {
   model: string;
   recommendation: 'BUY' | 'SELL' | 'HOLD';
   confidence: number;
@@ -18,7 +18,7 @@ interface AIModelResponse {
   status?: 'analyzing' | 'completed' | 'failed';
 }
 
-interface AIConsensusData {
+export interface AIConsensusData {
   consensus_score: number;
   recommendation: 'BUY' | 'SELL' | 'HOLD';
   confidence_threshold_met: boolean;

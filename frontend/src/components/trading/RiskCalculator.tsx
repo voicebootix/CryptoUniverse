@@ -88,13 +88,13 @@ export const RiskCalculator: React.FC<RiskCalculatorProps> = ({
     let maxLossPercent = 0;
     if (data.stopLoss && data.stopLoss > 0) {
       const lossPerUnit = Math.abs(data.entryPrice - data.stopLoss);
-      const units = positionSize / data.entryPrice;
+      const units = data.entryPrice > 0 ? positionSize / data.entryPrice : 0;
       maxLoss = lossPerUnit * units * leverage;
       maxLossPercent = data.portfolioValue > 0 ? (maxLoss / data.portfolioValue) * 100 : 0;
     } else {
       // Assume 5% default risk if no stop loss
       maxLoss = positionSize * 0.05 * leverage;
-      maxLossPercent = positionSizePercent * 0.05 * leverage;
+      maxLossPercent = data.portfolioValue > 0 ? (maxLoss / data.portfolioValue) * 100 : 0;
     }
 
     // Calculate potential gain (if take profit is set)
@@ -102,13 +102,13 @@ export const RiskCalculator: React.FC<RiskCalculatorProps> = ({
     let potentialGainPercent = 0;
     if (data.takeProfit && data.takeProfit > 0) {
       const gainPerUnit = Math.abs(data.takeProfit - data.entryPrice);
-      const units = positionSize / data.entryPrice;
+      const units = data.entryPrice > 0 ? positionSize / data.entryPrice : 0;
       potentialGain = gainPerUnit * units * leverage;
       potentialGainPercent = data.portfolioValue > 0 ? (potentialGain / data.portfolioValue) * 100 : 0;
     } else {
       // Assume 10% default gain if no take profit
       potentialGain = positionSize * 0.10 * leverage;
-      potentialGainPercent = positionSizePercent * 0.10 * leverage;
+      potentialGainPercent = data.portfolioValue > 0 ? (potentialGain / data.portfolioValue) * 100 : 0;
     }
 
     // Calculate risk/reward ratio
@@ -190,7 +190,7 @@ export const RiskCalculator: React.FC<RiskCalculatorProps> = ({
                   {riskConfig.label}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {formatPercentage(metrics.positionSizePercent / 100)} of portfolio
+                  {formatPercentage(metrics.positionSizePercent)} of portfolio
                 </div>
               </div>
             </div>
@@ -213,7 +213,7 @@ export const RiskCalculator: React.FC<RiskCalculatorProps> = ({
           </div>
           <Progress value={metrics.positionSizePercent} className="h-2" />
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>{formatPercentage(metrics.positionSizePercent / 100)} of portfolio</span>
+            <span>{formatPercentage(metrics.positionSizePercent)} of portfolio</span>
             {metrics.positionSizePercent > 25 && (
               <span className="text-orange-500">High concentration</span>
             )}
@@ -268,7 +268,7 @@ export const RiskCalculator: React.FC<RiskCalculatorProps> = ({
                 -{formatCurrency(metrics.maxLoss)}
               </div>
               <div className="text-xs text-muted-foreground">
-                {formatPercentage(metrics.maxLossPercent / 100)} of portfolio
+                {formatPercentage(metrics.maxLossPercent)} of portfolio
               </div>
               {data.stopLoss && (
                 <div className="text-xs text-muted-foreground">
@@ -287,7 +287,7 @@ export const RiskCalculator: React.FC<RiskCalculatorProps> = ({
                 +{formatCurrency(metrics.potentialGain)}
               </div>
               <div className="text-xs text-muted-foreground">
-                {formatPercentage(metrics.potentialGainPercent / 100)} of portfolio
+                {formatPercentage(metrics.potentialGainPercent)} of portfolio
               </div>
               {data.takeProfit && (
                 <div className="text-xs text-muted-foreground">

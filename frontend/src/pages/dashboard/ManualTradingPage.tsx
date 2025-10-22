@@ -50,9 +50,7 @@ import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { apiClient } from '@/lib/api/client';
 import { AIConsensusCard } from '@/components/trading/AIConsensusCard';
 import { MarketContextCard } from '@/components/trading/MarketContextCard';
-import { QuickActionBar } from '@/components/trading/QuickActionBar';
 import { AIUsageStats } from '@/components/trading/AIUsageStats';
-import { PortfolioImpactPreview } from '@/components/trading/PortfolioImpactPreview';
 
 type ManualWorkflowType =
   | 'trade_validation'
@@ -936,6 +934,60 @@ const ManualTradingPage: React.FC = () => {
     }
   }, [isStreaming, activeTab]);
 
+  // Update latestConsensusData when AI summary completes
+  useEffect(() => {
+    if (aiSummary?.aiAnalysis) {
+      const analysis = aiSummary.aiAnalysis;
+
+      // Try to extract consensus data from the AI analysis
+      if (analysis.consensus_score !== undefined && analysis.recommendation) {
+        setLatestConsensusData({
+          consensus_score: analysis.consensus_score || 0,
+          recommendation: analysis.recommendation || 'HOLD',
+          confidence_threshold_met: analysis.confidence_threshold_met || false,
+          model_responses: analysis.model_responses || [],
+          cost_summary: analysis.cost_summary,
+          reasoning: analysis.reasoning || aiSummary.content,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+  }, [aiSummary]);
+
+  // Update marketContext when market data updates
+  useEffect(() => {
+    if (marketData && marketData.length > 0) {
+      // Derive market context from marketData
+      const symbols = marketData.map(item => item.symbol);
+      const avgChange = marketData.reduce((sum, item) => sum + (item.change || 0), 0) / marketData.length;
+
+      // Determine trend based on average change
+      let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+      if (avgChange > 2) trend = 'bullish';
+      else if (avgChange < -2) trend = 'bearish';
+
+      // Determine sentiment (simplified)
+      let sentiment: 'positive' | 'negative' | 'neutral' = 'neutral';
+      if (avgChange > 1) sentiment = 'positive';
+      else if (avgChange < -1) sentiment = 'negative';
+
+      setMarketContext({
+        symbols,
+        trend,
+        sentiment,
+        avgChange,
+        topGainers: marketData
+          .filter(item => (item.change || 0) > 0)
+          .sort((a, b) => (b.change || 0) - (a.change || 0))
+          .slice(0, 3),
+        topLosers: marketData
+          .filter(item => (item.change || 0) < 0)
+          .sort((a, b) => (a.change || 0) - (b.change || 0))
+          .slice(0, 3)
+      });
+    }
+  }, [marketData]);
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1665,11 +1717,34 @@ const ManualTradingPage: React.FC = () => {
               todayCost: (balance.today_usage || 0) * 0.05, // Estimate
               profitGenerated: dailyPnL > 0 ? dailyPnL : 0,
               roi: dailyPnL > 0 && balance.today_usage > 0 ? dailyPnL / (balance.today_usage * 0.05) : 0,
-              callBreakdown: [
-                { type: 'opportunity_scan', count: 5, totalCost: 0.25, successRate: 92 },
-                { type: 'trade_validation', count: 3, totalCost: 0.15, successRate: 100 },
-                { type: 'market_analysis', count: 2, totalCost: 0.10, successRate: 100 }
-              ]
+              callBreakdown: (() => {
+                // Aggregate aiInsights by function/type
+                if (!aiInsights || aiInsights.length === 0) {
+                  return undefined;
+                }
+
+                const grouped = aiInsights.reduce((acc, insight) => {
+                  const type = insight.function || 'unknown';
+                  if (!acc[type]) {
+                    acc[type] = { count: 0, totalCost: 0, successCount: 0 };
+                  }
+                  acc[type].count++;
+                  // Estimate cost per call (could be extracted from insight.payload if available)
+                  acc[type].totalCost += 0.05;
+                  // Assume success if payload exists (adjust based on actual success field if available)
+                  if (insight.payload && Object.keys(insight.payload).length > 0) {
+                    acc[type].successCount++;
+                  }
+                  return acc;
+                }, {} as Record<string, { count: number; totalCost: number; successCount: number }>);
+
+                return Object.entries(grouped).map(([type, data]) => ({
+                  type,
+                  count: data.count,
+                  totalCost: data.totalCost,
+                  successRate: data.count > 0 ? (data.successCount / data.count) * 100 : 0
+                }));
+              })()
             }}
           />
 

@@ -159,6 +159,10 @@ export const QuickActionBar: React.FC<QuickActionBarProps> = ({
           const ActionIcon = action.icon;
           const insufficientCredits = action.requiresCredits && !canAfford(action.cost || 0);
 
+          const tooltipText = action.cost
+            ? `${action.description} (Cost: ${action.cost} credits)`
+            : action.description;
+
           return (
             <TooltipProvider key={action.id}>
               <Tooltip>
@@ -168,6 +172,7 @@ export const QuickActionBar: React.FC<QuickActionBarProps> = ({
                     size="sm"
                     onClick={() => handleAction(action.id)}
                     disabled={action.disabled || action.isLoading}
+                    title={tooltipText}
                     className={cn(
                       'gap-2',
                       insufficientCredits && 'opacity-50 cursor-not-allowed'
@@ -225,6 +230,10 @@ export const QuickActionBar: React.FC<QuickActionBarProps> = ({
             const ActionIcon = action.icon;
             const insufficientCredits = action.requiresCredits && !canAfford(action.cost || 0);
 
+            const tooltipText = action.cost
+              ? `${action.description} (Cost: ${action.cost} credits)`
+              : action.description;
+
             return (
               <motion.div
                 key={action.id}
@@ -235,6 +244,7 @@ export const QuickActionBar: React.FC<QuickActionBarProps> = ({
                 <button
                   onClick={() => handleAction(action.id)}
                   disabled={action.disabled || action.isLoading}
+                  title={tooltipText}
                   className={cn(
                     'w-full rounded-lg border bg-card p-4 text-left transition-all hover:border-primary/50 hover:shadow-md',
                     'disabled:opacity-50 disabled:cursor-not-allowed',
