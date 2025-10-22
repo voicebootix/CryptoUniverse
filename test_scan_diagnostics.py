@@ -244,7 +244,9 @@ class ScanDiagnosticsTester:
             print(f"   User ID: {latest.get('user_id')}")
             print(f"   Opportunities: {latest.get('opportunities_discovered')}")
             print(f"   Strategies: {latest.get('strategies_scanned')}")
-            print(f"   Execution time: {latest.get('execution_time_ms'):.2f}ms")
+            exec_time = latest.get('execution_time_ms')
+            exec_time_str = f"{float(exec_time):.2f}" if exec_time is not None else "N/A"
+            print(f"   Execution time: {exec_time_str}ms")
             print(f"   Success: {latest.get('success')}")
             print(f"   Timestamp: {latest.get('timestamp')}")
 
@@ -255,10 +257,14 @@ class ScanDiagnosticsTester:
             print(f"\n📅 Daily Statistics ({daily.get('date')}):")
             print(f"   Total scans: {stats.get('total_scans', 0)}")
             print(f"   Successful: {stats.get('successful_scans', 0)}")
-            print(f"   Success rate: {daily.get('success_rate', 0):.1f}%")
+            success_rate = daily.get('success_rate', 0)
+            success_rate_str = f"{float(success_rate):.1f}" if success_rate is not None else "0.0"
+            print(f"   Success rate: {success_rate_str}%")
             print(f"   Total opportunities: {stats.get('total_opportunities', 0)}")
             print(f"   Total strategies: {stats.get('total_strategies', 0)}")
-            print(f"   Avg execution time: {stats.get('avg_execution_time_ms', 0):.2f}ms")
+            avg_exec_time = stats.get('avg_execution_time_ms', 0)
+            avg_exec_time_str = f"{float(avg_exec_time):.2f}" if avg_exec_time is not None else "0.00"
+            print(f"   Avg execution time: {avg_exec_time_str}ms")
 
         # System health
         health = metrics.get("system_health", {})
@@ -311,8 +317,13 @@ def main():
             print(f"\n📜 Recent Scan History:")
             for i, scan in enumerate(history.get("scans", [])[:5], 1):
                 print(f"\n   {i}. Scan ID: {scan.get('scan_id')}")
-                print(f"      Opportunities: {scan.get('opportunities_count')}")
-                print(f"      Execution time: {scan.get('execution_time_ms'):.2f}ms")
+                # Handle fallback keys for opportunities
+                opps = scan.get('opportunities_count') or scan.get('opportunities') or 0
+                print(f"      Opportunities: {opps}")
+                # Safe float formatting for execution time
+                scan_exec_time = scan.get('execution_time_ms')
+                scan_exec_time_str = f"{float(scan_exec_time):.2f}" if scan_exec_time is not None else "N/A"
+                print(f"      Execution time: {scan_exec_time_str}ms")
                 print(f"      Updated: {scan.get('last_updated')}")
 
     print(f"\n{'='*60}")

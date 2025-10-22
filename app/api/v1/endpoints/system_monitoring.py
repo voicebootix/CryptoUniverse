@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.redis import get_redis_client
 from app.core.database import get_database, AsyncSessionLocal
@@ -37,8 +37,8 @@ class ServiceHealthMetrics(BaseModel):
     error_rate_5m: float
     throughput_5m: int
     active_connections: Optional[int] = None
-    warnings: List[str] = []
-    details: Dict[str, Any] = {}
+    warnings: List[str] = Field(default_factory=list)
+    details: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SystemHealthResponse(BaseModel):
@@ -47,7 +47,7 @@ class SystemHealthResponse(BaseModel):
     timestamp: str
     services: Dict[str, ServiceHealthMetrics]
     summary: Dict[str, Any]
-    alerts: List[Dict[str, Any]] = []
+    alerts: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 async def get_redis_metrics(redis) -> Dict[str, Any]:
