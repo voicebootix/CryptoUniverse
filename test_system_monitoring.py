@@ -5,6 +5,11 @@ This script tests the comprehensive system monitoring endpoints that provide
 real-time metrics for all 60+ CryptoUniverse services.
 
 Usage:
+    export BASE_URL="https://cryptouniverse.onrender.com/api/v1"
+    export ADMIN_EMAIL="your_admin_email"
+    export ADMIN_PASSWORD="your_admin_password"
+    export DISABLE_TLS_VERIFY="false"  # Set to "true" only for local dev with self-signed certs
+
     python test_system_monitoring.py
 
 Author: CTO Assistant
@@ -13,29 +18,39 @@ Date: 2025-10-22
 
 import requests
 import json
+import os
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-# Configuration
-BASE_URL = "https://cryptouniverse.onrender.com/api/v1"
-ADMIN_EMAIL = "admin@cryptouniverse.com"
-ADMIN_PASSWORD = "AdminPass123!"
+# Configuration from environment variables
+BASE_URL = os.environ.get("BASE_URL", "https://cryptouniverse.onrender.com/api/v1")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+DISABLE_TLS_VERIFY = os.environ.get("DISABLE_TLS_VERIFY", "false").lower() == "true"
 
-# Disable SSL warnings
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+# Validate required environment variables
+if not ADMIN_EMAIL:
+    raise ValueError("ADMIN_EMAIL environment variable is required")
+if not ADMIN_PASSWORD:
+    raise ValueError("ADMIN_PASSWORD environment variable is required")
+
+# Only disable SSL warnings if explicitly requested (for local dev only)
+if DISABLE_TLS_VERIFY:
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    print("⚠️  WARNING: TLS verification disabled. Use only for local development!")
 
 
 class SystemMonitoringTester:
     """Test system monitoring endpoints."""
 
-    def __init__(self, base_url: str, email: str, password: str):
+    def __init__(self, base_url: str, email: str, password: str, verify_ssl: bool = True):
         self.base_url = base_url
         self.email = email
         self.password = password
         self.access_token: Optional[str] = None
         self.session = requests.Session()
-        self.session.verify = False
+        self.session.verify = verify_ssl
 
     def authenticate(self) -> bool:
         """Authenticate and get access token."""
@@ -232,7 +247,7 @@ def main():
     print(f"{'='*80}")
     print(f"Timestamp: {datetime.now().isoformat()}")
 
-    tester = SystemMonitoringTester(BASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD)
+    tester = SystemMonitoringTester(BASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD, verify_ssl=not DISABLE_TLS_VERIFY)
 
     # Step 1: Authenticate
     if not tester.authenticate():

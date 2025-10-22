@@ -515,7 +515,6 @@ async def get_cost_tracking_metrics(redis) -> ServiceHealthMetrics:
 
 @router.get("/system-health", response_model=SystemHealthResponse)
 async def get_system_health(
-    detailed: bool = Query(True, description="Include detailed metrics"),
     current_user: User = Depends(require_role(UserRole.ADMIN))
 ):
     """
