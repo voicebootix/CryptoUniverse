@@ -89,11 +89,13 @@ async def get_database_metrics(db) -> Dict[str, Any]:
         await db.execute(text("SELECT 1"))
         query_latency_ms = (time.perf_counter() - start) * 1000
 
-        # Get connection pool stats
-        pool = db.get_bind().pool
-        pool_size = pool.size()
-        pool_checked_out = pool.checkedout()
-        pool_overflow = pool.overflow()
+        # Get connection pool stats (robust across SQLAlchemy async variants)
+        bind = db.get_bind()
+        engine = getattr(bind, "sync_engine", bind)
+        pool = getattr(engine, "pool", None)
+        pool_size = pool.size() if hasattr(pool, "size") else 0
+        pool_checked_out = pool.checkedout() if hasattr(pool, "checkedout") else 0
+        pool_overflow = pool.overflow() if hasattr(pool, "overflow") else 0
 
         return {
             "connected": True,

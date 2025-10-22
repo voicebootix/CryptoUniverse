@@ -299,7 +299,7 @@ def main():
     scan_id = scan_data.get("scan_id")
 
     # Step 3: Monitor scan progress
-    success = tester.monitor_scan(scan_id, max_wait=120)
+    tester.monitor_scan(scan_id, max_wait=120)
 
     # Step 4: Get detailed metrics
     metrics = tester.get_scan_metrics()
