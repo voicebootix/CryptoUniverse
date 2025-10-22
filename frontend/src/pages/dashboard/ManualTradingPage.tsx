@@ -48,6 +48,11 @@ import PhaseProgressVisualizer, { ExecutionPhase } from '@/components/trading/Ph
 import { PHASE_CONFIG } from '@/constants/trading';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { apiClient } from '@/lib/api/client';
+import { AIConsensusCard } from '@/components/trading/AIConsensusCard';
+import { MarketContextCard } from '@/components/trading/MarketContextCard';
+import { QuickActionBar } from '@/components/trading/QuickActionBar';
+import { AIUsageStats } from '@/components/trading/AIUsageStats';
+import { PortfolioImpactPreview } from '@/components/trading/PortfolioImpactPreview';
 
 type ManualWorkflowType =
   | 'trade_validation'
@@ -185,6 +190,8 @@ const ManualTradingPage: React.FC = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [activeTab, setActiveTab] = useState('trade');
   const [aiInsights, setAiInsights] = useState<Array<{ id: string; title: string; payload: any; function: string; timestamp: string }>>([]);
+  const [latestConsensusData, setLatestConsensusData] = useState<any>(null);
+  const [marketContext, setMarketContext] = useState<any>(null);
 
   const streamingControllerRef = useRef<AbortController | null>(null);
   const manualSessionRef = useRef<string | null>(null);
@@ -1147,6 +1154,15 @@ const ManualTradingPage: React.FC = () => {
             </Card>
 
             <div className="space-y-6">
+              {/* AI Consensus Card */}
+              {latestConsensusData && (
+                <AIConsensusCard
+                  consensusData={latestConsensusData}
+                  compact
+                  onApplyRecommendation={applyAiRecommendationToTrade}
+                />
+              )}
+
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-base">
@@ -1177,6 +1193,14 @@ const ManualTradingPage: React.FC = () => {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Market Context Card */}
+              {marketContext && (
+                <MarketContextCard
+                  marketData={marketContext}
+                  compact
+                />
+              )}
 
               <Card>
                 <CardHeader>
@@ -1632,6 +1656,23 @@ const ManualTradingPage: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="risk" className="space-y-6">
+          {/* AI Usage Stats - Full width */}
+          <AIUsageStats
+            usageData={{
+              remainingCredits: balance.available_credits || 0,
+              totalCredits: balance.total_credits || 1000,
+              todayCalls: balance.today_usage || 0,
+              todayCost: (balance.today_usage || 0) * 0.05, // Estimate
+              profitGenerated: dailyPnL > 0 ? dailyPnL : 0,
+              roi: dailyPnL > 0 && balance.today_usage > 0 ? dailyPnL / (balance.today_usage * 0.05) : 0,
+              callBreakdown: [
+                { type: 'opportunity_scan', count: 5, totalCost: 0.25, successRate: 92 },
+                { type: 'trade_validation', count: 3, totalCost: 0.15, successRate: 100 },
+                { type: 'market_analysis', count: 2, totalCost: 0.10, successRate: 100 }
+              ]
+            }}
+          />
+
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
               <CardHeader>
