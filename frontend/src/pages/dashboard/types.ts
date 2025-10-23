@@ -22,13 +22,13 @@ export interface MarketContext {
     symbol: string;
     change?: number;
     price?: number;
-    volume?: number;
+    volume?: number | string;
   }>;
   topLosers?: Array<{
     symbol: string;
     change?: number;
     price?: number;
-    volume?: number;
+    volume?: number | string;
   }>;
 }
 
