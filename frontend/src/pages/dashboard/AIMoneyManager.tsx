@@ -53,6 +53,13 @@ import AutonomousSettingsPanel from './components/AutonomousSettingsPanel';
 import { OpportunitiesDrawer } from '@/components/trading/opportunities';
 import type { OpportunitiesDrawerState, Opportunity } from '@/components/trading/opportunities';
 
+// AI Showcase Components
+import { AIConsensusCard } from '@/components/trading/AIConsensusCard';
+import { MarketContextCard } from '@/components/trading/MarketContextCard';
+import { AIUsageStats } from '@/components/trading/AIUsageStats';
+import { QuickActionBar } from '@/components/trading/QuickActionBar';
+import { PortfolioImpactPreview } from '@/components/trading/PortfolioImpactPreview';
+
 interface TradeExecution {
   id: string;
   phase: ExecutionPhase;
@@ -89,6 +96,9 @@ const AIMoneyManager: React.FC = () => {
   });
   const [credits, setCredits] = useState<number>(0);
   const [portfolioValue, setPortfolioValue] = useState<number>(10000); // Default portfolio value
+  const [latestConsensusData, setLatestConsensusData] = useState<any>(null);
+  const [marketContext, setMarketContext] = useState<any>(null);
+  const [usageData, setUsageData] = useState<any>(null);
 
   // WebSocket connection for real-time updates
   const [ws, setWs] = useState<WebSocket | null>(null);
@@ -699,13 +709,35 @@ const AIMoneyManager: React.FC = () => {
       try {
         // Fetch credits
         const creditsResponse = await apiClient.get('/credits/balance');
-        setCredits(creditsResponse.data.available_credits || 0);
+        const availableCredits = creditsResponse.data.available_credits || 0;
+        const totalCredits = creditsResponse.data.total_purchased_credits || 1000;
+        const usedCredits = creditsResponse.data.total_used_credits || 0;
+        setCredits(availableCredits);
+
+        // Set usage data for AIUsageStats
+        setUsageData({
+          remainingCredits: availableCredits,
+          totalCredits: totalCredits,
+          todayCalls: usedCredits,
+          todayCost: usedCredits * 0.05, // Estimate
+          profitGenerated: 0,
+          roi: 0
+        });
 
         // Fetch portfolio value
         const portfolioResponse = await apiClient.get('/portfolio/summary');
         setPortfolioValue(portfolioResponse.data.total_value || 10000);
       } catch (error) {
         console.error('Failed to fetch data', error);
+        // Set default usage data on error
+        setUsageData({
+          remainingCredits: credits || 675,
+          totalCredits: 1000,
+          todayCalls: 0,
+          todayCost: 0,
+          profitGenerated: 0,
+          roi: 0
+        });
       }
     };
     fetchData();
@@ -792,6 +824,40 @@ const AIMoneyManager: React.FC = () => {
             onPhaseOverride={(phase: ExecutionPhase) => {
               setCurrentPhase(phase);
             }}
+          />
+
+          {/* Quick Action Bar - AI Features */}
+          <QuickActionBar
+            onScanOpportunities={handleScanOpportunities}
+            onValidateTrade={() => console.log('Validate trade')}
+            onAssessRisk={() => console.log('Assess risk')}
+            onRebalancePortfolio={() => console.log('Rebalance')}
+            onFinalConsensus={() => console.log('Final consensus')}
+            availableCredits={credits}
+            compact={true}
+          />
+
+          {/* AI Consensus Card */}
+          {latestConsensusData && (
+            <AIConsensusCard
+              consensusData={latestConsensusData}
+              compact={true}
+            />
+          )}
+
+          {/* Market Context Card */}
+          {marketContext && (
+            <MarketContextCard
+              marketContext={marketContext}
+              compact={true}
+            />
+          )}
+
+          {/* AI Usage Stats */}
+          <AIUsageStats
+            usageData={usageData}
+            isLoading={!usageData}
+            compact={true}
           />
 
           {/* Current Execution Details */}
