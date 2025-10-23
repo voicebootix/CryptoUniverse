@@ -4434,6 +4434,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         """
         try:
             if not self.redis:
+                self.logger.warning("❌ Redis not available for lifecycle tracking - scan will not be tracked", scan_id=scan_id, phase=phase, user_id=user_id)
                 return
 
             lifecycle_key = f"scan_lifecycle:{scan_id}"
