@@ -788,11 +788,11 @@ const AIMoneyManager: React.FC = () => {
       )}
 
       {/* Main Content - Split View as Specified */}
-      <div className="flex-1 grid grid-cols-12 gap-6 p-6">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 min-h-0">
         {/* LEFT: Conversational Interface (col-span-7) - Original size */}
-        <div className="col-span-7 flex flex-col">
-          <Card className="flex-1 flex flex-col">
-            <CardHeader className="pb-0">
+        <div className="col-span-1 lg:col-span-7 flex flex-col min-h-0">
+          <Card className="flex-1 flex flex-col overflow-hidden">
+            <CardHeader className="pb-0 flex-shrink-0">
               <CardTitle className="flex items-center gap-2">
                 <MessageSquare className="h-5 w-5" />
                 Conversational Interface
@@ -801,7 +801,7 @@ const AIMoneyManager: React.FC = () => {
                 Chat with AI about market analysis and trading decisions
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex-1 p-0">
+            <CardContent className="flex-1 p-0 overflow-hidden">
               <ConversationalTradingInterface
                 isPaperTrading={isPaperMode}
                 className="h-full"
@@ -812,10 +812,11 @@ const AIMoneyManager: React.FC = () => {
           </Card>
         </div>
 
-        {/* RIGHT: Action Panel (col-span-5) - Original size */}
-        <div className="col-span-5 space-y-6">
-          {/* 5-Phase Visualizer */}
-          <PhaseProgressVisualizer
+        {/* RIGHT: AI Intelligence Panel (col-span-5) - Always visible */}
+        <div className="col-span-1 lg:col-span-5 flex flex-col gap-4 min-h-0 overflow-hidden">
+          <div className="space-y-4 overflow-y-auto flex-1 pr-2 pb-4">
+            {/* 5-Phase Visualizer */}
+            <PhaseProgressVisualizer
             currentPhase={currentPhase}
             phaseHistory={[]}
             isCompact={false}
@@ -953,6 +954,7 @@ const AIMoneyManager: React.FC = () => {
               )}
             </CardContent>
           </Card>
+          </div>
         </div>
       </div>
 
