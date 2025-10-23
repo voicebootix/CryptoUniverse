@@ -30,7 +30,6 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
@@ -51,6 +50,7 @@ import { apiClient } from '@/lib/api/client';
 import { AIConsensusCard } from '@/components/trading/AIConsensusCard';
 import { MarketContextCard } from '@/components/trading/MarketContextCard';
 import { AIUsageStats } from '@/components/trading/AIUsageStats';
+import { QuickActionBar } from '@/components/trading/QuickActionBar';
 import { OpportunitiesDrawer } from '@/components/trading/opportunities';
 import type { OpportunitiesDrawerState, Opportunity } from '@/components/trading/opportunities';
 import type { ConsensusData, MarketContext, AIPricingConfig } from './types';
@@ -189,7 +189,6 @@ const ManualTradingPage: React.FC = () => {
   type PhaseHistoryEntry = ComponentProps<typeof PhaseProgressVisualizer>['phaseHistory'][number];
   const [phaseHistory, setPhaseHistory] = useState<PhaseHistoryEntry[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [activeTab, setActiveTab] = useState('trade');
   const [aiInsights, setAiInsights] = useState<Array<{ id: string; title: string; payload: any; function: string; timestamp: string }>>([]);
   const [latestConsensusData, setLatestConsensusData] = useState<ConsensusData | null>(null);
   const [marketContext, setMarketContext] = useState<MarketContext | null>(null);
@@ -1334,9 +1333,6 @@ const ManualTradingPage: React.FC = () => {
         leverage: 1
       });
 
-      // Switch to Execute Trade tab
-      setActiveTab('trade');
-
       toast({
         title: 'Applied to Form',
         description: `${opportunity.symbol} parameters loaded into trade form`,
@@ -1410,11 +1406,7 @@ const ManualTradingPage: React.FC = () => {
     pushWorkflowLog('info', message);
   }, [connectionStatus, isConnectionOpen, pushWorkflowLog]);
 
-  useEffect(() => {
-    if (isStreaming && activeTab !== 'workflow') {
-      setActiveTab('workflow');
-    }
-  }, [isStreaming, activeTab]);
+  // Removed: auto-switch to workflow tab (tabs no longer used)
 
   // Update latestConsensusData when AI summary completes
   useEffect(() => {
@@ -1471,11 +1463,12 @@ const ManualTradingPage: React.FC = () => {
   }, [marketData]);
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      {/* Pricing Error Alert */}
-      {pricingError && (
-        <Card className="border-red-500/50 bg-red-500/10">
-          <CardContent className="pt-6">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="h-full flex flex-col">
+      {/* Header Section */}
+      <div className="flex-shrink-0 border-b p-6">
+        {/* Pricing Error Alert */}
+        {pricingError && (
+          <div className="mb-4 rounded-lg border-red-500/50 bg-red-500/10 p-4">
             <div className="flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5" />
               <div className="flex-1">
@@ -1492,48 +1485,46 @@ const ManualTradingPage: React.FC = () => {
                 </Button>
               </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Manual Trading Control Center</h1>
-          <p className="text-muted-foreground">
-            Execute trades, rebalancing, and AI-driven actions with full transparency into every phase.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <Badge variant="outline" className="gap-1">
-            <Radio className="h-3 w-3" />
-            {isConnectionOpen ? 'AI live' : 'AI idle'}
-          </Badge>
-          <Badge variant="outline" className="gap-1">
-            <ListTree className="h-3 w-3" />
-            {aggregatedStats.connectedCount} Exchanges
-          </Badge>
-          <Badge variant="outline" className="gap-1">
-            <DollarSign className="h-3 w-3" />
-            {formatCurrency(availableBalance)} Available
-          </Badge>
-          <Badge variant="secondary" className="gap-1">
-            <Zap className="h-3 w-3" />
-            {creditsLoading ? 'Loading credits…' : `${balance.available_credits} credits`}
-          </Badge>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
+              <Target className="h-8 w-8 text-primary" />
+              Manual Trading
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              Professional trading interface with AI-powered intelligence
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge variant="outline" className="gap-1">
+              <Radio className="h-3 w-3" />
+              {isConnectionOpen ? 'AI Live' : 'AI Idle'}
+            </Badge>
+            <Badge variant="outline" className="gap-1">
+              <ListTree className="h-3 w-3" />
+              {aggregatedStats.connectedCount} Exchanges
+            </Badge>
+            <Badge variant="outline" className="gap-1">
+              <DollarSign className="h-3 w-3" />
+              {formatCurrency(availableBalance)}
+            </Badge>
+            <Badge variant="secondary" className="gap-1">
+              <Zap className="h-3 w-3" />
+              {creditsLoading ? 'Loading...' : `${balance.available_credits} credits`}
+            </Badge>
+          </div>
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="trade">Execute Trade</TabsTrigger>
-          <TabsTrigger value="workflow">AI Workflow</TabsTrigger>
-          <TabsTrigger value="strategies">Strategies</TabsTrigger>
-          <TabsTrigger value="risk">Live Intelligence</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="trade" className="space-y-6">
-          <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
+      {/* Main 2-Column Layout */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 min-h-0">
+        {/* LEFT COLUMN: Trading Execution (col-span-8) */}
+        <div className="col-span-1 lg:col-span-8 flex flex-col gap-6 min-h-0">
+          {/* Trade Execution Form */}
+          <Card className="flex-1 flex flex-col overflow-hidden">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Target className="h-5 w-5" />
@@ -1709,21 +1700,107 @@ const ManualTradingPage: React.FC = () => {
                   </div>
                 </div>
               </CardContent>
+          </Card>
+
+          {/* Streaming Logs / Phase Execution */}
+          {(isStreaming || workflowLogs.length > 0) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Activity className="h-4 w-4" />
+                  Execution Log
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-64">
+                  <div className="space-y-2 text-sm font-mono">
+                    {workflowLogs.map((log) => (
+                      <div
+                        key={log.id}
+                        className={`p-2 rounded ${
+                          log.level === 'error'
+                            ? 'bg-red-500/10 text-red-500'
+                            : log.level === 'success'
+                            ? 'bg-green-500/10 text-green-500'
+                            : log.level === 'warning'
+                            ? 'bg-yellow-500/10 text-yellow-500'
+                            : 'bg-muted'
+                        }`}
+                      >
+                        <span className="text-muted-foreground">[{log.time}]</span> {log.message}
+                      </div>
+                    ))}
+                    {streamingContent && (
+                      <div className="p-2 rounded bg-blue-500/10 text-blue-500">
+                        {streamingContent}
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
+              </CardContent>
             </Card>
+          )}
+        </div>
 
-            <div className="space-y-6">
-              {/* AI Consensus Card */}
-              {latestConsensusData && (
-                <AIConsensusCard
-                  consensusData={latestConsensusData}
-                  compact
-                  onApplyRecommendation={applyAiRecommendationToTrade}
-                />
-              )}
+        {/* RIGHT COLUMN: AI Intelligence Panel (col-span-4) */}
+        <div className="col-span-1 lg:col-span-4 flex flex-col gap-4 min-h-0 overflow-hidden">
+          <div className="space-y-4 overflow-y-auto flex-1 pr-2 pb-4">
+            {/* Quick Action Bar */}
+            <QuickActionBar
+              onScanOpportunities={() => handleConsensusAction('opportunity')}
+              onValidateTrade={() => handleConsensusAction('validation')}
+              onAssessRisk={() => handleConsensusAction('risk')}
+              onRebalancePortfolio={() => handleConsensusAction('portfolio')}
+              onFinalConsensus={() => handleConsensusAction('decision')}
+              availableCredits={balance.available_credits || 0}
+              compact={false}
+            />
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
+            {/* Phase Progress Visualizer */}
+            <PhaseProgressVisualizer
+              currentPhase={currentPhase}
+              phaseHistory={phaseHistory}
+              isCompact={false}
+              showMetrics={true}
+              allowManualControl={false}
+            />
+
+            {/* AI Consensus Card */}
+            {latestConsensusData && (
+              <AIConsensusCard
+                consensusData={latestConsensusData}
+                compact={true}
+                onApplyRecommendation={applyAiRecommendationToTrade}
+              />
+            )}
+
+            {/* Market Context Card */}
+            {/* TODO: Fix type mismatch between MarketContext and MarketContextData */}
+            {/* {marketContext && (
+              <MarketContextCard
+                marketData={marketContext}
+                compact={true}
+              />
+            )} */}
+
+            {/* AI Usage Stats */}
+            <AIUsageStats
+              usageData={{
+                remainingCredits: balance.available_credits || 0,
+                totalCredits: balance.total_purchased_credits || 0,
+                todayCalls: balance.total_used_credits || 0,
+                todayCost: (balance.total_used_credits || 0) * (pricingConfig?.per_call_estimate || 0.05),
+                profitGenerated: dailyPnL > 0 ? dailyPnL : 0,
+                roi: dailyPnL > 0 && balance.total_used_credits > 0 ? dailyPnL / ((balance.total_used_credits || 1) * (pricingConfig?.per_call_estimate || 0.05)) : 0
+              }}
+              isLoading={creditsLoading}
+              compact={true}
+            />
+
+            {/* Portfolio Snapshot */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
                     <BarChart3 className="h-4 w-4" />
                     Portfolio Snapshot
                   </CardTitle>
@@ -1750,650 +1827,47 @@ const ManualTradingPage: React.FC = () => {
                     </span>
                   </div>
                 </CardContent>
-              </Card>
-
-              {/* Market Context Card - TODO: Create adapter for MarketContext type */}
-              {/* {marketContext && (
-                <MarketContextCard
-                  marketData={marketContext}
-                  compact
-                />
-              )} */}
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Activity className="h-4 w-4" />
-                    Recent Trades
-                  </CardTitle>
-                  <CardDescription>Live feed from all connected exchanges.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-48 pr-2">
-                    <div className="space-y-3 text-sm">
-                      {recentTrades.length === 0 ? (
-                        <p className="text-muted-foreground">No recent trades recorded.</p>
-                      ) : (
-                        recentTrades.map((trade) => (
-                          <div key={trade.id} className="rounded-md border p-3">
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold">{trade.symbol}</span>
-                              <Badge variant="outline" className="gap-1">
-                                {trade.side === 'buy' ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                                {trade.side.toUpperCase()}
-                              </Badge>
-                            </div>
-                            <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                              <span>{new Date(trade.time).toLocaleString()}</span>
-                              <span>{formatCurrency(trade.price)}</span>
-                            </div>
-                            <div className="mt-2 flex items-center justify-between text-xs">
-                              <span>Amount: {trade.amount}</span>
-                              <span className={trade.pnl >= 0 ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                                P&amp;L: {formatCurrency(trade.pnl)}
-                              </span>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="workflow" className="space-y-6">
-          <div className="grid gap-6 xl:grid-cols-3">
-            <Card className="xl:col-span-2">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Brain className="h-5 w-5" />
-                  Live AI Workflow
-                </CardTitle>
-                <CardDescription>
-                  Mirror the chat-based AI process with step-by-step transparency and actionable results.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Workflow Type</Label>
-                    <Select
-                      value={workflowConfig.type}
-                      onValueChange={(value) => setWorkflowConfig((prev) => ({ ...prev, type: value as ManualWorkflowType }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="trade_validation">Trade Validation</SelectItem>
-                        <SelectItem value="portfolio_rebalance">Portfolio Rebalancing</SelectItem>
-                        <SelectItem value="opportunity_scan">Opportunity Scan</SelectItem>
-                        <SelectItem value="market_analysis">Market Analysis</SelectItem>
-                        <SelectItem value="portfolio_review">Portfolio Review</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Preferred Strategy</Label>
-                    <Select
-                      value={workflowConfig.strategyId}
-                      onValueChange={(value) => setWorkflowConfig((prev) => ({ ...prev, strategyId: value }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select strategy" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="manual">Manual Parameters</SelectItem>
-                        {Object.entries(availableStrategies).map(([key, strategy]) => (
-                          <SelectItem key={key} value={key}>
-                            {strategy.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {selectedStrategy && (
-                      <p className="text-xs text-muted-foreground">
-                        {selectedStrategy.description}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Timeframe</Label>
-                    <Input
-                      value={workflowConfig.timeframe}
-                      onChange={(event) => setWorkflowConfig((prev) => ({ ...prev, timeframe: event.target.value }))}
-                      placeholder="e.g. 1h, 4h, 1d"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Target Confidence (%)</Label>
-                    <Slider
-                      value={[workflowConfig.confidence]}
-                      min={55}
-                      max={95}
-                      step={1}
-                      onValueChange={([value]) => setWorkflowConfig((prev) => ({ ...prev, confidence: value }))}
-                    />
-                    <div className="text-xs text-muted-foreground">{workflowConfig.confidence}% consensus target</div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Symbols to Monitor</Label>
-                    <Input
-                      value={workflowConfig.targetSymbolsText}
-                      onChange={(event) => setWorkflowConfig((prev) => ({ ...prev, targetSymbolsText: event.target.value }))}
-                      placeholder="Comma separated list (e.g. BTC/USDT,ETH/USDT)"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Rebalance Threshold (%)</Label>
-                    <Input
-                      type="number"
-                      value={workflowConfig.rebalanceThreshold}
-                      onChange={(event) =>
-                        setWorkflowConfig((prev) => ({ ...prev, rebalanceThreshold: Number(event.target.value) || 0 }))
-                      }
-                    />
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-4 rounded-lg border p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>AI Model Strategy</Label>
-                      <p className="text-xs text-muted-foreground">Select the weighting of GPT-4, Claude, and Gemini.</p>
-                    </div>
-                    <Select
-                      value={workflowConfig.aiModels}
-                      onValueChange={(value) => setWorkflowConfig((prev) => ({ ...prev, aiModels: value }))}
-                    >
-                      <SelectTrigger className="w-[200px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Balanced (all models)</SelectItem>
-                        <SelectItem value="gpt4_claude">GPT-4 + Claude</SelectItem>
-                        <SelectItem value="cost_optimized">Cost Optimized</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center justify-between rounded-md border p-3">
-                    <div>
-                      <Label className="flex items-center gap-2 text-sm">
-                        <Shield className="h-4 w-4" /> Include risk metrics
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        Stress tests, drawdown analysis, and liquidity checks during the workflow.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={workflowConfig.includeRiskMetrics}
-                      onCheckedChange={(checked) => setWorkflowConfig((prev) => ({ ...prev, includeRiskMetrics: checked }))}
-                    />
-                  </div>
-                  <Textarea
-                    value={workflowConfig.customNotes}
-                    onChange={(event) => setWorkflowConfig((prev) => ({ ...prev, customNotes: event.target.value }))}
-                    placeholder="Optional notes or constraints for the AI (e.g. prefer exchanges with deep liquidity)."
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-xs text-muted-foreground">
-                    Credits are automatically deducted per workflow step. Available: {balance.available_credits}
-                  </div>
-                  <div className="flex flex-wrap gap-3">
-                    <Button variant="outline" onClick={() => handleConsensusAction('opportunity')} disabled={workflowDisabled}>
-                      <Target className="mr-2 h-4 w-4" />
-                      Scan Opportunities
-                    </Button>
-                    <Button variant="outline" onClick={() => handleConsensusAction('validation')} disabled={workflowDisabled}>
-                      <CheckCircle className="mr-2 h-4 w-4" />
-                      Validate Trade
-                    </Button>
-                    <Button variant="outline" onClick={() => handleConsensusAction('risk')} disabled={workflowDisabled}>
-                      <Shield className="mr-2 h-4 w-4" />
-                      Assess Risk
-                    </Button>
-                    <Button variant="outline" onClick={() => handleConsensusAction('decision')} disabled={workflowDisabled}>
-                      <Equal className="mr-2 h-4 w-4" />
-                      Final Consensus
-                    </Button>
-                    <Button onClick={runLiveWorkflow} disabled={workflowDisabled}>
-                      {isStreaming ? (
-                        <>
-                          <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                          Streaming...
-                        </>
-                      ) : (
-                        <>
-                          <Brain className="mr-2 h-4 w-4" />
-                          Run Live Workflow
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
             </Card>
 
-            <div className="space-y-6">
-              <PhaseProgressVisualizer currentPhase={currentPhase} phaseHistory={phaseHistory} isCompact />
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Activity className="h-4 w-4" />
-                    Workflow Stream
-                  </CardTitle>
-                  <CardDescription>Live commentary from the AI as phases progress.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-48 pr-2 text-sm">
-                    {streamingContent ? (
-                      <pre className="whitespace-pre-wrap text-muted-foreground">{streamingContent}</pre>
-                    ) : (
-                      <p className="text-muted-foreground">Start a workflow to stream analysis in real time.</p>
-                    )}
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <LineChart className="h-4 w-4" />
-                    AI Workflow Logs
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-48 pr-2 text-sm">
-                    <div className="space-y-2">
-                      {workflowLogs.length === 0 ? (
-                        <p className="text-muted-foreground">No workflow logs yet.</p>
-                      ) : (
-                        workflowLogs
-                          .slice()
-                          .reverse()
-                          .map((log) => (
-                            <div key={log.id} className="rounded-md border p-2">
-                              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                <span>{log.time}</span>
-                                <span className="capitalize">{log.level}</span>
-                              </div>
-                              <p className="text-sm">{log.message}</p>
-                            </div>
-                          ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-
-          {aiSummary && (
+            {/* Recent Trades */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Brain className="h-4 w-4" />
-                  AI Recommendation Summary
+                  <Activity className="h-4 w-4" />
+                  Recent Trades
                 </CardTitle>
-                <CardDescription>Final consensus from the AI workflow with actionable context.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                  {aiSummary.confidence && (
-                    <Badge variant="outline">Confidence {aiSummary.confidence.toFixed(1)}%</Badge>
-                  )}
-                  {aiSummary.intent && <Badge variant="outline">Intent {aiSummary.intent}</Badge>}
-                  {aiSummary.requiresApproval && <Badge variant="outline">Requires Approval</Badge>}
-                </div>
-
-                <ScrollArea className="h-40 rounded-md border p-4 text-sm">
-                  <pre className="whitespace-pre-wrap text-muted-foreground">{aiSummary.content}</pre>
-                </ScrollArea>
-
-                {aiSummary.actionData && (
-                  <div className="rounded-lg border bg-muted/40 p-4 text-sm">
-                    <h4 className="mb-2 font-semibold">Suggested Action</h4>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {Object.entries(aiSummary.actionData).map(([key, value]) => (
-                        <div key={key} className="flex items-center justify-between">
-                          <span className="text-muted-foreground">{key.replace(/_/g, ' ')}</span>
-                          <span className="font-medium">{typeof value === 'number' ? value.toString() : String(value)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex flex-wrap gap-3">
-                  <Button variant="outline" onClick={applyAiRecommendationToTrade}>
-                    <Settings className="mr-2 h-4 w-4" />
-                    Apply to Trade Form
-                  </Button>
-                  <Button onClick={() => handleConsensusAction('decision')}>
-                    <Brain className="mr-2 h-4 w-4" />
-                    Refresh Consensus
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {aiInsights.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Sparkles className="h-4 w-4" />
-                  AI Insights Feed
-                </CardTitle>
-                <CardDescription>Recent consensus calls and data pulls driven by manual requests.</CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="max-h-64 pr-2">
-                  <div className="space-y-3 text-sm">
-                    {aiInsights.map((insight) => (
-                      <div key={insight.id} className="rounded-md border p-3">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>{new Date(insight.timestamp).toLocaleTimeString()}</span>
-                          <Badge variant="outline">{insight.function}</Badge>
+                <ScrollArea className="h-48">
+                  <div className="space-y-2 text-sm">
+                    {recentTrades.length === 0 ? (
+                      <p className="text-muted-foreground text-center py-4">No recent trades</p>
+                    ) : (
+                      recentTrades.slice(0, 5).map((trade) => (
+                        <div key={trade.id} className="rounded-md border p-2">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold">{trade.symbol}</span>
+                            <Badge variant="outline" className="text-xs">
+                              {trade.side === 'buy' ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                              {trade.side.toUpperCase()}
+                            </Badge>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                            <span>{new Date(trade.time).toLocaleTimeString()}</span>
+                            <span className={trade.pnl >= 0 ? 'text-green-500' : 'text-red-500'}>
+                              {formatCurrency(trade.pnl)}
+                            </span>
+                          </div>
                         </div>
-                        <h4 className="mt-1 font-semibold">{insight.title}</h4>
-                        <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-muted-foreground">
-                          {JSON.stringify(insight.payload, null, 2)}
-                        </pre>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </ScrollArea>
               </CardContent>
             </Card>
-          )}
-        </TabsContent>
-
-        <TabsContent value="strategies" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Settings className="h-5 w-5" />
-                Strategy Controls
-              </CardTitle>
-              <CardDescription>
-                Execute any available strategy — including your unlocked premium strategies — directly from the manual dashboard.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {Object.entries(availableStrategies).map(([key, strategy]) => (
-                  <Card key={key} className="flex flex-col justify-between">
-                    <CardHeader>
-                      <CardTitle className="text-lg">{strategy.name}</CardTitle>
-                      <CardDescription className="capitalize">{strategy.category}</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3 text-sm">
-                      <p className="text-muted-foreground">{strategy.description}</p>
-                      <div className="flex items-center justify-between">
-                        <span>Risk Level</span>
-                        <Badge variant="outline">{strategy.risk_level}</Badge>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>Minimum Capital</span>
-                        <span className="font-medium">{formatCurrency(strategy.min_capital)}</span>
-                      </div>
-                      <Button
-                        size="sm"
-                        className="w-full"
-                        onClick={() => handleStrategyExecution(key)}
-                        disabled={strategyExecuting}
-                      >
-                        <Play className="mr-2 h-3 w-3" />
-                        Execute Strategy
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <BarChart3 className="h-4 w-4" />
-                Active Strategy Performance
-              </CardTitle>
-              <CardDescription>Metrics pulled live from the backend for each configured strategy.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {strategies.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">
-                    No strategies configured yet. Use the marketplace or IDE to add strategies.
-                  </p>
-                ) : (
-                  strategies.map((strategy) => (
-                    <Card key={strategy.strategy_id} className="border-dashed">
-                      <CardHeader>
-                        <CardTitle className="text-lg">{strategy.name}</CardTitle>
-                        <CardDescription>{strategy.status}</CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-2 text-sm">
-                        <div className="flex items-center justify-between">
-                          <span>Total Trades</span>
-                          <span className="font-medium">{strategy.total_trades}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span>Win Rate</span>
-                          <span className="font-medium">{formatPercentage(strategy.win_rate)}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span>Total P&amp;L</span>
-                          <span className={strategy.total_pnl >= 0 ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                            {formatCurrency(Number(strategy.total_pnl))}
-                          </span>
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          Last executed: {strategy.last_executed_at ? new Date(strategy.last_executed_at).toLocaleString() : '—'}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="risk" className="space-y-6">
-          {/* AI Usage Stats - Full width */}
-          <AIUsageStats
-            usageData={{
-              remainingCredits: balance.available_credits || 0,
-              totalCredits: balance.total_purchased_credits || 0,
-              todayCalls: balance.total_used_credits || 0,
-              todayCost: (balance.total_used_credits || 0) * (pricingConfig?.per_call_estimate || 0.05),
-              profitGenerated: dailyPnL > 0 ? dailyPnL : 0,
-              roi: dailyPnL > 0 && balance.total_used_credits > 0 ? dailyPnL / ((balance.total_used_credits || 1) * (pricingConfig?.per_call_estimate || 0.05)) : 0,
-              callBreakdown: (() => {
-                // Aggregate aiInsights by function/type
-                if (!aiInsights || aiInsights.length === 0) {
-                  return undefined;
-                }
-
-                const grouped = aiInsights.reduce((acc, insight) => {
-                  const type = insight.function || 'unknown';
-                  if (!acc[type]) {
-                    acc[type] = { count: 0, totalCost: 0, successCount: 0 };
-                  }
-                  acc[type].count++;
-
-                  // Extract cost from payload if available, otherwise use pricing config
-                  const insightCost = insight.payload?.price
-                    ?? insight.payload?.cost
-                    ?? pricingConfig?.per_call_estimate
-                    ?? 0.05;
-                  acc[type].totalCost += insightCost;
-
-                  // Check explicit success field (payload.success, payload.status === 'ok', status === 'completed')
-                  const isSuccess =
-                    insight.payload?.success === true ||
-                    insight.payload?.status === 'ok' ||
-                    insight.payload?.status === 'completed' ||
-                    (insight as any).status === 'completed';
-
-                  if (isSuccess) {
-                    acc[type].successCount++;
-                  }
-                  return acc;
-                }, {} as Record<string, { count: number; totalCost: number; successCount: number }>);
-
-                return Object.entries(grouped).map(([type, data]) => ({
-                  type,
-                  count: data.count,
-                  totalCost: data.totalCost,
-                  successRate: data.count > 0 ? (data.successCount / data.count) * 100 : 0
-                }));
-              })()
-            }}
-          />
-
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="h-5 w-5" />
-                  Portfolio &amp; Risk Metrics
-                </CardTitle>
-                <CardDescription>Live portfolio composition with AI-monitored balances.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-lg border p-3 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span>Positions Tracked</span>
-                    <Badge variant="outline">{positions.length}</Badge>
-                  </div>
-                  <Separator className="my-3" />
-                  <ScrollArea className="h-48 pr-2">
-                    {positions.length === 0 ? (
-                      <p className="text-muted-foreground">No open positions detected.</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {positions.map((position) => (
-                          <div key={position.symbol} className="rounded-md border p-3 text-sm">
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold">{position.symbol}</span>
-                              <Badge variant="outline">{position.side.toUpperCase()}</Badge>
-                            </div>
-                            <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                              <span>Amount: {position.amount}</span>
-                              <span>Value: {formatCurrency(position.value)}</span>
-                            </div>
-                            <div className="mt-1 flex items-center justify-between text-xs">
-                              <span>Unrealized P&amp;L</span>
-                              <span className={position.unrealizedPnL >= 0 ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                                {formatCurrency(position.unrealizedPnL)}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </ScrollArea>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Brain className="h-5 w-5" />
-                  AI System Health
-                </CardTitle>
-                <CardDescription>Model status, cost usage, and consensus telemetry in real time.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 text-sm">
-                <div className="rounded-md border p-3">
-                  <h4 className="font-semibold mb-2">Model Status</h4>
-                  <div className="grid gap-2">
-                    {aiStatus?.ai_models_status
-                      ? Object.entries(aiStatus.ai_models_status).map(([model, status]) => (
-                          <div key={model} className="flex items-center justify-between">
-                            <span>{model}</span>
-                            <Badge variant="outline">{String(status)}</Badge>
-                          </div>
-                        ))
-                      : <p className="text-muted-foreground">Model telemetry not available.</p>}
-                  </div>
-                </div>
-                <div className="rounded-md border p-3">
-                  <h4 className="font-semibold mb-2">Consensus Stream</h4>
-                  <ScrollArea className="h-32 pr-2">
-                    <div className="space-y-2">
-                      {consensusHistory.length === 0 ? (
-                        <p className="text-muted-foreground text-xs">No consensus events yet.</p>
-                      ) : (
-                        consensusHistory.slice(-20).reverse().map((item, index) => (
-                          <div key={`${item.timestamp}-${index}`} className="flex items-center justify-between text-xs">
-                            <span>{new Date(item.timestamp).toLocaleTimeString()}</span>
-                            <span>{item.recommendation} @ {item.consensus}%</span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              </CardContent>
-            </Card>
           </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <BarChart3 className="h-4 w-4" />
-                Market Data Stream
-              </CardTitle>
-              <CardDescription>Real-time pricing feed from the trading websocket.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="max-h-64 pr-2">
-                <div className="grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-3">
-                  {marketData.length === 0 ? (
-                    <p className="text-muted-foreground">Market data will appear as soon as subscriptions update.</p>
-                  ) : (
-                    marketData.map((item) => (
-                      <div key={item.symbol} className="rounded-md border p-3">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold">{item.symbol}</span>
-                          <span className={item.change >= 0 ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                            {formatPercentage(item.change)}
-                          </span>
-                        </div>
-                        <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                          <span>Price</span>
-                          <span>{formatCurrency(item.price)}</span>
-                        </div>
-                        <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                          <span>Volume</span>
-                          <span>{item.volume}</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
 
       {/* Opportunities Drawer */}
       <OpportunitiesDrawer
