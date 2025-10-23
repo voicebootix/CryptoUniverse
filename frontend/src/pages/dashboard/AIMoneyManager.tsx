@@ -848,7 +848,7 @@ const AIMoneyManager: React.FC = () => {
           {/* Market Context Card */}
           {marketContext && (
             <MarketContextCard
-              marketContext={marketContext}
+              marketData={marketContext}
               compact={true}
             />
           )}
