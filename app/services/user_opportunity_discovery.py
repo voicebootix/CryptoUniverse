@@ -739,6 +739,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         user_id=user_id,
                         force_refresh=force_refresh)
 
+        # Track scan start
+        await self._track_scan_lifecycle(user_id, scan_id, "started", "in_progress",
+                                        force_refresh=force_refresh,
+                                        start_time=discovery_start_time)
+
         metrics: Dict[str, Any] = {
             "scan_id": scan_id,
             "start_time": discovery_start_time,
@@ -775,6 +780,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             
             # STEP 3: Load portfolio data for this discovery
             portfolio_fetch_start = time.time()
+            await self._track_scan_lifecycle(user_id, scan_id, "portfolio_fetch", "in_progress")
+
             portfolio_result = await self._get_user_portfolio(user_id)
             metrics["portfolio_fetch_time"] = time.time() - portfolio_fetch_start
 
@@ -783,7 +790,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                   scan_id=scan_id,
                                   user_id=user_id,
                                   portfolio_result=portfolio_result)
+                await self._track_scan_lifecycle(user_id, scan_id, "portfolio_fetch", "error",
+                                                error="No active strategies found",
+                                                portfolio_result=portfolio_result)
                 return await self._handle_no_strategies_user(user_id, scan_id)
+
+            await self._track_scan_lifecycle(user_id, scan_id, "portfolio_fetch", "completed",
+                                           strategies_count=len(portfolio_result.get("active_strategies", [])),
+                                           duration_ms=metrics["portfolio_fetch_time"] * 1000)
             
             active_strategies = portfolio_result["active_strategies"]
             
@@ -796,6 +810,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             # STEP 4: Get enterprise asset discovery based on user tier
             asset_discovery_start = time.time()
+            await self._track_scan_lifecycle(user_id, scan_id, "asset_discovery", "in_progress")
+
             discovered_assets = await enterprise_asset_filter.discover_all_assets_with_volume_filtering(
                 min_tier=user_profile.max_asset_tier,
                 force_refresh=force_refresh
@@ -804,7 +820,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             if not discovered_assets or sum(len(assets) for assets in discovered_assets.values()) == 0:
                 self.logger.warning("No assets discovered", scan_id=scan_id, user_tier=user_profile.user_tier)
+                await self._track_scan_lifecycle(user_id, scan_id, "asset_discovery", "error",
+                                                error="No tradeable assets found")
                 return {"success": False, "error": "No tradeable assets found", "opportunities": []}
+
+            await self._track_scan_lifecycle(user_id, scan_id, "asset_discovery", "completed",
+                                           total_assets=sum(len(assets) for assets in discovered_assets.values()),
+                                           duration_ms=metrics["asset_discovery_time"] * 1000)
 
             await self._preload_price_universe(discovered_assets, user_profile, scan_id)
 
@@ -815,6 +837,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             metrics['total_strategies'] = total_strategies
             strategies_completed = 0
             strategy_timings: Dict[str, float] = {}
+
+            # Track start of strategies scan
+            await self._track_scan_lifecycle(user_id, scan_id, "strategies_scan", "in_progress",
+                                           total_strategies=total_strategies)
 
             initial_snapshot = self._assemble_response(
                 user_id=user_id,
@@ -994,6 +1020,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # STEP 9: Cache results
             await self._cache_opportunities(user_id, final_response, user_profile)
 
+            # Track strategies completion
+            await self._track_scan_lifecycle(user_id, scan_id, "strategies_scan", "completed",
+                                           strategies_completed=total_strategies,
+                                           opportunities_found=len(ranked_opportunities))
+
             # Track metrics for diagnostic monitoring
             await self._track_scan_metrics(
                 user_id=user_id,
@@ -1004,6 +1035,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 success=True
             )
 
+            # Track final completion
+            await self._track_scan_lifecycle(user_id, scan_id, "completed", "completed",
+                                           total_opportunities=len(ranked_opportunities),
+                                           execution_time_ms=execution_time)
+
             self.logger.info("✅ ENTERPRISE User Opportunity Discovery Completed",
                            scan_id=scan_id,
                            user_id=user_id,
@@ -1012,16 +1048,26 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                            execution_time_ms=execution_time)
 
             return final_response
-            
+
         except Exception as e:
             execution_time = (time.time() - discovery_start_time) * 1000
+            error_type = type(e).__name__
+            is_timeout = "Timeout" in error_type or "timeout" in str(e).lower()
+
             self.logger.error("💥 ENTERPRISE User Opportunity Discovery Failed",
                             scan_id=scan_id,
                             user_id=user_id,
                             execution_time_ms=execution_time,
                             error=str(e),
-                            error_type=type(e).__name__,
+                            error_type=error_type,
                             exc_info=True)
+
+            # Track failure with detailed error info
+            await self._track_scan_lifecycle(user_id, scan_id, "failed", "error" if not is_timeout else "timeout",
+                                           error=str(e),
+                                           error_type=error_type,
+                                           execution_time_ms=execution_time,
+                                           is_timeout=is_timeout)
 
             # Track error metrics
             await self._track_error_metrics(user_id, scan_id, str(e), execution_time)
@@ -4379,6 +4425,47 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         except Exception as track_error:
             self.logger.debug("Error tracking failed", error=str(track_error))
+
+    async def _track_scan_lifecycle(self, user_id: str, scan_id: str, phase: str, status: str = "in_progress", error: str = None, **extra_data):
+        """Track scan lifecycle progression through each phase for comprehensive diagnostics.
+
+        Phases: started, portfolio_fetch, asset_discovery, strategies_scan, ranking, completed, failed
+        Status: in_progress, completed, error, timeout
+        """
+        try:
+            if not self.redis:
+                return
+
+            lifecycle_key = f"scan_lifecycle:{scan_id}"
+            timestamp = self._current_timestamp().isoformat()
+
+            phase_data = {
+                "phase": phase,
+                "status": status,
+                "timestamp": timestamp,
+                "user_id": user_id,
+                **extra_data
+            }
+
+            if error:
+                phase_data["error"] = str(error)
+
+            # Store in Redis hash for easy retrieval
+            await self.redis.hset(lifecycle_key, phase, json.dumps(phase_data))
+            await self.redis.expire(lifecycle_key, 3600)  # 1 hour TTL
+
+            # Also update "current_phase" for quick status checks
+            await self.redis.hset(lifecycle_key, "current_phase", phase)
+            await self.redis.hset(lifecycle_key, "current_status", status)
+            await self.redis.hset(lifecycle_key, "last_updated", timestamp)
+
+            self.logger.info(f"📍 Scan lifecycle: {phase}",
+                           scan_id=scan_id,
+                           status=status,
+                           **extra_data)
+
+        except Exception as track_error:
+            self.logger.debug("Lifecycle tracking failed", error=str(track_error))
 
     async def _track_scan_metrics(self, user_id: str, scan_id: str, opportunities_count: int, strategies_count: int, execution_time_ms: float, success: bool = True):
         """Track user-initiated opportunity scan metrics for diagnostic monitoring.
