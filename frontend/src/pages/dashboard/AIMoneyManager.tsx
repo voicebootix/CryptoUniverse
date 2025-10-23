@@ -346,9 +346,9 @@ const AIMoneyManager: React.FC = () => {
       const response = await apiClient.post('/ai-consensus/analyze-opportunity', {
         symbol: 'BTC/USDT', // Default symbol, could be made configurable
         analysis_type: 'opportunity',
-        timeframe: '1h',
+        timeframe: '4h',
         confidence_threshold: 0.7,
-        ai_models: 'ensemble',
+        ai_models: 'all',
         include_risk_metrics: true
       });
 
@@ -379,7 +379,7 @@ const AIMoneyManager: React.FC = () => {
               strategy: opp.strategy
             },
             confidence_threshold: 0.7,
-            ai_models: 'ensemble',
+            ai_models: 'all',
             execution_urgency: 'normal'
           }).then(res => res.data?.result || res.data)
         )
@@ -597,7 +597,7 @@ const AIMoneyManager: React.FC = () => {
           take_profit: opportunity.take_profit
         },
         confidence_threshold: 0.7,
-        ai_models: 'ensemble',
+        ai_models: 'all',
         execution_urgency: 'normal'
       });
 
