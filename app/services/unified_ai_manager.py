@@ -1380,6 +1380,7 @@ class UnifiedAIManager(LoggerMixin):
         last_status_text: Optional[str] = None
         response_message_id: Optional[int] = None
         response_buffer: str = ""
+        response_delivered = False
         last_response_sent_length = 0
         final_metadata: Optional[Dict[str, Any]] = None
 
@@ -1423,7 +1424,7 @@ class UnifiedAIManager(LoggerMixin):
             return status_message_id
 
         async def _update_response(text: str, *, replace: bool = False) -> Optional[int]:
-            nonlocal response_message_id, response_buffer, last_response_sent_length
+            nonlocal response_message_id, response_buffer, last_response_sent_length, response_delivered
 
             response_buffer = text if replace else response_buffer + text
             truncated = self._truncate_telegram_text(response_buffer)
@@ -1439,8 +1440,17 @@ class UnifiedAIManager(LoggerMixin):
                     )
                     return None
 
-                response_message_id = send_result.get("message_id")
+                message_id = send_result.get("message_id")
+                if not message_id:
+                    self.logger.error(
+                        "Telegram streaming response missing message_id",
+                        chat_id=chat_id,
+                    )
+                    return None
+
+                response_message_id = message_id
                 last_response_sent_length = len(truncated)
+                response_delivered = True
                 return response_message_id
 
             if replace or len(truncated) - last_response_sent_length >= 32 or truncated.endswith((".", "!", "?")):
@@ -1459,8 +1469,17 @@ class UnifiedAIManager(LoggerMixin):
                     )
                     try:
                         send_result = await self.telegram_core.telegram_api.send_message(chat_id, truncated)
-                        response_message_id = send_result.get("message_id")
+                        message_id = send_result.get("message_id")
+                        if not message_id:
+                            self.logger.error(
+                                "Telegram streaming recovery missing message_id",
+                                chat_id=chat_id,
+                            )
+                            return response_message_id
+
+                        response_message_id = message_id
                         last_response_sent_length = len(truncated)
+                        response_delivered = True
                     except Exception as send_exc:
                         self.logger.error(
                             "Failed to recover Telegram streaming response",
@@ -1507,7 +1526,15 @@ class UnifiedAIManager(LoggerMixin):
             return None
 
         if response_buffer:
-            if response_message_id and len(response_buffer) > last_response_sent_length:
+            if not response_delivered or not response_message_id:
+                self.logger.warning(
+                    "Telegram streaming response was never delivered",
+                    chat_id=chat_id,
+                    user_id=user_id,
+                )
+                return None
+
+            if len(response_buffer) > last_response_sent_length:
                 truncated = self._truncate_telegram_text(response_buffer)
                 try:
                     await self.telegram_core.telegram_api.edit_message_text(
