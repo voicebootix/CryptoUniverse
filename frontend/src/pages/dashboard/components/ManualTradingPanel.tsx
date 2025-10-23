@@ -66,7 +66,7 @@ const ManualTradingPanel: React.FC<ManualTradingPanelProps> = ({
 
   const fetchMarketData = async () => {
     try {
-      const response = await apiClient.get(`/api/v1/market/price/${symbol}`);
+      const response = await apiClient.get(`/market/price/${symbol}`);
       if (response.data.success) {
         setMarketPrice(response.data.data.price);
         if (orderType === 'market') {
