@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,24 +16,30 @@ import {
   AlertTriangle,
   Info,
   Zap,
-  Shield
+  Shield,
+  Sparkles
 } from 'lucide-react';
 import { apiClient } from '@/lib/api/client';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { useToast } from '@/components/ui/use-toast';
+import { RiskCalculator } from '@/components/trading/RiskCalculator';
 
 interface ManualTradingPanelProps {
   isPaperMode: boolean;
   onExecuteTrade: (tradeData: any) => Promise<void>;
   isExecuting: boolean;
   aiSuggestions?: any;
+  portfolioValue?: number;
+  showRiskCalculator?: boolean;
 }
 
 const ManualTradingPanel: React.FC<ManualTradingPanelProps> = ({
   isPaperMode,
   onExecuteTrade,
   isExecuting,
-  aiSuggestions
+  aiSuggestions,
+  portfolioValue = 10000,
+  showRiskCalculator = true
 }) => {
   const { toast } = useToast();
   
@@ -173,6 +179,49 @@ const ManualTradingPanel: React.FC<ManualTradingPanelProps> = ({
       // duration: 3000
     });
   };
+
+  // Calculate risk metrics for RiskCalculator component
+  const riskCalculatorData = useMemo(() => {
+    const proposedAmount = parseFloat(amount) || 0;
+    const entryPrice = parseFloat(price) || marketPrice || 0;
+    const stopLossPercent = parseFloat(stopLoss) || 0;
+    const takeProfitPercent = parseFloat(takeProfit) || 0;
+    const leverageValue = parseFloat(leverage) || 1;
+
+    // Calculate actual stop loss and take profit prices (side-aware)
+    let stopLossPrice: number | undefined = undefined;
+    let takeProfitPrice: number | undefined = undefined;
+
+    if (stopLossPercent > 0) {
+      if (side === 'buy') {
+        // For BUY: stop loss is below entry price
+        stopLossPrice = entryPrice * (1 - stopLossPercent / 100);
+      } else {
+        // For SELL: stop loss is above entry price
+        stopLossPrice = entryPrice * (1 + stopLossPercent / 100);
+      }
+    }
+
+    if (takeProfitPercent > 0) {
+      if (side === 'buy') {
+        // For BUY: take profit is above entry price
+        takeProfitPrice = entryPrice * (1 + takeProfitPercent / 100);
+      } else {
+        // For SELL: take profit is below entry price
+        takeProfitPrice = entryPrice * (1 - takeProfitPercent / 100);
+      }
+    }
+
+    return {
+      portfolioValue,
+      availableBalance,
+      proposedAmount,
+      entryPrice,
+      stopLoss: stopLossPrice,
+      takeProfit: takeProfitPrice,
+      leverage: leverageValue
+    };
+  }, [amount, price, marketPrice, stopLoss, takeProfit, leverage, portfolioValue, availableBalance, side]);
 
   return (
     <div className="space-y-4">
@@ -326,6 +375,11 @@ const ManualTradingPanel: React.FC<ManualTradingPanelProps> = ({
           </div>
         </CardContent>
       </Card>
+
+      {/* AI-Powered Risk Calculator */}
+      {showRiskCalculator && amount && parseFloat(amount) > 0 && (
+        <RiskCalculator data={riskCalculatorData} compact />
+      )}
 
       {/* Order Summary */}
       <Card className="bg-muted/50">
