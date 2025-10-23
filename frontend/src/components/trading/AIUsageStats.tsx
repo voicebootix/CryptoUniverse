@@ -21,7 +21,7 @@ interface AIUsageData {
   todayCost: number;
   profitGenerated: number;
   roi: number;
-  callBreakdown: AICallStats[];
+  callBreakdown?: AICallStats[];
   topPerformingModel?: string;
   avgResponseTime?: number;
 }
@@ -239,7 +239,7 @@ export const AIUsageStats: React.FC<AIUsageStatsProps> = ({
             </div>
 
             <div className="space-y-2">
-              {usageData.callBreakdown.map((call, index) => {
+              {usageData.callBreakdown?.map((call, index) => {
                 const config = CALL_TYPE_CONFIG[call.type] || {
                   icon: Brain,
                   color: 'text-gray-500',

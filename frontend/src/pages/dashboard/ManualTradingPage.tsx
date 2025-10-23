@@ -757,7 +757,10 @@ const ManualTradingPage: React.FC = () => {
                 consensus_score: best.validation?.consensus_score || 0,
                 recommendation: best.side === 'buy' ? 'BUY' : 'SELL',
                 confidence_threshold_met: true,
-                model_responses: best.validation?.model_responses || [],
+                model_responses: (best.validation?.model_responses || []).map(mr => ({
+                  ...mr,
+                  score: mr.confidence || 0  // Add missing score property
+                })),
                 cost_summary: { total_cost: totalScanCost },
                 reasoning: best.reasoning || `Top opportunity from ${validated.length} validated`,
                 timestamp: new Date().toISOString()
@@ -1736,13 +1739,13 @@ const ManualTradingPage: React.FC = () => {
                 </CardContent>
               </Card>
 
-              {/* Market Context Card */}
-              {marketContext && (
+              {/* Market Context Card - TODO: Create adapter for MarketContext type */}
+              {/* {marketContext && (
                 <MarketContextCard
                   marketData={marketContext}
                   compact
                 />
-              )}
+              )} */}
 
               <Card>
                 <CardHeader>
@@ -2202,11 +2205,11 @@ const ManualTradingPage: React.FC = () => {
           <AIUsageStats
             usageData={{
               remainingCredits: balance.available_credits || 0,
-              totalCredits: balance.total_credits || 1000,
-              todayCalls: balance.today_usage || 0,
-              todayCost: (balance.today_usage || 0) * 0.05, // Estimate
+              totalCredits: balance.total_purchased_credits || 0,
+              todayCalls: balance.total_used_credits || 0,
+              todayCost: (balance.total_used_credits || 0) * (pricingConfig?.per_call_estimate || 0.05),
               profitGenerated: dailyPnL > 0 ? dailyPnL : 0,
-              roi: dailyPnL > 0 && balance.today_usage > 0 ? dailyPnL / (balance.today_usage * 0.05) : 0,
+              roi: dailyPnL > 0 && balance.total_used_credits > 0 ? dailyPnL / ((balance.total_used_credits || 1) * (pricingConfig?.per_call_estimate || 0.05)) : 0,
               callBreakdown: (() => {
                 // Aggregate aiInsights by function/type
                 if (!aiInsights || aiInsights.length === 0) {
