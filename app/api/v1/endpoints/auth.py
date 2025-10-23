@@ -24,6 +24,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
+from sqlalchemy.orm import load_only
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.config import get_settings
@@ -291,8 +292,26 @@ async def login(
     try:
         # Find user with proper timeout for production
         try:
+            user_stmt = (
+                select(User)
+                .options(
+                    load_only(
+                        User.id,
+                        User.email,
+                        User.hashed_password,
+                        User.is_active,
+                        User.is_verified,
+                        User.role,
+                        User.status,
+                        User.two_factor_enabled,
+                        User.tenant_id,
+                        User.last_login,
+                    )
+                )
+                .filter(User.email == request.email)
+            )
             result = await asyncio.wait_for(
-                db.execute(select(User).filter(User.email == request.email)),
+                db.execute(user_stmt),
                 timeout=10.0  # Production timeout
             )
             user = result.scalar_one_or_none()

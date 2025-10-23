@@ -6,9 +6,12 @@ This router includes all API endpoints for the enterprise platform.
 
 import time
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, HTTPException, status as http_status
 import structlog
+from sqlalchemy import text
 
 # Import endpoint routers
 from app.api.v1.endpoints import (
@@ -17,6 +20,10 @@ from app.api.v1.endpoints import (
     password_reset, health, opportunity_discovery, admin_testing, ab_testing, admin_strategy_access,
     signals, unified_strategies, risk, diagnostics, scan_diagnostics, system_monitoring
 )
+
+from app.core.database import AsyncSessionLocal
+from app.core.redis import get_redis_client
+from app.services.system_monitoring import system_monitoring_service
 
 logger = structlog.get_logger(__name__)
 
@@ -55,24 +62,197 @@ api_router.include_router(admin_strategy_access.router, tags=["Admin Strategy Ma
 api_router.include_router(unified_strategies.router, tags=["Enterprise Strategy Management"])
 
 # Add monitoring endpoint that frontend expects
+def _build_alert(
+    severity: str,
+    message: str,
+    *,
+    metric: str,
+    value: Any,
+    threshold: Optional[Any] = None
+) -> Dict[str, Any]:
+    """Helper to build a consistent alert payload."""
+
+    alert: Dict[str, Any] = {
+        "severity": severity,
+        "message": message,
+        "metric": metric,
+        "observed_value": value,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    if threshold is not None:
+        alert["threshold"] = threshold
+    return alert
+
+
+def _collect_endpoint_metrics(
+    window_minutes: int = 5,
+) -> Dict[str, Dict[str, float]]:
+    """Return latency statistics for critical endpoints from in-memory metrics."""
+
+    metrics: Dict[str, Dict[str, float]] = {}
+    collector_metrics = system_monitoring_service.metrics_collector.metrics.get(
+        "http_request_duration_ms"
+    )
+
+    if not collector_metrics:
+        return metrics
+
+    cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
+    critical_paths = {
+        "/api/v1/auth/login": "login",
+        "/api/v1/diagnostics/test-layers": "diagnostics_layers",
+        "/api/v1/scan-diagnostics/scan-metrics": "scan_metrics",
+    }
+
+    bucket: Dict[str, List[float]] = {label: [] for label in critical_paths.values()}
+
+    for point in collector_metrics:
+        if point.timestamp < cutoff:
+            continue
+        path = point.tags.get("path") if point.tags else None
+        if path in critical_paths:
+            bucket[critical_paths[path]].append(point.value)
+
+    for label, values in bucket.items():
+        if not values:
+            continue
+        sorted_values = sorted(values)
+        if len(sorted_values) > 1:
+            index = max(0, int(len(sorted_values) * 0.95) - 1)
+            p95 = sorted_values[index]
+        else:
+            p95 = sorted_values[0]
+        metrics[label] = {
+            "count": len(sorted_values),
+            "avg_ms": sum(sorted_values) / len(sorted_values),
+            "p95_ms": p95,
+            "max_ms": sorted_values[-1],
+        }
+
+    return metrics
+
+
 @api_router.get("/monitoring/alerts")
 async def get_monitoring_alerts():
-    """Get system monitoring alerts."""
+    """Get system monitoring alerts with live infrastructure checks."""
+
+    alerts: List[Dict[str, Any]] = []
+    metrics: Dict[str, Any] = {}
+
+    # Database latency check
+    db_latency_ms: Optional[float] = None
     try:
-        # Return basic alerts structure that frontend expects
-        return {
-            "success": True,
-            "alerts": [],
-            "system_status": "operational",
-            "last_updated": datetime.utcnow().isoformat()
-        }
-    except Exception as e:
-        logger.error("Failed to get monitoring alerts", error=str(e), exc_info=True)
-        from fastapi import HTTPException, status
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve monitoring alerts: {str(e)}"
+        async with AsyncSessionLocal() as session:
+            start = time.perf_counter()
+            await session.execute(text("SELECT 1"))
+            db_latency_ms = (time.perf_counter() - start) * 1000
+        metrics["database_latency_ms"] = round(db_latency_ms, 2)
+
+        if db_latency_ms > 5000:
+            alerts.append(
+                _build_alert(
+                    "critical",
+                    "Database latency exceeded 5s",
+                    metric="database_latency_ms",
+                    value=round(db_latency_ms, 2),
+                    threshold=5000,
+                )
+            )
+        elif db_latency_ms > 2000:
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    "Database latency is above 2s",
+                    metric="database_latency_ms",
+                    value=round(db_latency_ms, 2),
+                    threshold=2000,
+                )
+            )
+    except Exception as db_error:
+        alerts.append(
+            _build_alert(
+                "critical",
+                "Database health check failed",
+                metric="database_latency_ms",
+                value=str(db_error),
+            )
         )
+        metrics["database_error"] = str(db_error)
+
+    # Redis health check
+    redis_latency_ms: Optional[float] = None
+    try:
+        redis = await get_redis_client()
+        if not redis:
+            raise RuntimeError("Redis client unavailable")
+        start = time.perf_counter()
+        await redis.ping()
+        redis_latency_ms = (time.perf_counter() - start) * 1000
+        metrics["redis_latency_ms"] = round(redis_latency_ms, 2)
+
+        if redis_latency_ms > 1000:
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    "Redis ping latency is elevated",
+                    metric="redis_latency_ms",
+                    value=round(redis_latency_ms, 2),
+                    threshold=1000,
+                )
+            )
+    except Exception as redis_error:
+        alerts.append(
+            _build_alert(
+                "critical",
+                "Redis health check failed",
+                metric="redis_latency_ms",
+                value=str(redis_error),
+            )
+        )
+        metrics["redis_error"] = str(redis_error)
+
+    # Endpoint performance metrics
+    endpoint_metrics = _collect_endpoint_metrics()
+    metrics["endpoint_latency"] = endpoint_metrics
+
+    for endpoint, stats in endpoint_metrics.items():
+        max_latency = stats.get("max_ms")
+        if max_latency is None:
+            continue
+        if max_latency > 5000:
+            alerts.append(
+                _build_alert(
+                    "critical",
+                    f"{endpoint.replace('_', ' ').title()} latency exceeded 5s",
+                    metric=f"endpoint_latency.{endpoint}",
+                    value=round(max_latency, 2),
+                    threshold=5000,
+                )
+            )
+        elif max_latency > 2000:
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    f"{endpoint.replace('_', ' ').title()} latency above 2s",
+                    metric=f"endpoint_latency.{endpoint}",
+                    value=round(max_latency, 2),
+                    threshold=2000,
+                )
+            )
+
+    system_status = "operational"
+    if any(alert["severity"] == "critical" for alert in alerts):
+        system_status = "critical"
+    elif any(alert["severity"] == "warning" for alert in alerts):
+        system_status = "degraded"
+
+    return {
+        "success": len(alerts) == 0,
+        "alerts": alerts,
+        "system_status": system_status,
+        "metrics": metrics,
+        "last_updated": datetime.utcnow().isoformat(),
+    }
 
 @api_router.get("/status")
 async def api_status():

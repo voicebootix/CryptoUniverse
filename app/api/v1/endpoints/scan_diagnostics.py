@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.redis import get_redis_client
 from app.api.v1.endpoints.auth import get_current_user, require_role
@@ -53,9 +53,11 @@ class ScanLifecycleResponse(BaseModel):
     current_phase: Optional[str] = None
     current_status: Optional[str] = None
     last_updated: Optional[str] = None
-    phases: Dict[str, Any] = {}
+    phases: Dict[str, Any] = Field(default_factory=dict)
     is_stuck: bool = False
     stuck_duration_seconds: Optional[float] = None
+    redis_key: Optional[str] = None
+    recovered_from_index: bool = False
     timestamp: str
 
 
@@ -392,9 +394,31 @@ async def get_scan_lifecycle(
             )
 
         lifecycle_key = f"scan_lifecycle:{scan_id}"
+        resolved_key = lifecycle_key
+        recovered_from_index = False
 
         # Get all lifecycle data
         lifecycle_data = await redis.hgetall(lifecycle_key)
+
+        if not lifecycle_data:
+            # Attempt to recover from index of known lifecycle keys
+            index_key = "scan_lifecycle:index"
+            try:
+                async for candidate in redis.scan_iter(match=f"scan_lifecycle:*{scan_id}*", count=5):
+                    resolved_key = candidate.decode() if isinstance(candidate, bytes) else candidate
+                    lifecycle_data = await redis.hgetall(resolved_key)
+                    if lifecycle_data:
+                        recovered_from_index = resolved_key != lifecycle_key
+                        break
+                if not lifecycle_data:
+                    # fall back to most recent entry from index if available
+                    recent_keys = await redis.zrevrange(index_key, 0, 0)
+                    if recent_keys:
+                        resolved_key = recent_keys[0]
+                        lifecycle_data = await redis.hgetall(resolved_key)
+                        recovered_from_index = True
+            except Exception as scan_error:
+                logger.debug("Lifecycle index lookup failed", error=str(scan_error))
 
         if not lifecycle_data:
             raise HTTPException(
@@ -441,15 +465,19 @@ async def get_scan_lifecycle(
             except Exception as time_parse_error:
                 logger.debug("Failed to parse time", error=str(time_parse_error))
 
+        resolved_scan_id = resolved_key.split("scan_lifecycle:", 1)[-1]
+
         response = {
             "success": True,
-            "scan_id": scan_id,
+            "scan_id": resolved_scan_id,
             "current_phase": current_phase,
             "current_status": current_status,
             "last_updated": last_updated,
             "phases": phases,
             "is_stuck": is_stuck,
             "stuck_duration_seconds": stuck_duration_seconds,
+            "redis_key": resolved_key,
+            "recovered_from_index": recovered_from_index,
             "timestamp": datetime.utcnow().isoformat()
         }
 
