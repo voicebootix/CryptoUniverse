@@ -88,6 +88,7 @@ const AIMoneyManager: React.FC = () => {
     validating: new Set()
   });
   const [credits, setCredits] = useState<number>(0);
+  const [portfolioValue, setPortfolioValue] = useState<number>(10000); // Default portfolio value
 
   // WebSocket connection for real-time updates
   const [ws, setWs] = useState<WebSocket | null>(null);
@@ -692,17 +693,22 @@ const AIMoneyManager: React.FC = () => {
     });
   }, [toast]);
 
-  // Fetch credits on mount
+  // Fetch credits and portfolio on mount
   useEffect(() => {
-    const fetchCredits = async () => {
+    const fetchData = async () => {
       try {
-        const response = await apiClient.get('/credits/balance');
-        setCredits(response.data.available_credits || 0);
+        // Fetch credits
+        const creditsResponse = await apiClient.get('/credits/balance');
+        setCredits(creditsResponse.data.available_credits || 0);
+
+        // Fetch portfolio value
+        const portfolioResponse = await apiClient.get('/portfolio/summary');
+        setPortfolioValue(portfolioResponse.data.total_value || 10000);
       } catch (error) {
-        console.error('Failed to fetch credits', error);
+        console.error('Failed to fetch data', error);
       }
     };
-    fetchCredits();
+    fetchData();
   }, []);
 
   return (
@@ -979,6 +985,7 @@ const AIMoneyManager: React.FC = () => {
         onValidateOpportunity={handleValidateOpportunity}
         onApplyToForm={handleApplyOpportunityToForm}
         availableCredits={credits}
+        portfolioValue={portfolioValue}
       />
     </div>
   );
