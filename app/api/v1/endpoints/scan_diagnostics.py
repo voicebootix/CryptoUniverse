@@ -10,7 +10,7 @@ Date: 2025-10-22
 
 import json
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Mapping
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -398,40 +398,50 @@ async def get_scan_lifecycle(
         recovered_from_index = False
 
         # Get all lifecycle data
-        lifecycle_data = await redis.hgetall(lifecycle_key)
+        def _decode_hash(hash_data: Mapping[Any, Any]) -> Dict[str, Any]:
+            if not hash_data:
+                return {}
 
-        if not lifecycle_data:
+            decoded: Dict[str, Any] = {}
+            for key, value in hash_data.items():
+                k = key.decode() if isinstance(key, bytes) else key
+                v = value.decode() if isinstance(value, bytes) else value
+                decoded[k] = v
+            return decoded
+
+        lifecycle_data = await redis.hgetall(lifecycle_key)
+        decoded_data = _decode_hash(lifecycle_data)
+
+        if not decoded_data:
             # Attempt to recover from index of known lifecycle keys
             index_key = "scan_lifecycle:index"
             try:
                 async for candidate in redis.scan_iter(match=f"scan_lifecycle:*{scan_id}*", count=5):
                     resolved_key = candidate.decode() if isinstance(candidate, bytes) else candidate
-                    lifecycle_data = await redis.hgetall(resolved_key)
-                    if lifecycle_data:
+                    decoded_data = _decode_hash(await redis.hgetall(resolved_key))
+                    if decoded_data:
                         recovered_from_index = resolved_key != lifecycle_key
                         break
-                if not lifecycle_data:
+                if not decoded_data:
                     # fall back to most recent entry from index if available
                     recent_keys = await redis.zrevrange(index_key, 0, 0)
+                    recent_keys = [
+                        key.decode() if isinstance(key, bytes) else key
+                        for key in recent_keys
+                    ]
                     if recent_keys:
                         resolved_key = recent_keys[0]
-                        lifecycle_data = await redis.hgetall(resolved_key)
-                        recovered_from_index = True
+                        decoded_data = _decode_hash(await redis.hgetall(resolved_key))
+                        if decoded_data:
+                            recovered_from_index = True
             except Exception as scan_error:
                 logger.debug("Lifecycle index lookup failed", error=str(scan_error))
 
-        if not lifecycle_data:
+        if not decoded_data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No lifecycle data found for scan {scan_id}"
             )
-
-        # Decode Redis hash
-        decoded_data = {}
-        for key, value in lifecycle_data.items():
-            k = key.decode() if isinstance(key, bytes) else key
-            v = value.decode() if isinstance(value, bytes) else value
-            decoded_data[k] = v
 
         # Extract current state
         current_phase = decoded_data.get("current_phase")
