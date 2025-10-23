@@ -53,6 +53,7 @@ import { MarketContextCard } from '@/components/trading/MarketContextCard';
 import { AIUsageStats } from '@/components/trading/AIUsageStats';
 import { OpportunitiesDrawer } from '@/components/trading/opportunities';
 import type { OpportunitiesDrawerState, Opportunity } from '@/components/trading/opportunities';
+import type { ConsensusData, MarketContext, AIPricingConfig } from './types';
 
 type ManualWorkflowType =
   | 'trade_validation'
@@ -190,8 +191,10 @@ const ManualTradingPage: React.FC = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [activeTab, setActiveTab] = useState('trade');
   const [aiInsights, setAiInsights] = useState<Array<{ id: string; title: string; payload: any; function: string; timestamp: string }>>([]);
-  const [latestConsensusData, setLatestConsensusData] = useState<any>(null);
-  const [marketContext, setMarketContext] = useState<any>(null);
+  const [latestConsensusData, setLatestConsensusData] = useState<ConsensusData | null>(null);
+  const [marketContext, setMarketContext] = useState<MarketContext | null>(null);
+  const [pricingConfig, setPricingConfig] = useState<AIPricingConfig | null>(null);
+  const [pricingError, setPricingError] = useState<string | null>(null);
   const [opportunitiesDrawer, setOpportunitiesDrawer] = useState<OpportunitiesDrawerState>({
     open: false,
     data: null,
@@ -718,9 +721,12 @@ const ManualTradingPage: React.FC = () => {
               }
             });
 
-            // 4. Calculate costs
-            const scanCost = opportunities.length * 1; // 1 credit per scan
-            const validationCost = opportunities.length * 2; // 2 credits per validation
+            // 4. Calculate costs from backend pricing config
+            if (!pricingConfig) {
+              throw new Error('Pricing configuration not loaded. Please refresh the page.');
+            }
+            const scanCost = opportunities.length * pricingConfig.opportunity_scan_cost;
+            const validationCost = opportunities.length * pricingConfig.validation_cost;
             const totalScanCost = scanCost + validationCost;
 
             // 5. Show drawer with tiered results
@@ -732,15 +738,21 @@ const ManualTradingPage: React.FC = () => {
                 totalCount: opportunities.length,
                 validatedCount: validated.length,
                 scanCost: totalScanCost,
-                executionCostPerTrade: 2
+                executionCostPerTrade: pricingConfig.execution_cost
               },
               executing: new Set(),
               validating: new Set()
             });
 
-            // 6. Update consensus card with best validated opportunity
+            // 6. Update consensus card with best validated opportunity (sort by consensus_score)
             if (validated.length > 0) {
-              const best = validated[0];
+              // Clone and sort to avoid mutation
+              const sortedValidated = [...validated].sort((a, b) => {
+                const scoreA = a.validation?.consensus_score ?? 0;
+                const scoreB = b.validation?.consensus_score ?? 0;
+                return scoreB - scoreA; // Descending
+              });
+              const best = sortedValidated[0];
               setLatestConsensusData({
                 consensus_score: best.validation?.consensus_score || 0,
                 recommendation: best.side === 'buy' ? 'BUY' : 'SELL',
@@ -1192,15 +1204,23 @@ const ManualTradingPage: React.FC = () => {
 
         pushWorkflowLog('info', `Validating ${opportunity.symbol} with AI consensus...`);
 
-        // Validate the trade
+        // Validate the trade - calculate percentages based on side
+        const stopLossPercent = opportunity.side === 'buy'
+          ? ((opportunity.entry_price - opportunity.stop_loss) / opportunity.entry_price) * 100
+          : ((opportunity.stop_loss - opportunity.entry_price) / opportunity.entry_price) * 100;
+
+        const takeProfitPercent = opportunity.side === 'buy'
+          ? ((opportunity.take_profit - opportunity.entry_price) / opportunity.entry_price) * 100
+          : ((opportunity.entry_price - opportunity.take_profit) / opportunity.entry_price) * 100;
+
         const result = await validateTrade({
           trade_data: {
             symbol: opportunity.symbol,
             action: opportunity.side,
             amount: opportunity.suggested_position_size,
             order_type: 'market',
-            stop_loss: ((opportunity.entry_price - opportunity.stop_loss) / opportunity.entry_price) * 100,
-            take_profit: ((opportunity.take_profit - opportunity.entry_price) / opportunity.entry_price) * 100,
+            stop_loss: stopLossPercent,
+            take_profit: takeProfitPercent,
             leverage: 1,
             strategy: opportunity.strategy
           },
@@ -1285,14 +1305,23 @@ const ManualTradingPage: React.FC = () => {
 
   const handleApplyOpportunityToForm = useCallback(
     (opportunity: Opportunity) => {
+      // Calculate percentages based on side
+      const stopLossPercent = opportunity.side === 'buy'
+        ? ((opportunity.entry_price - opportunity.stop_loss) / opportunity.entry_price) * 100
+        : ((opportunity.stop_loss - opportunity.entry_price) / opportunity.entry_price) * 100;
+
+      const takeProfitPercent = opportunity.side === 'buy'
+        ? ((opportunity.take_profit - opportunity.entry_price) / opportunity.entry_price) * 100
+        : ((opportunity.entry_price - opportunity.take_profit) / opportunity.entry_price) * 100;
+
       setTradeForm({
         symbol: opportunity.symbol,
         action: opportunity.side,
         amount: opportunity.suggested_position_size,
         orderType: 'market',
         price: opportunity.entry_price,
-        stopLoss: ((opportunity.entry_price - opportunity.stop_loss) / opportunity.entry_price) * 100,
-        takeProfit: ((opportunity.take_profit - opportunity.entry_price) / opportunity.entry_price) * 100,
+        stopLoss: stopLossPercent,
+        takeProfit: takeProfitPercent,
         leverage: 1
       });
 
@@ -1307,6 +1336,28 @@ const ManualTradingPage: React.FC = () => {
     },
     [toast]
   );
+
+  // Fetch pricing configuration from backend
+  useEffect(() => {
+    const fetchPricing = async () => {
+      try {
+        const response = await apiClient.get('/ai/pricing');
+        setPricingConfig({
+          opportunity_scan_cost: response.data.opportunity_scan_cost || 1,
+          validation_cost: response.data.validation_cost || 2,
+          execution_cost: response.data.execution_cost || 2,
+          per_call_estimate: response.data.per_call_estimate || 0.05
+        });
+        setPricingError(null);
+      } catch (error: any) {
+        console.error('Failed to fetch pricing config', error);
+        setPricingError('Failed to load pricing configuration. Please refresh or contact support.');
+        // Do NOT silently use hardcoded values - show error to user
+      }
+    };
+
+    fetchPricing();
+  }, []);
 
   useEffect(() => {
     setCurrentMode(ChatMode.TRADING);
@@ -1405,6 +1456,30 @@ const ManualTradingPage: React.FC = () => {
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+      {/* Pricing Error Alert */}
+      {pricingError && (
+        <Card className="border-red-500/50 bg-red-500/10">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-red-500">Pricing Configuration Error</h3>
+                <p className="text-sm text-muted-foreground mt-1">{pricingError}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.location.reload()}
+                  className="mt-3"
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Refresh Page
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Manual Trading Control Center</h1>
@@ -2144,10 +2219,22 @@ const ManualTradingPage: React.FC = () => {
                     acc[type] = { count: 0, totalCost: 0, successCount: 0 };
                   }
                   acc[type].count++;
-                  // Estimate cost per call (could be extracted from insight.payload if available)
-                  acc[type].totalCost += 0.05;
-                  // Assume success if payload exists (adjust based on actual success field if available)
-                  if (insight.payload && Object.keys(insight.payload).length > 0) {
+
+                  // Extract cost from payload if available, otherwise use pricing config
+                  const insightCost = insight.payload?.price
+                    ?? insight.payload?.cost
+                    ?? pricingConfig?.per_call_estimate
+                    ?? 0.05;
+                  acc[type].totalCost += insightCost;
+
+                  // Check explicit success field (payload.success, payload.status === 'ok', status === 'completed')
+                  const isSuccess =
+                    insight.payload?.success === true ||
+                    insight.payload?.status === 'ok' ||
+                    insight.payload?.status === 'completed' ||
+                    (insight as any).status === 'completed';
+
+                  if (isSuccess) {
                     acc[type].successCount++;
                   }
                   return acc;
