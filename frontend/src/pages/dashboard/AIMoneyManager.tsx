@@ -17,7 +17,8 @@ import {
   Pause,
   History,
   AlertCircle,
-  CheckCircle
+  CheckCircle,
+  Target
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -48,6 +49,10 @@ import ManualTradingPanel from './components/ManualTradingPanel';
 // Autonomous Settings Component (extracted from AutonomousPage)
 import AutonomousSettingsPanel from './components/AutonomousSettingsPanel';
 
+// Opportunities Drawer
+import { OpportunitiesDrawer } from '@/components/trading/opportunities';
+import type { OpportunitiesDrawerState, Opportunity } from '@/components/trading/opportunities';
+
 interface TradeExecution {
   id: string;
   phase: ExecutionPhase;
@@ -76,6 +81,13 @@ const AIMoneyManager: React.FC = () => {
   const [currentExecution, setCurrentExecution] = useState<TradeExecution | null>(null);
   const [recentExecutions, setRecentExecutions] = useState<TradeExecution[]>([]);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [opportunitiesDrawer, setOpportunitiesDrawer] = useState<OpportunitiesDrawerState>({
+    open: false,
+    data: null,
+    executing: new Set(),
+    validating: new Set()
+  });
+  const [credits, setCredits] = useState<number>(0);
 
   // WebSocket connection for real-time updates
   const [ws, setWs] = useState<WebSocket | null>(null);
@@ -319,6 +331,380 @@ const AIMoneyManager: React.FC = () => {
     }
   };
 
+  // Scan for opportunities
+  const handleScanOpportunities = useCallback(async () => {
+    try {
+      setIsExecuting(true);
+
+      toast({
+        title: "Scanning Markets",
+        description: "AI models are analyzing opportunities across all markets..."
+      });
+
+      // Call opportunity scan API
+      const response = await apiClient.post('/ai-consensus/analyze-opportunity', {
+        symbol: 'BTC/USDT', // Default symbol, could be made configurable
+        analysis_type: 'opportunity',
+        timeframe: '1h',
+        confidence_threshold: 0.7,
+        ai_models: 'ensemble',
+        include_risk_metrics: true
+      });
+
+      // Parse response
+      const opportunityData = response.data?.result?.opportunity_analysis || response.data?.result || response.data;
+      const opportunities = opportunityData?.opportunities || opportunityData?.detected_opportunities || [];
+
+      if (opportunities.length === 0) {
+        toast({
+          title: "No Opportunities Found",
+          description: "AI didn't detect any high-confidence trading opportunities at this time."
+        });
+        return;
+      }
+
+      // Batch validate all opportunities
+      const validationResults = await Promise.allSettled(
+        opportunities.map((opp: any) =>
+          apiClient.post('/ai-consensus/validate-trade', {
+            trade_data: {
+              symbol: opp.symbol,
+              action: opp.side,
+              amount: opp.suggested_position_size,
+              order_type: 'market',
+              stop_loss: opp.stop_loss_percent,
+              take_profit: opp.take_profit_percent,
+              leverage: opp.leverage || 1,
+              strategy: opp.strategy
+            },
+            confidence_threshold: 0.7,
+            ai_models: 'ensemble',
+            execution_urgency: 'normal'
+          }).then(res => res.data?.result || res.data)
+        )
+      );
+
+      // Split into validated vs non-validated
+      const validated: Opportunity[] = [];
+      const nonValidated: Opportunity[] = [];
+
+      opportunities.forEach((opp: any, idx: number) => {
+        const validation = validationResults[idx];
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+        const opportunity: Opportunity = {
+          id: crypto.randomUUID(),
+          symbol: opp.symbol,
+          side: opp.side,
+          strategy: opp.strategy || 'Unknown',
+          confidence: opp.confidence || 0,
+          entry_price: opp.entry_price || 0,
+          stop_loss: opp.stop_loss || 0,
+          take_profit: opp.take_profit || 0,
+          suggested_position_size: opp.suggested_position_size || 0,
+          position_size_percent: opp.position_size_percent || 0,
+          max_risk: opp.max_risk || 0,
+          max_risk_percent: opp.max_risk_percent || 0,
+          potential_gain: opp.potential_gain || 0,
+          potential_gain_percent: opp.potential_gain_percent || 0,
+          risk_reward_ratio: opp.risk_reward_ratio || 0,
+          timeframe: opp.timeframe || '1h',
+          reasoning: opp.reasoning,
+          indicators: opp.indicators,
+          timestamp: new Date().toISOString(),
+          expires_at: expiresAt,
+          aiValidated: false,
+          validation: undefined,
+          validationReason: undefined
+        };
+
+        if (validation.status === 'fulfilled' && validation.value?.approved) {
+          opportunity.aiValidated = true;
+          opportunity.validation = {
+            approved: validation.value.approved,
+            consensus_score: validation.value.consensus_score || 0,
+            confidence: validation.value.confidence || 0,
+            reason: validation.value.reason,
+            model_responses: validation.value.model_responses,
+            risk_assessment: validation.value.risk_assessment
+          };
+          validated.push(opportunity);
+        } else {
+          opportunity.validationReason = validation.status === 'fulfilled'
+            ? validation.value?.reason
+            : 'Validation failed';
+          nonValidated.push(opportunity);
+        }
+      });
+
+      // Sort validated by consensus score
+      const sortedValidated = [...validated].sort((a, b) => {
+        const scoreA = a.validation?.consensus_score ?? 0;
+        const scoreB = b.validation?.consensus_score ?? 0;
+        return scoreB - scoreA;
+      });
+
+      // Open drawer
+      setOpportunitiesDrawer({
+        open: true,
+        data: {
+          validated: sortedValidated,
+          nonValidated,
+          totalCount: opportunities.length,
+          validatedCount: sortedValidated.length,
+          scanCost: opportunities.length * 3, // Approximate cost
+          executionCostPerTrade: 2
+        },
+        executing: new Set(),
+        validating: new Set()
+      });
+
+      toast({
+        title: "Scan Complete",
+        description: `Found ${opportunities.length} opportunities (${sortedValidated.length} AI-validated)`
+      });
+
+    } catch (error: any) {
+      console.error('Opportunity scan failed', error);
+      toast({
+        title: "Scan Failed",
+        description: error?.response?.data?.detail || error?.message || "Failed to scan for opportunities",
+        variant: "destructive"
+      });
+    } finally {
+      setIsExecuting(false);
+    }
+  }, [toast]);
+
+  // Execute single opportunity
+  const handleExecuteOpportunity = useCallback(async (opportunityId: string, positionSize: number) => {
+    try {
+      setOpportunitiesDrawer(prev => ({
+        ...prev,
+        executing: new Set([...prev.executing, opportunityId])
+      }));
+
+      const opportunity = [...(opportunitiesDrawer.data?.validated || []), ...(opportunitiesDrawer.data?.nonValidated || [])]
+        .find(opp => opp.id === opportunityId);
+
+      if (!opportunity) {
+        throw new Error('Opportunity not found');
+      }
+
+      // Execute trade
+      const response = await apiClient.post('/trading/execute', {
+        symbol: opportunity.symbol,
+        action: opportunity.side,
+        amount: positionSize,
+        order_type: 'market',
+        stop_loss: opportunity.stop_loss,
+        take_profit: opportunity.take_profit,
+        source: 'ai_opportunity'
+      });
+
+      if (response.data.success) {
+        toast({
+          title: "Trade Executed",
+          description: `Successfully executed ${opportunity.side} ${positionSize} ${opportunity.symbol}`,
+        });
+
+        // Remove opportunity from drawer
+        setOpportunitiesDrawer(prev => {
+          if (!prev.data) return prev;
+          return {
+            ...prev,
+            data: {
+              ...prev.data,
+              validated: prev.data.validated.filter(opp => opp.id !== opportunityId),
+              nonValidated: prev.data.nonValidated.filter(opp => opp.id !== opportunityId)
+            }
+          };
+        });
+      }
+
+    } catch (error: any) {
+      console.error('Trade execution failed', error);
+      toast({
+        title: "Execution Failed",
+        description: error?.response?.data?.detail || error?.message || "Failed to execute trade",
+        variant: "destructive"
+      });
+    } finally {
+      setOpportunitiesDrawer(prev => {
+        const newExecuting = new Set(prev.executing);
+        newExecuting.delete(opportunityId);
+        return { ...prev, executing: newExecuting };
+      });
+    }
+  }, [opportunitiesDrawer, toast]);
+
+  // Batch execute opportunities
+  const handleBatchExecuteOpportunities = useCallback(async (opportunityIds: string[]) => {
+    try {
+      setOpportunitiesDrawer(prev => ({
+        ...prev,
+        executing: new Set([...prev.executing, ...opportunityIds])
+      }));
+
+      const results = await Promise.allSettled(
+        opportunityIds.map(id => handleExecuteOpportunity(id, 0)) // Position size should be set already
+      );
+
+      const successful = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.filter(r => r.status === 'rejected').length;
+
+      toast({
+        title: "Batch Execution Complete",
+        description: `${successful} successful, ${failed} failed`
+      });
+
+    } catch (error: any) {
+      console.error('Batch execution failed', error);
+      toast({
+        title: "Batch Execution Failed",
+        description: "Failed to execute batch trades",
+        variant: "destructive"
+      });
+    } finally {
+      setOpportunitiesDrawer(prev => ({
+        ...prev,
+        executing: new Set()
+      }));
+    }
+  }, [handleExecuteOpportunity, toast]);
+
+  // Validate opportunity
+  const handleValidateOpportunity = useCallback(async (opportunityId: string) => {
+    try {
+      setOpportunitiesDrawer(prev => ({
+        ...prev,
+        validating: new Set([...prev.validating, opportunityId])
+      }));
+
+      const opportunity = opportunitiesDrawer.data?.nonValidated.find(opp => opp.id === opportunityId);
+      if (!opportunity) {
+        throw new Error('Opportunity not found');
+      }
+
+      const response = await apiClient.post('/ai-consensus/validate-trade', {
+        trade_data: {
+          symbol: opportunity.symbol,
+          action: opportunity.side,
+          amount: opportunity.suggested_position_size,
+          order_type: 'market',
+          stop_loss: opportunity.stop_loss,
+          take_profit: opportunity.take_profit
+        },
+        confidence_threshold: 0.7,
+        ai_models: 'ensemble',
+        execution_urgency: 'normal'
+      });
+
+      const result = response.data?.result || response.data;
+
+      if (result.approved) {
+        // Move to validated
+        setOpportunitiesDrawer(prev => {
+          if (!prev.data) return prev;
+
+          const updatedOpportunity: Opportunity = {
+            ...opportunity,
+            aiValidated: true,
+            validation: {
+              approved: result.approved,
+              consensus_score: result.consensus_score || 0,
+              confidence: result.confidence || 0,
+              reason: result.reason,
+              model_responses: result.model_responses,
+              risk_assessment: result.risk_assessment
+            }
+          };
+
+          return {
+            ...prev,
+            data: {
+              ...prev.data,
+              validated: [...prev.data.validated, updatedOpportunity].sort((a, b) => {
+                const scoreA = a.validation?.consensus_score ?? 0;
+                const scoreB = b.validation?.consensus_score ?? 0;
+                return scoreB - scoreA;
+              }),
+              nonValidated: prev.data.nonValidated.filter(opp => opp.id !== opportunityId)
+            }
+          };
+        });
+
+        toast({
+          title: "Validation Successful",
+          description: `Opportunity approved with ${result.consensus_score}% consensus`
+        });
+      } else {
+        toast({
+          title: "Validation Failed",
+          description: result.reason || "AI consensus rejected this opportunity",
+          variant: "destructive"
+        });
+      }
+
+    } catch (error: any) {
+      console.error('Validation failed', error);
+      toast({
+        title: "Validation Error",
+        description: error?.response?.data?.detail || error?.message || "Failed to validate opportunity",
+        variant: "destructive"
+      });
+    } finally {
+      setOpportunitiesDrawer(prev => {
+        const newValidating = new Set(prev.validating);
+        newValidating.delete(opportunityId);
+        return { ...prev, validating: newValidating };
+      });
+    }
+  }, [opportunitiesDrawer, toast]);
+
+  // Apply opportunity to trade form
+  const handleApplyOpportunityToForm = useCallback((opportunity: Opportunity) => {
+    // Update phase details with the opportunity suggestion
+    setPhaseDetails(prev => ({
+      ...prev,
+      analysis: {
+        ...prev.analysis,
+        suggestions: {
+          symbol: opportunity.symbol,
+          side: opportunity.side,
+          amount: opportunity.suggested_position_size,
+          price: opportunity.entry_price,
+          stopLoss: opportunity.stop_loss,
+          takeProfit: opportunity.take_profit
+        }
+      }
+    }));
+
+    // Close drawer
+    setOpportunitiesDrawer(prev => ({ ...prev, open: false }));
+
+    // Switch to manual trading tab
+    setActiveTab('manual');
+
+    toast({
+      title: "Applied to Form",
+      description: "Opportunity parameters have been applied to the trading form"
+    });
+  }, [toast]);
+
+  // Fetch credits on mount
+  useEffect(() => {
+    const fetchCredits = async () => {
+      try {
+        const response = await apiClient.get('/credits/balance');
+        setCredits(response.data.available_credits || 0);
+      } catch (error) {
+        console.error('Failed to fetch credits', error);
+      }
+    };
+    fetchCredits();
+  }, []);
+
   return (
     <div className="h-full flex flex-col">
       {/* Header Section */}
@@ -533,12 +919,26 @@ const AIMoneyManager: React.FC = () => {
               >
                 <div className="max-h-96 overflow-y-auto">
                   <TabsContent value="manual" className="p-6 m-0">
-                    <ManualTradingPanel
-                      isPaperMode={isPaperMode}
-                      onExecuteTrade={handleManualTrade}
-                      isExecuting={isExecuting}
-                      aiSuggestions={phaseDetails.analysis?.suggestions}
-                    />
+                    <div className="space-y-4">
+                      {/* Scan Opportunities Button */}
+                      <Button
+                        variant="outline"
+                        className="w-full"
+                        onClick={handleScanOpportunities}
+                        disabled={isExecuting}
+                      >
+                        <Target className="mr-2 h-4 w-4" />
+                        Scan Market Opportunities
+                      </Button>
+
+                      {/* Manual Trading Panel */}
+                      <ManualTradingPanel
+                        isPaperMode={isPaperMode}
+                        onExecuteTrade={handleManualTrade}
+                        isExecuting={isExecuting}
+                        aiSuggestions={phaseDetails.analysis?.suggestions}
+                      />
+                    </div>
                   </TabsContent>
 
                   <TabsContent value="autonomous" className="p-6 m-0">
@@ -569,6 +969,17 @@ const AIMoneyManager: React.FC = () => {
           </AnimatePresence>
         </Tabs>
       </div>
+
+      {/* Opportunities Drawer */}
+      <OpportunitiesDrawer
+        state={opportunitiesDrawer}
+        onClose={() => setOpportunitiesDrawer(prev => ({ ...prev, open: false }))}
+        onExecuteTrade={handleExecuteOpportunity}
+        onExecuteBatch={handleBatchExecuteOpportunities}
+        onValidateOpportunity={handleValidateOpportunity}
+        onApplyToForm={handleApplyOpportunityToForm}
+        availableCredits={credits}
+      />
     </div>
   );
 };
