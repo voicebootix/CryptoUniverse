@@ -33,6 +33,7 @@ import StrategyPublisher from '@/pages/dashboard/StrategyPublisher';
 import PublisherDashboard from '@/pages/dashboard/PublisherDashboard';
 import ABTestingLab from '@/pages/dashboard/ABTestingLab';
 import MyStrategies from '@/pages/dashboard/MyStrategies';
+import ManualTradingPage from '@/pages/dashboard/ManualTradingPage';
 
 // Loading Component
 const LoadingScreen: React.FC = () => (
@@ -151,6 +152,9 @@ const App: React.FC = () => {
               
               {/* My Strategies */}
               <Route path="my-strategies" element={<MyStrategies />} />
+              
+              {/* Manual Trading */}
+              <Route path="manual-trading" element={<ManualTradingPage />} />
               
               {/* Performance Hub */}
               <Route path="performance" element={<PerformanceHub />} />

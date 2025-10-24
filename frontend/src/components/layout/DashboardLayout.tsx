@@ -93,6 +93,12 @@ const navigation: NavigationItem[] = [
     badge: "BETA",
   },
   {
+    name: "Manual Trading",
+    href: "/dashboard/manual-trading",
+    icon: TrendingUp,
+    badge: "PRO",
+  },
+  {
     name: "Performance Hub",
     href: "/dashboard/performance",
     icon: BarChart3,
