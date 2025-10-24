@@ -134,9 +134,9 @@ def _collect_endpoint_metrics(
             p95 = sorted_values[index]
         else:
             p95 = sorted_values[0]
-        avg_ms = sum(sorted_values) / len(sorted_values)
-        first_value = sorted_values[0]
-        last_value = sorted_values[-1]
+        avg_ms = sum(values) / len(values)
+        first_value = values[0]
+        last_value = values[-1]
         change_pct = None
         if first_value:
             change_pct = ((last_value - first_value) / first_value) * 100
@@ -147,10 +147,10 @@ def _collect_endpoint_metrics(
             elif change_pct < -10:
                 trend = "decreasing"
         metrics[label] = {
-            "count": len(sorted_values),
+            "count": len(values),
             "avg_ms": avg_ms,
             "p95_ms": p95,
-            "max_ms": last_value,
+            "max_ms": max(values),
             "trend": trend,
             "change_pct": change_pct,
         }

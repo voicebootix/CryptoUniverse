@@ -72,8 +72,8 @@ class MetricsCollector:
         
         values = [point.value for point in recent_points]
         sorted_values = sorted(values)
-        first_value = sorted_values[0]
-        last_value = sorted_values[-1]
+        first_value = values[0]
+        last_value = values[-1]
         avg_value = sum(values) / len(values)
         p95_index = max(0, math.ceil(0.95 * len(sorted_values)) - 1)
         p95_value = sorted_values[p95_index]
