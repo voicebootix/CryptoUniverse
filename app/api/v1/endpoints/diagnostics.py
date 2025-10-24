@@ -85,29 +85,57 @@ async def test_middleware_layers(request: Request):
     start = time.perf_counter()
     try:
         async with AsyncSessionLocal() as db:
+            start_db = time.perf_counter()
             await db.execute(text("SELECT 1"))
+            db_latency_ms = round((time.perf_counter() - start_db) * 1000, 2)
+
+            db_status = "passed"
+            db_message = "Database connection successful"
+            if db_latency_ms > 3000:
+                db_status = "failed"
+                db_message = "Database latency critical"
+            elif db_latency_ms > 1000:
+                db_status = "degraded"
+                db_message = "Database latency elevated"
+
             results["layers"]["database"] = {
-                "status": "passed",
-                "message": "Database connection successful"
+                "status": db_status,
+                "message": db_message,
+                "latency_ms": db_latency_ms,
             }
+            results["timing"]["database_ms"] = db_latency_ms
     except Exception as e:
         results["layers"]["database"] = {
             "status": "failed",
             "error": str(e),
             "type": type(e).__name__
         }
-    results["timing"]["database_ms"] = round((time.perf_counter() - start) * 1000, 2)
+        results["timing"]["database_ms"] = round((time.perf_counter() - start) * 1000, 2)
 
     # Test 4: Redis Connection
     start = time.perf_counter()
     try:
         redis = await get_redis_client()
         if redis:
+            redis_start = time.perf_counter()
             await redis.ping()
+            redis_latency_ms = round((time.perf_counter() - redis_start) * 1000, 2)
+
+            redis_status = "passed"
+            redis_message = "Redis connection successful"
+            if redis_latency_ms > 1500:
+                redis_status = "failed"
+                redis_message = "Redis latency critical"
+            elif redis_latency_ms > 500:
+                redis_status = "degraded"
+                redis_message = "Redis latency elevated"
+
             results["layers"]["redis"] = {
-                "status": "passed",
-                "message": "Redis connection successful"
+                "status": redis_status,
+                "message": redis_message,
+                "latency_ms": redis_latency_ms,
             }
+            results["timing"]["redis_ms"] = redis_latency_ms
         else:
             results["layers"]["redis"] = {
                 "status": "degraded",
@@ -119,7 +147,7 @@ async def test_middleware_layers(request: Request):
             "error": str(e),
             "type": type(e).__name__
         }
-    results["timing"]["redis_ms"] = round((time.perf_counter() - start) * 1000, 2)
+        results["timing"]["redis_ms"] = round((time.perf_counter() - start) * 1000, 2)
 
     # Test 5: Rate Limiter State
     start = time.perf_counter()
