@@ -50,6 +50,7 @@ class ScanLifecycleResponse(BaseModel):
     """Response model for scan lifecycle tracking."""
     success: bool
     scan_id: str
+    resolved_scan_id: Optional[str] = None
     current_phase: Optional[str] = None
     current_status: Optional[str] = None
     last_updated: Optional[str] = None
@@ -396,6 +397,7 @@ async def get_scan_lifecycle(
         lifecycle_key = f"scan_lifecycle:{scan_id}"
         resolved_key = lifecycle_key
         recovered_from_index = False
+        resolved_scan_id: Optional[str] = None
 
         # Get all lifecycle data
         def _decode_hash(hash_data: Mapping[Any, Any]) -> Dict[str, Any]:
@@ -475,11 +477,13 @@ async def get_scan_lifecycle(
             except Exception as time_parse_error:
                 logger.debug("Failed to parse time", error=str(time_parse_error))
 
-        resolved_scan_id = resolved_key.split("scan_lifecycle:", 1)[-1]
+        if recovered_from_index:
+            resolved_scan_id = resolved_key.split("scan_lifecycle:", 1)[-1]
 
         response = {
             "success": True,
-            "scan_id": resolved_scan_id,
+            "scan_id": scan_id,
+            "resolved_scan_id": resolved_scan_id,
             "current_phase": current_phase,
             "current_status": current_status,
             "last_updated": last_updated,
