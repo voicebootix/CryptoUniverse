@@ -418,24 +418,17 @@ async def get_scan_lifecycle(
             # Attempt to recover from index of known lifecycle keys
             index_key = "scan_lifecycle:index"
             try:
-                async for candidate in redis.scan_iter(match=f"scan_lifecycle:{scan_id}", count=5):
-                    resolved_key = candidate.decode() if isinstance(candidate, bytes) else candidate
+                # Fall back to most recent entry from index if available
+                recent_keys = await redis.zrevrange(index_key, 0, 0)
+                recent_keys = [
+                    key.decode() if isinstance(key, bytes) else key
+                    for key in recent_keys
+                ]
+                if recent_keys:
+                    resolved_key = recent_keys[0]
                     decoded_data = _decode_hash(await redis.hgetall(resolved_key))
-                    if decoded_data:
-                        recovered_from_index = resolved_key != lifecycle_key
-                        break
-                if not decoded_data:
-                    # fall back to most recent entry from index if available
-                    recent_keys = await redis.zrevrange(index_key, 0, 0)
-                    recent_keys = [
-                        key.decode() if isinstance(key, bytes) else key
-                        for key in recent_keys
-                    ]
-                    if recent_keys:
-                        resolved_key = recent_keys[0]
-                        decoded_data = _decode_hash(await redis.hgetall(resolved_key))
-                        if decoded_data:
-                            recovered_from_index = True
+                    if decoded_data and resolved_key != lifecycle_key:
+                        recovered_from_index = True
             except Exception as scan_error:
                 logger.debug("Lifecycle index lookup failed", error=str(scan_error))
 
