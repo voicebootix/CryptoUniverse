@@ -418,7 +418,7 @@ async def get_scan_lifecycle(
             # Attempt to recover from index of known lifecycle keys
             index_key = "scan_lifecycle:index"
             try:
-                async for candidate in redis.scan_iter(match=f"scan_lifecycle:*{scan_id}*", count=5):
+                async for candidate in redis.scan_iter(match=f"scan_lifecycle:{scan_id}", count=5):
                     resolved_key = candidate.decode() if isinstance(candidate, bytes) else candidate
                     decoded_data = _decode_hash(await redis.hgetall(resolved_key))
                     if decoded_data:
