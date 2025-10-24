@@ -79,19 +79,24 @@ class MetricsCollector:
         p95_value = sorted_values[p95_index]
         median_value = statistics.median(sorted_values)
 
+        delta = last_value - first_value
+        eps = 1e-9
         change_pct: Optional[float]
-        if first_value:
-            change_pct = ((last_value - first_value) / first_value) * 100
-        elif last_value:
-            change_pct = float("inf")
+        if abs(first_value) > eps:
+            change_pct = (delta / first_value) * 100
         else:
-            change_pct = 0.0
+            change_pct = None
 
         trend = "stable"
-        if isinstance(change_pct, (int, float)):
+        if change_pct is not None:
             if change_pct > 10:
                 trend = "increasing"
             elif change_pct < -10:
+                trend = "decreasing"
+        else:
+            if delta > 0:
+                trend = "increasing"
+            elif delta < 0:
                 trend = "decreasing"
 
         return {
@@ -105,7 +110,7 @@ class MetricsCollector:
             "min": min(sorted_values),
             "max": max(sorted_values),
             "trend": trend,
-            "change_pct": None if change_pct in {float("inf"), float("-inf")} else change_pct,
+            "change_pct": change_pct,
         }
     
     def get_all_metrics_summary(self, duration_minutes: int = 15) -> Dict[str, Any]:
