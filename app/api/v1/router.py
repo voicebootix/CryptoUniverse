@@ -103,15 +103,27 @@ def _collect_endpoint_metrics(
         "/api/v1/diagnostics/test-layers": "diagnostics_layers",
         "/api/v1/scan-diagnostics/scan-metrics": "scan_metrics",
     }
+    prefix_paths = {
+        "/api/v1/scan-diagnostics/scan-lifecycle": "scan_lifecycle",
+    }
 
-    bucket: Dict[str, List[float]] = {label: [] for label in critical_paths.values()}
+    all_labels = set(critical_paths.values()) | set(prefix_paths.values())
+    bucket: Dict[str, List[float]] = {label: [] for label in all_labels}
 
     for point in collector_metrics:
         if point.timestamp < cutoff:
             continue
         path = point.tags.get("path") if point.tags else None
+        label: Optional[str] = None
         if path in critical_paths:
-            bucket[critical_paths[path]].append(point.value)
+            label = critical_paths[path]
+        else:
+            for prefix, prefix_label in prefix_paths.items():
+                if path and path.startswith(prefix):
+                    label = prefix_label
+                    break
+        if label:
+            bucket[label].append(point.value)
 
     for label, values in bucket.items():
         if not values:
@@ -122,11 +134,25 @@ def _collect_endpoint_metrics(
             p95 = sorted_values[index]
         else:
             p95 = sorted_values[0]
+        avg_ms = sum(sorted_values) / len(sorted_values)
+        first_value = sorted_values[0]
+        last_value = sorted_values[-1]
+        change_pct = None
+        if first_value:
+            change_pct = ((last_value - first_value) / first_value) * 100
+        trend = "stable"
+        if change_pct is not None:
+            if change_pct > 10:
+                trend = "increasing"
+            elif change_pct < -10:
+                trend = "decreasing"
         metrics[label] = {
             "count": len(sorted_values),
-            "avg_ms": sum(sorted_values) / len(sorted_values),
+            "avg_ms": avg_ms,
             "p95_ms": p95,
-            "max_ms": sorted_values[-1],
+            "max_ms": last_value,
+            "trend": trend,
+            "change_pct": change_pct,
         }
 
     return metrics
@@ -138,6 +164,7 @@ async def get_monitoring_alerts():
 
     alerts: List[Dict[str, Any]] = []
     metrics: Dict[str, Any] = {}
+    metrics["performance_trends"] = system_monitoring_service.get_performance_trends()
 
     # Database latency check
     db_latency_ms: Optional[float] = None
@@ -178,6 +205,33 @@ async def get_monitoring_alerts():
             )
         )
         metrics["database_error"] = str(db_error)
+
+    db_query_summary = system_monitoring_service.metrics_collector.get_metric_summary(
+        "db_query_duration_ms", 15
+    )
+    if "error" not in db_query_summary:
+        metrics["database_query_ms"] = db_query_summary
+        p95_query = db_query_summary.get("p95")
+        if p95_query and p95_query > 2000:
+            alerts.append(
+                _build_alert(
+                    "critical",
+                    "Database query p95 latency above 2s",
+                    metric="database_query_ms.p95",
+                    value=round(p95_query, 2),
+                    threshold=2000,
+                )
+            )
+        elif p95_query and p95_query > 1000:
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    "Database query p95 latency above 1s",
+                    metric="database_query_ms.p95",
+                    value=round(p95_query, 2),
+                    threshold=1000,
+                )
+            )
 
     # Redis health check
     redis_latency_ms: Optional[float] = None
@@ -237,6 +291,70 @@ async def get_monitoring_alerts():
                     metric=f"endpoint_latency.{endpoint}",
                     value=round(max_latency, 2),
                     threshold=2000,
+                )
+            )
+        change_pct = stats.get("change_pct")
+        if (
+            stats.get("trend") == "increasing"
+            and isinstance(change_pct, (int, float))
+            and change_pct is not None
+            and change_pct > 50
+        ):
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    f"{endpoint.replace('_', ' ').title()} latency trending upward",
+                    metric=f"endpoint_latency.{endpoint}.trend",
+                    value=round(change_pct, 2),
+                )
+            )
+
+    # System resource utilisation summaries
+    for resource_metric in ("cpu_usage_pct", "memory_usage_pct", "disk_usage_pct"):
+        summary = system_monitoring_service.metrics_collector.get_metric_summary(
+            resource_metric, 30
+        )
+        if "error" in summary:
+            continue
+        metrics[resource_metric] = summary
+        current_value = summary.get("current", 0)
+        thresholds = system_monitoring_service.thresholds.get(resource_metric, {})
+        critical_threshold = thresholds.get("critical")
+        warning_threshold = thresholds.get("warning")
+        if critical_threshold is not None and current_value >= critical_threshold:
+            alerts.append(
+                _build_alert(
+                    "critical",
+                    f"{resource_metric.replace('_', ' ').title()} above critical threshold",
+                    metric=resource_metric,
+                    value=round(current_value, 2),
+                    threshold=critical_threshold,
+                )
+            )
+        elif warning_threshold is not None and current_value >= warning_threshold:
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    f"{resource_metric.replace('_', ' ').title()} above warning threshold",
+                    metric=resource_metric,
+                    value=round(current_value, 2),
+                    threshold=warning_threshold,
+                )
+            )
+
+        change_pct = summary.get("change_pct")
+        if (
+            summary.get("trend") == "increasing"
+            and isinstance(change_pct, (int, float))
+            and change_pct is not None
+            and change_pct > 25
+        ):
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    f"{resource_metric.replace('_', ' ').title()} increasing rapidly",
+                    metric=f"{resource_metric}.trend",
+                    value=round(change_pct, 2),
                 )
             )
 

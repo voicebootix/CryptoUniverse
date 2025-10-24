@@ -137,6 +137,7 @@ class ExchangeAccount(Base):
         Index('idx_exchange_accounts_user_exchange_status', 'user_id', 'exchange_name', 'status'),
         Index('idx_exchange_accounts_status_trading', 'status', 'trading_enabled'),
         Index('idx_exchange_accounts_user_trading', 'user_id', 'trading_enabled'),
+        Index('idx_exchange_accounts_status_trading_user', 'status', 'trading_enabled', 'user_id'),
         Index("idx_exchange_name_status", "exchange_name", "status"),
         Index("idx_exchange_default", "is_default"),
     )

@@ -34,6 +34,7 @@ from app.models.user import User, UserRole, UserStatus
 from app.models.tenant import Tenant
 from app.models.session import UserSession
 from app.services.rate_limit import rate_limiter
+from app.services.system_monitoring import system_monitoring_service
 from app.services.oauth import OAuthService
 
 settings = get_settings()
@@ -310,10 +311,26 @@ async def login(
                 )
                 .filter(User.email == request.email)
             )
+            query_start = time.perf_counter()
             result = await asyncio.wait_for(
                 db.execute(user_stmt),
                 timeout=10.0  # Production timeout
             )
+            query_duration_ms = (time.perf_counter() - query_start) * 1000
+            try:
+                system_monitoring_service.metrics_collector.record_metric(
+                    "db_query_duration_ms",
+                    query_duration_ms,
+                    {"query": "auth_login"},
+                )
+                if query_duration_ms > 1000:
+                    system_monitoring_service.metrics_collector.record_metric(
+                        "db_slow_query_count",
+                        1.0,
+                        {"query": "auth_login"},
+                    )
+            except Exception:
+                pass
             user = result.scalar_one_or_none()
         except asyncio.TimeoutError:
             logger.error("Database timeout during login")

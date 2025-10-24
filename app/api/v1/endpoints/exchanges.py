@@ -967,14 +967,24 @@ async def fetch_exchange_balances(api_key: ExchangeApiKey, db: AsyncSession) -> 
             return []
         
     except InvalidToken as e:
-        logger.error(f"Failed to decrypt API credentials for key {api_key.id}", error=str(e))
-        return []
+        logger.error(
+            f"Failed to decrypt API credentials for key {api_key.id}", error=str(e)
+        )
+        raise ExchangeAPIError(exchange_name if 'exchange_name' in locals() else 'exchange', "Invalid API credentials") from e
     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-        logger.error(f"Network error fetching balances for API key {api_key.id}", error=str(e))
-        return []
-    except Exception as e:
-        logger.error(f"Unexpected error fetching balances for API key {api_key.id}", error=str(e), exc_info=True)
+        logger.error(
+            f"Network error fetching balances for API key {api_key.id}", error=str(e)
+        )
+        raise ExchangeAPIError(exchange_name if 'exchange_name' in locals() else 'exchange', f"Network error: {str(e)}") from e
+    except ExchangeAPIError:
         raise
+    except Exception as e:
+        logger.error(
+            f"Unexpected error fetching balances for API key {api_key.id}",
+            error=str(e),
+            exc_info=True,
+        )
+        raise ExchangeAPIError(exchange_name if 'exchange_name' in locals() else 'exchange', str(e)) from e
 
 
 async def fetch_binance_balances(api_key: str, api_secret: str) -> List[Dict[str, Any]]:
@@ -1243,89 +1253,91 @@ async def get_kucoin_prices(currencies: List[str]) -> Dict[str, float]:
 
 
 async def fetch_kraken_balances(api_key: str, api_secret: str) -> List[Dict[str, Any]]:
-    """Fetch balances from Kraken API with proper signature authentication."""
-    try:
-        import hmac
-        import hashlib
-        import urllib.parse
-        
-        base_url = "https://api.kraken.com"
-        endpoint = "/0/private/Balance"
-        # Initialize nonce manager if needed
-        await kraken_nonce_manager._init_redis()
-        nonce = await kraken_nonce_manager.get_nonce()  # ENTERPRISE NONCE MANAGEMENT
-        
-        # Prepare POST data
+    """Fetch balances from Kraken API with resilient nonce handling."""
+
+    import hmac
+    import hashlib
+    import urllib.parse
+
+    base_url = "https://api.kraken.com"
+    endpoint = "/0/private/Balance"
+
+    await kraken_nonce_manager._init_redis()
+
+    async def _perform_request() -> Dict[str, Any]:
+        nonce = await kraken_nonce_manager.get_nonce()
         post_data = urllib.parse.urlencode({"nonce": str(nonce)})
-        
-        # Create signature for Kraken API (Kraken-specific format)
+
         encoded_endpoint = endpoint.encode()
-        # CRITICAL FIX: Kraken signature uses nonce + post_data (nonce not duplicated)
-        nonce_postdata = str(nonce) + post_data  # "123456nonce=123456" format expected by Kraken
-        sha256_hash = hashlib.sha256(nonce_postdata.encode('utf-8')).digest()
+        nonce_postdata = str(nonce) + post_data
+        sha256_hash = hashlib.sha256(nonce_postdata.encode("utf-8")).digest()
         signature_data = encoded_endpoint + sha256_hash
-        
+
         signature = base64.b64encode(
             hmac.new(
                 base64.b64decode(api_secret),
                 signature_data,
-                hashlib.sha512
+                hashlib.sha512,
             ).digest()
         ).decode()
-        
+
         headers = {
             "API-Key": api_key,
             "API-Sign": signature,
-            "Content-Type": "application/x-www-form-urlencoded"
+            "Content-Type": "application/x-www-form-urlencoded",
         }
-        
-        async def make_kraken_request():
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{base_url}{endpoint}",
-                    headers=headers,
-                    data=post_data
-                ) as response:
-                    await validate_exchange_response(response, "kraken")
-                    data = await response.json()
-                    if data.get("error"):
-                        raise ExchangeAPIError("kraken", str(data['error']))
-                    return data
-        
-        # Use retry logic for API calls
-        data = await retry_with_backoff(make_kraken_request)
-        
-        balances_data = data.get("result", {})
-        balances = []
-        
-        # Get current prices for USD conversion
-        active_currencies = [currency for currency, balance in balances_data.items() if float(balance) > 0]
-        prices = await get_kraken_prices(active_currencies)
-        
-        # Process balances
-        for currency, balance in balances_data.items():
-            balance_float = float(balance)
-            
-            # Only include assets with non-zero balance
-            if balance_float > 0:
-                # Kraken uses different currency codes (e.g., XXBT for BTC)
-                normalized_currency = normalize_kraken_currency(currency)
-                usd_price = prices.get(normalized_currency, 0.0)
-                value_usd = balance_float * usd_price
-                
-                balances.append({
-                    "asset": normalized_currency,
-                    "free": balance_float,  # Kraken doesn't separate free/locked in balance endpoint
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{base_url}{endpoint}", headers=headers, data=post_data
+            ) as response:
+                await validate_exchange_response(response, "kraken")
+                data = await response.json()
+                errors = data.get("error") or []
+                if errors:
+                    raise ExchangeAPIError("kraken", ", ".join(errors))
+                return data
+
+    try:
+        data = await retry_with_backoff(
+            _perform_request,
+            max_retries=5,
+            base_delay=0.5,
+        )
+    except ExchangeAPIError:
+        raise
+    except Exception as exc:
+        logger.error("Failed to fetch Kraken balances", error=str(exc))
+        raise ExchangeAPIError("kraken", str(exc)) from exc
+
+    balances_data = data.get("result", {})
+    balances: List[Dict[str, Any]] = []
+
+    active_currencies = [
+        currency for currency, balance in balances_data.items() if float(balance or 0) > 0
+    ]
+    prices = await get_kraken_prices(active_currencies)
+
+    for currency, balance in balances_data.items():
+        balance_float = float(balance)
+        if balance_float <= 0:
+            continue
+
+        normalized_currency = normalize_kraken_currency(currency)
+        usd_price = prices.get(normalized_currency, 0.0)
+        value_usd = balance_float * usd_price
+
+        balances.append(
+            {
+                "asset": normalized_currency,
+                "free": balance_float,
                 "locked": 0.0,
-                    "total": balance_float,
-                    "value_usd": round(value_usd, 2)
-                })
-        
-        return balances
-                
-    except Exception as e:
-        logger.error(f"Failed to fetch Kraken balances: {str(e)}")
-        return []
+                "total": balance_float,
+                "value_usd": round(value_usd, 2),
+            }
+        )
+
+    return balances
 
 
 def normalize_kraken_currency(kraken_currency: str) -> str:
@@ -1791,8 +1803,12 @@ async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> D
                 return result
                 
             except asyncio.TimeoutError:
-                error_msg = f"{account.exchange_name} balance fetch timeout (>{settings.EXCHANGE_API_TIMEOUT}s)"
-                logger.error(error_msg, user_id=user_id, exchange=account.exchange_name)
+                error_msg = (
+                    f"{account.exchange_name} balance fetch timeout (>{settings.EXCHANGE_API_TIMEOUT}s)"
+                )
+                logger.error(
+                    error_msg, user_id=user_id, exchange=account.exchange_name
+                )
                 return {
                     "success": False,
                     "exchange": account.exchange_name,
@@ -1801,16 +1817,17 @@ async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> D
                     "balances": [],
                     "total_value_usd": 0.0,
                     "asset_count": 0,
-                    "fetch_time_ms": (time.time() - exchange_start_time) * 1000
+                    "fetch_time_ms": (time.time() - exchange_start_time) * 1000,
                 }
-                
-            except Exception as e:
-                error_msg = f"Failed to fetch {account.exchange_name} balances: {str(e)}"
-                logger.error(error_msg, 
-                           user_id=user_id,
-                           exchange=account.exchange_name,
-                           error=str(e),
-                           exc_info=True)
+
+            except ExchangeAPIError as api_error:
+                error_msg = f"{account.exchange_name} API error: {api_error.message}"
+                logger.error(
+                    error_msg,
+                    user_id=user_id,
+                    exchange=account.exchange_name,
+                    status_code=api_error.status_code,
+                )
                 return {
                     "success": False,
                     "exchange": account.exchange_name,
@@ -1819,7 +1836,27 @@ async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> D
                     "balances": [],
                     "total_value_usd": 0.0,
                     "asset_count": 0,
-                    "fetch_time_ms": (time.time() - exchange_start_time) * 1000
+                    "fetch_time_ms": (time.time() - exchange_start_time) * 1000,
+                }
+
+            except Exception as e:
+                error_msg = f"{account.exchange_name} balance fetch failed: {str(e)}"
+                logger.error(
+                    error_msg,
+                    user_id=user_id,
+                    exchange=account.exchange_name,
+                    error=str(e),
+                    exc_info=True,
+                )
+                return {
+                    "success": False,
+                    "exchange": account.exchange_name,
+                    "account_id": str(account.id),
+                    "error": error_msg,
+                    "balances": [],
+                    "total_value_usd": 0.0,
+                    "asset_count": 0,
+                    "fetch_time_ms": (time.time() - exchange_start_time) * 1000,
                 }
         
         # Execute exchange balance fetches (parallel if enabled, sequential if not)
@@ -1906,8 +1943,15 @@ async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> D
                    total_value_usd=total_value_usd,
                    total_assets=len(all_balances))
         
+        overall_status = "operational"
+        if failed_exchanges and successful_exchanges:
+            overall_status = "degraded"
+        elif failed_exchanges and successful_exchanges == 0:
+            overall_status = "critical"
+
         return {
-            "success": True,
+            "success": failed_exchanges == 0,
+            "overall_status": overall_status,
             "total_value_usd": total_value_usd,
             "balances": all_balances,
             "exchanges": exchange_summaries,
@@ -1919,8 +1963,8 @@ async def get_user_portfolio_from_exchanges(user_id: str, db: AsyncSession) -> D
                 "successful_exchanges": successful_exchanges,
                 "failed_exchanges": failed_exchanges,
                 "parallel_fetching": True,
-                "speed_improvement_estimate": f"{len(user_exchanges)}x faster than sequential"
-            }
+                "speed_improvement_estimate": f"{len(user_exchanges)}x faster than sequential",
+            },
         }
         
     except Exception as e:
