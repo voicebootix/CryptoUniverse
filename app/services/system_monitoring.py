@@ -185,8 +185,10 @@ class SystemMonitoringService:
         """Expose smoothed performance metrics for dashboards and alerts."""
         metric_windows = {
             "http_request_duration_ms": 15,
-            "db_query_duration_ms": 15,
+            "database_response_time_ms": 15,
             "redis_response_time_ms": 15,
+            # Retain legacy key for backward compatibility with older metric emitters
+            "db_query_duration_ms": 15,
             "db_slow_query_count": 60,
         }
 
