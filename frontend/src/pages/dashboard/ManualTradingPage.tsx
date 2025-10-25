@@ -717,10 +717,24 @@ const ManualTradingPage: React.FC = () => {
             const validated: Opportunity[] = opportunities.map((opp: any) => {
               const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes from now
 
+              // Normalize opportunity_type for case-insensitive comparison
+              const oppType = String(opp.opportunity_type || '').toLowerCase().trim();
+
+              // Determine side with explicit checks for long/buy and short/sell
+              let side: 'buy' | 'sell';
+              if (oppType.includes('long') || oppType.includes('buy')) {
+                side = 'buy';
+              } else if (oppType.includes('short') || oppType.includes('sell')) {
+                side = 'sell';
+              } else {
+                // Default fallback
+                side = 'sell';
+              }
+
               return {
                 id: crypto.randomUUID(),
                 symbol: opp.symbol,
-                side: opp.opportunity_type?.includes('LONG') || opp.opportunity_type?.includes('BUY') ? 'buy' as const : 'sell' as const,
+                side,
                 strategy: opp.strategy_name || opp.strategy_id || 'Unknown',
                 confidence: (opp.confidence_score || 0) * 100, // Convert 0-1 to 0-100
                 entry_price: opp.entry_price || 0,
