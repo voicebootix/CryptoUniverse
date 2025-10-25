@@ -4553,7 +4553,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         except Exception as track_error:
             self.logger.debug("Lifecycle tracking failed", error=str(track_error))
 
-    async def _track_debug_step(self, user_id: str, scan_id: str, step_number: int, step_name: str, status: str = "in_progress", error: str = None, **extra_data):
+    async def _track_debug_step(
+        self,
+        user_id: str,
+        scan_id: str,
+        step_number: int,
+        step_name: str,
+        status: str = "in_progress",
+        error: str | None = None,
+        **extra_data,
+    ):
         """Track detailed step-by-step progress for diagnostic visibility.
 
         This writes to Redis so debug info is visible through the diagnostic endpoint
@@ -4573,6 +4582,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 "name": step_name,
                 "status": status,
                 "timestamp": timestamp,
+                "user_id": user_id,
+                "scan_id": scan_id,
                 **extra_data
             }
 
@@ -4594,7 +4605,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                            status=status,
                            **extra_data)
 
-        except Exception as track_error:
+        except Exception as track_error:  # noqa: BLE001 - telemetry should not affect flow
             self.logger.debug("Debug step tracking failed", error=str(track_error))
 
     async def _track_scan_metrics(self, user_id: str, scan_id: str, opportunities_count: int, strategies_count: int, execution_time_ms: float, success: bool = True):
